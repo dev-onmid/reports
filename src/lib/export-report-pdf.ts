@@ -33,6 +33,21 @@ async function proxyCrossOriginImages(doc: Document, origin: string): Promise<vo
 }
 
 export async function exportReportToPdf(token: string, filename: string): Promise<void> {
+  const { blob } = await renderReportPdf(token);
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+// Renderiza o relatório público (token) num PDF real — o MESMO pipeline do botão
+// "Exportar PDF" da tela de Relatórios (html2canvas → jsPDF, qualidade Cinfel). Devolve
+// o Blob pra quem quiser baixar OU enviar (ex: a Luna renderiza e sobe pro WhatsApp).
+export async function renderReportPdf(token: string): Promise<{ blob: Blob }> {
   const [{ default: html2canvas }, { jsPDF }] = await Promise.all([
     import('html2canvas'),
     import('jspdf'),
@@ -118,7 +133,7 @@ export async function exportReportToPdf(token: string, filename: string): Promis
       pdf.addImage(imgData, 'JPEG', x, y, drawW, drawH);
     }
 
-    pdf.save(filename);
+    return { blob: pdf.output('blob') };
   } finally {
     document.body.removeChild(iframe);
   }

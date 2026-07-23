@@ -25,9 +25,15 @@ const HEADLESS_READ_TOOLS = new Set([
   'get_meta_structure', 'get_optimizer_analysis', 'get_client_goals', 'get_lead_attribution',
   'get_demographics', 'get_social_monitor', 'get_ai_costs', 'search_crm_leads', 'get_lead_conversation',
   'get_crm_stats', 'generate_report_pdf', 'send_report_pdf_whatsapp', 'list_luna_tasks',
+  // Cobertura total do sistema (leitura)
+  'list_reports', 'get_report_configs', 'list_disparos_campaigns', 'get_whatsapp_instances',
+  'get_crm_inbox', 'get_followup_status', 'list_automations', 'list_email_campaigns',
+  'list_leadlovers_campaigns', 'get_lp_analytics', 'get_link_redirects', 'get_ig_posts',
+  'get_optimizer_queue', 'get_activity_logs',
 ]);
 const HEADLESS_ACTION_TOOLS = new Set([
   'execute_ad_action', 'update_meta_campaign_status', 'duplicate_meta_campaign', 'move_crm_lead',
+  'disparo_campaign_action',
 ]);
 
 type LunaTask = {
@@ -48,7 +54,8 @@ async function runHeadlessAgent(task: LunaTask): Promise<{ text: string; inputTo
 - Você está executando a tarefa agendada "${task.titulo}". NINGUÉM vai responder perguntas — nunca pergunte, decida e execute.
 - Agora é ${new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })} (horário de Brasília).
 - Sua ÚLTIMA mensagem de texto é o resultado final${task.whatsapp_phone ? ' e será enviada por WhatsApp' : ''}. Escreva em português claro, formato WhatsApp: use *negrito* e listas com "-", NUNCA tabelas markdown.
-- Se algum dado não vier (conta desconectada, sem leads), diga isso honestamente no resultado em vez de inventar.`;
+- Se algum dado não vier (conta desconectada, sem leads), diga isso honestamente no resultado em vez de inventar.
+- Relatórios agendados: use send_report_pdf_whatsapp normalmente. Como não há navegador aqui, o envio como ARQUIVO PDF não é possível — a entrega é SEMPRE o LINK do relatório oficial (a ferramenta já faz isso automaticamente). Não prometa "PDF em anexo" no texto.`;
 
   const messages: Anthropic.MessageParam[] = [{ role: 'user', content: task.instrucao }];
   let inputTokens = 0;

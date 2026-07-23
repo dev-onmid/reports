@@ -1,5 +1,36 @@
 @AGENTS.md
 
+## Luna IA — cobertura total do sistema (15 tools novas) (2026-07-23)
+
+Auditoria pedida pelo Matheus ("ela tem que ser capaz de usar e acessar o sistema inteiro, não criar nada para si"): as 41 tools existentes já reusavam os primitivos canônicos (getFreshMetaToken/countMetaResults/executeOptimizerAction/resolveGoogleToken), mas módulos inteiros não tinham NENHUMA ferramenta. Adicionadas 15 tools (total 56) em `luna-tools.ts`, todas finas — SELECT espelhando a query da rota canônica OU `fetchInternal()` (novo helper: GET em rota interna via `appOrigin()`), zero implementação paralela:
+
+- **Relatórios**: `list_reports` (diagnostic_reports + link público — reenviar sem gerar de novo), `get_report_configs` (automação mensal).
+- **Disparos**: `list_disparos_campaigns` (zapi_campaigns, strip de mensagem/números via `stripFields`), `disparo_campaign_action` (pause/resume/cancel — POST na rota canônica `/api/disparos/campaigns/[id]/action`).
+- **WhatsApp**: `get_whatsapp_instances` (HTTP em `/api/admin/instances` — mesma fonte da aba Instâncias).
+- **CRM**: `get_crm_inbox` (LATERAL última mensagem + não-lidas via `chat_read_at`, colunas `crm_messages.text/direction`), `get_followup_status` (regras + execuções).
+- **Marketing**: `list_automations` (webhook_configs + meta_automations), `list_email_campaigns` (HTTP), `list_leadlovers_campaigns` (HTTP, **strip de credenciais** webhook_url/auth_key/machine_code).
+- **Analytics**: `get_lp_analytics` (client_landing_pages + stats via HTTP), `get_link_redirects` (HTTP), `get_ig_posts` (HTTP `/api/meta/ig-posts?clientIds=`), `get_optimizer_queue` (HTTP `/api/otimizador/fila`, recs cap 20).
+- **Auditoria**: `get_activity_logs`.
+- Prompt do chat: bloco "Visão do sistema" expandido com todas. Scheduler: 14 de leitura no `HEADLESS_READ_TOOLS`; `disparo_campaign_action` em `HEADLESS_ACTION_TOOLS` (só com permitir_acoes).
+- **Exclusão deliberada**: leitura do Cofre (senhas em texto pra IA = risco; ela só grava via add_client_vault_credential). Falta também (decisão futura): criar/editar automações, e-mail e leadlovers (só leitura por ora).
+- ✅ tsc + `next build` limpos. ⚠️ Executores precisam de DB/produção — validar perguntando à Luna: "quais instâncias estão desconectadas?", "o que tá pendente no otimizador?", "campanhas de disparo rodando?".
+
+## Luna IA — relatório OFICIAL da plataforma (link ou PDF) (2026-07-23)
+
+Bug reportado pelo Matheus: pedir à Luna "gera o relatório do Panino77 e manda no WhatsApp" produzia um PDF de 2 páginas totalmente diferente do padrão (capa + 1 tabela Meta), NADA a ver com o relatório rico de 26 páginas do gerador da tela Relatórios (referência: Cinfel). **Causa raiz**: as ferramentas de relatório da Luna (`generate_report_pdf`/`send_report_pdf_whatsapp`/`generate_client_report`) montavam o PDF à mão via `generateReportPdf` (`src/lib/report-pdf.ts`) — nunca tocavam o gerador real.
+
+- **Fonte única de verdade agora é o gerador oficial**: as 3 ferramentas chamam `buildRealReport()` (novo em `luna-tools.ts`), que faz `POST ${appOrigin()}/api/reports/run-once` — a MESMA rota da tela Relatórios (maxDuration=300 próprio, isolando o fan-out pesado do orçamento do chat; mesmo padrão do `report-dispatch.ts` que já chamava `run/[configId]`). Devolve o `public_token` + link `/relatorio/[token]`. Template = o do `report_configs` do cliente (senão `performance`); período via `resolvePeriodDates` (this_month/last_month/last_30d/last_7d/custom em BRT). `appOrigin()` = `APP_URL`/`NEXT_PUBLIC_APP_URL` (fallback `https://reports.onmid.app`).
+- **Entrega escolhível (decisão do Matheus: "os 2, eu escolho e falo pra Luna")** — o servidor NÃO consegue gerar o PDF rico (o export é client-side via html2canvas em `export-report-pdf.ts`; sem puppeteer/chromium no stack, e a própria automação mensal da plataforma manda o LINK, não PDF):
+  - **Link** (`send_report_pdf_whatsapp` com `format:'link'`, padrão): resolve Z-API e manda o link do relatório via `sendText` — igual à automação da plataforma. Funciona no chat E no agendador headless.
+  - **PDF real** (`format:'pdf'`, SÓ no chat com navegador): o servidor emite o evento SSE `render_report_pdf`; o front (`agente/page.tsx`) renderiza o PDF fiel com `renderReportPdf(token)` (refactor de `exportReportToPdf` → extraiu `renderReportPdf` que devolve `Blob`; mesmo pipeline/qualidade do botão "Exportar PDF" da tela Relatórios) e sobe o base64 pra **`POST /api/agent/send-report-pdf`** (endpoint novo — resolve a Z-API server-side e faz `sendDocument`; o navegador nunca vê tokens).
+  - **`generate_report_pdf`** (baixar no chat): emite `render_report_pdf` mode `download` → o front gera e baixa o PDF completo.
+  - **`generate_client_report`**: devolve só o link (card no chat).
+- **Card do relatório no chat** (`ReportCard` em `agente/page.tsx`): evento `report_link` vira um card com "Ver relatório" (abre `/relatorio/[token]`) + "Baixar PDF" (client-side). `FileAttachment` ganhou `token?`; `StreamEvent` ganhou `report_link` + `render_report_pdf`; os renders rodam DEPOIS do stream (podem levar dezenas de segundos) e publicam mensagem de status.
+- **Agendador headless**: `onEvent` é undefined → `format:'pdf'` cai automaticamente no envio do LINK (sem navegador não há como renderizar). Prompt do scheduler avisa "não prometa PDF em anexo".
+- **Prompts**: bloco "Relatórios (SEMPRE o gerador oficial)" no chat (`agent/chat/route.ts`) manda usar as ferramentas, mostrar o texto retornado exato e nunca inventar números/descrever o conteúdo.
+- Removidos: `saveReportToDb` e os imports `generateReportPdf`/`sendDocument` de `luna-tools.ts` (agora sem uso); `report-pdf.ts` ficou órfão (dead code, não removido).
+- ✅ Verificado no preview (dev :3000, auth fail-open com session forjada + /api/permissions 500): mock do SSE do chat emitindo `report_link` → card renderiza com "Ver relatório" + "Baixar PDF", link `/relatorio/[token]` correto (screenshot). tsc limpo + `next build` compila (rota `/api/agent/send-report-pdf` registrada). ⚠️ Fluxo real (run-once com Graph/DB, Z-API, html2canvas de um token real) exige produção — validar repetindo o pedido do Panino'77.
+
 ## Tela do cliente — abas enxutas + modal de configuração (2026-07-22)
 
 Reforma de densidade da tela `clientes/[id]` (pedido do Matheus: "ao clicar em clientes aparecia tudo de uma vez"). Reorganização 100% de apresentação — nenhuma rota/backend mudou.

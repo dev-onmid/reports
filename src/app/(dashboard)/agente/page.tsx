@@ -11,6 +11,7 @@ import {
   Sparkles, ShieldCheck, Users, CalendarClock, RotateCcw, ChevronRight,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { exportReportToPdf, renderReportPdf } from '@/lib/export-report-pdf';
 
 type Role = string | undefined;
 
@@ -18,6 +19,20 @@ type FileAttachment = {
   url: string;
   filename: string;
   label: string;
+  // Presente → é o card do relatório OFICIAL (link /relatorio/[token]); habilita "Ver" + "Baixar PDF".
+  token?: string;
+};
+
+// Pedido do servidor pra o navegador renderizar o PDF completo do relatório (mesmo pipeline
+// da tela de Relatórios) e baixar OU enviar no WhatsApp. Processado após o fim do stream.
+type PendingRender = {
+  mode: 'download' | 'whatsapp';
+  token: string;
+  filename: string;
+  clientName?: string;
+  phone?: string;
+  zapi_client_id?: string | null;
+  caption?: string | null;
 };
 
 type ChatMessage = {
@@ -41,6 +56,8 @@ type StreamEvent =
   | { type: 'tool_start'; name: string }
   | { type: 'tool_done'; name: string }
   | { type: 'file_attachment'; url: string; filename: string; label: string }
+  | { type: 'report_link'; token: string; url: string; clientName: string; label: string }
+  | { type: 'render_report_pdf'; mode: 'download' | 'whatsapp'; token: string; filename: string; clientName?: string; phone?: string; zapi_client_id?: string | null; caption?: string | null }
   | { type: 'done'; role?: string; usage?: TokenUsage }
   | { type: 'error'; message: string };
 
@@ -84,6 +101,16 @@ const TOOL_LABELS: Record<string, string> = {
 function getToolLabel(name: string): string {
   if (name.startsWith('ext_')) return 'executando ferramenta';
   return TOOL_LABELS[name] ?? name;
+}
+
+// Blob → base64 puro (sem o prefixo data:...;base64,).
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve((reader.result as string).split(',')[1] ?? '');
+    reader.onerror = () => reject(new Error('Falha ao ler o PDF gerado.'));
+    reader.readAsDataURL(blob);
+  });
 }
 
 // ---- Voice recording hook ----
@@ -133,6 +160,47 @@ function useVoiceInput(onTranscript: (text: string) => void) {
 
 // ---- Sub-components ----
 
+// Card do relatório OFICIAL: abre o relatório completo (/relatorio/[token]) e exporta o
+// PDF fiel (mesmo pipeline da tela de Relatórios) direto no navegador.
+function ReportCard({ att }: { att: FileAttachment }) {
+  const [downloading, setDownloading] = useState(false);
+  async function download() {
+    if (downloading || !att.token) return;
+    setDownloading(true);
+    try {
+      await exportReportToPdf(att.token, att.filename);
+    } catch { /* silencioso — o usuário ainda tem o link "Ver relatório" */ }
+    finally { setDownloading(false); }
+  }
+  return (
+    <div className="flex w-full items-center gap-3 rounded-xl border border-primary/20 bg-[#101522] px-4 py-3">
+      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+        <FileText className="h-4 w-4 text-primary" />
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="truncate text-sm font-semibold text-slate-100">{att.label}</p>
+        <p className="text-xs text-slate-500">Relatório completo · gerador oficial</p>
+      </div>
+      <a
+        href={att.url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="shrink-0 rounded-lg border border-white/10 px-3 py-1.5 text-xs font-semibold text-slate-200 transition-colors hover:border-primary/40 hover:text-primary"
+      >
+        Ver relatório
+      </a>
+      <button
+        onClick={download}
+        disabled={downloading}
+        className="flex shrink-0 items-center gap-1.5 rounded-lg bg-primary/90 px-3 py-1.5 text-xs font-semibold text-black transition-colors hover:bg-primary disabled:opacity-60"
+      >
+        {downloading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+        {downloading ? 'Gerando…' : 'Baixar PDF'}
+      </button>
+    </div>
+  );
+}
+
 function MessageBubble({ msg }: { msg: ChatMessage }) {
   const isUser = msg.role === 'user';
   return (
@@ -163,23 +231,27 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
         {msg.attachments && msg.attachments.length > 0 && (
           <div className="flex flex-col gap-2 w-full">
             {msg.attachments.map((att, i) => (
-              <a
-                key={i}
-                href={att.url}
-                download={att.filename}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="group flex w-full items-center gap-3 rounded-xl border border-white/10 bg-[#101522] px-4 py-3 transition-all hover:border-primary/30 hover:bg-primary/5"
-              >
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-red-500/10">
-                  <FileText className="h-4 w-4 text-red-400" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="truncate text-sm font-semibold text-slate-100">{att.label}</p>
-                  <p className="text-xs text-slate-500">{att.filename}</p>
-                </div>
-                <Download className="h-4 w-4 shrink-0 text-slate-500 transition-colors group-hover:text-primary" />
-              </a>
+              att.token ? (
+                <ReportCard key={i} att={att} />
+              ) : (
+                <a
+                  key={i}
+                  href={att.url}
+                  download={att.filename}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="group flex w-full items-center gap-3 rounded-xl border border-white/10 bg-[#101522] px-4 py-3 transition-all hover:border-primary/30 hover:bg-primary/5"
+                >
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-red-500/10">
+                    <FileText className="h-4 w-4 text-red-400" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="truncate text-sm font-semibold text-slate-100">{att.label}</p>
+                    <p className="text-xs text-slate-500">{att.filename}</p>
+                  </div>
+                  <Download className="h-4 w-4 shrink-0 text-slate-500 transition-colors group-hover:text-primary" />
+                </a>
+              )
             ))}
           </div>
         )}
@@ -927,6 +999,7 @@ export default function AgentePage() {
       let currentActive: string[] = [];
       let accText = '';
       const accAttachments: FileAttachment[] = [];
+      const pendingRenders: PendingRender[] = [];
       let messageAdded = false;
 
       while (true) {
@@ -944,6 +1017,13 @@ export default function AgentePage() {
               accText += event.text;
             } else if (event.type === 'file_attachment') {
               accAttachments.push({ url: event.url, filename: event.filename, label: event.label });
+            } else if (event.type === 'report_link') {
+              accAttachments.push({ url: event.url, filename: `${event.label}.pdf`, label: event.label, token: event.token });
+            } else if (event.type === 'render_report_pdf') {
+              pendingRenders.push({
+                mode: event.mode, token: event.token, filename: event.filename, clientName: event.clientName,
+                phone: event.phone, zapi_client_id: event.zapi_client_id, caption: event.caption,
+              });
             } else if (event.type === 'tool_start') {
               currentActive = [...currentActive, event.name];
               setActiveTools([...currentActive]);
@@ -973,12 +1053,51 @@ export default function AgentePage() {
           attachments: accAttachments.length > 0 ? accAttachments : undefined,
         }]);
       }
+
+      // Renderiza no navegador os PDFs pedidos pela Luna (mesmo pipeline da tela Relatórios).
+      // Roda DEPOIS do stream — cada render pode levar dezenas de segundos.
+      for (const r of pendingRenders) {
+        await processReportRender(r);
+      }
     } catch {
       setMessages(prev => [...prev, { id: assistantId, role: 'assistant', content: 'Desculpe, ocorreu um erro. Tente novamente.', toolsUsed: [] }]);
     } finally {
       setLoading(false);
       setActiveTools([]);
       inputRef.current?.focus();
+    }
+  }
+
+  // Renderiza o PDF real do relatório no navegador e baixa (mode=download) ou envia no
+  // WhatsApp (mode=whatsapp, sobe o base64 pra /api/agent/send-report-pdf). Publica uma
+  // mensagem de status no chat com o resultado.
+  async function processReportRender(r: PendingRender) {
+    const pushStatus = (content: string) =>
+      setMessages(prev => [...prev, { id: `render-${r.token}-${Date.now()}`, role: 'assistant', content, toolsUsed: [] }]);
+    try {
+      if (r.mode === 'download') {
+        await exportReportToPdf(r.token, r.filename);
+        pushStatus(`⬇️ PDF completo de ${r.clientName ?? 'relatório'} gerado e baixado.`);
+        return;
+      }
+      // WhatsApp: renderiza → base64 → envia via endpoint (o servidor resolve a Z-API).
+      pushStatus(`⏳ Renderizando o PDF completo${r.clientName ? ` de ${r.clientName}` : ''} para enviar no WhatsApp…`);
+      const { blob } = await renderReportPdf(r.token);
+      const pdf_base64 = await blobToBase64(blob);
+      const res = await fetch('/api/agent/send-report-pdf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          pdf_base64, filename: r.filename, phone: r.phone,
+          zapi_client_id: r.zapi_client_id ?? null, caption: r.caption ?? null,
+          client_name: r.clientName ?? null,
+        }),
+      });
+      const data = await res.json().catch(() => ({})) as { ok?: boolean; error?: string };
+      if (res.ok && data.ok) pushStatus(`✅ PDF completo${r.clientName ? ` de ${r.clientName}` : ''} enviado para ${r.phone} no WhatsApp.`);
+      else pushStatus(`❌ Falha ao enviar o PDF no WhatsApp: ${data.error ?? 'erro desconhecido'}. O relatório continua disponível no card acima.`);
+    } catch (err) {
+      pushStatus(`❌ Não consegui gerar o PDF completo: ${err instanceof Error ? err.message : 'erro'}. Use o link do relatório no card acima.`);
     }
   }
 

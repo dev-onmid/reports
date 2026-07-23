@@ -5,8 +5,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { deflateSync } from 'zlib';
 import { makeServerPool } from '@/lib/server-db';
-import { sendText, sendDocument } from '@/lib/zapi';
-import { generateReportPdf } from '@/lib/report-pdf';
+import { sendText } from '@/lib/zapi';
 import { getFreshMetaToken } from '@/lib/meta-token';
 import { resolveMetaPeriod, resolveGaqlPeriod, applyMetaDateToUrl } from '@/lib/period-utils';
 import { countMetaResults } from '@/lib/meta-results';
@@ -349,26 +348,33 @@ export const systemTools: Anthropic.Tool[] = [
   },
   {
     name: 'generate_client_report',
-    description: 'Gera um relatório de performance completo para um cliente com dados do período.',
+    description: 'Gera o relatório OFICIAL do cliente pelo gerador da plataforma (o mesmo da tela Relatórios — capa, Meta Ads, Instagram, Google, etc.) e devolve o link público /relatorio/[token] para ver ou compartilhar no chat. Use quando o usuário quiser gerar/ver o relatório sem necessariamente baixar o PDF.',
     input_schema: {
       type: 'object' as const,
       properties: {
         client_id: { type: 'string', description: 'ID do cliente' },
-        period: { type: 'string', description: 'Período do relatório (padrão: this_month)' },
+        period: { type: 'string', description: 'Período: this_month, last_month, last_30d, last_7d, custom (padrão: this_month)' },
+        date_from: { type: 'string', description: 'Data inicial YYYY-MM-DD (obrigatória se period=custom)' },
+        date_to: { type: 'string', description: 'Data final YYYY-MM-DD (obrigatória se period=custom)' },
+        template: { type: 'string', enum: ['performance', 'delivery', 'social'], description: 'Modelo do relatório. Se omitido, usa o configurado para o cliente (ou performance).' },
       },
       required: ['client_id'],
     },
   },
   {
     name: 'send_report_pdf_whatsapp',
-    description: 'Gera um relatório de performance em PDF e envia via WhatsApp usando Z-API. Use quando o usuário pedir para enviar o relatório de um cliente pelo WhatsApp. Se não souber qual Z-API usar, pergunte ao usuário.',
+    description: 'Gera o relatório OFICIAL do cliente pelo gerador da plataforma e ENVIA no WhatsApp via Z-API. O formato de entrega é escolhido em "format": "link" envia o link do relatório completo (padrão, funciona sempre); "pdf" envia o arquivo PDF real de todas as páginas (renderizado no navegador — só disponível no chat, não no agendador). Use quando o usuário pedir para enviar o relatório pelo WhatsApp. Se não souber qual Z-API usar, use list_zapi_clients.',
     input_schema: {
       type: 'object' as const,
       properties: {
         client_id: { type: 'string', description: 'ID do cliente para gerar o relatório' },
         phone: { type: 'string', description: 'Número do WhatsApp com DDI (ex: 5511999999999)' },
-        period: { type: 'string', description: 'Período: this_month, last_month, last_30d, last_7d (padrão: this_month)' },
-        caption: { type: 'string', description: 'Mensagem de texto que acompanha o PDF (opcional)' },
+        period: { type: 'string', description: 'Período: this_month, last_month, last_30d, last_7d, custom (padrão: this_month)' },
+        date_from: { type: 'string', description: 'Data inicial YYYY-MM-DD (obrigatória se period=custom)' },
+        date_to: { type: 'string', description: 'Data final YYYY-MM-DD (obrigatória se period=custom)' },
+        format: { type: 'string', enum: ['link', 'pdf'], description: 'Como entregar: "link" (padrão) manda o link do relatório; "pdf" manda o arquivo PDF completo.' },
+        template: { type: 'string', enum: ['performance', 'delivery', 'social'], description: 'Modelo do relatório. Se omitido, usa o configurado para o cliente (ou performance).' },
+        caption: { type: 'string', description: 'Mensagem de texto que acompanha o relatório (opcional)' },
         zapi_client_id: { type: 'string', description: 'ID da conexão Z-API a usar. Se não souber, use list_zapi_clients primeiro.' },
       },
       required: ['client_id', 'phone'],
@@ -376,12 +382,15 @@ export const systemTools: Anthropic.Tool[] = [
   },
   {
     name: 'generate_report_pdf',
-    description: 'Gera um relatório de performance em PDF e disponibiliza para download diretamente no chat. Use quando o usuário pedir para ver, gerar ou baixar um relatório em PDF no chat.',
+    description: 'Gera o relatório OFICIAL do cliente pelo gerador da plataforma e disponibiliza o PDF completo (todas as páginas) para download direto no chat. Use quando o usuário pedir para ver, gerar ou baixar o relatório em PDF no chat.',
     input_schema: {
       type: 'object' as const,
       properties: {
         client_id: { type: 'string', description: 'ID do cliente para gerar o relatório' },
-        period: { type: 'string', description: 'Período: this_month, last_month, last_30d, last_7d (padrão: this_month)' },
+        period: { type: 'string', description: 'Período: this_month, last_month, last_30d, last_7d, custom (padrão: this_month)' },
+        date_from: { type: 'string', description: 'Data inicial YYYY-MM-DD (obrigatória se period=custom)' },
+        date_to: { type: 'string', description: 'Data final YYYY-MM-DD (obrigatória se period=custom)' },
+        template: { type: 'string', enum: ['performance', 'delivery', 'social'], description: 'Modelo do relatório. Se omitido, usa o configurado para o cliente (ou performance).' },
       },
       required: ['client_id'],
     },
@@ -799,32 +808,247 @@ A ferramenta busca automaticamente os IDs de cidades e interesses na API Meta, v
       required: ['task_id'],
     },
   },
+  // ─── Cobertura total do sistema (leitura + ações finas reusando rotas canônicas) ───
+  {
+    name: 'list_reports',
+    description: 'Lista os relatórios JÁ GERADOS (tela Relatórios) com o link público de cada um. Use para reenviar/compartilhar um relatório existente sem gerar de novo.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        client_id: { type: 'string', description: 'Filtrar por cliente (opcional)' },
+        limit: { type: 'number', description: 'Máx de relatórios (padrão 15)' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'get_report_configs',
+    description: 'Lista as automações de relatório mensal por cliente (dia de envio, template, grupo de WhatsApp, ativo/inativo).',
+    input_schema: { type: 'object' as const, properties: {}, required: [] },
+  },
+  {
+    name: 'list_disparos_campaigns',
+    description: 'Lista as campanhas de disparo de WhatsApp (módulo Disparos) com status e progresso.',
+    input_schema: {
+      type: 'object' as const,
+      properties: { status: { type: 'string', description: 'Filtrar por status (opcional): running, paused, done, cancelled...' } },
+      required: [],
+    },
+  },
+  {
+    name: 'disparo_campaign_action',
+    description: 'Pausa, retoma ou cancela uma campanha de disparo de WhatsApp. Ações: pause, resume, cancel. Descreva a campanha e espere confirmação do usuário antes de cancelar.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        campaign_id: { type: 'string', description: 'ID da campanha (use list_disparos_campaigns)' },
+        action: { type: 'string', enum: ['pause', 'resume', 'cancel'], description: 'Ação a executar' },
+      },
+      required: ['campaign_id', 'action'],
+    },
+  },
+  {
+    name: 'get_whatsapp_instances',
+    description: 'Status de TODAS as instâncias de WhatsApp (Evolution) da agência: conectada/desconectada e a que cliente cada uma está vinculada. Use quando perguntarem se o WhatsApp de alguém caiu.',
+    input_schema: { type: 'object' as const, properties: {}, required: [] },
+  },
+  {
+    name: 'get_crm_inbox',
+    description: 'Inbox do CRM de um cliente: conversas recentes com última mensagem e contagem de não lidas.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        client_id: { type: 'string', description: 'ID do cliente' },
+        limit: { type: 'number', description: 'Máx de conversas (padrão 20)' },
+      },
+      required: ['client_id'],
+    },
+  },
+  {
+    name: 'get_followup_status',
+    description: 'Regras de follow-up do CRM de um cliente e execuções pendentes/recentes (sequências automáticas de mensagens).',
+    input_schema: {
+      type: 'object' as const,
+      properties: { client_id: { type: 'string', description: 'ID do cliente' } },
+      required: ['client_id'],
+    },
+  },
+  {
+    name: 'list_automations',
+    description: 'Lista as automações do sistema: webhooks de entrada (Automações) e automações da Meta cadastradas.',
+    input_schema: { type: 'object' as const, properties: {}, required: [] },
+  },
+  {
+    name: 'list_email_campaigns',
+    description: 'Lista as campanhas de e-mail marketing com status e métricas básicas.',
+    input_schema: { type: 'object' as const, properties: {}, required: [] },
+  },
+  {
+    name: 'list_leadlovers_campaigns',
+    description: 'Lista as campanhas de envio de contatos ao Leadlovers com progresso (enviados/pendentes/erros).',
+    input_schema: { type: 'object' as const, properties: {}, required: [] },
+  },
+  {
+    name: 'get_lp_analytics',
+    description: 'Radar de LP: landing pages cadastradas de um cliente (sessões 30d, última visita) e, com lp_id, as estatísticas completas (funil de scroll, cliques, dispositivos).',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        client_id: { type: 'string', description: 'ID do cliente' },
+        lp_id: { type: 'string', description: 'ID da LP para estatísticas detalhadas (opcional)' },
+        days: { type: 'number', description: 'Janela em dias para as estatísticas (padrão 30)' },
+      },
+      required: ['client_id'],
+    },
+  },
+  {
+    name: 'get_link_redirects',
+    description: 'Links rastreados /r/ (encurtador com captura de UTM/clique): lista com contagem de cliques.',
+    input_schema: {
+      type: 'object' as const,
+      properties: { client_id: { type: 'string', description: 'Filtrar por cliente (opcional)' } },
+      required: [],
+    },
+  },
+  {
+    name: 'get_ig_posts',
+    description: 'Posts recentes do Instagram de um cliente com métricas (alcance, curtidas, comentários, salvos). Mais detalhado que o get_social_monitor.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        client_id: { type: 'string', description: 'ID do cliente' },
+        period: { type: 'string', description: 'Período: last_7d, last_14d, last_30d (padrão), this_month, last_month' },
+        limit: { type: 'number', description: 'Máx de posts (padrão 12)' },
+      },
+      required: ['client_id'],
+    },
+  },
+  {
+    name: 'get_optimizer_queue',
+    description: 'Fila global de decisões do Otimizador: recomendações pendentes por conta (o que precisa de ação agora). Sem client_id retorna a fila de todos.',
+    input_schema: {
+      type: 'object' as const,
+      properties: { client_id: { type: 'string', description: 'Filtrar por cliente (opcional)' } },
+      required: [],
+    },
+  },
+  {
+    name: 'get_activity_logs',
+    description: 'Últimos registros do log de auditoria do sistema (quem fez o quê e quando).',
+    input_schema: {
+      type: 'object' as const,
+      properties: { limit: { type: 'number', description: 'Máx de registros (padrão 30)' } },
+      required: [],
+    },
+  },
 ];
 
 // --- Tool executors ---
 
-async function saveReportToDb(
+// Origem canônica da aplicação (mesmo padrão do webhookOrigin) — usada pra montar o
+// link público do relatório e pra chamar a rota run-once por HTTP.
+function appOrigin(): string {
+  return (process.env.APP_URL ?? process.env.NEXT_PUBLIC_APP_URL ?? 'https://reports.onmid.app')
+    .trim().replace(/\/$/, '');
+}
+
+// GET numa rota interna do próprio sistema (reuso da lógica canônica em vez de duplicar).
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function fetchInternal(path: string): Promise<any | null> {
+  try {
+    const r = await fetch(`${appOrigin()}${path}`);
+    if (!r.ok) return null;
+    return await r.json();
+  } catch { return null; }
+}
+
+// Remove campos pesados/sensíveis de uma linha antes de devolver pra IA.
+function stripFields(row: Record<string, unknown>, drop: string[]): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(row)) {
+    if (drop.includes(k)) continue;
+    if (typeof v === 'string' && v.length > 300) { out[k] = v.slice(0, 300) + '…'; continue; }
+    out[k] = v;
+  }
+  return out;
+}
+
+// Converte o período nomeado da Luna (this_month/last_month/last_30d/last_7d/custom)
+// em datas YYYY-MM-DD no fuso de Brasília — mesma semântica dos relatórios da plataforma.
+function resolvePeriodDates(
+  period: string, dateFrom?: string, dateTo?: string,
+): { from: string; to: string } {
+  if (period === 'custom' && dateFrom) return { from: dateFrom, to: dateTo || dateFrom };
+  // "Hoje" em BRT (UTC-3)
+  const nowBrt = new Date(Date.now() - 3 * 3600_000);
+  const y = nowBrt.getUTCFullYear();
+  const m = nowBrt.getUTCMonth();
+  const d = nowBrt.getUTCDate();
+  const fmt = (dt: Date) => dt.toISOString().slice(0, 10);
+  switch (period) {
+    case 'last_month': {
+      const first = new Date(Date.UTC(y, m - 1, 1));
+      const last = new Date(Date.UTC(y, m, 0));
+      return { from: fmt(first), to: fmt(last) };
+    }
+    case 'last_7d':
+      return { from: fmt(new Date(Date.UTC(y, m, d - 6))), to: fmt(new Date(Date.UTC(y, m, d))) };
+    case 'last_30d':
+      return { from: fmt(new Date(Date.UTC(y, m, d - 29))), to: fmt(new Date(Date.UTC(y, m, d))) };
+    case 'this_month':
+    default:
+      return { from: fmt(new Date(Date.UTC(y, m, 1))), to: fmt(new Date(Date.UTC(y, m, d))) };
+  }
+}
+
+// Rótulo humano do relatório conforme o template.
+function reportLabel(template: string): string {
+  if (template === 'delivery') return 'Relatório de Delivery';
+  if (template === 'social') return 'Relatório de Redes Sociais';
+  return 'Relatório de Performance';
+}
+
+// Gera o relatório REAL da plataforma — o MESMO gerador da tela de Relatórios. Delega pra
+// rota /api/reports/run-once (que tem maxDuration=300 próprio, isolando o fan-out pesado
+// do orçamento do chat) e devolve o token público + o link /relatorio/[token]. O template
+// vem do report_config do cliente quando existe; senão 'performance' (padrão da plataforma).
+async function buildRealReport(
   pool: ReturnType<typeof makeServerPool>,
-  pdfBuffer: Buffer,
-  filename: string,
-  clientName: string
-): Promise<string> {
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS public.agent_report_files (
-      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      pdf_data BYTEA NOT NULL,
-      filename TEXT NOT NULL,
-      client_name TEXT NOT NULL,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      expires_at TIMESTAMPTZ NOT NULL DEFAULT NOW() + INTERVAL '7 days'
-    )
-  `);
-  const { rows } = await pool.query(
-    `INSERT INTO public.agent_report_files (pdf_data, filename, client_name)
-     VALUES ($1, $2, $3) RETURNING id`,
-    [pdfBuffer, filename, clientName]
-  );
-  return rows[0].id as string;
+  clientId: string,
+  period: string,
+  dateFrom?: string,
+  dateTo?: string,
+  templateOverride?: string,
+): Promise<{ token: string; url: string; clientName: string; template: string }> {
+  const { rows: clientRows } = await pool.query('SELECT name FROM public.clients WHERE id = $1', [clientId]);
+  if (!clientRows[0]) throw new Error('Cliente não encontrado.');
+  const clientName = clientRows[0].name as string;
+
+  let template = templateOverride || '';
+  if (!template) {
+    try {
+      const { rows } = await pool.query(
+        'SELECT template FROM public.report_configs WHERE client_id = $1 ORDER BY active DESC LIMIT 1',
+        [clientId],
+      );
+      template = (rows[0]?.template as string) || 'performance';
+    } catch { template = 'performance'; }
+  }
+
+  const { from, to } = resolvePeriodDates(period, dateFrom, dateTo);
+  const origin = appOrigin();
+  const res = await fetch(`${origin}/api/reports/run-once`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ clientId, from, to, template }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({})) as { error?: string };
+    throw new Error(err.error || `Falha ao gerar o relatório (HTTP ${res.status}).`);
+  }
+  const data = await res.json() as { public_token: string };
+  if (!data.public_token) throw new Error('O gerador não retornou o relatório.');
+  return { token: data.public_token, url: `${origin}/relatorio/${data.public_token}`, clientName, template };
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -883,7 +1107,7 @@ export async function execSystemTool(
       return JSON.stringify(rows);
     }
 
-    if (name === 'get_meta_campaigns' || (name === 'generate_client_report' && input._platform === 'meta')) {
+    if (name === 'get_meta_campaigns') {
       const clientId = input.client_id as string;
       const period = (input.period as string) || 'this_month';
       const metaPeriod = resolveMetaPeriod(period, (input.date_from as string) ?? '', (input.date_to as string) ?? '');
@@ -976,7 +1200,6 @@ export async function execSystemTool(
         }));
       }));
 
-      if (name === 'generate_client_report') return JSON.stringify(campaigns.slice(0, 20));
       if (campaigns.length === 0) return 'Nenhuma campanha Meta encontrada para esse período. Verifique se a conta está vinculada corretamente.';
       return JSON.stringify(campaigns.slice(0, 30));
     }
@@ -1217,70 +1440,35 @@ export async function execSystemTool(
     if (name === 'generate_client_report') {
       const clientId = input.client_id as string;
       const period = (input.period as string) || 'this_month';
-      const { rows: clientRows } = await pool.query('SELECT name, segment FROM public.clients WHERE id = $1', [clientId]);
-      if (!clientRows[0]) return 'Cliente não encontrado.';
-      // Reuse the meta/google campaign tools by setting a flag
-      const [metaResult, googleResult] = await Promise.allSettled([
-        execSystemTool('get_meta_campaigns', { client_id: clientId, period, _platform: 'meta' }),
-        execSystemTool('get_google_campaigns', { client_id: clientId, period }),
-      ]);
-      return JSON.stringify({
-        client: clientRows[0], period,
-        meta_campaigns: metaResult.status === 'fulfilled' ? JSON.parse(metaResult.value) : [],
-        google_campaigns: googleResult.status === 'fulfilled' ? JSON.parse(googleResult.value) : [],
-      });
+      const { token, url, clientName, template } = await buildRealReport(
+        pool, clientId, period,
+        input.date_from as string | undefined, input.date_to as string | undefined,
+        input.template as string | undefined,
+      );
+      const label = reportLabel(template);
+      onEvent?.({ type: 'report_link', token, url, clientName, label: `${label} — ${clientName}` });
+      return `✅ ${label} de ${clientName} gerado pelo gerador oficial da plataforma (todas as páginas).\n\n🔗 Link do relatório: ${url}\n\nO card no chat tem o botão "Baixar PDF" para exportar o arquivo completo.`;
     }
 
     if (name === 'generate_report_pdf') {
       const clientId = input.client_id as string;
       const period = (input.period as string) || 'this_month';
-      const { rows: clientRows } = await pool.query('SELECT name FROM public.clients WHERE id = $1', [clientId]);
-      if (!clientRows[0]) return 'Cliente não encontrado.';
-      const clientName = clientRows[0].name as string;
-
-      let metaCampaigns: Record<string, unknown>[] = [];
-      let googleCampaigns: Record<string, unknown>[] = [];
-      let crmLeads: Record<string, unknown>[] = [];
-
-      try {
-        const r = await execSystemTool('get_meta_campaigns', { client_id: clientId, period });
-        if (r && !r.startsWith('Nenhuma') && !r.startsWith('Erro')) metaCampaigns = JSON.parse(r);
-      } catch { /* ignore */ }
-      try {
-        const r = await execSystemTool('get_google_campaigns', { client_id: clientId, period });
-        if (r && !r.startsWith('Nenhuma') && !r.startsWith('Erro')) googleCampaigns = JSON.parse(r);
-      } catch { /* ignore */ }
-      try {
-        const r = await execSystemTool('get_crm_data', { client_id: clientId, limit: 30 });
-        if (r && !r.startsWith('Nenhum') && !r.startsWith('Erro')) crmLeads = JSON.parse(r);
-      } catch { /* ignore */ }
-
-      const periodLabels: Record<string, string> = {
-        'this_month': 'Mês Atual', 'last_month': 'Mês Anterior',
-        'last_30d': 'Últimos 30 dias', 'last_7d': 'Últimos 7 dias',
-      };
-
-      // Fetch monthly summaries for the history page
-      let monthlySummaries: import('@/lib/report-pdf').MonthlySummaryRow[] = [];
-      try {
-        const { rows: sumRows } = await pool.query(
-          `SELECT month, year, summary, meta_spend, google_spend, total_leads
-           FROM public.client_monthly_summaries
-           WHERE client_id = $1
-           ORDER BY year DESC, month DESC LIMIT 6`,
-          [clientId]
-        );
-        monthlySummaries = sumRows;
-      } catch { /* table may not exist yet */ }
-
-      const pdfBuffer = await generateReportPdf({
-        clientName, period: periodLabels[period] ?? period,
-        metaCampaigns, googleCampaigns, crmLeads, monthlySummaries,
-      });
+      const { token, url, clientName, template } = await buildRealReport(
+        pool, clientId, period,
+        input.date_from as string | undefined, input.date_to as string | undefined,
+        input.template as string | undefined,
+      );
+      const label = reportLabel(template);
       const filename = `Relatorio_${clientName.replace(/\s+/g, '_')}_${period}.pdf`;
-      const reportId = await saveReportToDb(pool, pdfBuffer, filename, clientName);
-      onEvent?.({ type: 'file_attachment', url: `/api/agent/report/${reportId}`, filename, label: `Relatório ${clientName} — ${periodLabels[period] ?? period}` });
-      return `PDF do relatório gerado com sucesso! O arquivo está disponível para download no chat.`;
+      if (onEvent) {
+        onEvent({ type: 'report_link', token, url, clientName, label: `${label} — ${clientName}` });
+        // O PDF fiel (mesma qualidade da tela de Relatórios) só é renderizável no navegador —
+        // pede pro chat gerar e baixar o arquivo completo.
+        onEvent({ type: 'render_report_pdf', mode: 'download', token, filename, clientName });
+        return `✅ ${label} de ${clientName} gerado. Estou preparando o PDF completo (todas as páginas) para download aqui no chat — o arquivo aparece em instantes.\n🔗 Link do relatório: ${url}`;
+      }
+      // Headless (sem navegador) → não há como renderizar o PDF; devolve o link.
+      return `✅ ${label} de ${clientName} gerado: ${url}`;
     }
 
     if (name === 'list_zapi_clients') {
@@ -1293,91 +1481,252 @@ export async function execSystemTool(
       const { client_id, phone, period = 'this_month', caption, zapi_client_id } = input as {
         client_id: string; phone: string; period?: string; caption?: string; zapi_client_id?: string;
       };
+      const format = (input.format as string) === 'pdf' ? 'pdf' : 'link';
 
-      // Get client name
-      const { rows: clientRows } = await pool.query('SELECT name FROM public.clients WHERE id = $1', [client_id]);
-      if (!clientRows[0]) return 'Cliente não encontrado.';
-      const clientName = clientRows[0].name as string;
+      // Gera o relatório REAL pelo gerador da plataforma (link + token).
+      const { token, url, clientName, template } = await buildRealReport(
+        pool, client_id, period,
+        input.date_from as string | undefined, input.date_to as string | undefined,
+        input.template as string | undefined,
+      );
+      const label = reportLabel(template);
+      const filename = `Relatorio_${clientName.replace(/\s+/g, '_')}_${period}.pdf`;
 
-      // Resolve Z-API connection
+      // Formato PDF (só no chat, com navegador): o front renderiza o PDF completo e sobe
+      // pra /api/agent/send-report-pdf, que envia via Z-API. Sem navegador (agendador),
+      // cai no envio do LINK abaixo.
+      if (format === 'pdf' && onEvent) {
+        onEvent({ type: 'report_link', token, url, clientName, label: `${label} — ${clientName}` });
+        onEvent({
+          type: 'render_report_pdf', mode: 'whatsapp', token, filename, clientName,
+          phone, zapi_client_id: zapi_client_id ?? null, caption: caption ?? null,
+        });
+        return `✅ ${label} de ${clientName} gerado. Estou renderizando o PDF completo no navegador e enviando para ${phone} via WhatsApp — confirmo em instantes.\n🔗 Link do relatório: ${url}`;
+      }
+
+      // Formato LINK (padrão) — resolve a Z-API e manda o link do relatório completo.
       let zapiConn: { instance_id: string; token: string; security_token?: string } | null = null;
       if (zapi_client_id) {
         const { rows } = await pool.query('SELECT instance_id, token, security_token FROM public.zapi_clients WHERE id = $1', [zapi_client_id]);
         if (rows[0]) zapiConn = rows[0];
       }
-      // Fallback: first active Z-API
       if (!zapiConn) {
         const { rows } = await pool.query("SELECT instance_id, token, security_token FROM public.zapi_clients WHERE active = true ORDER BY created_at ASC LIMIT 1");
         if (rows[0]) zapiConn = rows[0];
       }
-      // Also check external tools configured in Luna for Z-API
       if (!zapiConn) {
         const { rows } = await pool.query("SELECT config FROM public.agent_external_tools WHERE type = 'zapi_whatsapp' AND enabled = true LIMIT 1");
         if (rows[0]?.config?.instance_id) {
           zapiConn = { instance_id: rows[0].config.instance_id, token: rows[0].config.token, security_token: rows[0].config.security_token };
         }
       }
-      if (!zapiConn) return 'Nenhuma conexão Z-API encontrada. Use list_zapi_clients para ver as disponíveis.';
+      if (!zapiConn) return `⚠️ Relatório gerado (${url}) mas nenhuma conexão Z-API foi encontrada para enviar. Use list_zapi_clients.`;
 
-      // Fetch campaign and CRM data
-      let metaCampaigns: Record<string, unknown>[] = [];
-      let googleCampaigns: Record<string, unknown>[] = [];
-      let crmLeads: Record<string, unknown>[] = [];
-
-      try {
-        const metaRaw = await execSystemTool('get_meta_campaigns', { client_id, period });
-        if (metaRaw && !metaRaw.startsWith('Nenhuma') && !metaRaw.startsWith('Erro')) metaCampaigns = JSON.parse(metaRaw);
-      } catch { /* ignore */ }
-      try {
-        const googleRaw = await execSystemTool('get_google_campaigns', { client_id, period });
-        if (googleRaw && !googleRaw.startsWith('Nenhuma') && !googleRaw.startsWith('Erro')) googleCampaigns = JSON.parse(googleRaw);
-      } catch { /* ignore */ }
-      try {
-        const crmRaw = await execSystemTool('get_crm_data', { client_id, limit: 30 });
-        if (crmRaw && !crmRaw.startsWith('Nenhum') && !crmRaw.startsWith('Erro')) crmLeads = JSON.parse(crmRaw);
-      } catch { /* ignore */ }
-
-      // Generate PDF
-      const periodLabels: Record<string, string> = {
-        'this_month': 'Mês Atual', 'last_month': 'Mês Anterior',
-        'last_30d': 'Últimos 30 dias', 'last_7d': 'Últimos 7 dias',
-      };
-
-      let monthlySummariesWA: import('@/lib/report-pdf').MonthlySummaryRow[] = [];
-      try {
-        const { rows: sumRows } = await pool.query(
-          `SELECT month, year, summary, meta_spend, google_spend, total_leads
-           FROM public.client_monthly_summaries WHERE client_id = $1
-           ORDER BY year DESC, month DESC LIMIT 6`,
-          [client_id]
-        );
-        monthlySummariesWA = sumRows;
-      } catch { /* ignore */ }
-
-      const pdfBuffer = await generateReportPdf({
-        clientName,
-        period: periodLabels[period] ?? period,
-        metaCampaigns,
-        googleCampaigns,
-        crmLeads,
-        monthlySummaries: monthlySummariesWA,
-      });
-
-      const b64 = pdfBuffer.toString('base64');
-      const fileName = `Relatorio_${clientName.replace(/\s+/g, '_')}_${period}.pdf`;
-      const msgCaption = caption ?? `📊 Relatório de Performance — ${clientName}\nPeríodo: ${periodLabels[period] ?? period}\n\nGerado via Luna IA · Onmid Reports`;
-
-      // Save to DB and emit chat download event
-      const reportId = await saveReportToDb(pool, pdfBuffer, fileName, clientName);
-      onEvent?.({ type: 'file_attachment', url: `/api/agent/report/${reportId}`, filename: fileName, label: `Relatório ${clientName} — ${periodLabels[period] ?? period}` });
-
-      const result = await sendDocument(
+      const msg = caption ?? `📊 *${label} — ${clientName}*\n\nSeu relatório está pronto!\n\nAcesse aqui: ${url}`;
+      onEvent?.({ type: 'report_link', token, url, clientName, label: `${label} — ${clientName}` });
+      const result = await sendText(
         { instanceId: zapiConn.instance_id, token: zapiConn.token, clientToken: zapiConn.security_token },
-        phone, b64, fileName, msgCaption
+        phone, msg,
       );
+      if (result.ok) return `✅ ${label} de ${clientName} enviado para ${phone} (link do relatório completo).\n🔗 ${url}`;
+      return `❌ Relatório gerado mas falha ao enviar no WhatsApp: ${result.error}.\n🔗 Link: ${url}`;
+    }
 
-      if (result.ok) return `✅ Relatório de ${clientName} enviado com sucesso para ${phone}! O arquivo também está disponível para download no chat.`;
-      return `❌ PDF gerado mas falha ao enviar via WhatsApp: ${result.error}. O arquivo está disponível para download no chat.`;
+    // ─── Cobertura total do sistema ────────────────────────────────────────────
+
+    if (name === 'list_reports') {
+      const limit = Math.min(Number(input.limit) || 15, 50);
+      const params: unknown[] = [];
+      let where = '';
+      if (input.client_id) { params.push(input.client_id); where = 'WHERE client_id = $1'; }
+      params.push(limit);
+      const { rows } = await pool.query(
+        `SELECT id, client_id, client_name, title, period_from, period_to, generated_by, public_token, created_at
+           FROM public.diagnostic_reports ${where} ORDER BY created_at DESC LIMIT $${params.length}`,
+        params,
+      );
+      if (rows.length === 0) return 'Nenhum relatório gerado ainda.';
+      const origin = appOrigin();
+      return JSON.stringify(rows.map(r => ({
+        id: r.id, cliente: r.client_name, titulo: r.title,
+        periodo: `${r.period_from} a ${r.period_to}`, gerado_por: r.generated_by,
+        criado_em: r.created_at, link: `${origin}/relatorio/${r.public_token}`,
+      })));
+    }
+
+    if (name === 'get_report_configs') {
+      const { rows } = await pool.query(
+        `SELECT rc.id, rc.client_id, c.name AS client_name, rc.template, rc.send_day, rc.active,
+                rc.whatsapp_group, rc.zapi_client_id
+           FROM public.report_configs rc
+           JOIN public.clients c ON c.id = rc.client_id
+          ORDER BY c.name ASC`,
+      ).catch(() => ({ rows: [] as Record<string, unknown>[] }));
+      if (rows.length === 0) return 'Nenhuma automação de relatório mensal configurada.';
+      return JSON.stringify(rows);
+    }
+
+    if (name === 'list_disparos_campaigns') {
+      const { rows } = await pool.query(
+        `SELECT c.*, cl.name AS conexao FROM public.zapi_campaigns c
+           JOIN public.zapi_clients cl ON cl.id = c.client_id
+          ORDER BY c.created_at DESC LIMIT 40`,
+      ).catch(() => ({ rows: [] as Record<string, unknown>[] }));
+      let list = rows;
+      if (input.status) list = list.filter(r => String(r.status) === String(input.status));
+      if (list.length === 0) return 'Nenhuma campanha de disparo encontrada.';
+      // Corta textos de mensagem/listas de números — a IA só precisa do status/progresso.
+      return JSON.stringify(list.map(r => stripFields(r as Record<string, unknown>, ['message', 'messages', 'image_urls', 'numbers', 'numbers_raw'])));
+    }
+
+    if (name === 'disparo_campaign_action') {
+      const { campaign_id, action } = input as { campaign_id: string; action: string };
+      if (!['pause', 'resume', 'cancel'].includes(action)) return 'Ação inválida. Use pause, resume ou cancel.';
+      // Reusa a rota canônica do módulo Disparos (mesma semântica dos botões da tela).
+      const res = await fetch(`${appOrigin()}/api/disparos/campaigns/${campaign_id}/action`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action }),
+      }).catch(() => null);
+      if (!res || !res.ok) return `❌ Falha ao executar "${action}" na campanha (HTTP ${res?.status ?? 'sem resposta'}).`;
+      const labels: Record<string, string> = { pause: 'pausada', resume: 'retomada', cancel: 'cancelada' };
+      return `✅ Campanha de disparo ${labels[action]} com sucesso.`;
+    }
+
+    if (name === 'get_whatsapp_instances') {
+      // Rota canônica do admin (mesma da aba Instâncias em Configurações).
+      const data = await fetchInternal('/api/admin/instances');
+      if (!data?.instances) return 'Não consegui consultar as instâncias na VPS Evolution.';
+      const list = (data.instances as Record<string, unknown>[]).map(i => ({
+        nome: i.name, status: i.status, numero: i.number ?? null,
+        vinculos: i.vinculos, ativa: i.active,
+      }));
+      if (list.length === 0) return 'Nenhuma instância encontrada na VPS.';
+      return JSON.stringify(list);
+    }
+
+    if (name === 'get_crm_inbox') {
+      const clientId = input.client_id as string;
+      const limit = Math.min(Number(input.limit) || 20, 50);
+      const { rows } = await pool.query(
+        `SELECT l.id, l.nome, l.numero, l.status,
+                m.text AS ultima_mensagem, m.direction AS ultima_direcao, m.created_at AS ultima_em,
+                (SELECT COUNT(*)::int FROM public.crm_messages m2
+                  WHERE m2.lead_id = l.id AND m2.direction = 'in'
+                    AND m2.created_at > COALESCE(l.chat_read_at, '-infinity'::timestamptz)) AS nao_lidas
+           FROM public.crm_leads l
+           JOIN LATERAL (
+             SELECT text, direction, created_at FROM public.crm_messages m
+              WHERE m.lead_id = l.id ORDER BY created_at DESC LIMIT 1
+           ) m ON true
+          WHERE l.client_id = $1
+          ORDER BY m.created_at DESC LIMIT $2`,
+        [clientId, limit],
+      ).catch(() => ({ rows: [] as Record<string, unknown>[] }));
+      if (rows.length === 0) return 'Nenhuma conversa encontrada no CRM deste cliente.';
+      return JSON.stringify(rows.map(r => ({
+        ...r, ultima_mensagem: String(r.ultima_mensagem ?? '').slice(0, 150),
+      })));
+    }
+
+    if (name === 'get_followup_status') {
+      const clientId = input.client_id as string;
+      const { rows: regras } = await pool.query(
+        `SELECT r.* FROM public.crm_followup_regras r WHERE r.client_id = $1 ORDER BY r.created_at DESC`,
+        [clientId],
+      ).catch(() => ({ rows: [] as Record<string, unknown>[] }));
+      const { rows: execucoes } = await pool.query(
+        `SELECT e.* FROM public.crm_followup_execucoes e
+          WHERE e.client_id = $1 ORDER BY e.created_at DESC LIMIT 30`,
+        [clientId],
+      ).catch(() => ({ rows: [] as Record<string, unknown>[] }));
+      if (regras.length === 0 && execucoes.length === 0) return 'Nenhuma regra ou execução de follow-up para este cliente.';
+      return JSON.stringify({
+        regras: regras.map(r => stripFields(r as Record<string, unknown>, [])),
+        execucoes_recentes: execucoes.map(e => stripFields(e as Record<string, unknown>, [])),
+      });
+    }
+
+    if (name === 'list_automations') {
+      const { rows: webhooks } = await pool.query(
+        `SELECT id, name, description, enabled, created_at FROM public.webhook_configs ORDER BY created_at DESC`,
+      ).catch(() => ({ rows: [] as Record<string, unknown>[] }));
+      const { rows: metaAuto } = await pool.query(
+        `SELECT * FROM public.meta_automations ORDER BY created_at DESC LIMIT 30`,
+      ).catch(() => ({ rows: [] as Record<string, unknown>[] }));
+      if (webhooks.length === 0 && metaAuto.length === 0) return 'Nenhuma automação cadastrada.';
+      return JSON.stringify({
+        webhooks_de_entrada: webhooks,
+        automacoes_meta: metaAuto.map(a => stripFields(a as Record<string, unknown>, [])),
+      });
+    }
+
+    if (name === 'list_email_campaigns') {
+      const data = await fetchInternal('/api/email/campaigns');
+      if (!Array.isArray(data) || data.length === 0) return 'Nenhuma campanha de e-mail encontrada.';
+      return JSON.stringify((data as Record<string, unknown>[]).map(c => stripFields(c, ['html', 'body', 'content'])));
+    }
+
+    if (name === 'list_leadlovers_campaigns') {
+      const data = await fetchInternal('/api/leadlovers/campaigns');
+      if (!Array.isArray(data) || data.length === 0) return 'Nenhuma campanha Leadlovers encontrada.';
+      // Nunca expor credenciais do webhook pra IA.
+      return JSON.stringify((data as Record<string, unknown>[]).map(c =>
+        stripFields(c, ['webhook_url', 'auth_key', 'machine_code', 'email_sequence_code', 'sequence_level_code'])));
+    }
+
+    if (name === 'get_lp_analytics') {
+      const clientId = input.client_id as string;
+      const { rows: lps } = await pool.query(
+        `SELECT lp.id, lp.name, lp.url, lp.active, lp.created_at,
+                (SELECT COUNT(*)::int FROM public.lp_sessions s
+                  WHERE s.lp_id = lp.id AND s.created_at > NOW() - INTERVAL '30 days') AS sessions_30d,
+                (SELECT MAX(s.created_at) FROM public.lp_sessions s WHERE s.lp_id = lp.id) AS last_session_at
+           FROM public.client_landing_pages lp
+          WHERE lp.client_id = $1 ORDER BY lp.created_at DESC`,
+        [clientId],
+      ).catch(() => ({ rows: [] as Record<string, unknown>[] }));
+      if (lps.length === 0) return 'Nenhuma landing page cadastrada no Radar de LP deste cliente.';
+      if (input.lp_id) {
+        const days = Math.min(Math.max(Number(input.days) || 30, 1), 90);
+        const stats = await fetchInternal(`/api/clients/${clientId}/landing-pages/${input.lp_id}/stats?days=${days}`);
+        return JSON.stringify({ lps, stats: stats ?? 'estatísticas indisponíveis' });
+      }
+      return JSON.stringify(lps);
+    }
+
+    if (name === 'get_link_redirects') {
+      const qs = input.client_id ? `?clientId=${encodeURIComponent(input.client_id as string)}` : '';
+      const data = await fetchInternal(`/api/link-redirects${qs}`);
+      if (!Array.isArray(data) || data.length === 0) return 'Nenhum link rastreado /r/ encontrado.';
+      return JSON.stringify((data as Record<string, unknown>[]).map(l => stripFields(l, [])));
+    }
+
+    if (name === 'get_ig_posts') {
+      const period = (input.period as string) || 'last_30d';
+      const limit = Math.min(Number(input.limit) || 12, 30);
+      const data = await fetchInternal(
+        `/api/meta/ig-posts?clientIds=${encodeURIComponent(input.client_id as string)}&period=${period}&limit=${limit}`,
+      );
+      if (!data) return 'Não consegui buscar os posts do Instagram (conta não vinculada ou erro na Graph).';
+      return JSON.stringify(data).slice(0, 20000);
+    }
+
+    if (name === 'get_optimizer_queue') {
+      const qs = input.client_id ? `?clientId=${encodeURIComponent(input.client_id as string)}` : '';
+      const data = await fetchInternal(`/api/otimizador/fila${qs}`);
+      if (!data) return 'Não consegui consultar a fila do Otimizador.';
+      const recs = Array.isArray(data.recs) ? data.recs.slice(0, 20) : [];
+      return JSON.stringify({ contas: data.contas ?? [], decisoes_pendentes: recs, gerado_em: data.generated_at ?? null });
+    }
+
+    if (name === 'get_activity_logs') {
+      const limit = Math.min(Number(input.limit) || 30, 100);
+      const { rows } = await pool.query(
+        `SELECT * FROM public.activity_logs ORDER BY created_at DESC LIMIT $1`, [limit],
+      ).catch(() => ({ rows: [] as Record<string, unknown>[] }));
+      if (rows.length === 0) return 'Nenhum registro no log de auditoria.';
+      return JSON.stringify(rows.map(r => stripFields(r as Record<string, unknown>, [])));
     }
 
     if (name === 'list_users') {
