@@ -162,7 +162,7 @@ async function refreshGoogleTokenRaw(row: { access_token: string | null; refresh
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function lunaGoogleSearch(customerId: string, query: string): Promise<{ results: any[]; login: string | null } | null> {
+export async function lunaGoogleSearch(customerId: string, query: string): Promise<{ results: any[]; login: string | null; token: string } | null> {
   // Igual ao Radar (comprovado em produção): TODAS as conexões conectadas, sem
   // filtro de account_type/scope — o fallback do optimizer-execucao filtra por
   // esses campos e não casa com as linhas reais do banco (token voltava nulo).
@@ -197,11 +197,11 @@ export async function lunaGoogleSearch(customerId: string, query: string): Promi
     const cached = gLoginCache.get(customerId);
     if (cached !== undefined) {
       const out = await attempt(cached);
-      if (out) return { results: out, login: cached };
+      if (out) return { results: out, login: cached, token };
     }
     for (const login of [null, customerId]) {
       const out = await attempt(login);
-      if (out) { gLoginCache.set(customerId, login); return { results: out, login }; }
+      if (out) { gLoginCache.set(customerId, login); return { results: out, login, token }; }
     }
     const listRes = await fetch('https://googleads.googleapis.com/v24/customers:listAccessibleCustomers', {
       headers: { Authorization: `Bearer ${token}`, 'developer-token': GOOGLE_DEV_TOKEN },
@@ -211,10 +211,35 @@ export async function lunaGoogleSearch(customerId: string, query: string): Promi
       const cand = rn.replace('customers/', '').replace(/\D/g, '');
       if (cand === customerId) continue;
       const out = await attempt(cand);
-      if (out) { gLoginCache.set(customerId, cand); return { results: out, login: cand }; }
+      if (out) { gLoginCache.set(customerId, cand); return { results: out, login: cand, token }; }
     }
   }
   return null;
+}
+
+// Mutate cru na Google Ads API (mesmos headers/login do lunaGoogleSearch). Retorna os
+// resourceNames criados ou {error} com a mensagem real do Google.
+async function lunaGoogleMutate(
+  customerId: string, token: string, login: string | null,
+  resource: string, operations: Record<string, unknown>[],
+): Promise<{ resourceNames: string[] } | { error: string }> {
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${token}`, 'developer-token': GOOGLE_DEV_TOKEN, 'Content-Type': 'application/json',
+  };
+  if (login) headers['login-customer-id'] = login;
+  const r = await fetch(`https://googleads.googleapis.com/v24/customers/${customerId}/${resource}:mutate`, {
+    method: 'POST', headers, body: JSON.stringify({ operations }),
+  }).catch(() => null);
+  if (!r) return { error: 'sem resposta da Google Ads API' };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const body = await r.json().catch(() => ({})) as any;
+  if (!r.ok) {
+    const msg = body?.error?.details?.[0]?.errors?.[0]?.message
+      ?? body?.error?.message ?? `HTTP ${r.status}`;
+    return { error: String(msg) };
+  }
+  const names = (body?.results ?? []).map((x: { resourceName?: string }) => x.resourceName ?? '').filter(Boolean);
+  return { resourceNames: names };
 }
 
 export const DEFAULT_INSTRUCTIONS = `Você é Luna, assistente inteligente da Onmid Marketing.`;
@@ -612,6 +637,27 @@ A ferramenta busca automaticamente os IDs de cidades e interesses na API Meta, v
         audience_notes: { type: 'string', description: 'Análise de público-alvo gerada pela Luna (incluída no relatório)' },
       },
       required: ['client_id', 'name', 'objective', 'daily_budget'],
+    },
+  },
+  {
+    name: 'create_google_campaign',
+    description: `Cria uma campanha COMPLETA de Pesquisa (Search) no Google Ads: orçamento + campanha + grupo de anúncios + palavras-chave + anúncio responsivo (RSA).
+A campanha nasce PAUSADA — o gestor revisa no painel e ativa. Lances: Maximizar cliques (sem histórico de conversão ainda).
+IMPORTANTE: gere você as palavras-chave (5-15, focadas na intenção de busca do segmento), os títulos (mínimo 3, máx 30 caracteres CADA) e as descrições (mínimo 2, máx 90 caracteres CADA) antes de chamar. Sempre descreva a estrutura ao usuário e espere confirmação antes de criar.`,
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        client_id: { type: 'string', description: 'ID do cliente' },
+        name: { type: 'string', description: 'Nome da campanha (ex: [ON] Londrigifts - Agro - Pesquisa - Jul/26)' },
+        daily_budget: { type: 'number', description: 'Orçamento diário em reais (ex: 30.00)' },
+        keywords: { type: 'array', items: { type: 'string' }, description: 'Palavras-chave de pesquisa (5-15). Ex: ["brindes agronegócio", "canecas personalizadas agro"]' },
+        match_type: { type: 'string', enum: ['broad', 'phrase', 'exact'], description: 'Correspondência das palavras-chave (padrão: phrase)' },
+        headlines: { type: 'array', items: { type: 'string' }, description: 'Títulos do anúncio RSA: mínimo 3, máximo 15, ATÉ 30 CARACTERES cada' },
+        descriptions: { type: 'array', items: { type: 'string' }, description: 'Descrições do RSA: mínimo 2, máximo 4, ATÉ 90 CARACTERES cada' },
+        final_url: { type: 'string', description: 'URL de destino do anúncio (site/LP do cliente)' },
+        cities: { type: 'array', items: { type: 'string' }, description: 'Cidades alvo por nome (ex: ["Londrina"]). Sem cidades = Brasil inteiro' },
+      },
+      required: ['client_id', 'name', 'daily_budget', 'keywords', 'headlines', 'descriptions', 'final_url'],
     },
   },
   // ── Pacote A: execução Meta + Google ──────────────────────────────────────
@@ -2429,6 +2475,146 @@ export async function execSystemTool(
     }
 
     // ── Pacote C: cérebro do sistema ────────────────────────────────────────
+    if (name === 'create_google_campaign') {
+      const clientId = input.client_id as string;
+      const nome = String(input.name ?? '').trim();
+      const budget = Number(input.daily_budget);
+      const finalUrl = String(input.final_url ?? '').trim();
+      if (!nome || !budget || budget <= 0 || !finalUrl) return 'Informe name, daily_budget e final_url.';
+
+      // Valida a copy do RSA ANTES de criar qualquer coisa (limites reais do Google).
+      const headlines = (Array.isArray(input.headlines) ? input.headlines : [])
+        .map((h: unknown) => String(h).trim()).filter(Boolean).map((h: string) => h.slice(0, 30)).slice(0, 15);
+      const descriptions = (Array.isArray(input.descriptions) ? input.descriptions : [])
+        .map((d: unknown) => String(d).trim()).filter(Boolean).map((d: string) => d.slice(0, 90)).slice(0, 4);
+      const keywords = (Array.isArray(input.keywords) ? input.keywords : [])
+        .map((k: unknown) => String(k).trim()).filter(Boolean).slice(0, 20);
+      if (headlines.length < 3) return 'O anúncio RSA exige no mínimo 3 títulos (até 30 caracteres cada). Gere os títulos e chame de novo.';
+      if (descriptions.length < 2) return 'O anúncio RSA exige no mínimo 2 descrições (até 90 caracteres cada). Gere as descrições e chame de novo.';
+      if (keywords.length === 0) return 'Informe as palavras-chave da campanha de Pesquisa.';
+      const matchType = ({ broad: 'BROAD', phrase: 'PHRASE', exact: 'EXACT' } as Record<string, string>)[String(input.match_type ?? 'phrase')] ?? 'PHRASE';
+
+      const { rows: links } = await pool.query(
+        "SELECT account_id FROM public.client_account_links WHERE client_id = $1 AND platform IN ('google_ads','google') LIMIT 1",
+        [clientId],
+      );
+      const customerId = String(links[0]?.account_id ?? '').replace(/\D/g, '');
+      if (!customerId) return 'Nenhuma conta Google Ads vinculada a esse cliente.';
+
+      // Probe: resolve token + login-customer-id que funcionam (mesmo caminho das leituras).
+      const probe = await lunaGoogleSearch(customerId, 'SELECT customer.id FROM customer LIMIT 1');
+      if (!probe) return '❌ Não consegui acessar essa conta Google (token/permissão MCC). Verifique a conexão em Integrações.';
+      const { token, login } = probe;
+
+      const report: string[] = [
+        '📊 Relatório de criação — Google Ads',
+        `Conta: ${customerId}`,
+        '────────────────────────────────────────────',
+      ];
+
+      // Geo: resolve cidades → geo_target_constant; sem cidade (ou nenhuma achada) = Brasil.
+      const geoRns: string[] = [];
+      const cidades = (Array.isArray(input.cities) ? input.cities : []).map((c: unknown) => String(c).trim()).filter(Boolean);
+      for (const cidade of cidades.slice(0, 10)) {
+        const geo = await lunaGoogleSearch(customerId,
+          `SELECT geo_target_constant.resource_name, geo_target_constant.canonical_name
+             FROM geo_target_constant
+            WHERE geo_target_constant.name = '${cidade.replace(/'/g, "\\'")}'
+              AND geo_target_constant.country_code = 'BR'
+              AND geo_target_constant.target_type = 'City'
+              AND geo_target_constant.status = 'ENABLED' LIMIT 1`);
+        const rn = geo?.results?.[0]?.geoTargetConstant?.resourceName;
+        if (rn) geoRns.push(rn);
+      }
+      if (geoRns.length === 0) geoRns.push('geoTargetConstants/2076'); // Brasil
+      const geoLabel = cidades.length > 0 && geoRns[0] !== 'geoTargetConstants/2076' ? cidades.join(', ') : 'Brasil';
+
+      // 1) Orçamento (não compartilhado)
+      const budgetRes = await lunaGoogleMutate(customerId, token, login, 'campaignBudgets', [{
+        create: {
+          name: `${nome} — Orçamento ${Date.now()}`,
+          amountMicros: String(Math.round(budget * 1_000_000)),
+          explicitlyShared: false,
+          deliveryMethod: 'STANDARD',
+        },
+      }]);
+      if ('error' in budgetRes) return `❌ Falha ao criar o orçamento: ${budgetRes.error}`;
+      const budgetRn = budgetRes.resourceNames[0];
+
+      // 2) Campanha de Pesquisa (PAUSADA — gestor revisa e ativa)
+      const campRes = await lunaGoogleMutate(customerId, token, login, 'campaigns', [{
+        create: {
+          name: nome,
+          status: 'PAUSED',
+          advertisingChannelType: 'SEARCH',
+          campaignBudget: budgetRn,
+          targetSpend: {}, // Maximizar cliques
+          containsEuPoliticalAdvertising: 'DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING',
+          networkSettings: {
+            targetGoogleSearch: true,
+            targetSearchNetwork: false,
+            targetContentNetwork: false,
+            targetPartnerSearchNetwork: false,
+          },
+        },
+      }]);
+      if ('error' in campRes) return [...report, `❌ Campanha: FALHA — ${campRes.error}`].join('\n');
+      const campRn = campRes.resourceNames[0];
+      const campId = campRn.split('/').pop();
+      report.push('✅ Campanha criada (PAUSADA — revise e ative no painel)');
+      report.push(`   Nome: ${nome}`);
+      report.push(`   Tipo: Pesquisa (só Google Search)`);
+      report.push(`   Orçamento diário: R$ ${budget.toFixed(2)} · Lances: Maximizar cliques`);
+      report.push(`   ID: ${campId}`);
+      report.push('');
+
+      // 3) Segmentação: localização + idioma português
+      const critRes = await lunaGoogleMutate(customerId, token, login, 'campaignCriteria', [
+        ...geoRns.map(rn => ({ create: { campaign: campRn, location: { geoTargetConstant: rn } } })),
+        { create: { campaign: campRn, language: { languageConstant: 'languageConstants/1014' } } },
+      ]);
+      report.push('error' in critRes
+        ? `⚠️ Segmentação: FALHA (${critRes.error}) — ajuste localização/idioma no painel`
+        : `✅ Segmentação: ${geoLabel} · Português`);
+
+      // 4) Grupo de anúncios
+      const agRes = await lunaGoogleMutate(customerId, token, login, 'adGroups', [{
+        create: { name: `Grupo 1 — ${nome}`, campaign: campRn, type: 'SEARCH_STANDARD', status: 'ENABLED' },
+      }]);
+      if ('error' in agRes) return [...report, `⚠️ Grupo de anúncios: FALHA — ${agRes.error}`, `   Campanha criada (ID ${campId}) — finalize grupo/anúncio no painel.`].join('\n');
+      const agRn = agRes.resourceNames[0];
+      report.push(`✅ Grupo de anúncios criado`);
+
+      // 5) Palavras-chave
+      const kwRes = await lunaGoogleMutate(customerId, token, login, 'adGroupCriteria',
+        keywords.map((kw: string) => ({ create: { adGroup: agRn, status: 'ENABLED', keyword: { text: kw, matchType } } })));
+      report.push('error' in kwRes
+        ? `⚠️ Palavras-chave: FALHA (${kwRes.error}) — adicione no painel`
+        : `✅ ${keywords.length} palavra(s)-chave [${matchType}]: ${keywords.slice(0, 8).join(', ')}${keywords.length > 8 ? '…' : ''}`);
+
+      // 6) Anúncio responsivo de pesquisa
+      const adRes = await lunaGoogleMutate(customerId, token, login, 'adGroupAds', [{
+        create: {
+          adGroup: agRn,
+          status: 'ENABLED',
+          ad: {
+            finalUrls: [finalUrl],
+            responsiveSearchAd: {
+              headlines: headlines.map((t: string) => ({ text: t })),
+              descriptions: descriptions.map((t: string) => ({ text: t })),
+            },
+          },
+        },
+      }]);
+      report.push('error' in adRes
+        ? `⚠️ Anúncio RSA: FALHA (${adRes.error}) — crie o anúncio no painel`
+        : `✅ Anúncio RSA criado (${headlines.length} títulos · ${descriptions.length} descrições → ${finalUrl})`);
+
+      report.push('');
+      report.push('▶️ Próximo passo: revisar no painel do Google Ads e ATIVAR a campanha (está pausada de propósito).');
+      return report.join('\n');
+    }
+
     if (name === 'get_optimizer_analysis') {
       const clientId = input.client_id as string;
       const { rows } = await pool.query(

@@ -1,5 +1,16 @@
 @AGENTS.md
 
+## Luna IA — criação de campanha no Google Ads (2026-07-23)
+
+Matheus pediu criação de campanha por IA "como os players do mercado" — a Luna criava só no Meta e ALUCINAVA que "o Google Ads não suporta criação via API" (não existia a tool). Novo `create_google_campaign` em `luna-tools.ts` (total 57 tools):
+
+- **Pipeline completo via mutates REST v24** (mesmo padrão do optimizer-execucao): `campaignBudgets` (não compartilhado) → `campaigns` (SEARCH, **PAUSED de propósito** — gestor revisa e ativa, `targetSpend:{}` = Maximizar cliques, `containsEuPoliticalAdvertising` obrigatório desde v19, só Google Search sem parceiros/display) → `campaignCriteria` (geo + português `languageConstants/1014`) → `adGroups` (SEARCH_STANDARD) → `adGroupCriteria` (keywords, match broad/phrase/exact, padrão PHRASE) → `adGroupAds` (RSA).
+- **Acesso**: `lunaGoogleSearch` agora retorna também o `token` (probe `SELECT customer.id` resolve token+login MCC; callers antigos ignoram o campo extra). `lunaGoogleMutate()` novo: headers idênticos + extração da mensagem real de erro (`error.details[0].errors[0].message`).
+- **Geo**: cidades por nome → GAQL `geo_target_constant` (name/BR/City); nenhuma achada → Brasil `geoTargetConstants/2076`.
+- **Validação ANTES de criar**: RSA exige ≥3 títulos (trunca em 30 chars) e ≥2 descrições (90 chars) — devolve instrução pra IA gerar de novo em vez de criar campanha capenga. Falha no meio → relatório parcial linha a linha (mesmo formato do create_meta_campaign) dizendo o que criou e o que finalizar no painel.
+- **Prompt** (chat): bloco "Criação de campanhas" — NUNCA dizer que Google não cria via API; apresentar estrutura completa e ESPERAR confirmação em outra mensagem; contar caracteres do RSA. **Meta + Termos de Geração de Cadastros** (bloqueio real da Londrigifts): explicar o aceite manual único na Página E oferecer alternativa sem termos (conversa WhatsApp/tráfego wa.me). `create_google_campaign` fica FORA das allowlists headless (criação só com humano, igual a do Meta).
+- ⚠️ Mutates reais exigem produção — validar criando campanha de teste com orçamento baixo e conferindo no painel (nasce pausada).
+
 ## Luna IA — cobertura total do sistema (15 tools novas) (2026-07-23)
 
 Auditoria pedida pelo Matheus ("ela tem que ser capaz de usar e acessar o sistema inteiro, não criar nada para si"): as 41 tools existentes já reusavam os primitivos canônicos (getFreshMetaToken/countMetaResults/executeOptimizerAction/resolveGoogleToken), mas módulos inteiros não tinham NENHUMA ferramenta. Adicionadas 15 tools (total 56) em `luna-tools.ts`, todas finas — SELECT espelhando a query da rota canônica OU `fetchInternal()` (novo helper: GET em rota interna via `appOrigin()`), zero implementação paralela:
