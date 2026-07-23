@@ -634,6 +634,7 @@ A ferramenta busca automaticamente os IDs de cidades e interesses na API Meta, v
           description: 'Botão de CTA. Para leads: SIGN_UP, GET_QUOTE ou LEARN_MORE. Para vendas/tráfego: SHOP_NOW, LEARN_MORE.',
         },
         destination_url: { type: 'string', description: 'URL de destino do anúncio (site, LP, WhatsApp). Padrão: onmid.com.br' },
+        page_name: { type: 'string', description: 'Nome da Página do Facebook do cliente (para o promoted_object de leads). Se omitido, a ferramenta resolve pelo vínculo do sistema ou pelo nome do cliente — informe quando o usuário indicar a página ou quando a criação falhar por Termos de Geração de Cadastros com a página errada.' },
         audience_notes: { type: 'string', description: 'Análise de público-alvo gerada pela Luna (incluída no relatório)' },
       },
       required: ['client_id', 'name', 'objective', 'daily_budget'],
@@ -2001,13 +2002,46 @@ export async function execSystemTool(
       const token = await getFreshMetaToken(connRows[0]);
       const acctNode = String(links[0].account_id).startsWith('act_') ? links[0].account_id : `act_${links[0].account_id}`;
 
-      // Resolve Facebook Page ID (needed as promoted_object for LEADS/SALES)
+      // Resolve a Página do Facebook (promoted_object de LEADS/SALES). Página ERRADA aqui
+      // é o clássico "Termos de Geração de Cadastros" sem fim: o gestor aceita na página
+      // do cliente, mas o conjunto aponta pra OUTRA página da carteira (o token da agência
+      // administra dezenas — antes o código pegava a primeira da lista). Prioridade:
+      // page_name do input → meta_leadgen_page_map → match pelo nome do cliente → primeira (com aviso).
       let fbPageId: string | null = null;
+      let fbPageName = '';
+      let fbPageSource = '';
+      const { rows: cliRows } = await pool.query('SELECT name FROM public.clients WHERE id = $1', [client_id]);
+      const cliName = String(cliRows[0]?.name ?? '');
+      const norm = (s: string) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
       try {
-        const pagesRes = await fetch(`https://graph.facebook.com/v21.0/me/accounts?fields=id,name&limit=10&access_token=${token}`);
-        if (pagesRes.ok) {
-          const pagesData = await pagesRes.json() as { data?: Array<{ id: string; name: string }> };
-          fbPageId = pagesData.data?.[0]?.id ?? null;
+        const pagesRes = await fetch(`https://graph.facebook.com/v21.0/me/accounts?fields=id,name&limit=100&access_token=${token}`);
+        const pages: Array<{ id: string; name: string }> = pagesRes.ok
+          ? ((await pagesRes.json() as { data?: Array<{ id: string; name: string }> }).data ?? [])
+          : [];
+        const wanted = norm(String(input.page_name ?? ''));
+        if (wanted) {
+          const hit = pages.find(p => norm(p.name).includes(wanted) || wanted.includes(norm(p.name)));
+          if (hit) { fbPageId = hit.id; fbPageName = hit.name; fbPageSource = 'página indicada no pedido'; }
+        }
+        if (!fbPageId) {
+          const { rows: mapRows } = await pool.query(
+            'SELECT page_id FROM public.meta_leadgen_page_map WHERE client_id = $1 LIMIT 1', [client_id],
+          ).catch(() => ({ rows: [] as { page_id: string }[] }));
+          const mapped = mapRows[0]?.page_id as string | undefined;
+          if (mapped) {
+            fbPageId = mapped;
+            fbPageName = pages.find(p => p.id === mapped)?.name ?? mapped;
+            fbPageSource = 'vínculo página↔cliente do sistema';
+          }
+        }
+        if (!fbPageId && cliName) {
+          const alvo = norm(cliName);
+          const hit = pages.find(p => norm(p.name).includes(alvo) || alvo.includes(norm(p.name)));
+          if (hit) { fbPageId = hit.id; fbPageName = hit.name; fbPageSource = 'match pelo nome do cliente'; }
+        }
+        if (!fbPageId && pages[0]) {
+          fbPageId = pages[0].id; fbPageName = pages[0].name;
+          fbPageSource = '⚠️ primeira página da carteira — CONFIRA se é a página do cliente';
         }
       } catch { /* non-fatal */ }
 
@@ -2016,6 +2050,10 @@ export async function execSystemTool(
         `Conta: ${acctNode}`,
         `${'─'.repeat(44)}`,
       ];
+      if (fbPageId && (objective === 'OUTCOME_LEADS' || objective === 'OUTCOME_SALES')) {
+        report.push(`Página do Facebook: ${fbPageName} (${fbPageId}) — ${fbPageSource}`);
+        report.push('');
+      }
 
       // ── Helper: search Meta geo/interest ──────────────
       async function searchMetaCities(names: string[]): Promise<Array<{ key: string; name: string }>> {
@@ -2201,6 +2239,23 @@ export async function execSystemTool(
         const err = adsetData.error?.error_user_msg ?? adsetData.error?.message ?? `HTTP ${adsetRes.status}`;
         report.push(`⚠️ Conjunto de anúncios: FALHA`);
         report.push(`   Motivo: ${err}`);
+        // Falha de Termos de Geração de Cadastros: diagnostica QUAL página foi usada e se
+        // os termos constam aceitos nela (o aceite é POR PÁGINA — página errada = loop infinito).
+        if (fbPageId && /cadastr|leadgen|lead ads|termos/i.test(err)) {
+          let tosInfo = '';
+          try {
+            const t = await fetch(`https://graph.facebook.com/v21.0/${fbPageId}?fields=leadgen_tos_accepted&access_token=${token}`);
+            const td = await t.json() as { leadgen_tos_accepted?: boolean };
+            if (typeof td.leadgen_tos_accepted === 'boolean') {
+              tosInfo = td.leadgen_tos_accepted
+                ? 'CONSTAM aceitos — pode ser atraso de propagação da Meta; tente de novo em alguns minutos'
+                : 'NÃO constam aceitos nesta página';
+            }
+          } catch { /* best-effort */ }
+          report.push(`   Página usada no conjunto: ${fbPageName} (${fbPageId}) — ${fbPageSource}`);
+          if (tosInfo) report.push(`   Termos de Geração de Cadastros: ${tosInfo}`);
+          report.push(`   Aceite em facebook.com/ads/leadgen/tos escolhendo EXATAMENTE esta página. Se a página do cliente for OUTRA, repita o pedido informando o nome dela (campo page_name).`);
+        }
         report.push(`   Campanha criada (ID: ${campaignId}) — adicione o conjunto manualmente.`);
       } else {
         const adsetId = adsetData.id;
