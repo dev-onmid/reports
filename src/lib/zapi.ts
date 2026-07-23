@@ -82,8 +82,11 @@ export async function sendDocument(
   caption?: string,
 ): Promise<SendResult> {
   try {
+    // O endpoint do Z-API exige a EXTENSÃO na URL (/send-document/pdf) — sem ela o envio
+    // falha. E, como nos demais, o corpo precisa ser validado (200 não significa sucesso).
+    const ext = (fileName.split('.').pop() || 'pdf').toLowerCase();
     const res = await fetch(
-      `${BASE}/${client.instanceId}/token/${client.token}/send-document`,
+      `${BASE}/${client.instanceId}/token/${client.token}/send-document/${ext}`,
       {
         method: 'POST',
         headers: zapiHeaders(client.clientToken),
@@ -95,9 +98,8 @@ export async function sendDocument(
         }),
       },
     );
-    if (res.ok) return { ok: true };
-    const body = await res.json().catch(() => ({}));
-    return { ok: false, error: (body as { message?: string }).message ?? `HTTP ${res.status}` };
+    const body = await res.json().catch(() => ({})) as Record<string, unknown>;
+    return parseZapiResponse(res, body);
   } catch (err) {
     return { ok: false, error: String(err) };
   }
