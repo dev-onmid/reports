@@ -2542,8 +2542,12 @@ export async function execSystemTool(
         .map((h: unknown) => String(h).trim()).filter(Boolean).map((h: string) => h.slice(0, 30)).slice(0, 15);
       const descriptions = (Array.isArray(input.descriptions) ? input.descriptions : [])
         .map((d: unknown) => String(d).trim()).filter(Boolean).map((d: string) => d.slice(0, 90)).slice(0, 4);
+      // O texto da keyword na API NÃO aceita aspas/colchetes/til — esses caracteres são a
+      // notação do PAINEL pra indicar frase/exata (["kw"] / "kw"), mas a API usa o campo
+      // matchType separado. Sem essa limpeza a Google Ads API recusa por KEYWORD_HAS_INVALID_CHARS
+      // e a Luna (sem o motivo real) tende a inventar uma explicação ("restrição de política").
       const keywords = (Array.isArray(input.keywords) ? input.keywords : [])
-        .map((k: unknown) => String(k).trim()).filter(Boolean).slice(0, 20);
+        .map((k: unknown) => String(k).replace(/["[\]~]/g, '').trim()).filter(Boolean).slice(0, 20);
       if (headlines.length < 3) return 'O anúncio RSA exige no mínimo 3 títulos (até 30 caracteres cada). Gere os títulos e chame de novo.';
       if (descriptions.length < 2) return 'O anúncio RSA exige no mínimo 2 descrições (até 90 caracteres cada). Gere as descrições e chame de novo.';
       if (keywords.length === 0) return 'Informe as palavras-chave da campanha de Pesquisa.';
@@ -2643,9 +2647,15 @@ export async function execSystemTool(
       // 5) Palavras-chave
       const kwRes = await lunaGoogleMutate(customerId, token, login, 'adGroupCriteria',
         keywords.map((kw: string) => ({ create: { adGroup: agRn, status: 'ENABLED', keyword: { text: kw, matchType } } })));
-      report.push('error' in kwRes
-        ? `⚠️ Palavras-chave: FALHA (${kwRes.error}) — adicione no painel`
-        : `✅ ${keywords.length} palavra(s)-chave [${matchType}]: ${keywords.slice(0, 8).join(', ')}${keywords.length > 8 ? '…' : ''}`);
+      if ('error' in kwRes) {
+        // Linha própria (em vez de parêntese na mesma linha) — o texto exato do erro do
+        // Google não pode ser omitido/resumido; sem ele a IA tende a inventar um motivo.
+        report.push(`⚠️ Palavras-chave: FALHA`);
+        report.push(`   Motivo (Google Ads API): ${kwRes.error}`);
+        report.push(`   Adicione manualmente no grupo de anúncios.`);
+      } else {
+        report.push(`✅ ${keywords.length} palavra(s)-chave [${matchType}]: ${keywords.slice(0, 8).join(', ')}${keywords.length > 8 ? '…' : ''}`);
+      }
 
       // 6) Anúncio responsivo de pesquisa
       const adRes = await lunaGoogleMutate(customerId, token, login, 'adGroupAds', [{

@@ -1,5 +1,14 @@
 @AGENTS.md
 
+## Luna IA — fim da alucinação de "restrição de política" nas keywords (2026-07-23)
+
+Matheus reportou: `create_google_campaign` criou a campanha do Cost Odonto, mas as palavras-chave falharam e a Luna explicou como "restrição de política da API do Google" — texto NENHUM da ferramenta dizia isso, ela inventou. Causa raiz real, achada em `luna-tools.ts`: as keywords chegavam da IA já com aspas literais (`"dentista florianópolis"`, notação de correspondência de frase do PAINEL) e o código mandava esse texto cru pro campo `keyword.text` da API — que não aceita `"`, `[`, `]`, `~` (o tipo de correspondência é o campo `matchType` separado). A Google Ads API recusava por `KEYWORD_HAS_INVALID_CHARS`; sem o motivo real explícito na mesma linha, o modelo preencheu o vazio com uma explicação genérica.
+
+- **Sanitização**: `keywords = ... .replace(/["[\]~]/g, '')` antes de montar o mutate — aspas/colchetes/til nunca mais chegam na API.
+- **Erro nunca mais "sumível"**: a falha de keyword virou 3 linhas (`⚠️ FALHA` / `Motivo (Google Ads API): <texto exato>` / instrução), no mesmo padrão do Meta — antes era um parêntese na mesma linha, mais fácil da IA "resumir" ao repassar pro usuário.
+- **Prompt anti-alucinação**: regra nova e explícita — a Luna NUNCA inventa motivo de falha; repassa o texto literal de "Motivo:", e se a ferramenta não trouxer motivo nenhum, diz isso em vez de chutar uma explicação plausível.
+- ⚠️ Validar em produção recriando a campanha do Cost Odonto — as keywords sem aspas devem entrar normalmente.
+
 ## Luna IA — criação de campanha no Google Ads (2026-07-23)
 
 Matheus pediu criação de campanha por IA "como os players do mercado" — a Luna criava só no Meta e ALUCINAVA que "o Google Ads não suporta criação via API" (não existia a tool). Novo `create_google_campaign` em `luna-tools.ts` (total 57 tools):
