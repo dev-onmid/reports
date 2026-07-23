@@ -642,21 +642,44 @@ A ferramenta busca automaticamente os IDs de cidades e interesses na API Meta, v
   },
   {
     name: 'create_google_campaign',
-    description: `Cria uma campanha COMPLETA de Pesquisa (Search) no Google Ads: orçamento + campanha + grupo de anúncios + palavras-chave + anúncio responsivo (RSA).
+    description: `Cria uma campanha COMPLETA de Pesquisa (Search) no Google Ads: orçamento + campanha + grupo de anúncios + palavras-chave + anúncio responsivo (RSA) + extensões (sitelinks, frases de destaque, snippets).
 A campanha nasce PAUSADA — o gestor revisa no painel e ativa. Lances: Maximizar cliques (sem histórico de conversão ainda).
-IMPORTANTE: gere você as palavras-chave (5-15, focadas na intenção de busca do segmento), os títulos (mínimo 3, máx 30 caracteres CADA) e as descrições (mínimo 2, máx 90 caracteres CADA) antes de chamar. Sempre descreva a estrutura ao usuário e espere confirmação antes de criar.`,
+IMPORTANTE — capriche pra o anúncio nascer forte (Google prioriza anúncios completos):
+- keywords: 8-15, focadas na intenção de busca do segmento.
+- headlines: gere de 10 a 15 títulos (máx 30 caracteres CADA) — quanto mais, melhor o desempenho.
+- descriptions: gere 4 descrições (máx 90 caracteres cada).
+- cities: SEMPRE defina a localização real do cliente. NUNCA deixe vazio (vazio = Brasil inteiro, quase sempre errado). Se não souber a cidade, PERGUNTE ao usuário antes de criar.
+- sitelinks (4-6), callouts (4-6) e snippets deixam o anúncio muito mais completo — sempre gere.
+Sempre descreva a estrutura ao usuário e espere confirmação antes de criar.`,
     input_schema: {
       type: 'object' as const,
       properties: {
         client_id: { type: 'string', description: 'ID do cliente' },
         name: { type: 'string', description: 'Nome da campanha (ex: [ON] Londrigifts - Agro - Pesquisa - Jul/26)' },
         daily_budget: { type: 'number', description: 'Orçamento diário em reais (ex: 30.00)' },
-        keywords: { type: 'array', items: { type: 'string' }, description: 'Palavras-chave de pesquisa (5-15). Ex: ["brindes agronegócio", "canecas personalizadas agro"]' },
+        keywords: { type: 'array', items: { type: 'string' }, description: 'Palavras-chave de pesquisa (8-15). NÃO use aspas/colchetes — o tipo de correspondência é o campo match_type.' },
         match_type: { type: 'string', enum: ['broad', 'phrase', 'exact'], description: 'Correspondência das palavras-chave (padrão: phrase)' },
-        headlines: { type: 'array', items: { type: 'string' }, description: 'Títulos do anúncio RSA: mínimo 3, máximo 15, ATÉ 30 CARACTERES cada' },
-        descriptions: { type: 'array', items: { type: 'string' }, description: 'Descrições do RSA: mínimo 2, máximo 4, ATÉ 90 CARACTERES cada' },
+        headlines: { type: 'array', items: { type: 'string' }, description: 'Títulos do anúncio RSA: 10-15 títulos, ATÉ 30 CARACTERES cada' },
+        descriptions: { type: 'array', items: { type: 'string' }, description: 'Descrições do RSA: 4 descrições, ATÉ 90 CARACTERES cada' },
         final_url: { type: 'string', description: 'URL de destino do anúncio (site/LP do cliente)' },
-        cities: { type: 'array', items: { type: 'string' }, description: 'Cidades alvo por nome (ex: ["Londrina"]). Sem cidades = Brasil inteiro' },
+        cities: { type: 'array', items: { type: 'string' }, description: 'OBRIGATÓRIO na prática: cidades alvo por nome (ex: ["Florianópolis"]). Vazio = Brasil inteiro (evite). Se não souber, pergunte ao usuário.' },
+        sitelinks: {
+          type: 'array',
+          description: 'Links de site (4-6): cada um leva a uma seção. Melhoram MUITO o anúncio.',
+          items: {
+            type: 'object',
+            properties: {
+              text: { type: 'string', description: 'Texto do link, até 25 caracteres (ex: "Agende sua avaliação")' },
+              url: { type: 'string', description: 'URL de destino do link' },
+              description1: { type: 'string', description: 'Linha 1 opcional, até 35 caracteres' },
+              description2: { type: 'string', description: 'Linha 2 opcional, até 35 caracteres' },
+            },
+            required: ['text', 'url'],
+          },
+        },
+        callouts: { type: 'array', items: { type: 'string' }, description: 'Frases de destaque (4-6), até 25 caracteres cada (ex: "Atendimento humanizado", "Estacionamento próprio")' },
+        snippet_header: { type: 'string', description: 'Cabeçalho do snippet estruturado (ex: "Serviços", "Tipos"). Um dos valores válidos do Google.' },
+        snippet_values: { type: 'array', items: { type: 'string' }, description: 'Valores do snippet (mínimo 3), até 25 caracteres cada (ex: ["Implantes", "Ortodontia", "Clareamento"])' },
       },
       required: ['client_id', 'name', 'daily_budget', 'keywords', 'headlines', 'descriptions', 'final_url'],
     },
@@ -2571,8 +2594,12 @@ export async function execSystemTool(
         '────────────────────────────────────────────',
       ];
 
-      // Geo: resolve cidades → geo_target_constant; sem cidade (ou nenhuma achada) = Brasil.
+      // Geo: resolve cidades → geo_target_constant. Distingue "nenhuma cidade informada"
+      // (omissão — segmenta Brasil inteiro, quase sempre errado) de "cidade não encontrada"
+      // (nome errado) — o aviso no relatório precisa ser explícito nos dois casos.
       const geoRns: string[] = [];
+      const cidadesAchadas: string[] = [];
+      const cidadesNaoAchadas: string[] = [];
       const cidades = (Array.isArray(input.cities) ? input.cities : []).map((c: unknown) => String(c).trim()).filter(Boolean);
       for (const cidade of cidades.slice(0, 10)) {
         const geo = await lunaGoogleSearch(customerId,
@@ -2583,10 +2610,20 @@ export async function execSystemTool(
               AND geo_target_constant.target_type = 'City'
               AND geo_target_constant.status = 'ENABLED' LIMIT 1`);
         const rn = geo?.results?.[0]?.geoTargetConstant?.resourceName;
-        if (rn) geoRns.push(rn);
+        if (rn) { geoRns.push(rn); cidadesAchadas.push(cidade); } else { cidadesNaoAchadas.push(cidade); }
       }
-      if (geoRns.length === 0) geoRns.push('geoTargetConstants/2076'); // Brasil
-      const geoLabel = cidades.length > 0 && geoRns[0] !== 'geoTargetConstants/2076' ? cidades.join(', ') : 'Brasil';
+      let geoLabel: string;
+      let geoWarn = '';
+      if (geoRns.length === 0) {
+        geoRns.push('geoTargetConstants/2076'); // Brasil
+        geoLabel = 'BRASIL INTEIRO';
+        geoWarn = cidades.length === 0
+          ? '⚠️ Nenhuma cidade foi informada — a campanha segmentou o BRASIL INTEIRO. Se o cliente atende uma região específica, recrie informando a(s) cidade(s).'
+          : `⚠️ Cidade(s) não encontrada(s): ${cidadesNaoAchadas.join(', ')} — segmentou Brasil inteiro. Confira o nome e recrie.`;
+      } else {
+        geoLabel = cidadesAchadas.join(', ');
+        if (cidadesNaoAchadas.length) geoWarn = `⚠️ Não encontrada(s): ${cidadesNaoAchadas.join(', ')} (ficaram de fora)`;
+      }
 
       // 1) Orçamento (não compartilhado)
       const budgetRes = await lunaGoogleMutate(customerId, token, login, 'campaignBudgets', [{
@@ -2632,9 +2669,12 @@ export async function execSystemTool(
         ...geoRns.map(rn => ({ create: { campaign: campRn, location: { geoTargetConstant: rn } } })),
         { create: { campaign: campRn, language: { languageConstant: 'languageConstants/1014' } } },
       ]);
-      report.push('error' in critRes
-        ? `⚠️ Segmentação: FALHA (${critRes.error}) — ajuste localização/idioma no painel`
-        : `✅ Segmentação: ${geoLabel} · Português`);
+      if ('error' in critRes) {
+        report.push(`⚠️ Segmentação: FALHA (${critRes.error}) — ajuste localização/idioma no painel`);
+      } else {
+        report.push(`✅ Segmentação: ${geoLabel} · Português`);
+        if (geoWarn) report.push(`   ${geoWarn}`);
+      }
 
       // 4) Grupo de anúncios
       const agRes = await lunaGoogleMutate(customerId, token, login, 'adGroups', [{
@@ -2675,7 +2715,82 @@ export async function execSystemTool(
         ? `⚠️ Anúncio RSA: FALHA (${adRes.error}) — crie o anúncio no painel`
         : `✅ Anúncio RSA criado (${headlines.length} títulos · ${descriptions.length} descrições → ${finalUrl})`);
 
+      // 7) Extensões (sitelinks, frases de destaque, snippet) — best-effort, cada bloco
+      // isolado (falha de extensão nunca derruba a campanha). Deixam o anúncio bem mais
+      // completo, que é o que o Google prioriza no ranking.
+      const extResumo: string[] = [];
+      const linkAssets = (rns: string[], fieldType: string) =>
+        lunaGoogleMutate(customerId, token, login, 'campaignAssets',
+          rns.map(rn => ({ create: { campaign: campRn, asset: rn, fieldType } })));
+
+      // Sitelinks (Google exige no mínimo 2 para veicular)
+      const sitelinksIn = (Array.isArray(input.sitelinks) ? input.sitelinks : [])
+        .map((s: Record<string, unknown>) => ({
+          text: String(s?.text ?? '').trim().slice(0, 25),
+          url: String(s?.url ?? '').trim(),
+          d1: String(s?.description1 ?? '').trim().slice(0, 35),
+          d2: String(s?.description2 ?? '').trim().slice(0, 35),
+        }))
+        .filter((s: { text: string; url: string }) => s.text && /^https?:\/\//.test(s.url))
+        .slice(0, 8);
+      if (sitelinksIn.length >= 2) {
+        const a = await lunaGoogleMutate(customerId, token, login, 'assets',
+          sitelinksIn.map((s: { text: string; url: string; d1: string; d2: string }) => ({
+            create: {
+              finalUrls: [s.url],
+              // description1 e description2 têm que vir JUNTAS (as duas ou nenhuma).
+              sitelinkAsset: (s.d1 && s.d2)
+                ? { linkText: s.text, description1: s.d1, description2: s.d2 }
+                : { linkText: s.text },
+            },
+          })));
+        if ('error' in a) extResumo.push(`⚠️ Sitelinks: FALHA — ${a.error}`);
+        else {
+          const l = await linkAssets(a.resourceNames, 'SITELINK');
+          extResumo.push('error' in l ? `⚠️ Sitelinks criados mas não vinculados — ${l.error}` : `✅ ${sitelinksIn.length} sitelinks`);
+        }
+      } else if (sitelinksIn.length === 1) {
+        extResumo.push('⚠️ Sitelinks: o Google exige no mínimo 2 — gere mais e recrie');
+      }
+
+      // Frases de destaque / Callouts (mínimo 2)
+      const calloutsIn = (Array.isArray(input.callouts) ? input.callouts : [])
+        .map((c: unknown) => String(c).trim().slice(0, 25)).filter(Boolean).slice(0, 8);
+      if (calloutsIn.length >= 2) {
+        const a = await lunaGoogleMutate(customerId, token, login, 'assets',
+          calloutsIn.map((c: string) => ({ create: { calloutAsset: { calloutText: c } } })));
+        if ('error' in a) extResumo.push(`⚠️ Frases de destaque: FALHA — ${a.error}`);
+        else {
+          const l = await linkAssets(a.resourceNames, 'CALLOUT');
+          extResumo.push('error' in l ? `⚠️ Frases criadas mas não vinculadas — ${l.error}` : `✅ ${calloutsIn.length} frases de destaque`);
+        }
+      }
+
+      // Snippet estruturado (header + mínimo 3 valores)
+      const snipHeader = String(input.snippet_header ?? '').trim();
+      const snipValues = (Array.isArray(input.snippet_values) ? input.snippet_values : [])
+        .map((v: unknown) => String(v).trim().slice(0, 25)).filter(Boolean).slice(0, 10);
+      if (snipHeader && snipValues.length >= 3) {
+        const a = await lunaGoogleMutate(customerId, token, login, 'assets',
+          [{ create: { structuredSnippetAsset: { header: snipHeader, values: snipValues } } }]);
+        if ('error' in a) extResumo.push(`⚠️ Snippet "${snipHeader}": FALHA — ${a.error}`);
+        else {
+          const l = await linkAssets(a.resourceNames, 'STRUCTURED_SNIPPET');
+          extResumo.push('error' in l ? `⚠️ Snippet criado mas não vinculado — ${l.error}` : `✅ Snippet "${snipHeader}" (${snipValues.length} itens)`);
+        }
+      }
+
+      if (extResumo.length) {
+        report.push('');
+        report.push('Extensões:');
+        extResumo.forEach(e => report.push(`   ${e}`));
+      }
+
+      // Logo, imagens do anúncio e nome da empresa exigem ARQUIVO de imagem (upload) e/ou
+      // vínculo com o Perfil da Empresa — a Luna não tem esses arquivos. Avisa como pendência
+      // manual em vez de fingir que ficou completo.
       report.push('');
+      report.push('ℹ️ Adicione manualmente no painel (exigem imagem/Perfil da Empresa): logotipo, imagens do anúncio e nome da empresa.');
       report.push('▶️ Próximo passo: revisar no painel do Google Ads e ATIVAR a campanha (está pausada de propósito).');
       return report.join('\n');
     }

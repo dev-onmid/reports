@@ -1,5 +1,15 @@
 @AGENTS.md
 
+## Luna IA — Google Ads: localização honesta + extensões no anúncio (2026-07-23)
+
+Feedback do Matheus após a campanha do Cost Odonto sair no ar: cliques certos, anúncio ok, MAS localização virou "Brasil inteiro", poucos títulos e anúncio "pelado" (sem sitelinks, callouts, logo, imagens). Causas e correções em `create_google_campaign`:
+
+- **Localização Brasil**: a Luna não passava `cities` (mesmo com a cidade nas keywords — `clients` NÃO tem coluna de cidade, então nada preenche sozinho). O fallback `geoTargetConstants/2076` (Brasil) era silencioso. Agora: geo distingue "nenhuma cidade informada" de "cidade não encontrada" e o relatório GRITA o aviso (`⚠️ Nenhuma cidade foi informada — segmentou o BRASIL INTEIRO...`). Prompt: cities é obrigatório na prática; se não souber, PERGUNTAR antes de criar; não confiar na cidade das keywords pra segmentação.
+- **Extensões novas** (best-effort, cada bloco isolado — falha de extensão nunca derruba a campanha): sitelinks (assets `sitelinkAsset` + campaignAssets `SITELINK`; mín 2; description1/2 só juntas), callouts (`calloutAsset`/`CALLOUT`; mín 2), snippet estruturado (`structuredSnippetAsset`/`STRUCTURED_SNIPPET`; header + 3+ valores). Schema ganhou `sitelinks`/`callouts`/`snippet_header`/`snippet_values`; prompt manda sempre gerar.
+- **Mais copy**: schema/prompt pedem 10-15 títulos e 4 descrições (antes a IA gerava o mínimo, 3-5).
+- **Logo/imagens/nome da empresa**: NÃO implementados de propósito — exigem arquivo de imagem (upload) e/ou Perfil da Empresa vinculado, que a Luna não tem. O relatório lista como pendência manual (`ℹ️ Adicione manualmente no painel...`) e o prompt proíbe prometer que a Luna coloca. (Futuro possível: `image_url`/`logo_url` + upload de ImageAsset se a logo do cliente for cadastrada no sistema — hoje não há esse cadastro.)
+- ⚠️ Assets reais exigem produção — validar recriando a campanha do Cost Odonto com cidade (Florianópolis) e conferir sitelinks/callouts/snippet no painel.
+
 ## Luna IA — fim da alucinação de "restrição de política" nas keywords (2026-07-23)
 
 Matheus reportou: `create_google_campaign` criou a campanha do Cost Odonto, mas as palavras-chave falharam e a Luna explicou como "restrição de política da API do Google" — texto NENHUM da ferramenta dizia isso, ela inventou. Causa raiz real, achada em `luna-tools.ts`: as keywords chegavam da IA já com aspas literais (`"dentista florianópolis"`, notação de correspondência de frase do PAINEL) e o código mandava esse texto cru pro campo `keyword.text` da API — que não aceita `"`, `[`, `]`, `~` (o tipo de correspondência é o campo `matchType` separado). A Google Ads API recusava por `KEYWORD_HAS_INVALID_CHARS`; sem o motivo real explícito na mesma linha, o modelo preencheu o vazio com uma explicação genérica.
