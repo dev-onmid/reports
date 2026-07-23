@@ -684,6 +684,19 @@ Sempre descreva a estrutura ao usuário e espere confirmação antes de criar.`,
       required: ['client_id', 'name', 'daily_budget', 'keywords', 'headlines', 'descriptions', 'final_url'],
     },
   },
+  {
+    name: 'set_google_campaign_location',
+    description: `Corrige/ajusta a área de atuação (localização) de uma campanha do Google Ads que JÁ existe — ex: campanha que subiu como "Brasil inteiro" e deveria ser uma cidade específica. Remove as localizações atuais e aplica as cidades informadas, SEM recriar a campanha. Funciona com a campanha pausada ou ativa.`,
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        client_id: { type: 'string', description: 'ID do cliente' },
+        campaign_id: { type: 'string', description: 'ID numérico da campanha Google (aparece no relatório de criação e em get_google_campaigns)' },
+        cities: { type: 'array', items: { type: 'string' }, description: 'Cidades alvo por nome (ex: ["Florianópolis"]). Obrigatório — não deixe vazio.' },
+      },
+      required: ['client_id', 'campaign_id', 'cities'],
+    },
+  },
   // ── Pacote A: execução Meta + Google ──────────────────────────────────────
   {
     name: 'get_meta_structure',
@@ -2793,6 +2806,65 @@ export async function execSystemTool(
       report.push('ℹ️ Adicione manualmente no painel (exigem imagem/Perfil da Empresa): logotipo, imagens do anúncio e nome da empresa.');
       report.push('▶️ Próximo passo: revisar no painel do Google Ads e ATIVAR a campanha (está pausada de propósito).');
       return report.join('\n');
+    }
+
+    if (name === 'set_google_campaign_location') {
+      const clientId = input.client_id as string;
+      const campaignId = String(input.campaign_id ?? '').replace(/\D/g, '');
+      const cidades = (Array.isArray(input.cities) ? input.cities : []).map((c: unknown) => String(c).trim()).filter(Boolean);
+      if (!campaignId) return 'Informe o campaign_id da campanha a ajustar.';
+      if (cidades.length === 0) return 'Informe ao menos uma cidade — não dá pra ajustar a localização sem destino.';
+
+      const { rows: links } = await pool.query(
+        "SELECT account_id FROM public.client_account_links WHERE client_id = $1 AND platform IN ('google_ads','google') LIMIT 1",
+        [clientId],
+      );
+      const customerId = String(links[0]?.account_id ?? '').replace(/\D/g, '');
+      if (!customerId) return 'Nenhuma conta Google Ads vinculada a esse cliente.';
+
+      const probe = await lunaGoogleSearch(customerId, `SELECT campaign.id, campaign.name FROM campaign WHERE campaign.id = ${campaignId} LIMIT 1`);
+      if (!probe) return '❌ Não consegui acessar essa conta Google (token/permissão MCC). Verifique a conexão em Integrações.';
+      if (!probe.results?.length) return `❌ Campanha ${campaignId} não encontrada nessa conta Google.`;
+      const { token, login } = probe;
+      const campName = probe.results[0]?.campaign?.name ?? campaignId;
+
+      // Resolve as cidades → geo_target_constant (mesma lógica da criação).
+      const geoRns: string[] = [];
+      const achadas: string[] = [];
+      const naoAchadas: string[] = [];
+      for (const cidade of cidades.slice(0, 10)) {
+        const geo = await lunaGoogleSearch(customerId,
+          `SELECT geo_target_constant.resource_name FROM geo_target_constant
+            WHERE geo_target_constant.name = '${cidade.replace(/'/g, "\\'")}'
+              AND geo_target_constant.country_code = 'BR'
+              AND geo_target_constant.target_type = 'City'
+              AND geo_target_constant.status = 'ENABLED' LIMIT 1`);
+        const rn = geo?.results?.[0]?.geoTargetConstant?.resourceName;
+        if (rn) { geoRns.push(rn); achadas.push(cidade); } else { naoAchadas.push(cidade); }
+      }
+      if (geoRns.length === 0) return `❌ Nenhuma das cidades foi encontrada no Google: ${cidades.join(', ')}. Confira os nomes e tente de novo.`;
+
+      // Localizações atuais da campanha (pra remover — incluindo o "Brasil" errado).
+      const atuais = await lunaGoogleSearch(customerId,
+        `SELECT campaign_criterion.resource_name FROM campaign_criterion
+          WHERE campaign.id = ${campaignId} AND campaign_criterion.type = 'LOCATION'`);
+      const removeRns = (atuais?.results ?? [])
+        .map((r: { campaignCriterion?: { resourceName?: string } }) => r.campaignCriterion?.resourceName)
+        .filter((rn: string | undefined): rn is string => Boolean(rn));
+
+      // Remove antigas + adiciona novas no MESMO mutate (atômico).
+      const campRn = `customers/${customerId}/campaigns/${campaignId}`;
+      const ops = [
+        ...removeRns.map((rn: string) => ({ remove: rn })),
+        ...geoRns.map((rn: string) => ({ create: { campaign: campRn, location: { geoTargetConstant: rn } } })),
+      ];
+      const res = await lunaGoogleMutate(customerId, token, login, 'campaignCriteria', ops);
+      if ('error' in res) return `❌ Falha ao ajustar a localização: ${res.error}`;
+
+      let out = `✅ Área de atuação da campanha "${campName}" (ID ${campaignId}) atualizada para: ${achadas.join(', ')}.`;
+      if (removeRns.length) out += `\n   ${removeRns.length} localização(ões) anterior(es) removida(s) — inclusive o "Brasil inteiro", se havia.`;
+      if (naoAchadas.length) out += `\n   ⚠️ Não encontrada(s) (ficaram de fora): ${naoAchadas.join(', ')}.`;
+      return out;
     }
 
     if (name === 'get_optimizer_analysis') {

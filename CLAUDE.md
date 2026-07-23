@@ -9,6 +9,7 @@ Feedback do Matheus após a campanha do Cost Odonto sair no ar: cliques certos, 
 - **Mais copy**: schema/prompt pedem 10-15 títulos e 4 descrições (antes a IA gerava o mínimo, 3-5).
 - **Logo/imagens/nome da empresa**: NÃO implementados de propósito — exigem arquivo de imagem (upload) e/ou Perfil da Empresa vinculado, que a Luna não tem. O relatório lista como pendência manual (`ℹ️ Adicione manualmente no painel...`) e o prompt proíbe prometer que a Luna coloca. (Futuro possível: `image_url`/`logo_url` + upload de ImageAsset se a logo do cliente for cadastrada no sistema — hoje não há esse cadastro.)
 - ⚠️ Assets reais exigem produção — validar recriando a campanha do Cost Odonto com cidade (Florianópolis) e conferir sitelinks/callouts/snippet no painel.
+- **Corrigir campanha JÁ criada** (`set_google_campaign_location`): a Luna não tinha como editar a localização de campanha existente (só criar/pausar/ajustar orçamento) — a do Cost Odonto subiu como Brasil e não dava pra consertar sem recriar. Nova tool: `client_id + campaign_id + cities` → resolve as cidades (geo_target_constant), busca os `campaign_criterion` type=LOCATION atuais e faz um mutate ATÔMICO em `campaignCriteria` (remove antigos + cria novos). Não deixa virar Brasil de novo (0 cidades achadas → erro, não fallback). Prompt manda usar isso em vez de recriar. Fora do headless (edição estrutural, só chat).
 
 ## Luna IA — fim da alucinação de "restrição de política" nas keywords (2026-07-23)
 
