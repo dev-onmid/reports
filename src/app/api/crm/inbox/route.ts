@@ -482,8 +482,11 @@ export async function POST(req: NextRequest) {
           ?? '',
         );
         let rawPhone: string;
-        if (isLid && remoteJidAlt) {
-          rawPhone = remoteJidAlt.split('@')[0];
+        if (isLid) {
+          // ⚠️ NUNCA usar os dígitos do LID como telefone: sem remoteJidAlt o chat
+          // fica só com o lid (o webhook corrige o número quando a mensagem real
+          // chegar). Antes, o LID virava "numero" e SOBRESCREVIA telefones reais.
+          rawPhone = remoteJidAlt ? remoteJidAlt.split('@')[0] : '';
         } else {
           rawPhone = String(chat.phone ?? chat.phoneNumber ?? remoteJid.split('@')[0] ?? '');
         }
@@ -504,11 +507,13 @@ export async function POST(req: NextRequest) {
         };
       });
 
-    // Relaxed phone filter: 8–15 digits (covers short local numbers & international)
+    // Relaxed phone filter: 8–15 digits (covers short local numbers & international).
+    // Chats @lid sem telefone resolvido entram só com o lid — o upsert aceita
+    // (phone OU lid) e o webhook preenche o número real depois.
     const contacts = mapped.filter(contact => {
       const jid = String(contact.remoteJid);
       if (jid.endsWith('@g.us') || jid.endsWith('@broadcast') || jid.includes('newsletter')) return false;
-      if (!/^[0-9]{8,15}$/.test(contact.phone)) return false;
+      if (!/^[0-9]{8,15}$/.test(contact.phone) && !contact.lid) return false;
       if (!search) return true;
       return (searchDigits.length > 0 && contact.phone.includes(searchDigits))
         || contact.name.toLowerCase().includes(search);

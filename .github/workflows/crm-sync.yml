@@ -1,0 +1,27 @@
+name: CRM Sync
+
+# Sincronização de reserva do CRM no servidor: importa as conversas da Evolution
+# pra TODOS os clientes com instância ativa, sem depender de ninguém abrir a tela.
+# O webhook continua sendo o tempo real primário; isto é a rede de segurança.
+# Secret necessário no GitHub: CRM_SYNC_URL
+#   = https://reports.onmid.app/api/crm/sync-cron?secret=<valor de REPORTS_CRON_SECRET>
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch: {}
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Chamar a sincronização do CRM
+        run: |
+          if [ -z "${{ secrets.CRM_SYNC_URL }}" ]; then
+            echo "Secret CRM_SYNC_URL não configurado"; exit 1
+          fi
+          status=$(curl -s -o resp.json -w "%{http_code}" --max-time 290 "${{ secrets.CRM_SYNC_URL }}")
+          cat resp.json
+          if [ "$status" != "200" ]; then
+            echo "HTTP $status"; exit 1
+          fi

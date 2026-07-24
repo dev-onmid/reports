@@ -93,7 +93,15 @@ function normalizeEvolutionDeliveryStatus(raw: unknown): string | null {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function extractEvolutionStatusUpdates(body: any): Array<{ id: string; status: string; error?: string; remoteJid?: string; remoteDigits?: string }> {
-  const eventName = String(body?.event ?? body?.type ?? '').toUpperCase();
+  // Evolution manda o event como "messages.update" (ponto); normalizar pra
+  // comparar com MESSAGES_UPDATE (underscore, formato da config de webhook).
+  const eventName = String(body?.event ?? body?.type ?? '').toUpperCase().replace(/\./g, '_');
+  // ⚠️ BUG HISTÓRICO (2026-07-24): o messages.upsert REAL da Evolution v2.3.7 traz
+  // `status: 'DELIVERY_ACK'/'READ'` DENTRO do data da mensagem nova — sem este gate,
+  // TODA mensagem recebida era classificada como atualização de ✓✓, caía no UPDATE
+  // (que não acha nada) e era descartada com 200. O CRM inteiro só "andava" pelo
+  // import do navegador. Evento explícito que não é MESSAGES_UPDATE NUNCA é status.
+  if (eventName && !eventName.includes('MESSAGES_UPDATE')) return [];
   const rawData = Array.isArray(body?.data) ? body.data : [body?.data ?? body];
   const updates: Array<{ id: string; status: string; error?: string; remoteJid?: string; remoteDigits?: string }> = [];
 
