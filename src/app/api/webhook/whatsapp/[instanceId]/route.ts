@@ -45,11 +45,14 @@ function detectOriginFromContext(text: string): string | null {
 
 function detectOrigin(
   ctwaClid: string | undefined,
+  sourceUrl: string | null | undefined,
   tracking: MergedTracking,
   text: string,
   fromMe: boolean,
 ): string {
-  if (ctwaClid) return 'meta';
+  // CTWA: o sourceUrl do externalAdReply diz ONDE a pessoa clicou no anúncio —
+  // link do Instagram = placement Instagram (senão fica tudo rotulado Facebook).
+  if (ctwaClid) return /instagram\.com/i.test(String(sourceUrl ?? '')) ? 'instagram' : 'meta';
   if (fromMe) return 'cliente';
   return originFromTracking(tracking) ?? detectOriginFromContext(text) ?? 'organic';
 }
@@ -314,7 +317,7 @@ export async function POST(
     const clickCode = fromMe ? null : extractClickCode(rawMessageText);
     const clickMatch = clickCode ? await matchClickByCode(pool, clickCode).catch(() => null) : null;
     const tracking = mergeTracking(textTracking, clickMatch);
-    const origin = detectOrigin(ctwaClid, tracking, rawMessageText, fromMe);
+    const origin = detectOrigin(ctwaClid, sourceUrl ?? tracking.source_url, tracking, rawMessageText, fromMe);
 
     // When fromMe=true the pushName is the instance owner's name, not the contact's.
     // Only set nome from pushName on incoming messages (fromMe=false).

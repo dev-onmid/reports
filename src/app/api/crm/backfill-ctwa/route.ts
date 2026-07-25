@@ -111,6 +111,10 @@ export async function GET(req: NextRequest) {
           const ctwaClid = ad.ctwaClid ? String(ad.ctwaClid) : null;
           const sourceId = ad.sourceId ? String(ad.sourceId) : null;
           const sourceUrl = ad.sourceUrl ?? ad.mediaUrl ?? null;
+          // Placement real do clique: link do Instagram = Instagram; senão Facebook
+          const isInstagram = /instagram\.com/i.test(String(sourceUrl ?? ''));
+          const adOrigin = isInstagram ? 'instagram' : 'meta';
+          const adCanal = isInstagram ? 'Instagram' : 'Facebook';
           const hierarchy = sourceId
             ? await resolveMetaAdHierarchy(pool, inst.client_id, sourceId).catch(() => null)
             : null;
@@ -147,8 +151,14 @@ export async function GET(req: NextRequest) {
                  adset_name    = COALESCE(NULLIF(adset_name, ''), NULLIF($6, '')),
                  ad_name       = COALESCE(NULLIF(ad_name, ''), NULLIF($7, '')),
                  creative_name = COALESCE(NULLIF(creative_name, ''), NULLIF($8, '')),
-                 origin        = CASE WHEN COALESCE(origin, '') IN ('', 'organic') THEN 'meta' ELSE origin END,
-                 canal         = CASE WHEN COALESCE(origin, '') IN ('', 'organic') THEN 'Facebook' ELSE canal END,
+                 origin        = CASE
+                                   WHEN COALESCE(origin, '') IN ('', 'organic') THEN $13
+                                   WHEN origin = 'meta' AND $13 = 'instagram' THEN 'instagram'
+                                   ELSE origin END,
+                 canal         = CASE
+                                   WHEN COALESCE(origin, '') IN ('', 'organic') THEN $14
+                                   WHEN origin = 'meta' AND $13 = 'instagram' THEN 'Instagram'
+                                   ELSE canal END,
                  ddd           = COALESCE(NULLIF(ddd, ''), NULLIF($9, '')),
                  regiao_uf     = COALESCE(NULLIF(regiao_uf, ''), NULLIF($10, '')),
                  regiao_cidade = COALESCE(NULLIF(regiao_cidade, ''), NULLIF($11, '')),
@@ -161,6 +171,7 @@ export async function GET(req: NextRequest) {
                 adsetName ?? '', adName ?? '', creativeName ?? '',
                 dddInfo?.ddd ?? '', dddInfo?.uf ?? '', dddInfo?.regiao ?? '',
                 Number(rec.messageTimestamp ?? Math.floor(Date.now() / 1000)),
+                adOrigin, adCanal,
               ],
             );
             r.updated++;
@@ -171,8 +182,8 @@ export async function GET(req: NextRequest) {
               lid: lid || undefined,
               name: rec.pushName ?? undefined,
               lastMessageAt: rec.messageTimestamp ? new Date(Number(rec.messageTimestamp) * 1000).toISOString() : null,
-              canal: 'Facebook',
-              origin: 'meta',
+              canal: adCanal,
+              origin: adOrigin,
               ctwaClid,
               sourceId,
               sourceUrl,
@@ -190,8 +201,8 @@ export async function GET(req: NextRequest) {
             leadId: leadId!,
             clientId: inst.client_id,
             eventType: 'ctwa',
-            origin: 'meta',
-            canal: 'Facebook',
+            origin: adOrigin,
+            canal: adCanal,
             externalId: msgId,
             ctwaClid,
             sourceId,
