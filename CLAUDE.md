@@ -1,5 +1,16 @@
 @AGENTS.md
 
+## Biblioteca de Criativos — ranking de anúncios por resultado real do CRM (2026-07-25)
+
+Pedido do Matheus: visão compilada de "top ativos" (mais vendas/receita/leads, maior CPL, mais agendamento/negociação) em 3 lugares. Alimentada pela atribuição CTWA do CRM (destravada pelo conserto do webhook).
+
+- **`src/lib/creative-library.ts`** — `aggregateCreatives(pool, {days, clientId?})`: agrega `crm_leads` por criativo (chave = `source_id` do anúncio; fallback nome), com leads/vendas (fechou)/receita (SUM valor_rs)/ig_leads vs fb_leads (origin instagram|meta)/breakdown `por_status` (query separada, merge em JS)/join `clients` (name, segment). LIMIT 500, janela por `created_at`.
+- **`GET /api/creative-library?days=&clientId=`** — lista; erro devolve 200 com creatives vazio (tela degrada graciosa).
+- **`POST /api/creative-library/enrich`** `{days, items:[{clientId, adIds}]}` — gasto (insights `time_range` como field param) + `creative{thumbnail_url}` via Graph batch `?ids=` (40/lote), token por cliente via `getClientMetaAdsToken` (EXPORTADO de meta-ad-resolver), cache `meta_ad_enrich_cache (ad_id, days)` TTL 4h, orçamento 45s best-effort. CPL calculado na UI = gasto/leads do CRM.
+- **`src/components/creative-library.tsx`** (`CreativeLibrary {clientId?}`) — componente único das 3 telas: chips de período 7/30/60/90d, busca, filtros cliente/segmento (só na visão global), rede (Todas/Instagram/Facebook via ig_leads/fb_leads>0), ordenação leads/vendas/receita/**menor CPL**/gasto + **etapas DINÂMICAS do funil** (união dos `por_status`, top 8 — cobre "mais agendamento"/"mais negociação" com os nomes reais das etapas de cada funil), card com rank/thumb (fallback ImageOff)/badges cliente+segmento+IG/FB/5 métricas/chips de etapa/link "Ver anúncio" (source_url). ⚠️ lucide-react atual NÃO exporta ícones de marca (Instagram/Facebook) — usar badges de texto.
+- **Telas**: (1) `/resultados/criativos` — 3ª aba do Radar (`results-tabs.tsx`, herda flag radar); (2) CRM → botão "Anúncios" no toggle de views (`CrmTab` ganhou `'ads'`, render `<CreativeLibrary clientId={clientId}/>`); (3) Início — `TopCreativesCard` (top 5 por leads 30d, link pra biblioteca).
+- ✅ Verificado no preview (dev :3000, session forjada + fetch mockado): ranking, CPL sort correto, sorts por etapa dinâmicos, thumbs com fallback, card do Início com empty state. ⚠️ Dados reais (agregação SQL + Graph spend/thumbnail) exigem produção — validar abrindo a aba Criativos e conferindo gasto/CPL preenchendo ao carregar.
+
 ## CRM — webhook NUNCA salvava mensagem (causa raiz de "só atualiza abrindo o CRM" + Rastreio zerado) (2026-07-24)
 
 Matheus reportou que o chat só atualizava ao abrir o CRM e que o Rastreio de WhatsApp não funcionava (1.032 leads/30d, ZERO atribuição, ZERO região). Diagnóstico com testes reais (payloads sintéticos na rota de produção + mensagem real via Evolution + logs da VPS por SSH `root@2.25.144.71`):

@@ -28,7 +28,7 @@ export async function ensureMetaAdHierarchyCacheSchema(pool: Pool): Promise<void
   `);
 }
 
-async function getClientMetaAdsToken(pool: Pool, clientId: string): Promise<string | null> {
+export async function getClientMetaAdsToken(pool: Pool, clientId: string): Promise<string | null> {
   const { rows: links } = await pool.query<{ connection_id: string | null }>(
     `SELECT connection_id FROM public.client_account_links
       WHERE client_id = $1 AND platform IN ('meta_ads', 'meta') AND connection_id IS NOT NULL

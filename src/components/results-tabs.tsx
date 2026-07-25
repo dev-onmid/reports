@@ -2,12 +2,13 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { AtSign, BarChart3 } from 'lucide-react';
+import { AtSign, BarChart3, Clapperboard } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const TABS = [
   { label: 'Radar', href: '/resultados', icon: BarChart3 },
   { label: 'Redes Sociais', href: '/resultados/redes-sociais', icon: AtSign },
+  { label: 'Criativos', href: '/resultados/criativos', icon: Clapperboard },
 ];
 
 // Tab-nav do módulo Radar (/resultados e subrotas). A subrota herda a flag
