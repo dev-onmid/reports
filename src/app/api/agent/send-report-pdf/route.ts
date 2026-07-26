@@ -1,6 +1,7 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { sendDocument } from '@/lib/zapi';
+import { resolveZapiConn } from '@/lib/luna-tools';
 
 export const maxDuration = 60;
 
@@ -25,15 +26,9 @@ export async function POST(req: NextRequest) {
 
   const pool = makeServerPool();
   try {
-    // Resolve a conexão Z-API: a escolhida > primeira ativa > ferramenta externa da Luna.
+    // Resolve a conexão Z-API: a escolhida (por id OU nome) > primeira ativa > ferramenta externa.
     let zapiConn: { instance_id: string; token: string; security_token?: string } | null = null;
-    if (body.zapi_client_id) {
-      const { rows } = await pool.query(
-        'SELECT instance_id, token, security_token FROM public.zapi_clients WHERE id = $1',
-        [body.zapi_client_id],
-      );
-      if (rows[0]) zapiConn = rows[0];
-    }
+    if (body.zapi_client_id) zapiConn = await resolveZapiConn(pool, body.zapi_client_id);
     if (!zapiConn) {
       const { rows } = await pool.query(
         "SELECT instance_id, token, security_token FROM public.zapi_clients WHERE active = true ORDER BY created_at ASC LIMIT 1",

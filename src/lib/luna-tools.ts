@@ -1035,6 +1035,23 @@ function appOrigin(): string {
     .trim().replace(/\/$/, '');
 }
 
+// Resolve uma conexão Z-API por ID (uuid) OU nome — a Luna às vezes passa o NOME da
+// instância ("Teste") em vez do id. `id::text = $1` compara como texto e evita o erro
+// "invalid input syntax for type uuid" quando o valor não é um uuid.
+export async function resolveZapiConn(
+  pool: ReturnType<typeof makeServerPool>, idOrName: string | null | undefined,
+): Promise<{ instance_id: string; token: string; security_token?: string } | null> {
+  const v = String(idOrName ?? '').trim();
+  if (!v) return null;
+  const { rows } = await pool.query(
+    `SELECT instance_id, token, security_token FROM public.zapi_clients
+      WHERE id::text = $1 OR name ILIKE $1
+      ORDER BY (id::text = $1) DESC, active DESC NULLS LAST LIMIT 1`,
+    [v],
+  ).catch(() => ({ rows: [] as Array<{ instance_id: string; token: string; security_token?: string }> }));
+  return rows[0] ?? null;
+}
+
 // GET numa rota interna do próprio sistema (reuso da lógica canônica em vez de duplicar).
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function fetchInternal(path: string): Promise<any | null> {
@@ -1589,10 +1606,7 @@ export async function execSystemTool(
 
       // Formato LINK (padrão) — resolve a Z-API e manda o link do relatório completo.
       let zapiConn: { instance_id: string; token: string; security_token?: string } | null = null;
-      if (zapi_client_id) {
-        const { rows } = await pool.query('SELECT instance_id, token, security_token FROM public.zapi_clients WHERE id = $1', [zapi_client_id]);
-        if (rows[0]) zapiConn = rows[0];
-      }
+      if (zapi_client_id) zapiConn = await resolveZapiConn(pool, zapi_client_id);
       if (!zapiConn) {
         const { rows } = await pool.query("SELECT instance_id, token, security_token FROM public.zapi_clients WHERE active = true ORDER BY created_at ASC LIMIT 1");
         if (rows[0]) zapiConn = rows[0];
@@ -3159,15 +3173,12 @@ export async function execExternalTool(tool: ExternalTool, input: Record<string,
       let token = cfg.token ?? '';
       let securityToken = cfg.security_token;
 
-      // Look up credentials from existing zapi_clients if referenced by ID
+      // Look up credentials from existing zapi_clients if referenced by ID or name
       if (cfg.zapi_client_id) {
         const pool2 = makeServerPool();
         try {
-          const { rows } = await pool2.query(
-            'SELECT instance_id, token, security_token FROM public.zapi_clients WHERE id = $1 LIMIT 1',
-            [cfg.zapi_client_id]
-          );
-          if (rows[0]) { instanceId = rows[0].instance_id; token = rows[0].token; securityToken = rows[0].security_token ?? undefined; }
+          const conn = await resolveZapiConn(pool2, cfg.zapi_client_id);
+          if (conn) { instanceId = conn.instance_id; token = conn.token; securityToken = conn.security_token ?? undefined; }
         } finally { await pool2.end(); }
       }
 
