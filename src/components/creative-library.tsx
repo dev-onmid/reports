@@ -8,7 +8,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Clapperboard, ExternalLink, Search, ImageOff,
-  TrendingUp, Users,
+  TrendingUp, Users, MessageCircle,
 } from 'lucide-react';
 
 // lucide não tem mais ícones de marca — badges de texto no lugar
@@ -28,6 +28,7 @@ export type CreativeRow = {
   adset_name: string | null;
   source_url: string | null;
   leads: number;
+  conversas: number;
   vendas: number;
   receita: number;
   ig_leads: number;
@@ -155,6 +156,8 @@ export function CreativeLibrary({ clientId }: { clientId?: string }) {
 
     const sorted = [...list];
     if (sortBy === 'leads') sorted.sort((a, b) => b.leads - a.leads);
+    else if (sortBy === 'conversas') sorted.sort((a, b) => (b.conversas ?? 0) - (a.conversas ?? 0) || b.leads - a.leads);
+    else if (sortBy === 'taxa_conversa') sorted.sort((a, b) => ((b.conversas ?? 0) / Math.max(b.leads, 1)) - ((a.conversas ?? 0) / Math.max(a.leads, 1)) || b.leads - a.leads);
     else if (sortBy === 'vendas') sorted.sort((a, b) => b.vendas - a.vendas || b.leads - a.leads);
     else if (sortBy === 'receita') sorted.sort((a, b) => b.receita - a.receita || b.vendas - a.vendas);
     else if (sortBy === 'gasto') sorted.sort((a, b) => (spendOf(b) ?? -1) - (spendOf(a) ?? -1));
@@ -171,6 +174,7 @@ export function CreativeLibrary({ clientId }: { clientId?: string }) {
   const totals = useMemo(() => ({
     criativos: filtered.length,
     leads: filtered.reduce((a, r) => a + r.leads, 0),
+    conversas: filtered.reduce((a, r) => a + (r.conversas ?? 0), 0),
     vendas: filtered.reduce((a, r) => a + r.vendas, 0),
     receita: filtered.reduce((a, r) => a + r.receita, 0),
   }), [filtered]);
@@ -246,6 +250,8 @@ export function CreativeLibrary({ clientId }: { clientId?: string }) {
           className="h-8 rounded-md border border-border bg-card px-2 text-xs"
         >
           <option value="leads">Mais leads</option>
+          <option value="conversas">Mais conversas (responderam)</option>
+          <option value="taxa_conversa">Maior taxa de conversa</option>
           <option value="vendas">Mais vendas</option>
           <option value="receita">Mais receita</option>
           <option value="cpl">Menor CPL</option>
@@ -258,6 +264,7 @@ export function CreativeLibrary({ clientId }: { clientId?: string }) {
       <div className="flex flex-wrap items-center gap-4 rounded-md border border-border bg-card px-4 py-2.5 text-xs">
         <span className="flex items-center gap-1.5 font-bold"><Clapperboard className="h-3.5 w-3.5 text-primary" />{totals.criativos} criativos</span>
         <span className="flex items-center gap-1.5 text-muted-foreground"><Users className="h-3.5 w-3.5" />{totals.leads} leads</span>
+        <span className="flex items-center gap-1.5 text-muted-foreground"><MessageCircle className="h-3.5 w-3.5" />{totals.conversas} conversas</span>
         <span className="flex items-center gap-1.5 text-muted-foreground"><TrendingUp className="h-3.5 w-3.5" />{totals.vendas} vendas</span>
         <span className="font-bold text-primary">{fmtBRL(totals.receita)} em receita</span>
       </div>
@@ -277,7 +284,8 @@ export function CreativeLibrary({ clientId }: { clientId?: string }) {
             const en = r.source_id ? enrich[r.source_id] : undefined;
             const spend = en?.spend ?? null;
             const cpl = spend !== null && r.leads > 0 ? spend / r.leads : null;
-            const topStatus = Object.entries(r.por_status).sort((a, b) => b[1] - a[1]).slice(0, 3);
+            const sortedStage = sortBy.startsWith('etapa:') ? sortBy.slice(6) : null;
+            const topStatus = Object.entries(r.por_status).sort((a, b) => b[1] - a[1]).slice(0, 5);
             return (
               <div key={`${r.client_id}|${r.ad_key}`} className="rounded-md border border-border bg-card p-3">
                 <div className="flex items-start gap-3">
@@ -313,8 +321,12 @@ export function CreativeLibrary({ clientId }: { clientId?: string }) {
                   </div>
                 </div>
 
-                <div className="mt-3 grid grid-cols-5 gap-1 text-center">
+                <div className="mt-3 grid grid-cols-6 gap-1 text-center">
                   <div><p className="truncate text-[11px] font-black tracking-tight">{r.leads}</p><p className="text-[9px] uppercase text-muted-foreground">Leads</p></div>
+                  <div title={`${r.conversas ?? 0} de ${r.leads} leads responderam depois do atendimento`}>
+                    <p className="truncate text-[11px] font-black tracking-tight">{r.conversas ?? 0}<span className="ml-0.5 font-semibold text-[9px] text-muted-foreground">({r.leads > 0 ? Math.round(((r.conversas ?? 0) / r.leads) * 100) : 0}%)</span></p>
+                    <p className="text-[9px] uppercase text-muted-foreground">Conv.</p>
+                  </div>
                   <div><p className="truncate text-[11px] font-black tracking-tight">{r.vendas}</p><p className="text-[9px] uppercase text-muted-foreground">Vendas</p></div>
                   <div><p className="truncate text-[11px] font-black tracking-tight text-primary" title={r.receita > 0 ? fmtBRL(r.receita) : ''}>{r.receita > 0 ? fmtBRL(r.receita) : '—'}</p><p className="text-[9px] uppercase text-muted-foreground">Receita</p></div>
                   <div><p className="truncate text-[11px] font-black tracking-tight" title={spend !== null ? fmtBRL(spend) : ''}>{spend !== null ? fmtBRL(spend) : '—'}</p><p className="text-[9px] uppercase text-muted-foreground">Gasto</p></div>
@@ -324,8 +336,18 @@ export function CreativeLibrary({ clientId }: { clientId?: string }) {
                 {topStatus.length > 0 && (
                   <div className="mt-2 flex flex-wrap gap-1">
                     {topStatus.map(([st, n]) => (
-                      <span key={st} className="rounded bg-muted/30 px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                        {st}: <b className="text-foreground">{n}</b>
+                      <span
+                        key={st}
+                        title={`${n} de ${r.leads} leads (${Math.round((n / Math.max(r.leads, 1)) * 100)}%) na etapa ${st}`}
+                        className={cn(
+                          'rounded px-1.5 py-0.5 text-[10px]',
+                          sortedStage === st
+                            ? 'bg-primary/15 font-bold text-primary'
+                            : 'bg-muted/30 text-muted-foreground',
+                        )}
+                      >
+                        {st}: <b className={sortedStage === st ? 'text-primary' : 'text-foreground'}>{n}</b>
+                        <span className="ml-0.5 opacity-70">({Math.round((n / Math.max(r.leads, 1)) * 100)}%)</span>
                       </span>
                     ))}
                   </div>

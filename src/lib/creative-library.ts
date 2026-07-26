@@ -18,6 +18,8 @@ export type CreativeStat = {
   adset_name: string | null;
   source_url: string | null;
   leads: number;
+  /** Leads que RESPONDERAM no WhatsApp depois do primeiro atendimento (conversa real) */
+  conversas: number;
   vendas: number;
   receita: number;
   ig_leads: number;
@@ -43,12 +45,33 @@ export async function aggregateCreatives(
   // nome do anúncio (leads antigos/manuais sem source_id).
   const keyExpr = `COALESCE(NULLIF(l.source_id, ''), 'nm:' || LOWER(COALESCE(NULLIF(l.ad_name, ''), NULLIF(l.creative_name, ''))))`;
 
+  // `conversas` = métrica de FUNIL: o lead respondeu no WhatsApp DEPOIS do
+  // primeiro atendimento (mensagem 'in' após a primeira 'out') — conversa real,
+  // não só o clique inicial do anúncio. É o primeiro degrau do feedback da ponta.
   const { rows } = await pool.query(
-    `SELECT
+    `WITH leads_base AS (
+        SELECT l.*, ${keyExpr} AS ad_key
+          FROM public.crm_leads l
+         WHERE (NULLIF(l.source_id, '') IS NOT NULL OR NULLIF(l.ad_name, '') IS NOT NULL OR NULLIF(l.creative_name, '') IS NOT NULL)
+           AND l.created_at >= NOW() - ($1 || ' days')::interval
+           ${clientFilter}
+      ),
+      resp AS (
+        SELECT lb.id AS lead_id,
+               EXISTS (
+                 SELECT 1 FROM public.crm_messages mi
+                  WHERE mi.lead_id = lb.id AND mi.direction = 'in'
+                    AND mi.created_at > (
+                      SELECT MIN(mo.created_at) FROM public.crm_messages mo
+                       WHERE mo.lead_id = lb.id AND mo.direction = 'out')
+               ) AS respondeu
+          FROM leads_base lb
+      )
+      SELECT
         l.client_id,
         MAX(c.name)     AS client_name,
         MAX(c.segment)  AS segment,
-        ${keyExpr}      AS ad_key,
+        l.ad_key,
         MAX(NULLIF(l.source_id, ''))      AS source_id,
         MAX(NULLIF(l.ad_name, ''))        AS ad_name,
         MAX(NULLIF(l.creative_name, ''))  AS creative_name,
@@ -56,18 +79,17 @@ export async function aggregateCreatives(
         MAX(NULLIF(l.adset_name, ''))     AS adset_name,
         MAX(NULLIF(l.source_url, ''))     AS source_url,
         COUNT(*)::int                                     AS leads,
+        COUNT(*) FILTER (WHERE r.respondeu)::int          AS conversas,
         COUNT(*) FILTER (WHERE l.fechou = TRUE)::int      AS vendas,
         COALESCE(SUM(l.valor_rs) FILTER (WHERE l.fechou = TRUE), 0)::float AS receita,
         COUNT(*) FILTER (WHERE l.origin = 'instagram')::int AS ig_leads,
         COUNT(*) FILTER (WHERE l.origin = 'meta')::int      AS fb_leads,
         MIN(l.created_at) AS first_lead_at,
         MAX(l.created_at) AS last_lead_at
-      FROM public.crm_leads l
+      FROM leads_base l
+      LEFT JOIN resp r ON r.lead_id = l.id
       LEFT JOIN public.clients c ON c.id = l.client_id
-     WHERE (NULLIF(l.source_id, '') IS NOT NULL OR NULLIF(l.ad_name, '') IS NOT NULL OR NULLIF(l.creative_name, '') IS NOT NULL)
-       AND l.created_at >= NOW() - ($1 || ' days')::interval
-       ${clientFilter}
-     GROUP BY l.client_id, ${keyExpr}
+     GROUP BY l.client_id, l.ad_key
      ORDER BY COUNT(*) DESC
      LIMIT 500`,
     params,
@@ -103,6 +125,7 @@ export async function aggregateCreatives(
     adset_name: r.adset_name ?? null,
     source_url: r.source_url ?? null,
     leads: Number(r.leads),
+    conversas: Number(r.conversas ?? 0),
     vendas: Number(r.vendas),
     receita: Number(r.receita),
     ig_leads: Number(r.ig_leads),
