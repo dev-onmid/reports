@@ -2,7 +2,34 @@
 
 import RGL, { WidthProvider } from 'react-grid-layout';
 import type { Layout as RglLayout } from 'react-grid-layout';
-const RglGrid = WidthProvider(RGL);
+import { useIsMobile } from '@/lib/use-is-mobile';
+const RglBase = WidthProvider(RGL);
+
+// No mobile o grid arrastável vira uma pilha de cards de largura total: mesmo RGL
+// (mantém alturas via rowHeight), layout forçado em 1 coluna, sem drag/resize e sem
+// onLayoutChange — senão o empilhamento sobrescreveria o layout desktop salvo.
+function RglGrid(props: React.ComponentProps<typeof RglBase>) {
+  const isMobile = useIsMobile();
+  if (!isMobile) return <RglBase {...props} />;
+  const cols = props.cols ?? 12;
+  let y = 0;
+  const stacked = [...(props.layout ?? [])]
+    .sort((a, b) => a.y - b.y || a.x - b.x)
+    .map(l => {
+      const item = { ...l, x: 0, y, w: cols };
+      y += l.h;
+      return item;
+    });
+  return (
+    <RglBase
+      {...props}
+      layout={stacked}
+      isDraggable={false}
+      isResizable={false}
+      onLayoutChange={undefined}
+    />
+  );
+}
 import React, { Fragment, createContext, useContext, useEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import type { ReactNode } from 'react';
@@ -4285,7 +4312,7 @@ function IgTopPostsCard({ posts, loading, sortBy, onSortChange, periodFrom, peri
                     href={post.permalink}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="w-5 shrink-0 flex items-center justify-center text-muted-foreground/30 hover:text-[#E1306C] transition-colors opacity-0 group-hover:opacity-100"
+                    className="max-md:opacity-100 w-5 shrink-0 flex items-center justify-center text-muted-foreground/30 hover:text-[#E1306C] transition-colors opacity-0 group-hover:opacity-100"
                   >
                     <ExternalLink className="h-3.5 w-3.5" />
                   </a>

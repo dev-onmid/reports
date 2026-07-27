@@ -1,5 +1,17 @@
 @AGENTS.md
 
+## Mobile — Fase 1: 6 telas adaptadas + menu enxuto (2026-07-27)
+
+Decisão do Matheus: mobile cobre SÓ Início, Dashboard, Relatórios, Radar, Pagamentos e Luna — o resto (CRM, Clientes, Disparos, Otimizador, Cofre, Automações, Integrações, Logs, Configurações) fica fora do menu mobile e segue desktop-only. Estratégia: **responsividade aditiva no mesmo código** (nunca versão paralela) — a classe base do desktop nunca muda; o comportamento mobile entra via breakpoint (`max-md:`, `sm:`) ou `useIsMobile()`. Régua de UX: *criando algo → etapas; consultando algo → empilhar/scroll*.
+
+- **Infra**: `src/lib/use-is-mobile.ts` (`useIsMobile()`, matchMedia ≤767px = abaixo do `md`, SSR-safe começando desktop). `NavItem` ganhou flag `mobile?: boolean` (marcada nas 6); `Sidebar mode="mobile"` filtra por ela e esconde Configurações — o menu desktop NÃO filtra. O grid "Acesso rápido" do Início aplica o mesmo filtro quando `isMobile`.
+- **Relatórios**: modal "Gerar Relatório" vira **stepper de 4 etapas no mobile** (template+cliente → período+comparação → opções → resumo "Confira antes de gerar" + Gerar) — MESMO estado/handlers, só visibilidade condicional (`genStepCls(n)` = `hidden` fora da etapa; desktop renderiza tudo). Rodapé mostra "Etapa X de 4" + Voltar/Avançar (gates: etapa 0 exige cliente, etapa 1 exige datas). Template selector `grid-cols-1 sm:grid-cols-3`; header da tela com `flex-wrap`; as 2 tabelas (relatórios/automações) ganharam wrapper `overflow-x-auto` + `max-md:min-w-[720px]` na table.
+- **Pagamentos**: os DOIS calendários (mês e semana, `grid-cols-5`) embrulhados em `overflow-x-auto` + `min-w-[640px]` (mesmo padrão das tabelas do Radar); grid de status `grid-cols-1 md:grid-cols-[240px_1fr]`.
+- **Dashboard**: wrapper `RglGrid` (em volta do `WidthProvider(RGL)`) — no mobile empilha os cards em 1 coluna de largura total (ordena por y,x; y acumulado por h), `isDraggable/isResizable false` e **`onLayoutChange: undefined`** (⚠️ senão o layout empilhado sobrescreveria o layout desktop salvo do usuário). Cobre os 6 RglGrid da página sem tocar em cada call site.
+- **Padrão hover-touch**: ações `opacity-0 group-hover:opacity-100` ganham `max-md:opacity-100` (sempre visíveis no touch, desktop intacto) — aplicado em Pagamentos (7) e Dashboard (link do post IG).
+- ✅ Verificado no preview (dev :3000, session forjada, 375px + 1280px): menu mobile com exatamente as 6 + Início/Sair, stepper completo etapa a etapa (com /api/clients mockado), calendário de Pagamentos rolando com "+" visível, Dashboard empilhado; desktop conferido idêntico (sidebar completa, RGL em grid, modal completo sem etapas). tsc + `next build` limpos, zero erros de console.
+- Pendências conhecidas: telas fora do escopo continuam acessíveis por URL direta no celular (só saíram do menu — sem bloqueio/aviso); PWA (manifest/ícone) não feito; `logs` e demais telas fora das 6 seguem sem breakpoints.
+
 ## Alerta de saldo baixo — conserto completo: o cron nunca rodou (2026-07-27)
 
 Matheus perguntou se o alerta de saldo existia e como estava. Existia desde 22/06 (commit `62fadc6`) e **nunca disparou em produção**. Causas empilhadas, todas corrigidas:

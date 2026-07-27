@@ -17,6 +17,7 @@ import { callerHeaders } from '@/lib/auth-store';
 import { cn } from '@/lib/utils';
 import { exportReportToPdf } from '@/lib/export-report-pdf';
 import { REPORT_SECTIONS } from '@/lib/report-sections';
+import { useIsMobile } from '@/lib/use-is-mobile';
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -105,6 +106,10 @@ export default function RelatoriosPage() {
   // Personalização de páginas: keys DESMARCADAS (vazio = relatório completo, padrão)
   const [genHiddenSections, setGenHiddenSections] = useState<string[]>([]);
   const [showCustomizePages, setShowCustomizePages] = useState(false);
+  // Mobile: o modal Gerar vira um fluxo em etapas (mesmo estado, só muda a apresentação).
+  const isMobile = useIsMobile();
+  const [genStep, setGenStep] = useState(0);
+  const genStepCls = (n: number) => (isMobile && genStep !== n ? 'hidden' : undefined);
   const [clientLinks, setClientLinks] = useState<ClientLink[]>([]);
   const [generating, setGenerating] = useState(false);
 
@@ -194,6 +199,7 @@ export default function RelatoriosPage() {
     setGenHiddenSections([]);
     setShowCustomizePages(false);
     setClientLinks([]);
+    setGenStep(0);
     setShowGenModal(true);
   }
 
@@ -553,7 +559,7 @@ export default function RelatoriosPage() {
     <div className="space-y-6 p-6">
 
       {/* ── HEADER ── */}
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="flex items-center gap-4">
           <div className="w-12 h-12 rounded-xl bg-violet-500/20 border border-violet-500/30 flex items-center justify-center shrink-0">
             <BarChart2 className="w-6 h-6 text-violet-400" />
@@ -718,7 +724,8 @@ export default function RelatoriosPage() {
 
           {/* Table */}
           <div className="bg-card border border-border rounded-[var(--radius)] overflow-hidden">
-            <table className="w-full text-sm text-left">
+            <div className="overflow-x-auto">
+            <table className="w-full text-sm text-left max-md:min-w-[720px]">
               <thead className="border-b border-border">
                 <tr>
                   <th className="w-10 px-5 py-3">
@@ -856,6 +863,7 @@ export default function RelatoriosPage() {
                 })}
               </tbody>
             </table>
+            </div>
 
             {/* Pagination */}
             <div className="flex items-center justify-between px-5 py-3 border-t border-border">
@@ -1112,7 +1120,8 @@ export default function RelatoriosPage() {
           )}
 
           <div className="bg-card border border-border rounded-[var(--radius)] overflow-hidden">
-            <table className="w-full text-sm text-left">
+            <div className="overflow-x-auto">
+            <table className="w-full text-sm text-left max-md:min-w-[720px]">
               <thead className="border-b border-border">
                 <tr>
                   <th className="px-5 py-3 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Cliente</th>
@@ -1248,14 +1257,15 @@ export default function RelatoriosPage() {
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
         </div>
       )}
 
       {/* ── GENERATE MODAL ── */}
       {showGenModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="bg-card border border-border rounded-2xl p-6 w-full max-w-lg space-y-5 shadow-2xl max-h-[92vh] overflow-y-auto">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-3">
+          <div className="bg-card border border-border rounded-2xl p-4 sm:p-6 w-full max-w-lg space-y-5 shadow-2xl max-h-[92vh] overflow-y-auto">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <div className="w-9 h-9 rounded-xl bg-violet-500/20 border border-violet-500/30 flex items-center justify-center">
@@ -1272,9 +1282,9 @@ export default function RelatoriosPage() {
             </div>
 
             {/* Template selector */}
-            <div className="space-y-1.5">
+            <div className={cn('space-y-1.5', genStepCls(0))}>
               <label className="text-xs text-muted-foreground font-medium">Template</label>
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 {([
                   {
                     key: 'performance' as const,
@@ -1330,7 +1340,7 @@ export default function RelatoriosPage() {
             </div>
 
             <div className="space-y-3">
-              <div className="space-y-1.5">
+              <div className={cn('space-y-1.5', genStepCls(0))}>
                 <label className="text-xs text-muted-foreground font-medium">Cliente</label>
                 <select
                   value={genForm.clientId}
@@ -1356,6 +1366,7 @@ export default function RelatoriosPage() {
                   <p className="text-[10px] text-muted-foreground/50 pt-0.5">Nenhuma integração vinculada a este cliente.</p>
                 )}
               </div>
+              <div className={cn('space-y-3', genStepCls(1))}>
               {/* Period shortcuts */}
               <div className="space-y-1.5">
                 <label className="text-xs text-muted-foreground font-medium">Período</label>
@@ -1501,7 +1512,9 @@ export default function RelatoriosPage() {
                   {genForm.compareMode === 'none' && 'O relatório não exibe variações comparativas.'}
                 </p>
               </div>
+              </div>
 
+              <div className={cn('space-y-3', genStepCls(2))}>
               {/* Agency context — optional for both templates */}
               <div className="space-y-1.5">
                 <label className="text-xs text-muted-foreground font-medium">
@@ -1686,44 +1699,86 @@ export default function RelatoriosPage() {
                   </label>
                 </div>
               )}
+              </div>
             </div>
+
+            {/* Mobile: resumo de confirmação da última etapa */}
+            {isMobile && genStep === 3 && (
+              <div className="space-y-2 rounded-lg border border-border bg-background p-3">
+                <p className="text-xs font-medium text-muted-foreground">Confira antes de gerar</p>
+                <div className="space-y-1 text-xs">
+                  <p><span className="text-muted-foreground">Template:</span> <span className="font-semibold text-foreground">{genTemplate === 'performance' ? 'Performance' : genTemplate === 'delivery' ? 'Delivery' : 'Social'}</span></p>
+                  <p><span className="text-muted-foreground">Cliente:</span> <span className="font-semibold text-foreground">{clients.find(c => c.id === genForm.clientId)?.name ?? '—'}</span></p>
+                  <p><span className="text-muted-foreground">Período:</span> <span className="font-semibold text-foreground">{genForm.from && genForm.to ? `${new Date(genForm.from + 'T12:00:00').toLocaleDateString('pt-BR')} até ${new Date(genForm.to + 'T12:00:00').toLocaleDateString('pt-BR')}` : '—'}</span></p>
+                  <p><span className="text-muted-foreground">Comparação:</span> <span className="font-semibold text-foreground">{genForm.compareMode === 'previous_period' ? 'Período anterior' : genForm.compareMode === 'previous_year' ? 'Mesmo período (ano passado)' : genForm.compareMode === 'custom' ? 'Personalizado' : 'Sem comparação'}</span></p>
+                  {genHiddenSections.length > 0 && (
+                    <p><span className="text-muted-foreground">Páginas ocultas:</span> <span className="font-semibold text-foreground">{genHiddenSections.length}</span></p>
+                  )}
+                </div>
+              </div>
+            )}
 
             <div className="flex items-center justify-between gap-2 pt-1">
               <span className="text-[11px] text-muted-foreground/60 flex items-center gap-1">
-                <Zap className="w-3 h-3" />
-                ~R$ 0,21 estimado
+                {isMobile ? (
+                  <>Etapa {genStep + 1} de 4</>
+                ) : (
+                  <>
+                    <Zap className="w-3 h-3" />
+                    ~R$ 0,21 estimado
+                  </>
+                )}
               </span>
               <div className="flex gap-2">
-                <button onClick={() => { setShowGenModal(false); setClientLinks([]); }} className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors">
-                  Cancelar
-                </button>
-                <Button
-                  onClick={generateReport}
-                  disabled={
-                    generating ||
-                    !genForm.clientId ||
-                    !genForm.from ||
-                    !genForm.to
-                  }
-                  className={cn(
-                    'text-white gap-2 text-sm min-w-[120px]',
-                    genTemplate === 'delivery'
-                      ? 'bg-emerald-600 hover:bg-emerald-700'
-                      : 'bg-violet-600 hover:bg-violet-700',
-                  )}
+                <button
+                  onClick={() => {
+                    if (isMobile && genStep > 0) setGenStep(s => s - 1);
+                    else { setShowGenModal(false); setClientLinks([]); }
+                  }}
+                  className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
                 >
-                  {generating ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      Gerando...
-                    </>
-                  ) : (
-                    <>
-                      <Sparkles className="w-4 h-4" />
-                      Gerar
-                    </>
-                  )}
-                </Button>
+                  {isMobile && genStep > 0 ? 'Voltar' : 'Cancelar'}
+                </button>
+                {isMobile && genStep < 3 ? (
+                  <Button
+                    onClick={() => setGenStep(s => s + 1)}
+                    disabled={
+                      (genStep === 0 && !genForm.clientId) ||
+                      (genStep === 1 && (!genForm.from || !genForm.to))
+                    }
+                    className="bg-violet-600 hover:bg-violet-700 text-white gap-2 text-sm min-w-[110px]"
+                  >
+                    Avançar
+                  </Button>
+                ) : (
+                  <Button
+                    onClick={generateReport}
+                    disabled={
+                      generating ||
+                      !genForm.clientId ||
+                      !genForm.from ||
+                      !genForm.to
+                    }
+                    className={cn(
+                      'text-white gap-2 text-sm min-w-[120px]',
+                      genTemplate === 'delivery'
+                        ? 'bg-emerald-600 hover:bg-emerald-700'
+                        : 'bg-violet-600 hover:bg-violet-700',
+                    )}
+                  >
+                    {generating ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Gerando...
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="w-4 h-4" />
+                        Gerar
+                      </>
+                    )}
+                  </Button>
+                )}
               </div>
             </div>
           </div>

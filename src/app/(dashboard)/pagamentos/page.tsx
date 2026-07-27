@@ -1382,7 +1382,7 @@ function MonthPaymentCard({
             type="button"
             onClick={onToggleExtra}
             title={payment.extra ? 'Remover destaque extra' : 'Marcar como extra'}
-            className={cn('rounded-full p-0.5 transition-all', payment.extra ? 'text-violet-400' : 'opacity-0 text-muted-foreground/30 group-hover:opacity-100 hover:text-violet-400')}
+            className={cn('rounded-full p-0.5 transition-all', payment.extra ? 'text-violet-400' : 'max-md:opacity-100 opacity-0 text-muted-foreground/30 group-hover:opacity-100 hover:text-violet-400')}
           >
             <Zap className="h-3 w-3" />
           </button>
@@ -1401,7 +1401,7 @@ function MonthPaymentCard({
             type="button"
             onClick={onDelete}
             title="Excluir pagamento"
-            className="rounded-full p-0.5 text-muted-foreground/30 opacity-0 transition-all group-hover:opacity-100 hover:text-red-400"
+            className="max-md:opacity-100 rounded-full p-0.5 text-muted-foreground/30 opacity-0 transition-all group-hover:opacity-100 hover:text-red-400"
           >
             <Trash2 className="h-3 w-3" />
           </button>
@@ -1497,7 +1497,7 @@ function DayTimelinePaymentCard({
               type="button"
               onClick={onToggleExtra}
               title={payment.extra ? 'Remover destaque extra' : 'Marcar como extra'}
-              className={cn('rounded-full p-1 transition-all', payment.extra ? 'text-violet-400' : 'opacity-0 text-muted-foreground/30 group-hover:opacity-100 hover:text-violet-400')}
+              className={cn('rounded-full p-1 transition-all', payment.extra ? 'text-violet-400' : 'max-md:opacity-100 opacity-0 text-muted-foreground/30 group-hover:opacity-100 hover:text-violet-400')}
             >
               <Zap className="h-3.5 w-3.5" />
             </button>
@@ -1592,7 +1592,7 @@ function WeekPaymentCard({
             type="button"
             onClick={onToggleExtra}
             title={payment.extra ? 'Remover destaque extra' : 'Marcar como extra'}
-            className={cn('rounded-full p-0.5 transition-all', payment.extra ? 'text-violet-400' : 'opacity-0 text-muted-foreground/30 group-hover:opacity-100 hover:text-violet-400')}
+            className={cn('rounded-full p-0.5 transition-all', payment.extra ? 'text-violet-400' : 'max-md:opacity-100 opacity-0 text-muted-foreground/30 group-hover:opacity-100 hover:text-violet-400')}
           >
             <Zap className="h-3 w-3" />
           </button>
@@ -1600,7 +1600,7 @@ function WeekPaymentCard({
             type="button"
             onClick={onDelete}
             title="Excluir pagamento"
-            className="rounded-full p-0.5 text-muted-foreground/30 opacity-0 transition-all group-hover:opacity-100 hover:text-red-400"
+            className="max-md:opacity-100 rounded-full p-0.5 text-muted-foreground/30 opacity-0 transition-all group-hover:opacity-100 hover:text-red-400"
           >
             <Trash2 className="h-3 w-3" />
           </button>
@@ -2252,6 +2252,8 @@ export default function PagamentosPage() {
               })()}
             </div>
           </div>
+          <div className="overflow-x-auto">
+          <div className="min-w-[640px]">
           <div className="grid grid-cols-5 border-b border-border/70">
             {[
               { label: 'SEG', color: '#55f52f' },
@@ -2295,7 +2297,7 @@ export default function PagamentosPage() {
                                 setNewPayment((p) => ({ ...p, date }));
                                 formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
                               }}
-                              className="flex h-4 w-4 items-center justify-center rounded text-muted-foreground/40 opacity-0 transition-all hover:bg-violet-500/20 hover:text-violet-400 group-hover:opacity-100"
+                              className="max-md:opacity-100 flex h-4 w-4 items-center justify-center rounded text-muted-foreground/40 opacity-0 transition-all hover:bg-violet-500/20 hover:text-violet-400 group-hover:opacity-100"
                             >
                               <Plus className="h-3 w-3" />
                             </button>
@@ -2328,6 +2330,8 @@ export default function PagamentosPage() {
               })}
             </div>
           ))}
+          </div>
+          </div>
         </div>
       )}
 
@@ -2531,6 +2535,8 @@ export default function PagamentosPage() {
         return (
           <div className="space-y-4">
             <div className="overflow-hidden rounded-[var(--radius)] border border-border bg-card shadow-[0_0_34px_rgba(15,23,42,0.28)]">
+              <div className="overflow-x-auto">
+              <div className="min-w-[640px]">
               <div className="grid grid-cols-5 border-b border-border/70">
                 {dailyData.map((day, i) => (
                   <div key={day.date} className="border-r border-border/70 px-4 py-5 text-center last:border-r-0">
@@ -2567,6 +2573,8 @@ export default function PagamentosPage() {
                   </div>
                 ))}
               </div>
+              </div>
+              </div>
             </div>
 
             <div className="grid overflow-hidden rounded-[var(--radius)] border border-border bg-card shadow-[0_0_34px_rgba(15,23,42,0.28)] xl:grid-cols-[1.15fr_1.05fr_0.55fr]">
@@ -2578,7 +2586,7 @@ export default function PagamentosPage() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-[240px_1fr] border-r border-border/70">
+              <div className="grid grid-cols-1 md:grid-cols-[240px_1fr] border-r border-border/70">
                 <div className="space-y-4 p-5">
                   {statusRows.map(({ status, total, pct }) => {
                     const palette = STATUS_PALETTE[status];

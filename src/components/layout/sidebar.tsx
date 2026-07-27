@@ -45,9 +45,10 @@ export function Sidebar({
   }
 
   const visibleItems = NAV_ITEMS.filter(item => {
+    if (isMobile && !item.mobile) return false;
     return permissions[item.key] || (item.key === 'otimizador' && role === 'Administrador');
   });
-  const showConfiguracoes = role === 'Administrador';
+  const showConfiguracoes = role === 'Administrador' && !isMobile;
   const isCollapsed = !isMobile && collapsed;
 
   const isHomeActive = pathname === '/inicio' || pathname.startsWith('/inicio/');

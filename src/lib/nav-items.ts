@@ -11,21 +11,23 @@ export type NavItem = {
   key: keyof Permission;
   /** Short caption shown under the title on the home page's quick-access tiles. */
   desc: string;
+  /** Aparece no menu mobile (drawer). Telas densas de desktop ficam de fora. */
+  mobile?: boolean;
 };
 
 // Single source of truth for the 12 permission-gated modules. Used by the sidebar
 // (src/components/layout/sidebar.tsx) and the home page quick-access grid so they
 // can never drift apart. The always-visible "Início" entry lives in the sidebar.
 export const NAV_ITEMS: NavItem[] = [
-  { name: 'Dashboard',   href: '/dashboard',   icon: LayoutDashboard, key: 'dashboard',   desc: 'Visão geral' },
+  { name: 'Dashboard',   href: '/dashboard',   icon: LayoutDashboard, key: 'dashboard',   desc: 'Visão geral', mobile: true },
   { name: 'Clientes',    href: '/clientes',    icon: Users,           key: 'clientes',    desc: 'Sua carteira' },
   { name: 'CRM',         href: '/crm',         icon: TableProperties, key: 'crm',         desc: 'Funil e atendimento' },
-  { name: 'Relatórios',  href: '/relatorios',  icon: FileText,        key: 'relatorios',  desc: 'Entregas e PDFs' },
-  { name: 'Radar',       href: '/resultados',  icon: BarChart3,       key: 'radar',       desc: 'Resultados' },
-  { name: 'Pagamentos',  href: '/pagamentos',  icon: WalletCards,     key: 'pagamentos',  desc: 'Investimento em mídia' },
+  { name: 'Relatórios',  href: '/relatorios',  icon: FileText,        key: 'relatorios',  desc: 'Entregas e PDFs', mobile: true },
+  { name: 'Radar',       href: '/resultados',  icon: BarChart3,       key: 'radar',       desc: 'Resultados', mobile: true },
+  { name: 'Pagamentos',  href: '/pagamentos',  icon: WalletCards,     key: 'pagamentos',  desc: 'Investimento em mídia', mobile: true },
   { name: 'Disparos',    href: '/disparos',    icon: MessageCircle,   key: 'disparos',    desc: 'Campanhas WhatsApp' },
   { name: 'Otimizador',  href: '/otimizador',  icon: WandSparkles,    key: 'otimizador',  desc: 'Ações de tráfego' },
-  { name: 'Luna IA',     href: '/agente',      icon: Bot,             key: 'luna_ia',     desc: 'Assistente' },
+  { name: 'Luna IA',     href: '/agente',      icon: Bot,             key: 'luna_ia',     desc: 'Assistente', mobile: true },
   { name: 'Cofre',       href: '/vault',       icon: ShieldCheck,     key: 'cofre',       desc: 'Credenciais' },
   { name: 'Automações',  href: '/automacoes',  icon: Zap,             key: 'automacoes',  desc: 'Fluxos automáticos' },
   { name: 'Integrações', href: '/integracoes', icon: Plug,            key: 'integracoes', desc: 'Conexões' },

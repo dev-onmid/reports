@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Home, Bell, Sparkles, ArrowRight, Megaphone, ShieldCheck, Clapperboard } from 'lucide-react';
 import { getAuthSession, useMyPermissions, type AuthSession } from '@/lib/auth-store';
 import { NAV_ITEMS } from '@/lib/nav-items';
+import { useIsMobile } from '@/lib/use-is-mobile';
 import { useInvestmentPayments } from '@/lib/payment-store';
 import { getHolidayPaymentImpacts, getTodayISO, formatDateBR } from '@/lib/holidays';
 import { APP_VERSION } from '@/lib/app-version';
@@ -124,7 +125,12 @@ export default function InicioPage() {
     : '';
   const phrase = now ? PHRASES[dayOfYear(now) % PHRASES.length] : PHRASES[0];
 
-  const quickAccess = useMemo(() => NAV_ITEMS.filter((item) => permissions[item.key]), [permissions]);
+  const isMobile = useIsMobile();
+  // No mobile, o acesso rápido segue a mesma régua do menu: só as telas adaptadas.
+  const quickAccess = useMemo(
+    () => NAV_ITEMS.filter((item) => permissions[item.key] && (!isMobile || item.mobile)),
+    [permissions, isMobile],
+  );
 
   const notes = useMemo<Note[]>(() => {
     const list: Note[] = [];

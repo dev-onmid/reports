@@ -321,7 +321,7 @@ export function CreativeLibrary({ clientId }: { clientId?: string }) {
                   </div>
                 </div>
 
-                <div className="mt-3 grid grid-cols-6 gap-1 text-center">
+                <div className="mt-3 grid grid-cols-3 sm:grid-cols-6 gap-1 text-center">
                   <div><p className="truncate text-[11px] font-black tracking-tight">{r.leads}</p><p className="text-[9px] uppercase text-muted-foreground">Leads</p></div>
                   <div title={`${r.conversas ?? 0} de ${r.leads} leads responderam depois do atendimento`}>
                     <p className="truncate text-[11px] font-black tracking-tight">{r.conversas ?? 0}<span className="ml-0.5 font-semibold text-[9px] text-muted-foreground">({r.leads > 0 ? Math.round(((r.conversas ?? 0) / r.leads) * 100) : 0}%)</span></p>
