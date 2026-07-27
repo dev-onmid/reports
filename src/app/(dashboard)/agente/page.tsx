@@ -1115,26 +1115,26 @@ export default function AgentePage() {
     <div className="relative flex h-full max-h-[calc(100vh-6rem)] flex-col gap-4 overflow-hidden text-slate-100">
       <div className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(circle_at_20%_10%,rgba(123,44,255,0.18),transparent_28%),radial-gradient(circle_at_78%_16%,rgba(85,245,47,0.10),transparent_24%),linear-gradient(180deg,#050914_0%,#070b16_48%,#05070d_100%)]" />
 
-      <div className="flex shrink-0 items-center justify-between rounded-2xl border border-white/8 bg-[#0b1020]/80 p-6 shadow-[0_22px_70px_rgba(0,0,0,0.28)] backdrop-blur-xl">
-        <div className="flex items-center gap-5">
-          <div className="relative flex h-16 w-16 items-center justify-center rounded-full border border-primary/45 bg-primary/10 shadow-[0_0_35px_rgba(85,245,47,0.24)]">
-            <Bot className="h-8 w-8 text-primary" />
-            <span className="absolute inset-[-8px] rounded-full border border-primary/15" />
+      <div className="flex shrink-0 items-center justify-between rounded-2xl border border-white/8 bg-[#0b1020]/80 p-3 md:p-6 shadow-[0_22px_70px_rgba(0,0,0,0.28)] backdrop-blur-xl">
+        <div className="flex items-center gap-3 md:gap-5">
+          <div className="relative flex h-10 w-10 md:h-16 md:w-16 items-center justify-center rounded-full border border-primary/45 bg-primary/10 shadow-[0_0_35px_rgba(85,245,47,0.24)]">
+            <Bot className="h-5 w-5 md:h-8 md:w-8 text-primary" />
+            <span className="absolute inset-[-8px] rounded-full border border-primary/15 max-md:hidden" />
           </div>
           <div>
             <h1 className="text-base font-bold tracking-tight text-white">Luna</h1>
             <p className="mt-1 text-sm text-slate-400">
-              Assistente de tráfego pago <span className="mx-1 text-primary">•</span>
+              <span className="max-md:hidden">Assistente de tráfego pago <span className="mx-1 text-primary">•</span></span>
               <span className="font-semibold text-primary">Online</span>
             </p>
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => setShowTasks(true)} className="h-12 gap-2 rounded-xl border-white/15 bg-transparent px-5 text-sm font-bold text-white hover:bg-white/5 hover:text-primary">
+          <Button variant="outline" size="sm" onClick={() => setShowTasks(true)} className="h-9 px-3 md:h-12 md:px-5 gap-2 rounded-xl border-white/15 bg-transparent text-sm font-bold text-white hover:bg-white/5 hover:text-primary">
             <CalendarClock className="w-4 h-4" />Agendamentos
           </Button>
           {isAdmin && (
-            <Button variant="outline" size="sm" onClick={() => setShowTraining(true)} className="h-12 gap-2 rounded-xl border-primary/35 bg-transparent px-7 text-sm font-bold text-white hover:bg-primary/10 hover:text-primary">
+            <Button variant="outline" size="sm" onClick={() => setShowTraining(true)} className="max-md:hidden h-9 px-3 md:h-12 md:px-7 gap-2 rounded-xl border-primary/35 bg-transparent text-sm font-bold text-white hover:bg-primary/10 hover:text-primary">
               <Settings2 className="w-4 h-4" />Treinar Luna
             </Button>
           )}
@@ -1152,10 +1152,10 @@ export default function AgentePage() {
           <div className="pointer-events-none absolute inset-x-20 top-24 h-80 rounded-[50%] border border-primary/10" />
           <div className="pointer-events-none absolute inset-x-28 top-28 h-72 rounded-[50%] border border-violet-400/10" />
 
-          <div className="relative min-h-full px-8 py-8">
+          <div className="relative min-h-full px-4 py-4 md:px-8 md:py-8">
             {isEmpty ? (
-              <div className="flex min-h-[560px] flex-col items-center justify-center text-center">
-                <div className="relative mb-8 flex h-28 w-28 items-center justify-center rounded-full border border-primary/25 bg-[#101827]/80 shadow-[0_0_60px_rgba(85,245,47,0.20)]">
+              <div className="flex min-h-[40vh] md:min-h-[560px] flex-col items-center justify-center text-center">
+                <div className="max-md:hidden relative mb-8 flex h-28 w-28 items-center justify-center rounded-full border border-primary/25 bg-[#101827]/80 shadow-[0_0_60px_rgba(85,245,47,0.20)]">
                   <div className="absolute inset-5 rounded-full bg-primary/10 blur-xl" />
                   <Bot className="relative h-14 w-14 text-primary" />
                   <span className="absolute inset-[-18px] rounded-full border border-white/8" />
@@ -1163,12 +1163,12 @@ export default function AgentePage() {
                 <h2 className="text-xl font-bold tracking-tight text-white">
                   Olá! Sou a <span className="text-primary">Luna</span>
                 </h2>
-                <p className="mt-4 text-xl text-slate-300">Seu copiloto de tráfego pago e gestão.</p>
-                <p className="mt-6 max-w-xl text-base leading-relaxed text-slate-400">
+                <p className="mt-2 md:mt-4 text-base md:text-xl text-slate-300">Seu copiloto de tráfego pago e gestão.</p>
+                <p className="max-md:hidden mt-6 max-w-xl text-base leading-relaxed text-slate-400">
                   Tenho acesso ao sistema — clientes, campanhas, saldos, CRM, relatórios, pagamentos e métricas — para te ajudar a tomar decisões mais rápidas e inteligentes.
                 </p>
 
-                <div className="mt-10 grid w-full max-w-3xl gap-3 sm:grid-cols-2">
+                <div className="max-md:hidden mt-10 grid w-full max-w-3xl gap-3 sm:grid-cols-2">
                   {[
                     { text: 'Quais clientes estão ativos?', sub: 'Veja os clientes com campanhas ativas', icon: Users, color: 'text-primary' },
                     { text: 'Gera um relatório do cliente X', sub: 'Performance, gastos e resultados', icon: FileText, color: 'text-violet-400' },
@@ -1200,7 +1200,7 @@ export default function AgentePage() {
                 </div>
                 <button
                   onClick={() => setShowMoreSuggestions(p => !p)}
-                  className="mt-7 inline-flex items-center gap-2 rounded-xl border border-white/10 bg-[#0c1220] px-5 py-2.5 text-sm font-medium text-slate-300 hover:border-white/20 hover:text-white transition-colors"
+                  className="max-md:hidden mt-7 inline-flex items-center gap-2 rounded-xl border border-white/10 bg-[#0c1220] px-5 py-2.5 text-sm font-medium text-slate-300 hover:border-white/20 hover:text-white transition-colors"
                 >
                   {showMoreSuggestions ? 'Ver menos' : 'Ver mais sugestões'}
                   <ChevronDown className={cn('h-4 w-4 transition-transform', showMoreSuggestions && 'rotate-180')} />

@@ -424,7 +424,55 @@ export default function RedesSociaisPage() {
       {/* ── Lista ── */}
       {(loading || hasAnySnapshot) && (
         <div className="bg-card border border-border rounded-[var(--radius)] overflow-hidden">
-          <div className="overflow-x-auto">
+          {/* Mobile: lista compacta — selo de dias colado no nome, sem scroll lateral */}
+          <div className="md:hidden divide-y divide-border">
+            {loading && (
+              <p className="px-4 py-10 text-center text-sm text-muted-foreground">Carregando…</p>
+            )}
+            {!loading && filtered.length === 0 && (
+              <p className="px-4 py-10 text-center text-sm text-muted-foreground">
+                {showHidden ? 'Nenhum cliente oculto.' : 'Nenhum cliente encontrado com esses filtros.'}
+              </p>
+            )}
+            {!loading && filtered.map(({ client, snap, sev, days }) => {
+              const style = SEV_STYLE[sev];
+              const refreshing = refreshingIds.has(client.id);
+              return (
+                <div key={client.id} className={cn('border-l-[3px] px-3 py-3 flex items-center gap-3', style.border)}>
+                  <ClientAvatar clientId={client.id} name={client.name} size="sm" />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <p className="text-sm font-bold truncate">{client.name}</p>
+                      <span
+                        className={cn('shrink-0 inline-block rounded-full border px-2 py-0.5 text-[10px] font-bold whitespace-nowrap', style.badge)}
+                        title={snap?.error ?? (snap?.lastPostAt ? new Date(snap.lastPostAt).toLocaleString('pt-BR') : undefined)}
+                      >
+                        {sev === 'sem' ? (snap?.error ? 'Erro' : snap ? 'Sem IG' : 'Nunca coletado') : daysBadgeText(days)}
+                      </span>
+                    </div>
+                    <p className="text-xs text-muted-foreground truncate">
+                      {snap?.igUsername ? `@${snap.igUsername}` : client.segment}
+                      {snap?.lastPostAt && sev !== 'sem' && (
+                        <span className="text-muted-foreground/60"> · último {new Date(snap.lastPostAt).toLocaleDateString('pt-BR')}</span>
+                      )}
+                    </p>
+                    <p className="mt-0.5 text-[11px] text-muted-foreground/70 tabular-nums">
+                      {fmt(snap?.posts30d ?? null)} posts 30d · {fmt(snap?.followers ?? null)} seg. · alcance {fmt(snap?.reach28d ?? null)}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => void refreshOne(client.id)}
+                    disabled={refreshing || refreshingAll}
+                    title="Atualizar este cliente agora"
+                    className="shrink-0 flex h-8 w-8 items-center justify-center rounded-[var(--radius)] border border-border text-muted-foreground transition-colors hover:border-primary/50 hover:text-foreground disabled:opacity-50"
+                  >
+                    <RefreshCw className={cn('h-3.5 w-3.5', refreshing && 'animate-spin')} />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+          <div className="hidden md:block overflow-x-auto">
             <table className="min-w-[1150px] w-full">
               <thead>
                 <tr className="border-b border-border bg-muted/20">
