@@ -1365,12 +1365,16 @@ export default function RelatoriosPage() {
                     const now = new Date();
                     const y = now.getFullYear();
                     const m = now.getMonth();
+                    // Janela de N dias terminando HOJE (inclusiva: 7d = hoje + 6 anteriores).
+                    const ultimosDias = (n: number) => fmt(new Date(y, m, now.getDate() - (n - 1)));
                     const shortcuts = [
                       { label: 'Mês passado', from: fmt(new Date(y, m - 1, 1)), to: fmt(new Date(y, m, 0)) },
-                      { label: 'Este mês', from: fmt(new Date(y, m, 1)), to: fmt(new Date(y, m + 1, 0)) },
-                      { label: 'Últimos 30d', from: fmt(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 29)), to: fmt(now) },
-                      { label: 'Últimos 90d', from: fmt(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 89)), to: fmt(now) },
-                      { label: 'Este ano', from: fmt(new Date(y, 0, 1)), to: fmt(new Date(y, 11, 31)) },
+                      { label: 'Mês atual',   from: fmt(new Date(y, m, 1)),     to: fmt(new Date(y, m + 1, 0)) },
+                      { label: 'Últimos 7d',  from: ultimosDias(7),  to: fmt(now) },
+                      { label: 'Últimos 15d', from: ultimosDias(15), to: fmt(now) },
+                      { label: 'Últimos 30d', from: ultimosDias(30), to: fmt(now) },
+                      { label: 'Últimos 90d', from: ultimosDias(90), to: fmt(now) },
+                      { label: 'Este ano',    from: fmt(new Date(y, 0, 1)), to: fmt(new Date(y, 11, 31)) },
                     ];
                     return shortcuts.map(s => {
                       const active = genForm.from === s.from && genForm.to === s.to;
@@ -1387,35 +1391,6 @@ export default function RelatoriosPage() {
                           )}
                         >
                           {s.label}
-                        </button>
-                      );
-                    });
-                  })()}
-                </div>
-                {/* Meses recentes — 1 clique seleciona o mês inteiro, sem precisar do calendário */}
-                <div className="flex flex-wrap gap-1.5 pt-0.5">
-                  {(() => {
-                    const fmt = (d: Date) => d.toISOString().split('T')[0];
-                    const MESES = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
-                    const now = new Date();
-                    return Array.from({ length: 6 }).map((_, idx) => {
-                      const d = new Date(now.getFullYear(), now.getMonth() - idx, 1);
-                      const from = fmt(new Date(d.getFullYear(), d.getMonth(), 1));
-                      const to = fmt(new Date(d.getFullYear(), d.getMonth() + 1, 0));
-                      const active = genForm.from === from && genForm.to === to;
-                      return (
-                        <button
-                          key={from}
-                          type="button"
-                          onClick={() => setGenForm(f => ({ ...f, from, to }))}
-                          className={cn(
-                            'px-2.5 py-1 rounded-md text-xs font-semibold border transition-colors',
-                            active
-                              ? 'bg-violet-600 border-violet-500 text-white'
-                              : 'bg-background border-border text-muted-foreground hover:border-violet-500/50 hover:text-foreground',
-                          )}
-                        >
-                          {MESES[d.getMonth()]}/{String(d.getFullYear()).slice(2)}
                         </button>
                       );
                     });
