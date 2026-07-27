@@ -1,5 +1,22 @@
 @AGENTS.md
 
+## Alerta de saldo baixo — conserto completo: o cron nunca rodou (2026-07-27)
+
+Matheus perguntou se o alerta de saldo existia e como estava. Existia desde 22/06 (commit `62fadc6`) e **nunca disparou em produção**. Causas empilhadas, todas corrigidas:
+
+- **401 diário (causa raiz)**: `vercel.json` usava `"path": "/api/alerts/balance-cron?secret=${CRON_SECRET}"` — a Vercel **NÃO interpola env var no `path` de cron**, mandava a string literal; e a rota só lia query param, ignorando o header `Authorization: Bearer $CRON_SECRET` que a Vercel realmente envia. Agora `isAuthorized()` aceita **Bearer OU query**, contra a família `CRON_SECRET`/`REPORTS_CRON_SECRET`/`CRM_CRON_SECRET` (padrão do projeto: `CRON_SECRET` é *Sensitive* na Vercel, ilegível, por isso os workflows usam `REPORTS_CRON_SECRET`). Path do `vercel.json` limpo (só a rota). ⚠️ **Os outros 2 crons do `vercel.json` (otimizador/weekly, leadlovers/worker) têm o MESMO bug de `${CRON_SECRET}`** — são backup (o primário é GitHub Actions), mas o backup está morto.
+- **Era o único cron sem GitHub Actions** → `.github/workflows/balance-alert.yml` (`0 10 * * *` = 07h BRT + `workflow_dispatch`). **Secret necessário: `BALANCE_ALERT_URL`** = `https://reports.onmid.app/api/alerts/balance-cron?secret=<REPORTS_CRON_SECRET>`.
+- **Evolution nunca funcionaria**: o envio ignorava `zapi_clients.provider` e mandava tudo pra `api.z-api.io` — mas hoje o app **só cria instância Evolution**. Novo `WhatsAppTarget` + `buildTarget()` (em `src/lib/balance-alert-configs.ts`, lib nova compartilhada) ramificam `sendEvolutionText` vs `sendZapiText`. O **picker de grupos da UI tinha o mesmo bug** (só chamava a rota Z-API `extract/chats`, que retorna vazio pra Evolution) → agora escolhe `/api/otimizador/whatsapp-groups` quando o provider é evolution.
+- **Régua nova por ANTECEDÊNCIA EM DIAS** (decisão do Matheus; a antiga era `saldo < gasto de ontem` — avisava em cima da hora e **nunca** avisava conta parada, pois `spend=0` não dispara): `ritmoDiario = max(média 7d, ontem)` (pega quem escalou ontem; errar pra cima = avisar cedo, que é a falha barata), `diasRestantes = saldo / ritmo`, alerta quando `diasRestantes < dias_antecedencia` (coluna nova, default **3**, editável inline por destino na tela). Meta usa **1 chamada** com `time_increment=1` (janela + ontem no mesmo round-trip, por causa do teto de 60s); Google idem com `segments.date BETWEEN`. Datas resolvidas em **BRT** (`brtDateStr`) — antes usava o relógio UTC do servidor.
+- **Dedupe por destino**: a chave era `(account_id, alert_date)` sem o config → **o 1º grupo queimava a vaga do dia e todos os outros ficavam mudos**. Agora `(account_id, config_id, alert_date)` (drop da constraint antiga + índice novo no `ensureAlertLogTable`).
+- **Log só depois do envio**: antes o INSERT vinha ANTES do `sendWhatsapp` e não era revertido — falha de envio **engolia o alerta por 24h em silêncio**. Agora só grava se WhatsApp **ou** e-mail deu ok.
+- **E-mail de backup** (mesmo padrão do Webshare/Evolution: Gmail conectado + `WEBSHARE_ALERT_EMAIL`, ou `email_to` por destino). Importante porque o WhatsApp depende do proxy Webshare — se ele cai, o alerta de saldo caía junto sem ninguém saber.
+- **Mensagem agregada**: era 1 mensagem por conta (dia ruim = spam no grupo); agora 1 mensagem listando todas, com saldo/dura/ritmo por conta.
+- **Rotas de config estavam 100% abertas** (GET/POST/PATCH/DELETE/test sem auth — dava pra qualquer anônimo listar grupos e forçar disparo). Agora exigem `getCallerScope` unrestricted; a UI passa `callerHeaders()` (que também faltava no fetch de `/api/disparos/clients`).
+- **`ensureBalanceAlertTables` no cron**: ele fazia SELECT numa tabela criada só pela tela de Pagamentos.
+- ⚠️ `CLAUDE.md` listava uma tabela `balance_alerts` que **não existe** — as reais são `balance_alert_configs` e `balance_alerts_log` (ambas criadas inline, sem `.sql`).
+- ✅ Verificado: tsc + `next build` limpos; 25 asserts de unidade (`scratchpad/test-balance.mjs`: ritmo, runway, seleção pela régua, regressão do bug antigo, mensagem/e-mail); preview com fetch mockado (linha com provider+e-mail+input de dias, picker escolhendo o endpoint certo por provider, POST/PATCH/test com header de auth, clamp 99→30, sem erro de console). ⚠️ Graph/GAQL/Z-API/Gmail reais exigem produção — validar com "Testar agora" depois de configurar o destino.
+
 ## Biblioteca de Criativos — ranking de anúncios por resultado real do CRM (2026-07-25)
 
 Pedido do Matheus: visão compilada de "top ativos" (mais vendas/receita/leads, maior CPL, mais agendamento/negociação) em 3 lugares. Alimentada pela atribuição CTWA do CRM (destravada pelo conserto do webhook).
@@ -174,7 +191,7 @@ src/
 
 - Driver: `pg` (Pool com SSL). Conexão em `src/lib/server-db.ts`.
 - Migrations em `src/lib/db/*.sql` (16 arquivos). Aplicar em ordem por nome.
-- Tabelas principais: `users`, `clients`, `diagnostic_reports`, `crm_funnels`, `crm_stages`, `crm_tags`, `meta_automations`, `email_campaigns`, `balance_alerts`, `client_categories`.
+- Tabelas principais: `users`, `clients`, `diagnostic_reports`, `crm_funnels`, `crm_stages`, `crm_tags`, `meta_automations`, `email_campaigns`, `balance_alert_configs`, `client_categories`.
 - Variável de ambiente obrigatória: `DATABASE_URL`.
 
 ---

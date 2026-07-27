@@ -1,43 +1,79 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
-import { getLowBalanceAlerts, sendLowBalanceAlerts } from '@/lib/balance-alerts';
+import { getAccountBalances, sendBalanceAlerts, DEFAULT_DIAS_ANTECEDENCIA } from '@/lib/balance-alerts';
+import {
+  ensureBalanceAlertTables,
+  buildTarget,
+  BALANCE_CONFIG_SELECT,
+  type BalanceAlertConfigRow,
+} from '@/lib/balance-alert-configs';
 
 export const maxDuration = 60;
 
+/**
+ * Vercel calls crons with `Authorization: Bearer $CRON_SECRET` and does NOT
+ * interpolate `${CRON_SECRET}` inside the cron `path` — the old query-param-only
+ * check meant this route answered 401 every single day. GitHub Actions passes the
+ * secret in the query string instead, so both forms are accepted, against the
+ * same family of secrets the other crons use (CRON_SECRET is marked Sensitive on
+ * Vercel and can't be read back, so the workflows use REPORTS_CRON_SECRET).
+ */
+function isAuthorized(req: NextRequest): boolean {
+  const secrets = [
+    process.env.CRON_SECRET,
+    process.env.REPORTS_CRON_SECRET,
+    process.env.CRM_CRON_SECRET,
+  ].filter((s): s is string => Boolean(s));
+  if (secrets.length === 0) return false;
+
+  const urlSecret = req.nextUrl.searchParams.get('secret');
+  const authHeader = req.headers.get('authorization');
+  return secrets.some(s => urlSecret === s || authHeader === `Bearer ${s}`);
+}
+
 export async function GET(request: NextRequest) {
-  const secret = request.nextUrl.searchParams.get('secret');
-  if (secret !== process.env.CRON_SECRET) {
+  if (!isAuthorized(request)) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   const pool = makeServerPool();
-  let configs: { id: string; whatsapp_group: string; zapi_instance_id: string | null; zapi_token: string | null; zapi_security_token: string | null }[] = [];
+  let configs: BalanceAlertConfigRow[] = [];
   try {
-    const { rows } = await pool.query(`
-      SELECT bac.id, bac.whatsapp_group, z.instance_id AS zapi_instance_id, z.token AS zapi_token, z.security_token AS zapi_security_token
-      FROM public.balance_alert_configs bac
-      LEFT JOIN public.zapi_clients z ON z.id = bac.zapi_client_id AND z.active = true
-      WHERE bac.active = true
-    `);
+    // The cron may well be the first thing to touch these tables on a fresh
+    // database — it used to SELECT blindly and throw if the Pagamentos screen
+    // had never been opened.
+    await ensureBalanceAlertTables(pool);
+    const { rows } = await pool.query<BalanceAlertConfigRow>(
+      `${BALANCE_CONFIG_SELECT} WHERE bac.active = true`,
+    );
     configs = rows;
   } finally {
     await pool.end();
   }
 
-  const activeConfigs = configs.filter(c => c.zapi_instance_id && c.zapi_token);
-  if (activeConfigs.length === 0) return Response.json({ ok: true, alerts: 0, configs: 0 });
+  if (configs.length === 0) return Response.json({ ok: true, alerts: 0, configs: 0 });
 
-  const alerts = await getLowBalanceAlerts();
+  const accounts = await getAccountBalances();
   const results = [];
-  for (const cfg of activeConfigs) {
-    const result = await sendLowBalanceAlerts(
-      { instanceId: cfg.zapi_instance_id!, token: cfg.zapi_token!, clientToken: cfg.zapi_security_token ?? '' },
-      cfg.whatsapp_group,
-      alerts,
-      { force: false },
-    );
-    results.push({ configId: cfg.id, ...result });
+  for (const cfg of configs) {
+    const target = buildTarget(cfg);
+    if (!target) {
+      results.push({ configId: cfg.id, whatsapp: 'instância inativa ou sem credenciais', email: 'skipped' });
+      continue;
+    }
+    const r = await sendBalanceAlerts(target, accounts, {
+      configId: cfg.id,
+      diasAntecedencia: cfg.dias_antecedencia ?? DEFAULT_DIAS_ANTECEDENCIA,
+      emailTo: cfg.email_to ?? undefined,
+    });
+    results.push({
+      configId: cfg.id,
+      whatsapp: r.whatsapp,
+      email: r.email,
+      alerted: r.alerted.length,
+      skipped: r.skipped.length,
+    });
   }
 
-  return Response.json({ ok: true, totalAlerts: alerts.length, configs: results.length, results });
+  return Response.json({ ok: true, totalChecked: accounts.length, configs: results.length, results });
 }

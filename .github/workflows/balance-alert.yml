@@ -1,0 +1,41 @@
+name: Alerta de saldo baixo (contas de anúncio)
+
+# Checa diariamente o saldo das contas Meta/Google vinculadas a clientes pré-pagos
+# e avisa no grupo de WhatsApp (+ e-mail) as que não cobrem os próximos dias no
+# ritmo atual. A rota /api/alerts/balance-cron decide internamente quem alertar e
+# não repete o mesmo aviso da mesma conta no mesmo dia.
+#
+# Primário aqui (GitHub Actions), igual aos demais crons do projeto — o cron da
+# Vercel fica como backup.
+
+on:
+  schedule:
+    # Todo dia às 07h BRT (10h UTC)
+    - cron: '0 10 * * *'
+  workflow_dispatch: {}   # permite rodar manualmente pelo botão "Run workflow"
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Disparar checagem de saldo
+        run: |
+          echo "Checando saldos em $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+
+          URL="${{ secrets.BALANCE_ALERT_URL }}"
+          if [ -z "$URL" ]; then
+            echo "::error::Secret BALANCE_ALERT_URL não configurado no repositório."
+            exit 1
+          fi
+
+          HTTP_CODE=$(curl -s -o /tmp/response.json -w "%{http_code}" -X GET "$URL")
+          echo "HTTP $HTTP_CODE"
+          echo "=== Resposta ==="
+          cat /tmp/response.json 2>/dev/null && echo "" || echo "(vazio)"
+          echo "================"
+
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "::error::balance-cron retornou HTTP $HTTP_CODE"
+            exit 1
+          fi

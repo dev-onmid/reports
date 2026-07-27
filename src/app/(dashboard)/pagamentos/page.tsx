@@ -34,6 +34,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { useClients } from '@/lib/client-store';
+import { callerHeaders } from '@/lib/auth-store';
 import {
   type InvestmentPayment,
   type PaymentChannel,
@@ -306,46 +307,64 @@ function CriticalBalanceAlerts({
   );
 }
 
-// ── Daily low-balance WhatsApp alerts (balance < yesterday's spend) ──────────
+// ── Daily low-balance WhatsApp alerts (runway shorter than N days) ───────────
 type BalanceAlertConfig = {
   id: string; whatsapp_group: string; zapi_client_id: string | null;
-  zapi_name: string | null; active: boolean; created_at: string;
+  zapi_name: string | null; zapi_provider: string | null;
+  dias_antecedencia: number | null; email_to: string | null;
+  active: boolean; created_at: string;
 };
 
-type ZapiClientOption = { id: string; name: string };
+type ZapiClientOption = { id: string; name: string; provider: string | null };
+
+type GroupOption = { id: string; name: string };
 
 function BalanceAlertSettings() {
   const [configs, setConfigs] = useState<BalanceAlertConfig[]>([]);
   const [zapiClients, setZapiClients] = useState<ZapiClientOption[]>([]);
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ whatsappGroup: '', zapiClientId: '' });
+  const [form, setForm] = useState({ whatsappGroup: '', zapiClientId: '', diasAntecedencia: 3, emailTo: '' });
   const [saving, setSaving] = useState(false);
   const [testingId, setTestingId] = useState<string | null>(null);
   const [groupPickerOpen, setGroupPickerOpen] = useState(false);
   const [groupSearch, setGroupSearch] = useState('');
-  const [zapiGroups, setZapiGroups] = useState<{ phone: string; name: string }[]>([]);
+  const [zapiGroups, setZapiGroups] = useState<GroupOption[]>([]);
   const [loadingGroups, setLoadingGroups] = useState(false);
   const [expanded, setExpanded] = useState(false);
 
   useEffect(() => {
     Promise.all([
-      fetch('/api/alerts/balance-configs').then(r => r.ok ? r.json() : []),
-      fetch('/api/disparos/clients').then(r => r.ok ? r.json() : []),
+      fetch('/api/alerts/balance-configs', { headers: callerHeaders() }).then(r => r.ok ? r.json() : []),
+      fetch('/api/disparos/clients', { headers: callerHeaders() }).then(r => r.ok ? r.json() : []),
     ]).then(([cfgs, zapis]) => {
-      setConfigs(cfgs as BalanceAlertConfig[]);
-      setZapiClients(zapis as ZapiClientOption[]);
+      setConfigs(Array.isArray(cfgs) ? cfgs as BalanceAlertConfig[] : []);
+      setZapiClients(Array.isArray(zapis) ? zapis as ZapiClientOption[] : []);
     }).catch(() => {});
   }, []);
 
+  // Evolution and Z-API expose groups through different endpoints — the picker
+  // used to always call the Z-API one, so it found nothing for the Evolution
+  // instances that are the only kind the app creates today.
   useEffect(() => {
-    if (!form.zapiClientId) return;
+    if (!form.zapiClientId) { setZapiGroups([]); return; }
+    const provider = zapiClients.find(z => z.id === form.zapiClientId)?.provider ?? 'zapi';
+    const url = provider === 'evolution'
+      ? `/api/otimizador/whatsapp-groups?zapiClientId=${form.zapiClientId}`
+      : `/api/disparos/extract/chats?clientId=${form.zapiClientId}&type=groups`;
+
     setLoadingGroups(true);
-    fetch(`/api/disparos/extract/chats?clientId=${form.zapiClientId}&type=groups`)
+    fetch(url, { headers: callerHeaders() })
       .then(r => r.ok ? r.json() : [])
-      .then((rows: { phone: string; name: string }[]) => setZapiGroups(Array.isArray(rows) ? rows : []))
+      .then((rows: unknown) => {
+        if (!Array.isArray(rows)) { setZapiGroups([]); return; }
+        setZapiGroups((rows as Record<string, string>[]).map(g => ({
+          id: String(g.jid ?? g.phone ?? ''),
+          name: String(g.nome ?? g.name ?? g.jid ?? g.phone ?? ''),
+        })).filter(g => g.id));
+      })
       .catch(() => setZapiGroups([]))
       .finally(() => setLoadingGroups(false));
-  }, [form.zapiClientId]);
+  }, [form.zapiClientId, zapiClients]);
 
   async function saveConfig() {
     if (!form.whatsappGroup || !form.zapiClientId) return;
@@ -353,45 +372,73 @@ function BalanceAlertSettings() {
     try {
       const res = await fetch('/api/alerts/balance-configs', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ whatsappGroup: form.whatsappGroup, zapiClientId: form.zapiClientId }),
+        headers: { 'Content-Type': 'application/json', ...callerHeaders() },
+        body: JSON.stringify({
+          whatsappGroup: form.whatsappGroup,
+          zapiClientId: form.zapiClientId,
+          diasAntecedencia: form.diasAntecedencia,
+          emailTo: form.emailTo,
+        }),
       });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({})) as { error?: string };
+        alert(err.error ?? 'Erro ao salvar destino.');
+        return;
+      }
       const created = await res.json() as BalanceAlertConfig;
-      setConfigs(prev => [{ ...created, zapi_name: zapiClients.find(z => z.id === form.zapiClientId)?.name ?? null }, ...prev]);
+      const inst = zapiClients.find(z => z.id === form.zapiClientId);
+      setConfigs(prev => [{ ...created, zapi_name: inst?.name ?? null, zapi_provider: inst?.provider ?? null }, ...prev]);
       setShowForm(false);
-      setForm({ whatsappGroup: '', zapiClientId: '' });
+      setForm({ whatsappGroup: '', zapiClientId: '', diasAntecedencia: 3, emailTo: '' });
     } finally {
       setSaving(false);
     }
   }
 
-  async function toggleActive(cfg: BalanceAlertConfig) {
+  async function patchConfig(cfg: BalanceAlertConfig, patch: Record<string, unknown>) {
     await fetch(`/api/alerts/balance-configs/${cfg.id}`, {
-      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ active: !cfg.active }),
+      method: 'PATCH', headers: { 'Content-Type': 'application/json', ...callerHeaders() },
+      body: JSON.stringify(patch),
     });
+  }
+
+  async function toggleActive(cfg: BalanceAlertConfig) {
+    await patchConfig(cfg, { active: !cfg.active });
     setConfigs(prev => prev.map(c => c.id === cfg.id ? { ...c, active: !c.active } : c));
+  }
+
+  async function updateDias(cfg: BalanceAlertConfig, raw: string) {
+    const dias = Math.min(30, Math.max(1, Math.round(Number(raw) || 3)));
+    if (dias === (cfg.dias_antecedencia ?? 3)) return;
+    setConfigs(prev => prev.map(c => c.id === cfg.id ? { ...c, dias_antecedencia: dias } : c));
+    await patchConfig(cfg, { diasAntecedencia: dias });
   }
 
   async function deleteConfig(id: string) {
     if (!confirm('Excluir esse destino de alertas?')) return;
-    await fetch(`/api/alerts/balance-configs/${id}`, { method: 'DELETE' });
+    await fetch(`/api/alerts/balance-configs/${id}`, { method: 'DELETE', headers: callerHeaders() });
     setConfigs(prev => prev.filter(c => c.id !== id));
   }
 
   async function testConfig(cfg: BalanceAlertConfig) {
     setTestingId(cfg.id);
     try {
-      const res = await fetch(`/api/alerts/balance-configs/${cfg.id}/test`, { method: 'POST' });
-      const data = await res.json().catch(() => ({})) as { ok?: boolean; error?: string; totalChecked?: number; sent?: unknown[] };
+      const res = await fetch(`/api/alerts/balance-configs/${cfg.id}/test`, { method: 'POST', headers: callerHeaders() });
+      const data = await res.json().catch(() => ({})) as {
+        ok?: boolean; error?: string; totalChecked?: number; atRisk?: number;
+        alerted?: number; whatsapp?: string; email?: string; diasAntecedencia?: number;
+      };
       if (!res.ok || !data.ok) {
         alert(data.error ?? 'Erro ao testar alertas.');
         return;
       }
-      const sentCount = Array.isArray(data.sent) ? data.sent.length : 0;
-      alert(sentCount > 0
-        ? `${sentCount} alerta(s) de saldo baixo enviados no grupo.`
-        : `Nenhuma conta com saldo abaixo do gasto de ontem agora (${data.totalChecked ?? 0} conta(s) verificada(s)).`);
+      if ((data.alerted ?? 0) > 0) {
+        alert(`${data.alerted} conta(s) com saldo curto avisadas.\n\nWhatsApp: ${data.whatsapp}\nE-mail: ${data.email}`);
+      } else if ((data.atRisk ?? 0) > 0) {
+        alert(`${data.atRisk} conta(s) em risco, mas o envio não saiu.\n\nWhatsApp: ${data.whatsapp}\nE-mail: ${data.email}`);
+      } else {
+        alert(`Nenhuma conta com saldo abaixo de ${data.diasAntecedencia ?? 3} dia(s) agora (${data.totalChecked ?? 0} conta(s) verificada(s)).`);
+      }
     } finally {
       setTestingId(null);
     }
@@ -407,7 +454,7 @@ function BalanceAlertSettings() {
           <div>
             <p className="text-sm font-bold uppercase tracking-wider">Alertas diários de saldo no WhatsApp</p>
             <p className="text-xs text-muted-foreground">
-              Todo dia às 7h, avisa no grupo se o saldo disponível for menor que o gasto de ontem.
+              Todo dia às 7h, avisa no grupo (e por e-mail) as contas cujo saldo não cobre os próximos dias no ritmo atual.
             </p>
           </div>
         </div>
@@ -423,9 +470,22 @@ function BalanceAlertSettings() {
             <div key={cfg.id} className="flex items-center justify-between gap-3 rounded-lg border border-border bg-background/50 px-3 py-2">
               <div className="min-w-0">
                 <p className="text-sm font-medium truncate">{cfg.whatsapp_group}</p>
-                <p className="text-[11px] text-muted-foreground">via {cfg.zapi_name ?? 'instância removida'}</p>
+                <p className="text-[11px] text-muted-foreground truncate">
+                  via {cfg.zapi_name ?? 'instância removida'}
+                  {cfg.zapi_provider && <span className="uppercase"> · {cfg.zapi_provider}</span>}
+                  {cfg.email_to && <span> · e-mail: {cfg.email_to}</span>}
+                </p>
               </div>
               <div className="flex items-center gap-1 shrink-0">
+                <label className="flex items-center gap-1 text-[10px] text-muted-foreground" title="Avisar quando o saldo cobrir menos que este número de dias">
+                  <input
+                    type="number" min={1} max={30}
+                    defaultValue={cfg.dias_antecedencia ?? 3}
+                    onBlur={e => updateDias(cfg, e.target.value)}
+                    className="w-11 px-1.5 py-1 text-center bg-background border border-border rounded-md text-foreground text-xs focus:outline-none focus:ring-1 focus:ring-violet-500/50"
+                  />
+                  dias
+                </label>
                 <button
                   title={cfg.active ? 'Ativo — clique para desativar' : 'Inativo — clique para ativar'}
                   onClick={() => toggleActive(cfg)}
@@ -456,14 +516,18 @@ function BalanceAlertSettings() {
             <div className="rounded-lg border border-border p-3 space-y-3">
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1.5">
-                  <label className="text-xs text-muted-foreground font-medium">Instância Z-API</label>
+                  <label className="text-xs text-muted-foreground font-medium">Instância de WhatsApp</label>
                   <select
                     value={form.zapiClientId}
                     onChange={e => setForm(f => ({ ...f, zapiClientId: e.target.value, whatsappGroup: '' }))}
                     className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg text-foreground focus:outline-none focus:ring-1 focus:ring-violet-500/50"
                   >
                     <option value="">Selecionar instância...</option>
-                    {zapiClients.map(z => <option key={z.id} value={z.id}>{z.name}</option>)}
+                    {zapiClients.map(z => (
+                      <option key={z.id} value={z.id}>
+                        {z.name}{z.provider ? ` (${z.provider})` : ''}
+                      </option>
+                    ))}
                   </select>
                 </div>
                 <div className="space-y-1.5">
@@ -479,7 +543,7 @@ function BalanceAlertSettings() {
                           : loadingGroups
                             ? 'Carregando grupos...'
                             : form.whatsappGroup
-                              ? (zapiGroups.find(g => g.phone === form.whatsappGroup)?.name ?? form.whatsappGroup)
+                              ? (zapiGroups.find(g => g.id === form.whatsappGroup)?.name ?? form.whatsappGroup)
                               : 'Selecionar grupo...'}
                       </span>
                       <ChevronDown className="w-4 h-4 text-muted-foreground shrink-0" />
@@ -499,9 +563,9 @@ function BalanceAlertSettings() {
                           .filter(g => g.name.toLowerCase().includes(groupSearch.toLowerCase()))
                           .map(g => (
                             <button
-                              type="button" key={g.phone}
-                              onClick={() => { setForm(f => ({ ...f, whatsappGroup: g.phone })); setGroupPickerOpen(false); setGroupSearch(''); }}
-                              className={cn('w-full flex items-center gap-2 px-3 py-1.5 text-sm text-left hover:bg-muted/60 transition-colors', g.phone === form.whatsappGroup && 'bg-muted/40')}
+                              type="button" key={g.id}
+                              onClick={() => { setForm(f => ({ ...f, whatsappGroup: g.id })); setGroupPickerOpen(false); setGroupSearch(''); }}
+                              className={cn('w-full flex items-center gap-2 px-3 py-1.5 text-sm text-left hover:bg-muted/60 transition-colors', g.id === form.whatsappGroup && 'bg-muted/40')}
                             >
                               <span className="text-foreground truncate">{g.name}</span>
                             </button>
@@ -510,9 +574,33 @@ function BalanceAlertSettings() {
                     </PopoverContent>
                   </Popover>
                 </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs text-muted-foreground font-medium">Avisar com quantos dias de antecedência</label>
+                  <input
+                    type="number" min={1} max={30}
+                    value={form.diasAntecedencia}
+                    onChange={e => setForm(f => ({ ...f, diasAntecedencia: Number(e.target.value) }))}
+                    className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg text-foreground focus:outline-none focus:ring-1 focus:ring-violet-500/50"
+                  />
+                  <p className="text-[10px] text-muted-foreground">
+                    Dispara quando o saldo cobrir menos que isso no ritmo médio dos últimos 7 dias.
+                  </p>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs text-muted-foreground font-medium">E-mail de backup (opcional)</label>
+                  <input
+                    type="email" placeholder="financeiro@empresa.com"
+                    value={form.emailTo}
+                    onChange={e => setForm(f => ({ ...f, emailTo: e.target.value }))}
+                    className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-violet-500/50"
+                  />
+                  <p className="text-[10px] text-muted-foreground">
+                    Chega mesmo se o WhatsApp estiver fora. Em branco usa a env WEBSHARE_ALERT_EMAIL.
+                  </p>
+                </div>
               </div>
               <div className="flex justify-end gap-2">
-                <button onClick={() => { setShowForm(false); setForm({ whatsappGroup: '', zapiClientId: '' }); }} className="px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors">
+                <button onClick={() => { setShowForm(false); setForm({ whatsappGroup: '', zapiClientId: '', diasAntecedencia: 3, emailTo: '' }); }} className="px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors">
                   Cancelar
                 </button>
                 <Button onClick={saveConfig} disabled={saving || !form.whatsappGroup || !form.zapiClientId} className="bg-violet-600 hover:bg-violet-700 text-white gap-2 text-xs h-8">
