@@ -10,6 +10,22 @@ import { sendSocialMonitorAlert, type AlertSendResult } from '@/lib/social-monit
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
 
+// A Vercel chama crons com `Authorization: Bearer $CRON_SECRET` e NÃO interpola
+// `${CRON_SECRET}` no path. Além disso, o CRON_SECRET da Vercel é *Sensitive*
+// (ilegível), então os workflows do GitHub usam REPORTS_CRON_SECRET. Aceitamos a
+// mesma família dos outros crons (query OU Bearer) — mesmo padrão do balance-cron.
+function isAuthorized(req: NextRequest): boolean {
+  const urlSecret = req.nextUrl.searchParams.get('secret');
+  const authHeader = req.headers.get('authorization');
+  const secrets = [
+    process.env.CRON_SECRET,
+    process.env.REPORTS_CRON_SECRET,
+    process.env.CRM_CRON_SECRET,
+  ].filter(Boolean);
+  if (secrets.length === 0) return false;
+  return secrets.some(s => urlSecret === s || authHeader === `Bearer ${s}`);
+}
+
 const BUDGET_MS = 280_000;
 const CONCURRENCY = 4;
 
@@ -115,8 +131,7 @@ async function runRefresh(clientIds: string[] | null) {
 // Cron (GitHub Actions): GET secret-guarded — atualiza todos os clientes ativos
 // e, com os dados frescos, dispara o aviso WhatsApp (se configurado/ativo).
 export async function GET(req: NextRequest) {
-  const secret = req.nextUrl.searchParams.get('secret');
-  if (secret !== process.env.CRON_SECRET) {
+  if (!isAuthorized(req)) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 });
   }
   const result = await runRefresh(null);
