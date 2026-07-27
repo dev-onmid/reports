@@ -21,7 +21,8 @@ import { REPORT_SECTIONS } from '@/lib/report-sections';
 // ── Types ───────────────────────────────────────────────────────────────────
 
 type DiagnosticReport = {
-  id: string; client_id: string; client_name: string; title: string;
+  // title é NULL em relatórios Delivery/Social gravados antes do save incluir a coluna.
+  id: string; client_id: string; client_name: string; title: string | null;
   period_from: string; period_to: string; generated_by: string;
   public_token: string | null; created_at: string;
 };
@@ -37,6 +38,12 @@ type ReportConfig = {
 type ZapiClient = { id: string; name: string; provider: 'zapi' | 'evolution' };
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
+
+// Nome exibido do relatório. Relatórios Delivery/Social gravados sem `title` viriam em
+// branco na tabela — cai no nome do cliente em vez de mostrar uma linha vazia.
+function displayTitle(r: { title: string | null; client_name: string | null }): string {
+  return r.title?.trim() || `Relatório — ${r.client_name ?? 'sem cliente'}`;
+}
 
 function fmtDate(iso: string) { return new Date(iso).toLocaleDateString('pt-BR'); }
 function fmtDateTime(iso: string) {
@@ -451,7 +458,7 @@ export default function RelatoriosPage() {
 
   async function sendReportLink(report: DiagnosticReport) {
     if (!report.public_token) return;
-    await sendPublicLink(report.public_token, report.title || `Relatório — ${report.client_name}`);
+    await sendPublicLink(report.public_token, displayTitle(report));
   }
 
   async function downloadReport(token: string, clientName: string) {
@@ -501,8 +508,15 @@ export default function RelatoriosPage() {
   );
 
   // Filters & pagination
+  // ⚠️ title/client_name podem vir NULL do banco (relatórios Delivery/Social antigos foram
+  // gravados sem title) — chamar .toLowerCase() direto quebrava a tela inteira no primeiro
+  // caractere digitado na busca. Sempre normalizar antes de comparar.
   const filtered = visibleDiagnostics.filter(r => {
-    if (search && !r.title.toLowerCase().includes(search.toLowerCase()) && !r.client_name.toLowerCase().includes(search.toLowerCase())) return false;
+    if (search) {
+      const q = search.toLowerCase();
+      const hay = `${r.title ?? ''} ${r.client_name ?? ''}`.toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
     if (filterClient && r.client_name !== filterClient) return false;
     if (filterOrigin && r.generated_by !== filterOrigin) return false;
     return true;
@@ -750,7 +764,7 @@ export default function RelatoriosPage() {
                       <td className="px-5 py-3.5">
                         <input
                           type="checkbox"
-                          aria-label={`Selecionar ${row.title}`}
+                          aria-label={`Selecionar ${displayTitle(row)}`}
                           checked={isSelected}
                           onChange={() => toggleReportSelection(row.id)}
                           className="h-4 w-4 rounded border-border bg-background text-violet-500 accent-violet-600"
@@ -762,7 +776,7 @@ export default function RelatoriosPage() {
                             <ArrowUpRight className="w-4 h-4 text-emerald-400" />
                           </div>
                           <div>
-                            <p className="font-semibold text-foreground leading-none">{row.title}</p>
+                            <p className="font-semibold text-foreground leading-none">{displayTitle(row)}</p>
                             <p className="text-xs text-muted-foreground mt-0.5">Diagnóstico de performance</p>
                           </div>
                         </div>
@@ -830,7 +844,7 @@ export default function RelatoriosPage() {
                           )}
                           <button
                             title="Excluir"
-                            onClick={() => handleDelete(row.id, row.title)}
+                            onClick={() => handleDelete(row.id, displayTitle(row))}
                             className="p-1.5 rounded-md text-muted-foreground hover:text-red-400 hover:bg-red-500/10 transition-colors"
                           >
                             <Trash2 className="w-4 h-4" />

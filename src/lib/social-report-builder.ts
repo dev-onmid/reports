@@ -26,9 +26,11 @@ export async function saveSocialReport(opts: {
   const pool  = makeServerPool();
   try {
     const { rows } = await pool.query(
-      `INSERT INTO public.diagnostic_reports (client_id,client_name,period_from,period_to,template_slug,report_data,public_token,generated_by,config_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
-      [clientId, clientName, from, to, 'onmid-narrative-social', JSON.stringify(data), token, generatedBy, configId ?? null],
+      // `title` é obrigatório na prática: a lista de Relatórios exibe e BUSCA por ele —
+      // sem título a linha aparecia em branco (e a busca quebrava a tela).
+      `INSERT INTO public.diagnostic_reports (client_id,client_name,title,period_from,period_to,template_slug,report_data,public_token,generated_by,config_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
+      [clientId, clientName, `Relatório de Redes Sociais — ${clientName}`, from, to, 'onmid-narrative-social', JSON.stringify(data), token, generatedBy, configId ?? null],
     );
     return { token, reportId: rows[0].id as string };
   } finally {

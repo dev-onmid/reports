@@ -300,6 +300,15 @@ Correções no export PDF (html2canvas → jsPDF em `export-report-pdf.ts`) e no
 - **Peso do arquivo**: html2canvas `scale` 2 → **1.6** e JPEG `0.92` → **0.85** — derruba ~40% (7-8 MB → ~4-5 MB) mantendo nitidez em tela/impressão. Ajuste global do export.
 - ⚠️ O corte é específico do html2canvas — não reproduzível em render normal de browser (só o passe de descorte foi validado no preview). Regerar o PDF do Cinfel em produção pra confirmar pills inteiros.
 
+### Busca da tela de Relatórios quebrava a tela inteira (2026-07-22)
+
+Matheus: clicar na busca "Buscar relatórios..." e digitar o 1º caractere derrubava a página ("This page couldn't load"). **Causa raiz**: `saveDeliveryReport` (delivery-report-builder) e `saveSocialReport` (social-report-builder) **nunca inseriam a coluna `title`** no INSERT de `diagnostic_reports` — só `report-runner.ts` e `saveOmniReport` (performance) inseriam. Todo relatório Delivery/Social no banco tem `title = NULL`. O filtro da lista fazia `r.title.toLowerCase()` cru; como a condição era `search && !r.title...`, o short-circuit só avaliava ao DIGITAR → `TypeError: Cannot read properties of null` → error boundary do Next engole a tela. Por isso a tela abria normal e só morria ao digitar.
+
+- **Correção do crash** (`relatorios/page.tsx`): filtro normaliza antes de comparar (`` `${r.title ?? ''} ${r.client_name ?? ''}`.toLowerCase() ``) — e agora busca nos dois campos juntos, em vez de duas condições encadeadas.
+- **Tipo honesto**: `DiagnosticReport.title` virou `string | null` (era `string`, mentindo sobre o banco) — o tsc então apontou os 4 pontos de uso; helper único `displayTitle(r)` (`title?.trim() || 'Relatório — {cliente}'`) usado na tabela, no aria-label, no delete e no envio de link. Antes essas linhas apareciam **em branco** na coluna RELATÓRIO.
+- **Raiz corrigida**: os dois INSERTs passaram a gravar `title` (`Relatório de Delivery — X` / `Relatório de Redes Sociais — X`, mesmo padrão do performance). Relatórios ANTIGOS seguem com NULL no banco — o `displayTitle` cobre a exibição (não foi feito UPDATE retroativo).
+- ✅ Verificado no preview (dev :3000 da outra sessão, fetch mockado com linha `title:null`): antes do fix a expressão antiga lança `Cannot read properties of null` no mesmo dado e a nova retorna normal; na tela real, digitar "c→ci→cin→cinf" não quebra, filtra 3→1 linha e mostra "Relatório — Cinfel" no lugar do título vazio (screenshot). ⚠️ `/api/clients` retorna 500 em dev (sem DATABASE_URL) e o filtro `visibleDiagnostics` some com TUDO — pra testar essa tela no preview é obrigatório mocar `/api/clients` junto, com objetos `Client` completos (mock incompleto derruba a página com `name is not iterable`).
+
 ### Slide "Top palavras-chave" (Google Ads)
 
 - O relatório de performance (`buildOmniReport` em `src/lib/report-builder.ts`) monta os slides de Google a partir de `fetchGoogleAdsDetailed`, que agora traz também `palavrasChave: PalavraChaveGoogle[]` (tipo em `delivery-report-builder.ts`).
