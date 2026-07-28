@@ -1,6 +1,7 @@
 import { makeServerPool } from '@/lib/server-db';
 import { sendEvolutionText } from '@/lib/evolution-api';
 import { sendGmail } from '@/lib/gmail';
+import { isZapiConnected } from '@/lib/zapi';
 
 export type InstanceStatus = 'open' | 'close' | 'connecting' | string;
 
@@ -64,6 +65,43 @@ export async function fetchDisconnectedInstances(): Promise<DisconnectedAlert[]>
       reason: parseReason(i),
       disconnectedAt: i.disconnectionAt ?? null,
     }));
+}
+
+// Instâncias Z-API (provider != evolution) ATIVAS que estão desconectadas do
+// WhatsApp. O Z-API é cloud (não passa pela VPS), então checamos cada uma pelo
+// /status real (campo `connected`). Entram no MESMO popup do Evolution — o
+// usuário pediu só o aviso visual, sem WhatsApp/e-mail (a rota só chama isto).
+export async function fetchDisconnectedZapiInstances(
+  pool: ReturnType<typeof makeServerPool>,
+): Promise<DisconnectedAlert[]> {
+  let rows: Array<{ name: string; instance_id: string; token: string; security_token: string | null }>;
+  try {
+    const q = await pool.query(
+      `SELECT name, instance_id, token, security_token
+         FROM public.zapi_clients
+        WHERE active = TRUE AND COALESCE(provider, 'zapi') <> 'evolution'`,
+    );
+    rows = q.rows;
+  } catch {
+    return [];
+  }
+
+  const checks = await Promise.all(rows.map(async (r) => {
+    const connected = await isZapiConnected({
+      instanceId: r.instance_id, token: r.token, clientToken: r.security_token ?? undefined,
+    });
+    if (connected) return null;
+    return {
+      name: r.name,
+      status: 'close',
+      profileName: `${r.name} (Z-API)`, // distingue o provedor no popup
+      phone: null,
+      reasonCode: null,
+      reason: 'Instância Z-API desconectada — reconecte o WhatsApp',
+      disconnectedAt: null,
+    } as DisconnectedAlert;
+  }));
+  return checks.filter((a): a is DisconnectedAlert => a !== null);
 }
 
 // Instâncias marcadas como INATIVAS no banco (zapi_clients.active=false ou

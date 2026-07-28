@@ -1,5 +1,5 @@
 import type { Pool } from 'pg';
-import { sendText } from '@/lib/zapi';
+import { sendText, isZapiConnected } from '@/lib/zapi';
 
 // Aviso diário do Monitor de Redes Sociais via Z-API: depois da coleta do cron,
 // manda no grupo escolhido a lista de contas VISÍVEIS no radar (monitored=TRUE)
@@ -42,22 +42,6 @@ async function setSetting(pool: Pool, key: string, value: string, userId?: strin
      ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW(), updated_by=EXCLUDED.updated_by`,
     [key, value, userId ?? null],
   );
-}
-
-// Conexão REAL da instância Z-API. O checkStatus de @/lib/zapi só olha o HTTP 200,
-// que o /status retorna mesmo desconectado — aqui lemos o campo `connected`.
-async function zapiConnected(client: { instanceId: string; token: string; clientToken?: string }): Promise<boolean> {
-  try {
-    const headers: Record<string, string> = {};
-    if (client.clientToken) headers['Client-Token'] = client.clientToken;
-    const res = await fetch(
-      `https://api.z-api.io/instances/${client.instanceId}/token/${client.token}/status`,
-      { headers, signal: AbortSignal.timeout(10000) },
-    );
-    if (!res.ok) return false;
-    const body = await res.json() as { connected?: boolean };
-    return body.connected === true;
-  } catch { return false; }
 }
 
 function todayBRT(): string {
@@ -177,7 +161,7 @@ export async function sendSocialMonitorAlert(pool: Pool, opts: { force?: boolean
   // mensagem some silenciosamente. Sem esta checagem, marcávamos "enviado" e
   // queimávamos a trava do dia sem nada chegar no grupo. Confere a conexão real
   // (campo `connected` do /status, não só o HTTP 200 que o checkStatus do zapi.ts vê).
-  if (!(await zapiConnected(client))) {
+  if (!(await isZapiConnected(client))) {
     return { sent: false, reason: 'Instância Z-API desconectada — reconecte o WhatsApp', clientes: alertRows.length };
   }
 

@@ -116,3 +116,21 @@ export async function checkStatus(client: ZApiClient): Promise<boolean> {
     return false;
   }
 }
+
+// Conexão REAL da instância (celular pareado). O checkStatus acima só olha o
+// HTTP 200, que o /status devolve MESMO desconectado — aqui lemos o campo
+// `connected` do corpo, que é o que importa: o Z-API aceita /send-text e
+// responde "ok" com o aparelho fora, mas a mensagem nunca sai.
+export async function isZapiConnected(client: ZApiClient): Promise<boolean> {
+  try {
+    const res = await fetch(
+      `${BASE}/${client.instanceId}/token/${client.token}/status`,
+      { headers: zapiHeaders(client.clientToken), signal: AbortSignal.timeout(10000) },
+    );
+    if (!res.ok) return false;
+    const body = await res.json() as { connected?: boolean };
+    return body.connected === true;
+  } catch {
+    return false;
+  }
+}
