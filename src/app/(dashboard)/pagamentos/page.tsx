@@ -454,7 +454,7 @@ function BalanceAlertSettings() {
           <div>
             <p className="text-sm font-bold uppercase tracking-wider">Alertas diários de saldo no WhatsApp</p>
             <p className="text-xs text-muted-foreground">
-              Todo dia às 7h, avisa no grupo (e por e-mail) as contas cujo saldo não cobre os próximos dias no ritmo atual.
+              Todo dia às 7h, avisa no grupo (e por e-mail) as contas que vão ficar sem saldo — e as que já pararam.
             </p>
           </div>
         </div>
@@ -583,7 +583,8 @@ function BalanceAlertSettings() {
                     className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg text-foreground focus:outline-none focus:ring-1 focus:ring-violet-500/50"
                   />
                   <p className="text-[10px] text-muted-foreground">
-                    Dispara quando o saldo cobrir menos que isso no ritmo médio dos últimos 7 dias.
+                    Dispara quando o saldo cobrir menos que isso no ritmo de gasto. Conta que já
+                    parou por falta de saldo entra como &quot;já parou&quot;. Reenvia todo dia até recarregar.
                   </p>
                 </div>
                 <div className="space-y-1.5">

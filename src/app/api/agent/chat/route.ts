@@ -1,6 +1,6 @@
 import type { NextRequest } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
-import { logAiUsage } from '@/lib/ai-usage-logger';
+import { calcCostUsd, logAiUsage } from '@/lib/ai-usage-logger';
 import {
   getInstructions, getKnowledge, getExternalTools,
   systemTools, execSystemTool, execExternalTool,
@@ -56,7 +56,7 @@ As ferramentas add_client_vault_credential, reschedule_client_payment, set_clien
 ## Períodos e histórico mês a mês
 - Você TEM acesso a qualquer intervalo de datas: get_meta_campaigns e get_google_campaigns aceitam period='custom' com date_from/date_to (YYYY-MM-DD).
 - Para pedidos de evolução mensal ("mês a mês", "de janeiro a julho", "histórico do ano"), use get_monthly_history — UMA chamada devolve todos os meses do intervalo com investimento, leads (formulário + conversa iniciada) e CPL de Meta + Google + CRM. NUNCA diga que não é possível separar por mês.
-- Agora é {{AGORA}} (horário de Brasília). Use esta data/hora como referência para QUALQUER cálculo de tempo — meses relativos, "daqui a X minutos", "amanhã". NUNCA presuma outro horário.
+- A data/hora atual está no bloco "Contexto atual" no FIM das instruções (horário de Brasília). Use-a como referência para QUALQUER cálculo de tempo — meses relativos, "daqui a X minutos", "amanhã". NUNCA presuma outro horário.
 
 ## Execução em Meta e Google Ads
 - Você EXECUTA de verdade: execute_ad_action pausa/ativa/ajusta orçamento em campanha, conjunto e anúncio — tanto Meta quanto Google. duplicate_meta_campaign duplica campanha completa. get_meta_structure mostra conjuntos e anúncios (use antes de agir, pra achar o objeto certo e mostrar os IDs ao usuário).
@@ -101,14 +101,17 @@ Você tem acesso ao sistema INTEIRO — se o usuário perguntar sobre qualquer m
 
 ## Tarefas agendadas
 - Quando o usuário pedir algo no futuro ou recorrente ("toda segunda", "amanhã às 9h", "todo dia 1"), use schedule_luna_task. A instrução da tarefa deve ser AUTOSSUFICIENTE (a Luna que executa não vê esta conversa).
-- Tempo RELATIVO ("daqui a 30 minutos", "em 2 horas") → use o campo em_minutos e NÃO calcule horário você mesma. Horário ABSOLUTO ("amanhã às 9h") → run_at, calculado a partir de {{AGORA}}. O agendador roda a cada 15 min, então a execução pode atrasar até ~15 min do horário marcado — avise isso ao confirmar tarefas de curtíssimo prazo.
+- Tempo RELATIVO ("daqui a 30 minutos", "em 2 horas") → use o campo em_minutos e NÃO calcule horário você mesma. Horário ABSOLUTO ("amanhã às 9h") → run_at, calculado a partir da data/hora do bloco "Contexto atual". O agendador roda a cada 15 min, então a execução pode atrasar até ~15 min do horário marcado — avise isso ao confirmar tarefas de curtíssimo prazo.
 - Antes de agendar, confirme: o que fazer, quando/recorrência, e se o resultado vai pro WhatsApp (qual número). Só marque permitir_acoes=true se a tarefa EXECUTA ações (pausar, mover lead) — tarefas de análise/relatório ficam com false.
 - O envio de WhatsApp de tarefas agendadas sai SEMPRE pela instância fixa configurada pelo administrador — você NÃO escolhe instância e NÃO deve perguntar por qual instância enviar; apenas confirme o número de destino.
 - Horários sempre em fuso de Brasília. Gerencie com list_luna_tasks e cancel_luna_task.`;
 
-  systemText = systemText.replaceAll('{{AGORA}}', new Date().toLocaleString('pt-BR', {
+  // ⚠️ A data/hora fica num bloco de system SEPARADO, DEPOIS do breakpoint de cache.
+  // Antes ela era interpolada dentro do texto cacheado ({{AGORA}} com minuto) — o prefixo
+  // mudava a cada minuto e invalidava o cache inteiro (tools + system) em toda mensagem.
+  const nowText = `## Contexto atual\nAgora é ${new Date().toLocaleString('pt-BR', {
     timeZone: 'America/Sao_Paulo', weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit',
-  }));
+  })} (horário de Brasília).`;
 
   // Build dynamic external tools
   const dynTools: Anthropic.Tool[] = externalTools.map((t) => {
@@ -155,6 +158,24 @@ Você tem acesso ao sistema INTEIRO — se o usuário perguntar sobre qualquer m
     augmentedMessages = [pdfUserMsg, pdfAssistMsg, ...messages];
   }
 
+  // Marca a última mensagem com cache_control: o histórico (incluindo PDFs da base de
+  // conhecimento e resultados de ferramentas) passa a ser lido do cache (~0,1× do preço)
+  // entre iterações do loop de ferramentas e entre mensagens da conversa, em vez de ser
+  // reprocessado a preço cheio em toda chamada.
+  function withCacheMarker(msgs: Anthropic.MessageParam[]): Anthropic.MessageParam[] {
+    if (msgs.length === 0) return msgs;
+    const last = msgs[msgs.length - 1];
+    const content: Anthropic.ContentBlockParam[] = typeof last.content === 'string'
+      ? [{ type: 'text', text: last.content }]
+      : [...last.content];
+    if (content.length === 0) return msgs;
+    content[content.length - 1] = {
+      ...content[content.length - 1],
+      cache_control: { type: 'ephemeral' },
+    } as Anthropic.ContentBlockParam;
+    return [...msgs.slice(0, -1), { ...last, content }];
+  }
+
   const encoder = new TextEncoder();
 
   function send(controller: ReadableStreamDefaultController, event: Record<string, unknown>) {
@@ -167,17 +188,21 @@ Você tem acesso ao sistema INTEIRO — se o usuário perguntar sobre qualquer m
         let currentMessages = augmentedMessages;
         let totalInputTokens = 0;
         let totalOutputTokens = 0;
-        // claude-opus-4-7 pricing: $5/1M input, $25/1M output
-        const INPUT_COST_PER_TOKEN  = 3 / 1_000_000;
-        const OUTPUT_COST_PER_TOKEN = 15 / 1_000_000;
+        let totalCacheReadTokens = 0;
+        let totalCacheWriteTokens = 0;
 
         for (let iteration = 0; iteration < 10; iteration++) {
           const response = await client.messages.create({
             model: 'claude-sonnet-4-6',
             max_tokens: 4096,
-            system: [{ type: 'text', text: systemText, cache_control: { type: 'ephemeral' } }],
+            // Bloco 1 (estável) com breakpoint de cache — cobre tools + instruções.
+            // Bloco 2 (data/hora) fica FORA do cache, senão invalida o prefixo a cada minuto.
+            system: [
+              { type: 'text', text: systemText, cache_control: { type: 'ephemeral' } },
+              { type: 'text', text: nowText },
+            ],
             tools: allTools,
-            messages: currentMessages,
+            messages: withCacheMarker(currentMessages),
             stream: true,
           });
 
@@ -188,8 +213,12 @@ Você tem acesso ao sistema INTEIRO — se o usuário perguntar sobre qualquer m
 
           for await (const event of response) {
             if (event.type === 'message_start') {
-              totalInputTokens  += event.message.usage?.input_tokens  ?? 0;
-              totalOutputTokens += event.message.usage?.output_tokens ?? 0;
+              // input_tokens da API é SÓ o resto não cacheado — os tokens de cache
+              // são contados à parte (leitura 0,1×, escrita 1,25×) pro custo real.
+              totalInputTokens      += event.message.usage?.input_tokens  ?? 0;
+              totalOutputTokens     += event.message.usage?.output_tokens ?? 0;
+              totalCacheReadTokens  += event.message.usage?.cache_read_input_tokens ?? 0;
+              totalCacheWriteTokens += event.message.usage?.cache_creation_input_tokens ?? 0;
             } else if (event.type === 'message_delta') {
               totalOutputTokens += event.usage?.output_tokens ?? 0;
             } else if (event.type === 'content_block_start') {
@@ -244,14 +273,19 @@ Você tem acesso ao sistema INTEIRO — se o usuário perguntar sobre qualquer m
           ];
         }
 
-        const totalCostUsd = totalInputTokens * INPUT_COST_PER_TOKEN + totalOutputTokens * OUTPUT_COST_PER_TOKEN;
-        void logAiUsage({ source: 'luna_chat', model: 'claude-sonnet-4-6', inputTokens: totalInputTokens, outputTokens: totalOutputTokens });
+        const totalCostUsd = calcCostUsd('claude-sonnet-4-6', totalInputTokens, totalOutputTokens, totalCacheReadTokens, totalCacheWriteTokens);
+        void logAiUsage({
+          source: 'luna_chat', model: 'claude-sonnet-4-6',
+          inputTokens: totalInputTokens, outputTokens: totalOutputTokens,
+          cacheReadTokens: totalCacheReadTokens, cacheWriteTokens: totalCacheWriteTokens,
+        });
+        const allInputTokens = totalInputTokens + totalCacheReadTokens + totalCacheWriteTokens;
         send(controller, {
           type: 'done', role,
           usage: {
-            input_tokens: totalInputTokens,
+            input_tokens: allInputTokens,
             output_tokens: totalOutputTokens,
-            total_tokens: totalInputTokens + totalOutputTokens,
+            total_tokens: allInputTokens + totalOutputTokens,
             cost_usd: totalCostUsd,
           },
         });

@@ -129,6 +129,9 @@ export async function ensureCrmAiSchema(pool: Pool) {
 
     ALTER TABLE public.client_tracking_config
       ADD COLUMN IF NOT EXISTS ia_limite_chamadas_dia INTEGER NOT NULL DEFAULT 500;
+
+    ALTER TABLE public.client_tracking_config
+      ADD COLUMN IF NOT EXISTS ia_ativa BOOLEAN NOT NULL DEFAULT TRUE;
   `);
 
   for (const [temperatura, criterios] of Object.entries(DEFAULT_CRITERIA)) {
@@ -324,12 +327,23 @@ export async function analisarConversa(pool: Pool, leadId: string): Promise<void
     if (lead.time_interno === true) return;
 
     const clientId = String(lead.client_id);
+
+    // Interruptor GERAL (Configurações → Uso IA): 'false' desliga a análise de IA
+    // do CRM pra todos os clientes. Tabela ausente/sem a chave = ligado (default).
+    const { rows: globalRows } = await pool.query<{ value: string | null }>(
+      `SELECT value FROM public.system_settings WHERE key = 'crm_ai_enabled'`,
+    ).catch(() => ({ rows: [] as { value: string | null }[] }));
+    if (globalRows[0]?.value === 'false') return;
+
     const { rows: [config] } = await pool.query(
-      `SELECT COALESCE(ia_limite_chamadas_dia, 500)::int AS limite
+      `SELECT COALESCE(ia_limite_chamadas_dia, 500)::int AS limite,
+              COALESCE(ia_ativa, TRUE) AS ativa
          FROM public.client_tracking_config
         WHERE client_id = $1`,
       [clientId],
     );
+    // Interruptor POR CLIENTE: desligado = nenhuma análise/movimentação de etapa por IA.
+    if (config && config.ativa === false) return;
     const dailyLimit = Number(config?.limite ?? 500);
     const { rows: [usageToday] } = await pool.query(
       `SELECT COUNT(*)::int AS total

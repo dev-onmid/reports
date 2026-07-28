@@ -26,9 +26,17 @@ export const ESTIMATES: Record<string, AiEstimate> = {
   crm_attendance_audit: { model: 'claude-sonnet-4-6', inputTokens: 8000, outputTokens: 3000, labelPt: 'Auditoria de Atendimento (IA)' },
 };
 
-export function calcCostUsd(model: string, inputTokens: number, outputTokens: number): number {
+// cacheReadTokens (0,1× do preço de input) e cacheWriteTokens (1,25×) seguem a
+// tabela de prompt caching da Anthropic — sem eles o custo de chamadas cacheadas
+// (Luna) fica subestimado.
+export function calcCostUsd(model: string, inputTokens: number, outputTokens: number, cacheReadTokens = 0, cacheWriteTokens = 0): number {
   const p = MODEL_PRICING[model] ?? { input: 3.00, output: 15.00 };
-  return (inputTokens * p.input + outputTokens * p.output) / 1_000_000;
+  return (
+    inputTokens * p.input
+    + cacheReadTokens * p.input * 0.1
+    + cacheWriteTokens * p.input * 1.25
+    + outputTokens * p.output
+  ) / 1_000_000;
 }
 
 export function estimateCostUsd(source: string): number {

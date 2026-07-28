@@ -8,8 +8,11 @@ import { sendGmail } from '@/lib/gmail';
 /** Days of runway below which an account is considered at risk (UI-configurable). */
 export const DEFAULT_DIAS_ANTECEDENCIA = 3;
 
-/** How many days of history feed the "ritmo" (average daily spend). */
+/** Recent window: how fast the account is burning money right now. */
 const RITMO_WINDOW_DAYS = 7;
+
+/** Fallback window: proves an account is live even when it stopped delivering. */
+export const HISTORICO_WINDOW_DAYS = 30;
 
 export type AccountBalance = {
   clientId: string;
@@ -19,15 +22,19 @@ export type AccountBalance = {
   accountName: string;
   balance: number;
   spentYesterday: number;
-  /** Spend pace used for the runway: max(7-day average, yesterday) — see computeRitmo. */
+  /** Recent pace: max(7-day average, yesterday). Zero when the account stopped delivering. */
   ritmoDiario: number;
-  /** balance / ritmoDiario, or null when the account had no spend in the window. */
+  /** 30-day average, used as the pace when the recent one is zero. */
+  ritmoHistorico: number;
+  /** balance / effective pace. null only for accounts with no spend at all in 30 days. */
   diasRestantes: number | null;
+  /** Spent in the last 30 days but nothing in the last 7 — almost always "ran out of money". */
+  parada: boolean;
   currency: string;
 };
 
 /**
- * Spend pace behind the runway estimate.
+ * Recent spend pace.
  *
  * The 7-day average alone reacts too slowly to an account that just scaled up
  * (it would report days of runway that no longer exist), so we take whichever
@@ -40,10 +47,24 @@ export function computeRitmo(totalWindow: number, spentYesterday: number): numbe
   return Math.max(media, spentYesterday);
 }
 
-/** balance / pace, rounded to one decimal. null when the account isn't spending. */
-export function computeDiasRestantes(balance: number, ritmoDiario: number): number | null {
-  if (ritmoDiario <= 0) return null;
-  return Math.round((balance / ritmoDiario) * 10) / 10;
+/**
+ * Runway in days, from the recent pace — falling back to the 30-day average
+ * when the account has stopped spending entirely.
+ *
+ * That fallback is what makes an already-dry account visible. An account that
+ * hit R$0 stops delivering, so within a week its recent pace is zero and any
+ * "balance ÷ spend" rule divides by zero and goes quiet forever — exactly when
+ * the client's ads are off and it matters most. Using what the account *used*
+ * to spend keeps the division meaningful: R$0 ÷ R$80/dia = 0 days, alert.
+ *
+ * Returns null only when nothing was spent in 30 days — a dormant account, not
+ * an emergency. That's the one case we deliberately stay quiet about, and it
+ * needs no arbitrary "below R$X" rule to express.
+ */
+export function computeDiasRestantes(balance: number, ritmoDiario: number, ritmoHistorico = 0): number | null {
+  const ritmo = ritmoDiario > 0 ? ritmoDiario : ritmoHistorico;
+  if (ritmo <= 0) return null;
+  return Math.round((balance / ritmo) * 10) / 10;
 }
 
 /** Accounts whose runway is under the configured threshold, worst first. */
@@ -113,7 +134,8 @@ async function fetchMetaBalances(): Promise<AccountBalance[]> {
       .map(l => [l.account_id.replace(/^act_/, ''), { clientId: l.client_id, clientName: l.client_name }]),
   );
   const yesterday = yesterdayDateStr();
-  const windowStart = brtDateStr(RITMO_WINDOW_DAYS);
+  const windowStart = brtDateStr(HISTORICO_WINDOW_DAYS);
+  const recentStart = brtDateStr(RITMO_WINDOW_DAYS);
   const results: AccountBalance[] = [];
 
   await Promise.allSettled(conns.map(async (conn) => {
@@ -135,8 +157,8 @@ async function fetchMetaBalances(): Promise<AccountBalance[]> {
       const balance = calculateMetaAvailableBalance(a);
       if (balance === null) return;
 
-      // One daily-broken-down call covers both the pace window and yesterday —
-      // cheaper than two round-trips, which matters against the 60s cron budget.
+      // One daily-broken-down call covers both pace windows and yesterday —
+      // cheaper than three round-trips, which matters against the 60s cron budget.
       const insightsUrl = new URL(`https://graph.facebook.com/v21.0/${a.id}/insights`);
       insightsUrl.searchParams.set('level', 'account');
       insightsUrl.searchParams.set('fields', 'spend');
@@ -147,15 +169,20 @@ async function fetchMetaBalances(): Promise<AccountBalance[]> {
       if (!insightsRes?.ok) return;
       const insightsData = await insightsRes.json() as { data?: { spend?: string; date_start?: string }[] };
       const days = insightsData.data ?? [];
-      const totalWindow = days.reduce((sum, d) => sum + parseFloat(d.spend || '0'), 0);
+      const total30 = days.reduce((sum, d) => sum + parseFloat(d.spend || '0'), 0);
+      const total7 = days
+        .filter(d => (d.date_start ?? '') > recentStart)
+        .reduce((sum, d) => sum + parseFloat(d.spend || '0'), 0);
       const spentYesterday = parseFloat(days.find(d => d.date_start === yesterday)?.spend || '0');
-      const ritmoDiario = computeRitmo(totalWindow, spentYesterday);
+      const ritmoDiario = computeRitmo(total7, spentYesterday);
+      const ritmoHistorico = total30 / HISTORICO_WINDOW_DAYS;
 
       results.push({
         clientId: link.clientId, clientName: link.clientName,
         platform: 'meta', accountId: a.id, accountName: a.name,
-        balance, spentYesterday, ritmoDiario,
-        diasRestantes: computeDiasRestantes(balance, ritmoDiario),
+        balance, spentYesterday, ritmoDiario, ritmoHistorico,
+        diasRestantes: computeDiasRestantes(balance, ritmoDiario, ritmoHistorico),
+        parada: ritmoDiario <= 0 && ritmoHistorico > 0,
         currency: a.currency ?? 'BRL',
       });
     }));
@@ -255,27 +282,30 @@ async function fetchGoogleAccountBalance(customerId: string, accessToken: string
   return totalRemaining / 1_000_000;
 }
 
-/** Daily spend over the pace window; returns the window total and yesterday alone. */
+/** Daily spend over the 30-day window, split into the 7-day slice and yesterday. */
 async function fetchGoogleSpendWindow(
   customerId: string, accessToken: string, developerToken: string,
-  since: string, yesterday: string, loginCustomerId?: string,
-): Promise<{ totalWindow: number; spentYesterday: number }> {
+  since: string, recentSince: string, yesterday: string, loginCustomerId?: string,
+): Promise<{ total30: number; total7: number; spentYesterday: number }> {
   const data = await gadsSearch(
     customerId,
     `SELECT metrics.cost_micros, segments.date FROM customer
      WHERE segments.date BETWEEN '${since}' AND '${yesterday}'`,
     accessToken, developerToken, loginCustomerId,
   );
-  if (!data?.results?.length) return { totalWindow: 0, spentYesterday: 0 };
-  let totalWindow = 0;
+  if (!data?.results?.length) return { total30: 0, total7: 0, spentYesterday: 0 };
+  let total30 = 0;
+  let total7 = 0;
   let spentYesterday = 0;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   for (const row of data.results as any[]) {
     const cost = Number(row.metrics?.costMicros ?? 0) / 1_000_000;
-    totalWindow += cost;
-    if (row.segments?.date === yesterday) spentYesterday += cost;
+    const date = row.segments?.date ?? '';
+    total30 += cost;
+    if (date > recentSince) total7 += cost;
+    if (date === yesterday) spentYesterday += cost;
   }
-  return { totalWindow, spentYesterday };
+  return { total30, total7, spentYesterday };
 }
 
 async function fetchGoogleBalances(): Promise<AccountBalance[]> {
@@ -307,7 +337,8 @@ async function fetchGoogleBalances(): Promise<AccountBalance[]> {
   );
   const developerToken = process.env.GOOGLE_ADS_DEVELOPER_TOKEN ?? '1vR8GhAk4UMZoPaqo7Qq8Q';
   const yesterday = yesterdayDateStr();
-  const windowStart = brtDateStr(RITMO_WINDOW_DAYS);
+  const windowStart = brtDateStr(HISTORICO_WINDOW_DAYS);
+  const recentStart = brtDateStr(RITMO_WINDOW_DAYS);
   const results: AccountBalance[] = [];
   const seen = new Set<string>();
 
@@ -345,17 +376,19 @@ async function fetchGoogleBalances(): Promise<AccountBalance[]> {
 
       const balance = await fetchGoogleAccountBalance(normalizedId, accessToken, developerToken, account.mccId);
       if (balance === null) return;
-      const { totalWindow, spentYesterday } = await fetchGoogleSpendWindow(
-        normalizedId, accessToken, developerToken, windowStart, yesterday, account.mccId,
+      const { total30, total7, spentYesterday } = await fetchGoogleSpendWindow(
+        normalizedId, accessToken, developerToken, windowStart, recentStart, yesterday, account.mccId,
       );
-      const ritmoDiario = computeRitmo(totalWindow, spentYesterday);
+      const ritmoDiario = computeRitmo(total7, spentYesterday);
+      const ritmoHistorico = total30 / HISTORICO_WINDOW_DAYS;
 
       seen.add(normalizedId);
       results.push({
         clientId: link.clientId, clientName: link.clientName,
         platform: 'google', accountId: normalizedId, accountName: account.name,
-        balance, spentYesterday, ritmoDiario,
-        diasRestantes: computeDiasRestantes(balance, ritmoDiario),
+        balance, spentYesterday, ritmoDiario, ritmoHistorico,
+        diasRestantes: computeDiasRestantes(balance, ritmoDiario, ritmoHistorico),
+        parada: ritmoDiario <= 0 && ritmoHistorico > 0,
         currency: account.currency,
       });
     }));
@@ -399,36 +432,56 @@ function fmtRunway(dias: number | null): string {
   return `~${dias.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} dias`;
 }
 
-/** One aggregated message for every account at risk — a bad day used to mean one message per account. */
-export function buildBalanceAlertMessage(alerts: AccountBalance[], diasAntecedencia: number): string {
-  const header = alerts.length === 1
-    ? '🚨 *Saldo baixo — 1 conta de anúncio*'
-    : `🚨 *Saldo baixo — ${alerts.length} contas de anúncio*`;
-
-  const blocks = alerts.map((a) => {
-    const platformLabel = a.platform === 'meta' ? 'Meta Ads' : 'Google Ads';
-    return `*${a.clientName}* — ${platformLabel}\n`
-      + `Conta: ${a.accountName}\n`
+function alertBlock(a: AccountBalance): string {
+  const platformLabel = a.platform === 'meta' ? 'Meta Ads' : 'Google Ads';
+  const head = `*${a.clientName}* — ${platformLabel}\nConta: ${a.accountName}\n`;
+  // A stopped account's "runway" is arithmetic on a pace it no longer has —
+  // reporting "dura 0 dias" would read as a forecast when the outage is present tense.
+  return a.parada
+    ? head
+      + `Saldo: ${fmtMoney(a.balance, a.currency)}  ·  *sem entrega há ${RITMO_WINDOW_DAYS} dias*\n`
+      + `Gastava ${fmtMoney(a.ritmoHistorico, a.currency)}/dia — provavelmente parou por falta de saldo.`
+    : head
       + `Saldo: ${fmtMoney(a.balance, a.currency)}  ·  Dura ${fmtRunway(a.diasRestantes)}\n`
       + `Ritmo: ${fmtMoney(a.ritmoDiario, a.currency)}/dia (ontem: ${fmtMoney(a.spentYesterday, a.currency)})`;
-  });
+}
 
-  return `${header}\n\n${blocks.join('\n\n')}\n\n`
-    + `_Régua: avisar quando o saldo cobrir menos de ${diasAntecedencia} dia(s) no ritmo atual. Recarregue para as campanhas não pararem._`;
+/** One aggregated message for every account at risk — a bad day used to mean one message per account. */
+export function buildBalanceAlertMessage(alerts: AccountBalance[], diasAntecedencia: number): string {
+  const paradas = alerts.filter(a => a.parada);
+  const acabando = alerts.filter(a => !a.parada);
+
+  const header = alerts.length === 1
+    ? '🚨 *Saldo — 1 conta de anúncio*'
+    : `🚨 *Saldo — ${alerts.length} contas de anúncio*`;
+
+  const secoes: string[] = [];
+  if (paradas.length > 0) {
+    secoes.push(`⛔ *JÁ PARARAM* (${paradas.length})\n\n${paradas.map(alertBlock).join('\n\n')}`);
+  }
+  if (acabando.length > 0) {
+    secoes.push(`⏳ *VAI ACABAR* (${acabando.length})\n\n${acabando.map(alertBlock).join('\n\n')}`);
+  }
+
+  return `${header}\n\n${secoes.join('\n\n')}\n\n`
+    + `_Régua: avisar quando o saldo cobrir menos de ${diasAntecedencia} dia(s) de gasto. Reenviado todo dia enquanto não recarregar._`;
 }
 
 export function buildBalanceAlertEmail(alerts: AccountBalance[], diasAntecedencia: number) {
-  const subject = alerts.length === 1
-    ? `[ONMID] Saldo baixo: ${alerts[0].clientName}`
-    : `[ONMID] Saldo baixo em ${alerts.length} contas de anúncio`;
+  const paradas = alerts.filter(a => a.parada).length;
+  const subject = paradas > 0
+    ? `[ONMID] ${paradas} conta(s) PARADA(S) por saldo — ${alerts.length} no total`
+    : alerts.length === 1
+      ? `[ONMID] Saldo baixo: ${alerts[0].clientName}`
+      : `[ONMID] Saldo baixo em ${alerts.length} contas de anúncio`;
 
   const rows = alerts.map((a) => `
     <tr>
       <td style="padding:8px 12px;border-bottom:1px solid #eee"><strong>${a.clientName}</strong></td>
       <td style="padding:8px 12px;border-bottom:1px solid #eee">${a.platform === 'meta' ? 'Meta Ads' : 'Google Ads'}<br><span style="color:#666;font-size:12px">${a.accountName}</span></td>
       <td style="padding:8px 12px;border-bottom:1px solid #eee">${fmtMoney(a.balance, a.currency)}</td>
-      <td style="padding:8px 12px;border-bottom:1px solid #eee;color:#c00"><strong>${fmtRunway(a.diasRestantes)}</strong></td>
-      <td style="padding:8px 12px;border-bottom:1px solid #eee">${fmtMoney(a.ritmoDiario, a.currency)}/dia</td>
+      <td style="padding:8px 12px;border-bottom:1px solid #eee;color:#c00"><strong>${a.parada ? `PARADA há ${RITMO_WINDOW_DAYS}d` : fmtRunway(a.diasRestantes)}</strong></td>
+      <td style="padding:8px 12px;border-bottom:1px solid #eee">${fmtMoney(a.parada ? a.ritmoHistorico : a.ritmoDiario, a.currency)}/dia</td>
     </tr>`).join('');
 
   const html = `
@@ -448,7 +501,10 @@ export function buildBalanceAlertEmail(alerts: AccountBalance[], diasAntecedenci
     </div>`;
 
   const text = alerts.map(a =>
-    `${a.clientName} (${a.platform === 'meta' ? 'Meta' : 'Google'} — ${a.accountName}): saldo ${fmtMoney(a.balance, a.currency)}, dura ${fmtRunway(a.diasRestantes)}, ritmo ${fmtMoney(a.ritmoDiario, a.currency)}/dia`,
+    `${a.clientName} (${a.platform === 'meta' ? 'Meta' : 'Google'} — ${a.accountName}): saldo ${fmtMoney(a.balance, a.currency)}, `
+    + (a.parada
+      ? `PARADA há ${RITMO_WINDOW_DAYS} dias, gastava ${fmtMoney(a.ritmoHistorico, a.currency)}/dia`
+      : `dura ${fmtRunway(a.diasRestantes)}, ritmo ${fmtMoney(a.ritmoDiario, a.currency)}/dia`),
   ).join('\n');
 
   return { subject, html, text };

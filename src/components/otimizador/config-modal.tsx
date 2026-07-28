@@ -18,7 +18,7 @@ export function ConfigModal({ clientId, clientName, onClose }: { clientId: strin
   const [config, setConfig] = useState<ClientConfig>({
     cliente_id: clientId, modo_operacao: 'RECOMENDACAO_COM_APROVACAO',
     analise_dia_semana: 1, acoes_pre_aprovadas: [], min_dias_aprendizado: 7, orcamento_diario_maximo: null,
-    observacoes_fixas: null,
+    observacoes_fixas: null, ativo: true,
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -100,6 +100,15 @@ export function ConfigModal({ clientId, clientName, onClose }: { clientId: strin
           <div className="flex h-48 items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
         ) : (
           <div className="space-y-5 p-4">
+            <label className="flex cursor-pointer items-start justify-between gap-3 rounded-[var(--radius)] border border-border bg-background px-3 py-2.5">
+              <div>
+                <p className="text-sm font-medium text-foreground">Otimizador ativo para este cliente</p>
+                <p className="text-xs text-muted-foreground">Desligado: este cliente sai do rodízio de análises automáticas. A análise manual pela tela continua funcionando.</p>
+              </div>
+              <input type="checkbox" checked={config.ativo ?? true}
+                onChange={(e) => setConfig((prev) => ({ ...prev, ativo: e.target.checked }))}
+                className="mt-1 h-4 w-4 shrink-0 accent-primary" />
+            </label>
             <div className="space-y-2">
               <label className="text-xs font-semibold text-muted-foreground">Modo de operação</label>
               <div className="space-y-2">

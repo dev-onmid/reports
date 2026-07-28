@@ -1358,6 +1358,22 @@ async function loadBenchmarksMap(): Promise<Record<OptimizerNiche, NicheBenchmar
 async function executeWeekly({ origin, forceClientId, forceAi, all, period }: RunOptions) {
   const startedAt = Date.now();
 
+  // Interruptor GERAL (Configurações → Otimizador): desligado, o rodízio automático
+  // (cron sem clientId/all) não roda. Análise manual explícita continua permitida.
+  if (!forceClientId && !all) {
+    const pool = makeServerPool();
+    try {
+      const { rows } = await pool.query<{ value: string | null }>(
+        `SELECT value FROM public.system_settings WHERE key = 'optimizer_auto_enabled'`,
+      ).catch(() => ({ rows: [] as { value: string | null }[] }));
+      if (rows[0]?.value === 'false') {
+        return { ok: true, skipped: 'otimizador_desativado_globalmente', clients: 0, results: [] };
+      }
+    } finally {
+      await pool.end().catch(() => {});
+    }
+  }
+
   const clients = await loadClientsForToday(undefined, forceClientId, all);
   const clientIds = clients.map((c) => c.id);
   const [planningMap, connectionsMap, googleConnMap, benchmarks] = await Promise.all([

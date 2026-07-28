@@ -166,6 +166,9 @@ export type ClientConfig = {
   // (antes era orcamento_diario_maximo_conta na UI, que nunca casava → orçamento não salvava).
   orcamento_diario_maximo: number | null;
   observacoes_fixas: string | null;
+  // Desligado = o cliente sai do rodízio de análises automáticas (o cron semanal já
+  // filtra COALESCE(occ.ativo, true)). Análise manual pela tela continua possível.
+  ativo?: boolean;
 };
 
 export type ToastState = { text: string; erro?: boolean; undo?: { rec_id: string; cliente_id: string } } | null;

@@ -42,7 +42,7 @@ type LunaTask = {
   whatsapp_phone: string | null; zapi_client_id: string | null; permitir_acoes: boolean;
 };
 
-async function runHeadlessAgent(task: LunaTask): Promise<{ text: string; inputTokens: number; outputTokens: number }> {
+async function runHeadlessAgent(task: LunaTask): Promise<{ text: string; inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number }> {
   const instructions = await getInstructions();
   const allowed = systemTools.filter(t =>
     HEADLESS_READ_TOOLS.has(t.name) || (task.permitir_acoes && HEADLESS_ACTION_TOOLS.has(t.name)));
@@ -60,18 +60,24 @@ async function runHeadlessAgent(task: LunaTask): Promise<{ text: string; inputTo
   const messages: Anthropic.MessageParam[] = [{ role: 'user', content: task.instrucao }];
   let inputTokens = 0;
   let outputTokens = 0;
+  let cacheReadTokens = 0;
+  let cacheWriteTokens = 0;
   let finalText = '';
 
   for (let iter = 0; iter < 8; iter++) {
     const resp = await anthropic.messages.create({
       model: 'claude-sonnet-4-6',
       max_tokens: 1600,
-      system,
+      // O system é constante dentro das 8 iterações da tarefa — o breakpoint faz
+      // as iterações 2+ lerem tools + instruções do cache (0,1×) em vez de repagar.
+      system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
       tools: allowed,
       messages,
     });
     inputTokens += resp.usage.input_tokens;
     outputTokens += resp.usage.output_tokens;
+    cacheReadTokens += resp.usage.cache_read_input_tokens ?? 0;
+    cacheWriteTokens += resp.usage.cache_creation_input_tokens ?? 0;
 
     const textParts = resp.content.filter((b): b is Anthropic.TextBlock => b.type === 'text');
     if (textParts.length > 0) finalText = textParts.map(b => b.text).join('\n');
@@ -87,7 +93,7 @@ async function runHeadlessAgent(task: LunaTask): Promise<{ text: string; inputTo
     messages.push({ role: 'user', content: results });
   }
 
-  return { text: finalText || 'Tarefa executada, mas sem texto final gerado.', inputTokens, outputTokens };
+  return { text: finalText || 'Tarefa executada, mas sem texto final gerado.', inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens };
 }
 
 async function deliverWhatsApp(pool: ReturnType<typeof makeServerPool>, task: LunaTask, text: string): Promise<string | null> {
@@ -129,7 +135,7 @@ export async function GET(req: NextRequest) {
       // Orçamento de tempo: não começa tarefa nova com menos de 15s sobrando.
       if (Date.now() - started > 45_000) break;
       try {
-        const { text, inputTokens, outputTokens } = await runHeadlessAgent(task);
+        const { text, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens } = await runHeadlessAgent(task);
         const deliveryError = await deliverWhatsApp(pool, task, text);
         const resultNote = deliveryError ? `${text}\n\n[Falha no WhatsApp: ${deliveryError}]` : text;
         const next = task.tipo === 'once' ? null : computeNextRun(task.tipo, task);
@@ -143,7 +149,7 @@ export async function GET(req: NextRequest) {
           `INSERT INTO public.luna_task_runs (task_id, ok, result) VALUES ($1, $2, $3)`,
           [task.id, !deliveryError, resultNote.slice(0, 6000)]
         ).catch(() => {});
-        void logAiUsage({ source: 'luna_scheduler', model: 'claude-sonnet-4-6', inputTokens, outputTokens });
+        void logAiUsage({ source: 'luna_scheduler', model: 'claude-sonnet-4-6', inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens });
         ran.push({ id: task.id, titulo: task.titulo, ok: !deliveryError, erro: deliveryError ?? undefined });
       } catch (err) {
         // Falha na execução: registra e empurra 1h pra frente (evita loop de erro a cada 15min).

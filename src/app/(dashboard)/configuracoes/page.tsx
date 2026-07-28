@@ -29,6 +29,7 @@ import {
 import { mockUsers as initialUsers, mockPermissions as initialPermissions, defaultPermission } from '@/lib/mock-data';
 import type { User as UserType, Permission, Team } from '@/lib/mock-data';
 import { cn } from '@/lib/utils';
+import { callerHeaders } from '@/lib/auth-store';
 import { USD_TO_BRL } from '@/lib/ai-usage-config';
 
 // Mirrors the sidebar nav order (src/components/layout/sidebar.tsx) so admins
@@ -66,6 +67,7 @@ type AiUsageRow = {
   tokens_usados: number;
   custo_estimado_usd: number;
   ia_limite_chamadas_dia: number;
+  ia_ativa: boolean;
   chamadas_hoje: number;
 };
 
@@ -472,6 +474,9 @@ export default function ConfiguracoesPage() {
   const [search, setSearch] = useState('');
   const [aiUsage, setAiUsage] = useState<AiUsageRow[]>([]);
   const [aiUsageLoading, setAiUsageLoading] = useState(false);
+  // null = ainda carregando (evita "piscar" o toggle antes de saber o estado real)
+  const [crmAiGlobal, setCrmAiGlobal] = useState<boolean | null>(null);
+  const [otimizadorGlobal, setOtimizadorGlobal] = useState<boolean | null>(null);
   // Mês selecionado no histórico de uso de IA ('' = mais recente disponível)
   const [aiMonth, setAiMonth] = useState('');
   const [aiBilling, setAiBilling] = useState<AiBillingSettings>({
@@ -521,7 +526,38 @@ export default function ConfiguracoesPage() {
       .then(setAiUsage)
       .catch(() => setAiUsage([]))
       .finally(() => setAiUsageLoading(false));
+    void fetch('/api/crm/ai/config', { headers: callerHeaders() })
+      .then((res) => res.ok ? res.json() as Promise<{ global_ativa: boolean }> : null)
+      .then((data) => { if (data) setCrmAiGlobal(data.global_ativa); })
+      .catch(() => undefined);
   }, [activeTab]);
+
+  async function toggleCrmAiGlobal(next: boolean) {
+    setCrmAiGlobal(next);
+    await fetch('/api/crm/ai/config', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', ...callerHeaders() },
+      body: JSON.stringify({ global_ativa: next }),
+    }).catch(() => undefined);
+  }
+
+  async function toggleCrmAiClient(clientId: string, next: boolean) {
+    setAiUsage((prev) => prev.map((r) => r.client_id === clientId ? { ...r, ia_ativa: next } : r));
+    await fetch('/api/crm/ai/config', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', ...callerHeaders() },
+      body: JSON.stringify({ clientId, ia_ativa: next }),
+    }).catch(() => undefined);
+  }
+
+  async function toggleOtimizadorGlobal(next: boolean) {
+    setOtimizadorGlobal(next);
+    await fetch('/api/otimizador/global-config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...callerHeaders() },
+      body: JSON.stringify({ ativo: next }),
+    }).catch(() => undefined);
+  }
 
   async function saveAiBilling() {
     setAiBillingSaving(true);
@@ -655,6 +691,10 @@ export default function ConfiguracoesPage() {
     void fetch('/api/otimizador/whatsapp-config')
       .then((res) => res.ok ? res.json() as Promise<OtimizadorWaConfig> : null)
       .then((data) => { if (data) setOtimizadorWa(data); })
+      .catch(() => {});
+    void fetch('/api/otimizador/global-config', { headers: callerHeaders() })
+      .then((res) => res.ok ? res.json() as Promise<{ ativo: boolean }> : null)
+      .then((data) => { if (data) setOtimizadorGlobal(data.ativo); })
       .catch(() => {});
   }, [activeTab]);
 
@@ -1222,6 +1262,33 @@ export default function ConfiguracoesPage() {
                 </div>
 
                 {/* Tabela do mês por cliente */}
+                <div className={cn(
+                  'bg-card border rounded-[var(--radius)] p-5',
+                  crmAiGlobal === false ? 'border-red-500/40' : 'border-border',
+                )}>
+                  <div className="flex flex-wrap items-center justify-between gap-4">
+                    <div>
+                      <p className="text-sm font-bold">Análise de IA do CRM</p>
+                      <p className="text-xs text-muted-foreground mt-0.5 max-w-xl">
+                        Interruptor geral da IA que analisa as conversas e move os leads de etapa/temperatura no Kanban.
+                        Desligado, nenhum cliente é analisado. Para desligar só um cliente, use a coluna &quot;IA&quot; na tabela abaixo.
+                      </p>
+                    </div>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={crmAiGlobal ?? true}
+                        disabled={crmAiGlobal === null}
+                        onChange={(e) => void toggleCrmAiGlobal(e.target.checked)}
+                        className="h-4 w-4 rounded border-border accent-primary"
+                      />
+                      <span className={cn('text-sm font-semibold', crmAiGlobal === false ? 'text-red-400' : 'text-foreground')}>
+                        {crmAiGlobal === null ? '...' : crmAiGlobal ? 'Ativada' : 'Desativada'}
+                      </span>
+                    </label>
+                  </div>
+                </div>
+
                 <div className="bg-card border border-border rounded-[var(--radius)] overflow-hidden">
                   <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4 border-b border-border">
                     <div>
@@ -1264,6 +1331,7 @@ export default function ConfiguracoesPage() {
                     <thead>
                       <tr className="border-b border-border">
                         <th className="px-6 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Cliente</th>
+                        <th className="px-6 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">IA</th>
                         <th className="px-6 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground text-right">Chamadas</th>
                         <th className="px-6 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground text-right">Hoje</th>
                         <th className="px-6 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground text-right">Limite/dia</th>
@@ -1274,14 +1342,27 @@ export default function ConfiguracoesPage() {
                     </thead>
                     <tbody className="divide-y divide-border">
                       {aiUsageLoading ? (
-                        <tr><td colSpan={7} className="px-6 py-8 text-center text-sm text-muted-foreground">Carregando uso da IA...</td></tr>
+                        <tr><td colSpan={8} className="px-6 py-8 text-center text-sm text-muted-foreground">Carregando uso da IA...</td></tr>
                       ) : rows.length === 0 ? (
-                        <tr><td colSpan={7} className="px-6 py-8 text-center text-sm text-muted-foreground">Nenhum uso registrado neste mês.</td></tr>
+                        <tr><td colSpan={8} className="px-6 py-8 text-center text-sm text-muted-foreground">Nenhum uso registrado neste mês.</td></tr>
                       ) : rows.map((row) => (
                         <tr key={`${row.client_id}-${row.mes_ano}`} className="hover:bg-muted/30 transition-colors">
                           <td className="px-6 py-4">
                             <p className="font-semibold text-sm">{row.client_name}</p>
                             <p className="text-[11px] text-muted-foreground">{row.client_id}</p>
+                          </td>
+                          <td className="px-6 py-4">
+                            <label className="flex items-center gap-1.5 cursor-pointer" title="Liga/desliga a análise de IA (mudança de etapa/temperatura) para este cliente">
+                              <input
+                                type="checkbox"
+                                checked={row.ia_ativa !== false}
+                                onChange={(e) => void toggleCrmAiClient(row.client_id, e.target.checked)}
+                                className="h-4 w-4 rounded border-border accent-primary"
+                              />
+                              <span className={cn('text-[11px] font-semibold', row.ia_ativa === false ? 'text-red-400' : 'text-muted-foreground')}>
+                                {row.ia_ativa === false ? 'Off' : 'On'}
+                              </span>
+                            </label>
                           </td>
                           <td className="px-6 py-4 text-right font-semibold">{Number(row.chamadas_ia ?? 0).toLocaleString('pt-BR')}</td>
                           <td className="px-6 py-4 text-right text-muted-foreground">{Number(row.chamadas_hoje ?? 0).toLocaleString('pt-BR')}</td>
@@ -1294,6 +1375,7 @@ export default function ConfiguracoesPage() {
                       {!aiUsageLoading && rows.length > 0 && (
                         <tr className="bg-muted/20">
                           <td className="px-6 py-3.5 text-xs font-bold uppercase tracking-wider">Total do mês</td>
+                          <td className="px-6 py-3.5" />
                           <td className="px-6 py-3.5 text-right font-bold">{tCalls.toLocaleString('pt-BR')}</td>
                           <td className="px-6 py-3.5" />
                           <td className="px-6 py-3.5" />
@@ -1319,6 +1401,33 @@ export default function ConfiguracoesPage() {
 
       {activeTab === 'otimizador' && (
         <div className="space-y-6">
+          <div className={cn(
+            'rounded-[var(--radius)] border bg-card p-5',
+            otimizadorGlobal === false ? 'border-red-500/40' : 'border-border',
+          )}>
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div>
+                <p className="text-sm font-semibold text-foreground">Análises automáticas do Otimizador</p>
+                <p className="text-xs text-muted-foreground mt-0.5 max-w-xl">
+                  Interruptor geral do rodízio semanal (cron). Desligado, nenhuma análise automática roda — e nenhum custo de IA é gerado.
+                  Análises manuais pela tela do Otimizador continuam funcionando. Para tirar só um cliente do rodízio, use o toggle na Config do cliente (tela do Otimizador → engrenagem).
+                </p>
+              </div>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={otimizadorGlobal ?? true}
+                  disabled={otimizadorGlobal === null}
+                  onChange={(e) => void toggleOtimizadorGlobal(e.target.checked)}
+                  className="h-4 w-4 rounded border-border accent-primary"
+                />
+                <span className={cn('text-sm font-semibold', otimizadorGlobal === false ? 'text-red-400' : 'text-foreground')}>
+                  {otimizadorGlobal === null ? '...' : otimizadorGlobal ? 'Ativadas' : 'Desativadas'}
+                </span>
+              </label>
+            </div>
+          </div>
+
           <div className="rounded-[var(--radius)] border border-border bg-card p-5 space-y-5">
             <div>
               <p className="text-sm font-semibold text-foreground">Relatórios via WhatsApp</p>

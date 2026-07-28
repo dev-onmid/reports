@@ -673,7 +673,9 @@ async function handleV2(body: AnalyzeBody, origin: string): Promise<Response> {
       // o banner avisava "resposta incompleta"). Haiku 4.5 suporta até 64k de saída.
       model: OPTIMIZER_MODEL_V2,
       max_tokens: 32000,
-      system: buildOptimizerSystemPromptV2(),
+      // cache_control: o prompt v3.1 é grande e IGUAL para todos os clientes — no cron
+      // semanal (vários clientes em sequência) o 2º cliente em diante lê do cache (0,1×).
+      system: [{ type: 'text', text: buildOptimizerSystemPromptV2(), cache_control: { type: 'ephemeral' } }],
       messages: [{ role: 'user', content: JSON.stringify(payload) }],
     }),
   });
@@ -685,13 +687,15 @@ async function handleV2(body: AnalyzeBody, origin: string): Promise<Response> {
 
   const data = await response.json() as {
     content?: Array<{ type: string; text?: string }>;
-    usage?: { input_tokens?: number; output_tokens?: number };
+    usage?: { input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number };
   };
   const text = data.content?.map((b) => b.type === 'text' ? b.text ?? '' : '').join('').trim() ?? '';
   const inputTokens = Number(data.usage?.input_tokens ?? 0);
   const outputTokens = Number(data.usage?.output_tokens ?? 0);
-  const tokens = inputTokens + outputTokens;
-  const cost = calcCostUsd(OPTIMIZER_MODEL_V2, inputTokens, outputTokens);
+  const cacheReadTokens = Number(data.usage?.cache_read_input_tokens ?? 0);
+  const cacheWriteTokens = Number(data.usage?.cache_creation_input_tokens ?? 0);
+  const tokens = inputTokens + cacheReadTokens + cacheWriteTokens + outputTokens;
+  const cost = calcCostUsd(OPTIMIZER_MODEL_V2, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens);
 
   let parsed: unknown;
   let parseError: string | undefined;
@@ -733,7 +737,7 @@ async function handleV2(body: AnalyzeBody, origin: string): Promise<Response> {
     custo_estimado_usd: cost,
   };
 
-  void logAiUsage({ source: 'otimizador-v2', model: OPTIMIZER_MODEL_V2, inputTokens, outputTokens });
+  void logAiUsage({ source: 'otimizador-v2', model: OPTIMIZER_MODEL_V2, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens });
   await saveLogV2({ payload, result, payloadHash, connectionId, accountId: body.account_id, canal: body.canal, error: analiseError });
 
   // Executa ações automáticas (fire-and-forget)

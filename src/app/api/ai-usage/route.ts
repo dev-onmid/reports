@@ -76,7 +76,12 @@ export async function GET() {
         output_tokens INTEGER NOT NULL DEFAULT 0,
         cost_usd      NUMERIC(12,8) NOT NULL DEFAULT 0,
         created_at    TIMESTAMPTZ DEFAULT NOW()
-      )
+      );
+    `);
+    await pool.query(`
+      ALTER TABLE ai_usage_log
+        ADD COLUMN IF NOT EXISTS cache_read_tokens  INTEGER NOT NULL DEFAULT 0,
+        ADD COLUMN IF NOT EXISTS cache_write_tokens INTEGER NOT NULL DEFAULT 0
     `);
 
     const { rows: [month] } = await pool.query<{
@@ -84,7 +89,7 @@ export async function GET() {
     }>(`
       SELECT
         COUNT(*)                           AS calls,
-        COALESCE(SUM(input_tokens),  0)    AS input_tokens,
+        COALESCE(SUM(input_tokens + cache_read_tokens + cache_write_tokens), 0) AS input_tokens,
         COALESCE(SUM(output_tokens), 0)    AS output_tokens,
         COALESCE(SUM(cost_usd),      0)    AS cost_usd
       FROM ai_usage_log
@@ -111,7 +116,7 @@ export async function GET() {
         model,
         COUNT(*) AS calls,
         COALESCE(SUM(cost_usd), 0) AS cost_usd,
-        COALESCE(SUM(input_tokens), 0) AS input_tokens,
+        COALESCE(SUM(input_tokens + cache_read_tokens + cache_write_tokens), 0) AS input_tokens,
         COALESCE(SUM(output_tokens), 0) AS output_tokens
       FROM ai_usage_log
       WHERE created_at >= date_trunc('month', NOW())
