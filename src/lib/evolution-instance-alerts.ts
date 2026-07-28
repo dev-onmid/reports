@@ -91,10 +91,11 @@ export async function fetchDisconnectedZapiInstances(
       instanceId: r.instance_id, token: r.token, clientToken: r.security_token ?? undefined,
     });
     if (connected) return null;
+    const nome = (r.name ?? '').trim() || r.instance_id;
     return {
-      name: r.name,
+      name: nome,
       status: 'close',
-      profileName: `${r.name} (Z-API)`, // distingue o provedor no popup
+      profileName: `${nome} (Z-API)`, // distingue o provedor no popup
       phone: null,
       reasonCode: null,
       reason: 'Instância Z-API desconectada — reconecte o WhatsApp',
