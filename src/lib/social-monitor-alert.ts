@@ -44,6 +44,22 @@ async function setSetting(pool: Pool, key: string, value: string, userId?: strin
   );
 }
 
+// Conexão REAL da instância Z-API. O checkStatus de @/lib/zapi só olha o HTTP 200,
+// que o /status retorna mesmo desconectado — aqui lemos o campo `connected`.
+async function zapiConnected(client: { instanceId: string; token: string; clientToken?: string }): Promise<boolean> {
+  try {
+    const headers: Record<string, string> = {};
+    if (client.clientToken) headers['Client-Token'] = client.clientToken;
+    const res = await fetch(
+      `https://api.z-api.io/instances/${client.instanceId}/token/${client.token}/status`,
+      { headers, signal: AbortSignal.timeout(10000) },
+    );
+    if (!res.ok) return false;
+    const body = await res.json() as { connected?: boolean };
+    return body.connected === true;
+  } catch { return false; }
+}
+
 function todayBRT(): string {
   // 'YYYY-MM-DD' no fuso de São Paulo (en-CA formata nesse padrão)
   return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
@@ -155,13 +171,18 @@ export async function sendSocialMonitorAlert(pool: Pool, opts: { force?: boolean
   );
   const inst = rows[0] as { instance_id: string; token: string; security_token: string | null } | undefined;
   if (!inst) return { sent: false, reason: 'Instância Z-API não encontrada ou inativa' };
+  const client = { instanceId: inst.instance_id, token: inst.token, clientToken: inst.security_token ?? undefined };
+
+  // O Z-API responde "ok" no /send-text MESMO com o celular desconectado — a
+  // mensagem some silenciosamente. Sem esta checagem, marcávamos "enviado" e
+  // queimávamos a trava do dia sem nada chegar no grupo. Confere a conexão real
+  // (campo `connected` do /status, não só o HTTP 200 que o checkStatus do zapi.ts vê).
+  if (!(await zapiConnected(client))) {
+    return { sent: false, reason: 'Instância Z-API desconectada — reconecte o WhatsApp', clientes: alertRows.length };
+  }
 
   const message = buildAlertMessage(alertRows);
-  const result = await sendText(
-    { instanceId: inst.instance_id, token: inst.token, clientToken: inst.security_token ?? undefined },
-    cfg.groupId,
-    message,
-  );
+  const result = await sendText(client, cfg.groupId, message);
   if (!result.ok) return { sent: false, reason: result.error ?? 'Falha no envio Z-API', clientes: alertRows.length };
 
   // Marca a data só no fluxo do cron — o teste manual pode reenviar quantas vezes quiser.
