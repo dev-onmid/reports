@@ -260,6 +260,30 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
   const [testResult, setTestResult]       = useState<{ platform: string; sucesso: boolean; body: string } | null>(null);
   const [eventosCustom, setEventosCustom] = useState<EventoCustom[]>([]);
   const [newEvento, setNewEvento]         = useState({ status_gatilho: '', meta_event_name: '', google_conversion_label: '' });
+  // Etapas reais do funil do CRM — viram um <select> no guia de Eventos por
+  // Status (digitar o nome da etapa na mão era a maior fonte de evento morto:
+  // "proposta" ≠ "Proposta" e o disparo nunca casava).
+  const [stageOptions, setStageOptions] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (guia !== 'eventos' || stageOptions.length > 0) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const funnels = await fetch(`/api/crm/funnels?clientId=${encodeURIComponent(clientId)}`)
+          .then(r => r.ok ? r.json() as Promise<{ id: string }[]> : []);
+        const perFunnel = await Promise.all(funnels.map(f =>
+          fetch(`/api/crm/funnels/${f.id}/stages`)
+            .then(r => r.ok ? r.json() as Promise<{ label: string }[]> : [])
+            .catch(() => [] as { label: string }[]),
+        ));
+        if (cancelled) return;
+        const labels = [...new Set(perFunnel.flat().map(s => s.label).filter(Boolean))];
+        setStageOptions(labels);
+      } catch { /* sem etapas → o campo vira texto livre, como antes */ }
+    })();
+    return () => { cancelled = true; };
+  }, [guia, clientId, stageOptions.length]);
   const [addingEvento, setAddingEvento]   = useState(false);
 
   // ── Conversion log ─────────────────────────────────────────────────────
@@ -335,12 +359,27 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
   }
 
   async function testConversion(platform: 'meta' | 'google') {
+    // Pré-checagens no estado da tela — evitam o teste "mudo" (o envio real tem
+    // gate por ativo/config e sai sem logar nada, o que virava um "Erro" seco).
+    if (platform === 'meta' && !convConfig.meta_ativo) {
+      setTestResult({ platform, sucesso: false, body: 'O Meta CAPI está DESATIVADO — ligue o interruptor no passo "Ativar" e clique em Salvar antes de testar.' });
+      return;
+    }
+    if (platform === 'google' && !convConfig.google_ativo) {
+      setTestResult({ platform, sucesso: false, body: 'As conversões Google estão DESATIVADAS — ligue o interruptor no passo "Ativar" e clique em Salvar antes de testar.' });
+      return;
+    }
     platform === 'meta' ? setTestingMeta(true) : setTestingGoogle(true);
     setTestResult(null);
     try {
       const res = await fetch(`/api/clients/${clientId}/conversions/test`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ platform }) });
-      const data = await res.json() as { ok: boolean; resultado?: { sucesso: boolean; resposta_body: string } };
-      setTestResult({ platform, sucesso: data.resultado?.sucesso ?? false, body: data.resultado?.resposta_body ?? (res.ok ? 'Enviado' : 'Erro') });
+      const data = await res.json().catch(() => ({})) as { ok?: boolean; error?: string; resultado?: { sucesso: boolean; resposta_body: string } | null };
+      const body = data.resultado?.resposta_body
+        ?? data.error
+        ?? (res.ok
+          ? 'Nada foi enviado — salve a configuração primeiro (o teste usa a config já GRAVADA, não o que está digitado na tela).'
+          : 'Erro ao executar o teste.');
+      setTestResult({ platform, sucesso: data.resultado?.sucesso ?? false, body });
     } finally { platform === 'meta' ? setTestingMeta(false) : setTestingGoogle(false); }
   }
 
@@ -740,7 +779,7 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
             steps={[
               {
                 label: 'Pixel ID',
-                guide: '1. Acesse business.facebook.com\n2. Vá em "Gerenciador de Eventos"\n3. Selecione seu Pixel na lista\n4. O Pixel ID aparece abaixo do nome (ex: 1234567890123456)',
+                guide: 'É o MESMO número usado no guia "Conversão via API" — se já configurou lá, copie de lá.\n1. business.facebook.com → "Gerenciador de Eventos"\n2. Selecione o conjunto de dados do cliente\n3. Copie a "Identificação do conjunto de dados" (coluna da direita da Visão geral, ex: 1234567890123456)',
                 body: (
                   <div>
                     <label className="mb-1 block text-xs font-semibold text-muted-foreground">Pixel ID</label>
@@ -750,7 +789,7 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
               },
               {
                 label: 'Token',
-                guide: '1. No Gerenciador de Eventos, clique no Pixel\n2. Aba "Configurações"\n3. Role até "API de Conversões"\n4. "Gerar token de acesso"\n⚠️ Nunca compartilhe este token.',
+                guide: 'Pode usar o MESMO token do guia "Conversão via API".\n1. No Gerenciador de Eventos, clique no conjunto de dados\n2. Aba "Configurações"\n3. Role até "API de Conversões" → "Gerar token de acesso"\n⚠️ Nunca compartilhe este token.',
                 body: (
                   <div>
                     <label className="mb-1 block text-xs font-semibold text-muted-foreground">Token da API de Conversões</label>
@@ -760,7 +799,7 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
               },
               {
                 label: 'Gatilho',
-                guide: 'O atendente digita esse texto na conversa do WhatsApp para marcar a venda.\nEx.: "compra aprovada 297" dispara o evento Purchase com valor 297.',
+                guide: 'Combina com o atendente do cliente: quando fechar uma venda, ele digita o gatilho + valor NA PRÓPRIA CONVERSA do WhatsApp.\nEx.: gatilho "compra aprovada" → o atendente digita "compra aprovada 297" → o sistema dispara o Purchase de R$ 297 pra campanha na hora.\nDica: use um texto que o atendente não digitaria sem querer.',
                 body: (
                   <div className="space-y-4">
                     <div>
@@ -805,7 +844,7 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
             steps={[
               {
                 label: 'Ativar',
-                guide: 'Ligue o envio server-side e informe o Pixel.\n1. Acesse business.facebook.com\n2. Vá em "Gerenciador de Eventos"\n3. Selecione seu Pixel na lista\n4. O Pixel ID aparece abaixo do nome',
+                guide: 'Ligue o interruptor abaixo (sem ele, NADA é enviado — mesmo com tudo preenchido).\n1. business.facebook.com → "Gerenciador de Eventos" → "Conjuntos de dados"\n2. Selecione o conjunto do cliente\n3. Na Visão geral, coluna da direita: copie a "Identificação do conjunto de dados" (ex: 221663293188760) — esse é o Pixel ID',
                 body: (
                   <div className="space-y-4">
                     <Toggle value={convConfig.meta_ativo} onChange={v => setConvConfig(p => ({ ...p, meta_ativo: v }))} label="Ativar Meta CAPI" />
@@ -839,7 +878,7 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
               {
                 label: 'Teste',
                 optional: true,
-                guide: 'Opcional. Só use para validar o envio.\nGerenciador de Eventos → "Testar eventos" → copie o código (ex: TEST12345). Remova após confirmar.',
+                guide: 'Opcional — valida que Pixel, Token e Page ID estão certos.\n1. Gerenciador de Eventos → aba "Testar eventos" → canal "Mensagem" → "WhatsApp" → copie o código (ex: TEST12345)\n2. Cole aqui e clique em SALVAR (o teste usa a config gravada, não a digitada)\n3. Reabra este guia e clique em "Testar conexão"\n4. Se a resposta falar "ctwa_clid ausente", está TUDO CERTO — o lead fictício do teste não veio de anúncio; leads reais de anúncio trazem esse código e passam\n⚠️ Depois de confirmar, APAGUE o código e salve de novo. Se ficar preenchido, TODA conversão real vira "teste": a Meta aceita (200 OK) mas a campanha nunca recebe nada.',
                 body: (
                   <div className="space-y-4">
                     <div>
@@ -879,7 +918,7 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
               {
                 label: 'Ativar',
                 optional: true,
-                guide: 'ID da conta Google Ads (ex: 123-456-7890).\nSe deixar vazio, usa a conta já vinculada ao cliente em Contas de Anúncio.',
+                guide: 'Ligue o interruptor e avance — na maioria dos casos NÃO precisa preencher nada aqui.\nO Customer ID (ex: 123-456-7890, canto superior direito do painel Google Ads) só é necessário se o cliente NÃO estiver com a conta Google vinculada em Vincular Contas.',
                 body: (
                   <div className="space-y-4">
                     <Toggle value={convConfig.google_ativo} onChange={v => setConvConfig(p => ({ ...p, google_ativo: v }))} label="Ativar conversões Google" />
@@ -892,7 +931,7 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
               },
               {
                 label: 'Ações de conversão',
-                guide: 'NOME ou ID da ação de conversão, como está em Google Ads → Metas → Conversões.\nEx.: "Lead WhatsApp" ou 987654321.\n⚠️ Não é o rótulo do gtag — precisa ser o nome ou ID da ação, senão o upload offline falha.',
+                guide: 'No painel do Google Ads: Metas → Conversões → Resumo.\nJÁ EXISTE a ação? Copie o NOME dela exatamente como aparece na lista (ex.: "Lead WhatsApp") e cole abaixo.\nNÃO existe? Crie: "+ Nova ação de conversão" → Importar → "CRMs, arquivos ou outras fontes de dados" → Cliques → dê um nome (ex.: "Lead WhatsApp") → Salvar. Depois copie esse nome aqui.\nPreencha só as que o cliente usa — pode deixar as outras vazias.\n⚠️ NÃO é o rótulo do gtag (aquele código tipo AbC-D12...). É o NOME (ou ID numérico) da ação — com o rótulo, o envio falha.',
                 body: (
                   <div className="space-y-3">
                     <div>
@@ -948,7 +987,7 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
             onFinish={() => setGuia(null)}
             steps={[{
               label: 'Eventos',
-              guide: 'Cada linha liga um status do CRM a um evento nas plataformas.\nO status precisa ser escrito igual à etapa do funil (ex.: "Proposta").\n⚠️ No pixel de mensagem (WhatsApp) o evento de lead chama-se "LeadSubmitted" — não "Lead", que é do pixel de site. "Purchase" é igual nos dois.',
+              guide: 'Receita: quando o lead for arrastado pra etapa X no CRM, o sistema avisa a Meta/Google sozinho.\n1. Escolha a etapa do funil (a lista já mostra as etapas reais deste cliente)\n2. Evento Meta: use "LeadSubmitted" pra lead e "Purchase" pra venda\n3. Label Google: só se também quiser contar no Google Ads (nome da ação de conversão) — senão deixe vazio\n4. Clique em Adicionar — a linha já fica valendo na hora\nExemplos prontos: etapa "Agendou" → LeadSubmitted · etapa "Fechou" → Purchase.\n⚠️ No WhatsApp o evento de lead é "LeadSubmitted" — não "Lead", que é do pixel de site.',
               body: (
                 <div className="space-y-4">
             {eventosCustom.length > 0 && (
@@ -985,14 +1024,27 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
             )}
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_1fr_1fr_auto] items-end">
               <div>
-                <label className="mb-1 block text-[10px] font-semibold text-muted-foreground uppercase">Status gatilho</label>
-                <input value={newEvento.status_gatilho} onChange={e => setNewEvento(p => ({ ...p, status_gatilho: e.target.value }))} placeholder="Ex: Proposta" className="w-full rounded-lg border border-border bg-background px-3 py-1.5 text-xs outline-none focus:border-primary" />
+                <label className="mb-1 block text-[10px] font-semibold text-muted-foreground uppercase">Etapa do funil</label>
+                {stageOptions.length > 0 ? (
+                  <select
+                    value={newEvento.status_gatilho}
+                    onChange={e => setNewEvento(p => ({ ...p, status_gatilho: e.target.value }))}
+                    className="w-full rounded-lg border border-border bg-background px-3 py-1.5 text-xs outline-none focus:border-primary"
+                  >
+                    <option value="">Selecione a etapa...</option>
+                    {stageOptions.map(label => <option key={label} value={label}>{label}</option>)}
+                  </select>
+                ) : (
+                  <input value={newEvento.status_gatilho} onChange={e => setNewEvento(p => ({ ...p, status_gatilho: e.target.value }))} placeholder="Ex: Proposta" className="w-full rounded-lg border border-border bg-background px-3 py-1.5 text-xs outline-none focus:border-primary" />
+                )}
               </div>
               <div>
-                <label className="mb-1 flex items-center text-[10px] font-semibold text-muted-foreground uppercase">
-                  Evento Meta <HelpBtn text={'Para o pixel/conjunto de dados de mensagem (WhatsApp), o evento de lead chama-se "LeadSubmitted" — NÃO "Lead" (esse é o nome usado no pixel convencional de site). "Purchase" continua igual nos dois.'} />
-                </label>
-                <input value={newEvento.meta_event_name} onChange={e => setNewEvento(p => ({ ...p, meta_event_name: e.target.value }))} placeholder="Ex: LeadSubmitted" className="w-full rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-mono outline-none focus:border-primary" />
+                <label className="mb-1 block text-[10px] font-semibold text-muted-foreground uppercase">Evento Meta</label>
+                <input list="meta-event-sugestoes" value={newEvento.meta_event_name} onChange={e => setNewEvento(p => ({ ...p, meta_event_name: e.target.value }))} placeholder="Ex: LeadSubmitted" className="w-full rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-mono outline-none focus:border-primary" />
+                <datalist id="meta-event-sugestoes">
+                  <option value="LeadSubmitted">Lead (WhatsApp — use este, não &quot;Lead&quot;)</option>
+                  <option value="Purchase">Compra</option>
+                </datalist>
               </div>
               <div>
                 <label className="mb-1 block text-[10px] font-semibold text-muted-foreground uppercase">Label Google</label>
