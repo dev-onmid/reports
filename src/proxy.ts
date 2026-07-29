@@ -76,6 +76,16 @@ const CRON_PREFIXES = [
   '/api/social-monitor/refresh',
 ];
 
+/**
+ * Integrações máquina→máquina (Make etc.). Mesmo contrato dos crons: o proxy
+ * só exige que a credencial VENHA na requisição; quem confere o valor é a
+ * rota (x-onmid-secret vs MAKE_INTEGRATION_SECRET). Sem o header, cai na
+ * checagem de sessão — um curl anônimo continua vendo 401.
+ */
+const INTEGRATION_PREFIXES = [
+  '/api/integrations/reuniao',
+];
+
 function matches(pathname: string, prefixes: string[]): boolean {
   return prefixes.some(p => (p.endsWith('/') ? pathname.startsWith(p) : pathname === p || pathname.startsWith(`${p}/`)));
 }
@@ -88,6 +98,10 @@ export function proxy(req: NextRequest) {
   // Chamada servidor→servidor (Luna, cron do CRM, disparo de relatório). Elas
   // saem do próprio app por HTTP e não carregam cookie de usuário.
   if (isValidInternalToken(req.headers.get(INTERNAL_HEADER))) return NextResponse.next();
+
+  if (matches(pathname, INTEGRATION_PREFIXES) && req.headers.get('x-onmid-secret')) {
+    return NextResponse.next();
+  }
 
   // Cron só passa se apresentar alguma credencial; o valor é conferido na rota.
   if (matches(pathname, CRON_PREFIXES)) {
