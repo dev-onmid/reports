@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
-import { getAuthSession } from '@/lib/auth-store';
+import { getAuthSession, clearAuthSession } from '@/lib/auth-store';
 import { defaultPermission, type Permission } from '@/lib/mock-data';
 
 type Role = 'Administrador' | 'Usuário' | 'Visualizador';
@@ -72,24 +72,42 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
       return;
     }
 
+    // Uma única flag pros dois fetches: os caminhos de saída antecipada abaixo
+    // também precisam cancelar a validação de sessão, senão ela redireciona
+    // depois que o componente já saiu de tela.
+    let active = true;
+    const cleanup = () => { active = false; };
+
+    // O localStorage não é mais autoridade: ele sobrevive à expiração do cookie
+    // e a um logout feito em outra aba. Sem esta checagem, o usuário veria a
+    // interface montada com todas as chamadas de API devolvendo 401.
+    void fetch('/api/auth/me')
+      .then((res) => {
+        if (!active) return;
+        if (res.status === 401) {
+          clearAuthSession();
+          router.replace('/');
+        }
+      })
+      .catch(() => {});
+
     const role = session.role as Role;
     const allowedRoles = getAllowedRoles(pathname);
     if (!allowedRoles.includes(role)) {
       router.replace('/inicio');
-      return;
+      return cleanup;
     }
 
     const requiredFeature = getRequiredFeature(pathname);
     if (!requiredFeature) {
       setAllowed(true);
-      return;
+      return cleanup;
     }
     if (requiredFeature === 'otimizador' && role === 'Administrador') {
       setAllowed(true);
-      return;
+      return cleanup;
     }
 
-    let active = true;
     setAllowed(false);
     void fetch('/api/permissions')
       .then((res) => {
@@ -105,9 +123,13 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
         }
         setAllowed(true);
       })
-      .catch(() => { if (active) setAllowed(true); }); // fail open: the endpoint itself errored, not a denied permission
+      // Falha FECHADA. Antes isto era `setAllowed(true)`: qualquer erro em
+      // /api/permissions (inclusive o 401 de quem não tem sessão) liberava a
+      // tela. Agora volta pro início — a tela é secundária de qualquer forma,
+      // já que as APIs por trás dela exigem sessão.
+      .catch(() => { if (active) router.replace('/inicio'); });
 
-    return () => { active = false; };
+    return cleanup;
   }, [router, pathname]);
 
   if (!allowed) {

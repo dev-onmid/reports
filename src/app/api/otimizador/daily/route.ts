@@ -1,5 +1,6 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
+import { readSession } from '@/lib/session';
 import {
   OPTIMIZER_PERIODS,
   buildOptimizerPayloadFromCampaign,
@@ -102,20 +103,25 @@ async function analyzeCampaign(origin: string, payload: ReturnType<typeof buildO
   return res.json();
 }
 
+/**
+ * Papel vindo da sessão assinada, confirmado no banco.
+ *
+ * O `roleHint` do header `x-onmid-role` era aceito no catch: uma falha de banco
+ * transformava um header declarado pelo cliente em permissão de admin.
+ */
 async function isAdminRequest(request: NextRequest): Promise<boolean> {
-  const userId = request.headers.get('x-onmid-user-id') ?? '';
-  const roleHint = request.headers.get('x-onmid-role') ?? '';
-  if (!userId && roleHint !== 'Administrador') return false;
+  const userId = readSession(request)?.uid;
+  if (!userId) return false;
 
   const pool = makeServerPool();
   try {
-    const { rows } = await pool.query<{ role: string }>(
-      `SELECT role FROM public.users WHERE id = $1 LIMIT 1`,
+    const { rows } = await pool.query<{ role: string; status: string }>(
+      `SELECT role, status FROM public.users WHERE id = $1 LIMIT 1`,
       [userId],
     );
-    return rows[0]?.role === 'Administrador';
+    return rows[0]?.role === 'Administrador' && rows[0]?.status === 'Ativo';
   } catch {
-    return roleHint === 'Administrador';
+    return false;
   } finally {
     await pool.end();
   }

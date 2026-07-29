@@ -5,6 +5,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { deflateSync } from 'zlib';
 import { makeServerPool } from '@/lib/server-db';
+import { internalHeaders } from '@/lib/session';
 import { sendText } from '@/lib/zapi';
 import { getFreshMetaToken } from '@/lib/meta-token';
 import { resolveMetaPeriod, resolveGaqlPeriod, applyMetaDateToUrl } from '@/lib/period-utils';
@@ -1056,7 +1057,7 @@ export async function resolveZapiConn(
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function fetchInternal(path: string): Promise<any | null> {
   try {
-    const r = await fetch(`${appOrigin()}${path}`);
+    const r = await fetch(`${appOrigin()}${path}`, { headers: internalHeaders() });
     if (!r.ok) return null;
     return await r.json();
   } catch { return null; }
@@ -1139,7 +1140,7 @@ async function buildRealReport(
   const origin = appOrigin();
   const res = await fetch(`${origin}/api/reports/run-once`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...internalHeaders() },
     body: JSON.stringify({ clientId, from, to, template }),
   });
   if (!res.ok) {
@@ -1497,10 +1498,10 @@ export async function execSystemTool(
       const meta = links.find((l) => l.platform === 'meta_ads' || l.platform === 'meta');
       const goog = links.find((l) => l.platform === 'google_ads' || l.platform === 'google');
       if (meta?.connection_id) {
-        try { const r = await fetch(`${baseUrl}/api/meta/account-balances?connectionId=${meta.connection_id}`); if (r.ok) balances.meta = await r.json(); } catch { /* ignore */ }
+        try { const r = await fetch(`${baseUrl}/api/meta/account-balances?connectionId=${meta.connection_id}`, { headers: internalHeaders() }); if (r.ok) balances.meta = await r.json(); } catch { /* ignore */ }
       }
       if (goog?.connection_id) {
-        try { const r = await fetch(`${baseUrl}/api/google/account-balances?connectionId=${goog.connection_id}`); if (r.ok) balances.google = await r.json(); } catch { /* ignore */ }
+        try { const r = await fetch(`${baseUrl}/api/google/account-balances?connectionId=${goog.connection_id}`, { headers: internalHeaders() }); if (r.ok) balances.google = await r.json(); } catch { /* ignore */ }
       }
       return JSON.stringify(balances);
     }
@@ -1682,7 +1683,7 @@ export async function execSystemTool(
       // Reusa a rota canônica do módulo Disparos (mesma semântica dos botões da tela).
       const res = await fetch(`${appOrigin()}/api/disparos/campaigns/${campaign_id}/action`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...internalHeaders() },
         body: JSON.stringify({ action }),
       }).catch(() => null);
       if (!res || !res.ok) return `❌ Falha ao executar "${action}" na campanha (HTTP ${res?.status ?? 'sem resposta'}).`;

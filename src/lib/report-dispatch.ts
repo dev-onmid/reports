@@ -1,4 +1,5 @@
 import { makeServerPool } from '@/lib/server-db';
+import { internalHeaders } from '@/lib/session';
 import { sendText as sendWhatsapp } from '@/lib/zapi';
 import { sendEvolutionText } from '@/lib/evolution-api';
 
@@ -61,7 +62,7 @@ export async function dispatchReportConfigs(configs: DispatchConfig[], origin: s
     try {
       const runRes = await fetch(`${origin}/api/reports/run/${cfg.id}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...internalHeaders() },
         body: JSON.stringify({}), // uses prevMonth() by default
       });
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from 'react';
-import { mockUsers, defaultPermission, allPermission, type User, type Permission, type Team } from '@/lib/mock-data';
+import { defaultPermission, type Permission, type Team } from '@/lib/mock-data';
 
 const SESSION_STORAGE_KEY = 'onmid-session';
 
@@ -13,42 +13,65 @@ export type AuthSession = {
   team: Team;
 };
 
-async function loadAuthUsers(): Promise<User[]> {
-  try {
-    const res = await fetch('/api/users?login=1');
-    if (res.ok) {
-      const data = await res.json() as User[];
-      if (data && data.length > 0) return data;
-    }
-  } catch {
-    // fall back to mock users if API not available
-  }
-  return mockUsers;
-}
-
-export async function verifyUserCredentials(email: string, password: string): Promise<User | null> {
-  const normalizedEmail = email.trim().toLowerCase();
-  const users = await loadAuthUsers();
-
-  const user = users.find((u) => (
-    u.email.trim().toLowerCase() === normalizedEmail &&
-    u.password === password &&
-    u.status === 'Ativo'
-  ));
-
-  if (!user) return null;
-  return user;
-}
-
+/**
+ * A senha é verificada no SERVIDOR e o cookie de sessão vem na resposta.
+ *
+ * O modelo anterior baixava todos os usuários (com senha) via
+ * `/api/users?login=1` e comparava aqui no browser — qualquer visitante podia
+ * chamar essa URL e ler as credenciais de todo mundo. Também não há mais
+ * fallback pra `mockUsers`: derrubar a API era um caminho de login com as
+ * credenciais fixas do código.
+ *
+ * O localStorage segue guardando a sessão só para a UI (nome, papel). Quem
+ * autoriza de verdade é o cookie HttpOnly, que o JS não lê nem forja.
+ */
 export async function authenticateUser(email: string, password: string): Promise<AuthSession | null> {
   if (typeof window === 'undefined') return null;
 
-  const user = await verifyUserCredentials(email, password);
-  if (!user) return null;
+  try {
+    const res = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json() as Partial<AuthSession>;
+    if (!data?.userId) return null;
 
-  const session: AuthSession = { userId: user.id, name: user.name, email: user.email, role: user.role, team: user.team ?? 'onmid' };
-  window.localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
-  return session;
+    const session: AuthSession = {
+      userId: data.userId,
+      name: data.name ?? '',
+      email: data.email ?? '',
+      role: data.role ?? '',
+      team: (data.team as Team) ?? 'onmid',
+    };
+    window.localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
+    return session;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Reconfirma a senha do usuário antes de uma ação sensível.
+ *
+ * Antes isto baixava a lista de senhas e comparava no browser; agora a
+ * checagem é server-side e a resposta traz só o papel. Devolve null quando a
+ * credencial não confere.
+ */
+export async function verifyUserCredentials(email: string, password: string): Promise<{ role: string } | null> {
+  try {
+    const res = await fetch('/api/auth/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json() as { ok?: boolean; role?: string };
+    return data?.ok ? { role: data.role ?? '' } : null;
+  } catch {
+    return null;
+  }
 }
 
 export function getAuthSession(): AuthSession | null {
@@ -70,13 +93,16 @@ export function getAuthSession(): AuthSession | null {
 export function clearAuthSession() {
   if (typeof window === 'undefined') return;
   window.localStorage.removeItem(SESSION_STORAGE_KEY);
+  // Limpar só o localStorage deixaria o cookie de sessão vivo no servidor —
+  // "sair" não teria efeito nenhum sobre o acesso real.
+  void fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
 }
 
 /**
- * Identifies the logged-in user to API routes that need to scope data per-caller
- * (e.g. Disparos: a "parceiro" only sees their own instances/campaigns). This app
- * has no server session of its own, so — like /api/permissions — the server trusts
- * whatever id the client reports here. Spread into a fetch's `headers` option.
+ * Mantido por compatibilidade com os call sites existentes, mas não é mais o
+ * que autentica: o proxy SOBRESCREVE `x-onmid-user-id`/`x-onmid-role` com os
+ * valores do cookie assinado antes da requisição chegar na rota. O que for
+ * mandado daqui é ignorado — inclusive se for forjado.
  */
 export function callerHeaders(): Record<string, string> {
   const session = getAuthSession();
@@ -110,8 +136,9 @@ export function useMyPermissions(): { permissions: Permission; loading: boolean 
           );
         }
       } catch {
-        // The endpoint itself failed (not "no permission row") — fail open.
-        if (active) setPermissions(allPermission);
+        // Falha FECHADA: antes isto caía em `allPermission`, então derrubar
+        // /api/permissions liberava todas as telas pra qualquer sessão.
+        if (active) setPermissions(defaultPermission);
       } finally {
         if (active) setLoading(false);
       }

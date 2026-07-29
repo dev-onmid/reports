@@ -1,5 +1,6 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
+import { requireAdmin } from '@/lib/api-auth';
 import { getFreshMetaToken } from '@/lib/meta-token';
 import { countMetaResults } from '@/lib/meta-results';
 import {
@@ -1628,29 +1629,12 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const userId = request.headers.get('x-onmid-user-id') ?? '';
-  const roleHint = request.headers.get('x-onmid-role') ?? '';
-
-  if (!userId && roleHint !== 'Administrador') {
-    return Response.json({ error: 'Apenas administradores podem iniciar a análise geral.' }, { status: 403 });
-  }
-
-  const pool = makeServerPool();
-  try {
-    const { rows } = await pool.query<{ role: string }>(
-      `SELECT role FROM public.users WHERE id = $1 LIMIT 1`,
-      [userId],
-    );
-    if (rows[0]?.role !== 'Administrador' && roleHint !== 'Administrador') {
-      return Response.json({ error: 'Apenas administradores podem iniciar a análise geral.' }, { status: 403 });
-    }
-  } catch {
-    if (roleHint !== 'Administrador') {
-      return Response.json({ error: 'Apenas administradores.' }, { status: 403 });
-    }
-  } finally {
-    await pool.end().catch(() => {});
-  }
+  // O papel vem da sessão assinada + confirmação no banco. Antes, o header
+  // `x-onmid-role` sozinho bastava: mandar `x-onmid-role: Administrador`, sem
+  // usuário nenhum, passava — inclusive pelo `catch`, que liberava o acesso
+  // quando o banco falhava.
+  const auth = await requireAdmin(request);
+  if (!auth.ok) return auth.response;
 
   const opts = parseRunOptions(request);
   try {

@@ -63,11 +63,19 @@ export type User = {
   team: Team;
 };
 
+/**
+ * Semente de UI apenas — NÃO são credenciais.
+ *
+ * Este array vai no bundle do cliente, ou seja, é público. As senhas que
+ * ficavam aqui ('admin123', '1234') eram credenciais reais de administrador,
+ * e o auth-store caía nelas quando a API falhava: derrubar /api/users era um
+ * caminho de login. O campo agora é vazio e nada mais o compara.
+ */
 export const mockUsers: User[] = [
-  { id: '1', name: 'Admin', email: 'admin@onmid.com', password: 'admin123', role: 'Administrador', status: 'Ativo', team: 'onmid' },
-  { id: '4', name: 'Matheus', email: 'matheus@onmid.com.br', password: '1234', role: 'Administrador', status: 'Ativo', team: 'onmid' },
-  { id: '2', name: 'Maria Silva', email: 'maria@onmid.com', password: 'maria123', role: 'Usuário', status: 'Ativo', team: 'onmid' },
-  { id: '3', name: 'João Costa', email: 'joao@onmid.com', password: 'joao123', role: 'Visualizador', status: 'Inativo', team: 'onmid' },
+  { id: '1', name: 'Admin', email: 'admin@onmid.com', password: '', role: 'Administrador', status: 'Ativo', team: 'onmid' },
+  { id: '4', name: 'Matheus', email: 'matheus@onmid.com.br', password: '', role: 'Administrador', status: 'Ativo', team: 'onmid' },
+  { id: '2', name: 'Maria Silva', email: 'maria@onmid.com', password: '', role: 'Usuário', status: 'Ativo', team: 'onmid' },
+  { id: '3', name: 'João Costa', email: 'joao@onmid.com', password: '', role: 'Visualizador', status: 'Inativo', team: 'onmid' },
 ];
 
 const adminPermission: Permission = { ...defaultPermission, clientes: true, crm: true, relatorios: true, radar: true, pagamentos: true, disparos: true, otimizador: true, luna_ia: true, cofre: true, automacoes: true, integracoes: true, logs: true, configuracoes: true };

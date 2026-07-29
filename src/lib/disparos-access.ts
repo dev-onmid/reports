@@ -1,5 +1,6 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
+import { readSession } from '@/lib/session';
 
 export type CallerScope = {
   userId: string | null;
@@ -8,21 +9,23 @@ export type CallerScope = {
 };
 
 /**
- * Disparos visibility rule: Administrador role or 'onmid' team sees everything;
- * 'parceiro' team sees only the instances/campaigns they created.
+ * Regra de visibilidade: Administrador ou time 'onmid' vê tudo; 'parceiro' vê
+ * só o que criou.
  *
- * Caller identity is self-reported by the client via the x-onmid-user-id header
- * (set from the localStorage session in src/lib/auth-store.ts) — this app has no
- * server-side session of its own, so this matches the trust model already used
- * everywhere else (e.g. /api/permissions). Missing or unresolvable identity fails
- * CLOSED (unrestricted: false, userId: null), which makes every owner_id-scoped
- * query below return zero rows rather than risk leaking another partner's data.
+ * A identidade vem do COOKIE DE SESSÃO ASSINADO, não mais do header
+ * `x-onmid-user-id`. O header era declarado pelo próprio cliente, então
+ * qualquer um mandava o id de um admin e ficava irrestrito — esta função
+ * parecia um guard, mas era só um filtro de dados.
+ *
+ * O header segue como fallback porque o proxy o SOBRESCREVE com o valor do
+ * cookie verificado antes da rota rodar; ele nunca carrega mais o que o
+ * cliente mandou. Identidade ausente ou irresolvível falha FECHADO.
  */
 export async function getCallerScope(
   req: NextRequest,
   pool: ReturnType<typeof makeServerPool>,
 ): Promise<CallerScope> {
-  const userId = req.headers.get('x-onmid-user-id');
+  const userId = readSession(req)?.uid ?? req.headers.get('x-onmid-user-id');
   if (!userId) return { userId: null, unrestricted: false };
   try {
     const { rows: [user] } = await pool.query('SELECT role, team FROM public.users WHERE id = $1', [userId]);

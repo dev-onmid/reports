@@ -1,5 +1,6 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
+import { internalHeaders } from '@/lib/session';
 
 // Sincronização de RESERVA do CRM rodando no SERVIDOR (cron GitHub Actions a cada
 // 10 min) — antes ela só existia dentro do chat-view (browser), então o inbox só
@@ -70,7 +71,7 @@ export async function GET(req: NextRequest) {
       try {
         const heal = await fetch(`${origin}/api/crm/webhook-heal`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...internalHeaders() },
           body: JSON.stringify({ clientId: client.client_id }),
           signal: AbortSignal.timeout(30_000),
         });
@@ -81,7 +82,7 @@ export async function GET(req: NextRequest) {
       // 2) Import das conversas direto da Evolution (mesma rota do botão manual)
       const imp = await fetch(`${origin}/api/crm/inbox?clientId=${encodeURIComponent(client.client_id)}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...internalHeaders() },
         body: JSON.stringify({ limit: 100 }),
         signal: AbortSignal.timeout(90_000),
       });
