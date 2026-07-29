@@ -7,6 +7,17 @@ type Pool = ReturnType<typeof makeServerPool>;
 
 async function ensureSchema(pool: Pool) {
   await pool.query(`ALTER TABLE public.users ADD COLUMN IF NOT EXISTS team TEXT NOT NULL DEFAULT 'onmid'`);
+  // `setor` decide quem recebe a tarefa de uma reunião: tráfego vai pro gestor
+  // da conta, social vai pro setor inteiro. NULL = não participa desse rateio.
+  await pool.query('ALTER TABLE public.users ADD COLUMN IF NOT EXISTS setor TEXT').catch(() => {});
+  // ID numérico do membro no ClickUp — único identificador aceito em `assignees`.
+  await pool.query('ALTER TABLE public.users ADD COLUMN IF NOT EXISTS clickup_id TEXT').catch(() => {});
+}
+
+/** Só estes valores são gravados; qualquer outra coisa vira NULL. */
+export const SETORES = ['trafego', 'social'] as const;
+function normalizeSetor(v: unknown): string | null {
+  return typeof v === 'string' && (SETORES as readonly string[]).includes(v) ? v : null;
 }
 
 /**
@@ -18,10 +29,13 @@ async function ensureSchema(pool: Pool) {
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function rowToJson(r: any) {
-  return { id: r.id, name: r.name, email: r.email, role: r.role, status: r.status, team: r.team ?? 'onmid' };
+  return {
+    id: r.id, name: r.name, email: r.email, role: r.role, status: r.status, team: r.team ?? 'onmid',
+    setor: r.setor ?? null, clickup_id: r.clickup_id ?? null,
+  };
 }
 
-const SAFE_COLUMNS = 'id, name, email, role, status, COALESCE(team, \'onmid\') AS team';
+const SAFE_COLUMNS = 'id, name, email, role, status, COALESCE(team, \'onmid\') AS team, setor, clickup_id';
 
 export async function GET(req: NextRequest) {
   // Listar usuários expõe e-mails e papéis: exige sessão, mas não ser admin
@@ -46,33 +60,46 @@ export async function POST(req: NextRequest) {
   const auth = await requireAdmin(req);
   if (!auth.ok) return auth.response;
 
-  const body = await req.json() as { id: string; name: string; email: string; password?: string; role: string; status: string; team?: string };
+  const body = await req.json() as {
+    id: string; name: string; email: string; password?: string; role: string; status: string;
+    team?: string; setor?: string | null; clickup_id?: string | null;
+  };
   const team = body.team === 'parceiro' ? 'parceiro' : 'onmid';
+  // Chave ausente = não mexer no valor atual; chave presente com null = limpar.
+  // Sem essa distinção, todo caller antigo (que não conhece os campos novos)
+  // apagaria o setor e o ClickUp ID do usuário ao salvar.
+  const touchSetor = 'setor' in body;
+  const setor = normalizeSetor(body.setor);
+  const touchClickup = 'clickup_id' in body;
+  const clickupId = typeof body.clickup_id === 'string' && body.clickup_id.trim() ? body.clickup_id.trim() : null;
+
   const pool = makeServerPool();
   try {
     await ensureSchema(pool);
     const hasPassword = typeof body.password === 'string' && body.password.trim().length > 0;
-    let rows: Record<string, unknown>[];
-    if (hasPassword) {
-      // Senha entra hasheada; texto puro nunca é gravado.
-      const hashed = await hashPassword(body.password as string);
-      ({ rows } = await pool.query(
-        `INSERT INTO public.users (id, name, email, password, role, status, team)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
-         ON CONFLICT (id) DO UPDATE SET name=$2, email=$3, password=$4, role=$5, status=$6, team=$7
-         RETURNING ${SAFE_COLUMNS}`,
-        [body.id, body.name, body.email, hashed, body.role, body.status, team]
-      ));
-    } else {
-      // Update sem tocar na senha existente.
-      ({ rows } = await pool.query(
-        `INSERT INTO public.users (id, name, email, password, role, status, team)
-         VALUES ($1, $2, $3, '', $4, $5, $6)
-         ON CONFLICT (id) DO UPDATE SET name=$2, email=$3, role=$4, status=$5, team=$6
-         RETURNING ${SAFE_COLUMNS}`,
-        [body.id, body.name, body.email, body.role, body.status, team]
-      ));
-    }
+    // Senha entra hasheada; texto puro nunca é gravado.
+    const hashed = hasPassword ? await hashPassword(body.password as string) : '';
+
+    // As duas variantes compartilham as MESMAS 11 posições — a única diferença é
+    // se o UPDATE toca em `password`. Numeração divergente entre elas já foi
+    // fonte de bug (o $8 caindo no valor errado).
+    const params = [
+      body.id, body.name, body.email, hashed, body.role, body.status, team,
+      touchSetor, setor, touchClickup, clickupId,
+    ];
+    const onConflict = [
+      'name=$2', 'email=$3', ...(hasPassword ? ['password=$4'] : []), 'role=$5', 'status=$6', 'team=$7',
+      'setor = CASE WHEN $8::boolean THEN $9 ELSE users.setor END',
+      'clickup_id = CASE WHEN $10::boolean THEN $11 ELSE users.clickup_id END',
+    ].join(', ');
+
+    const { rows } = await pool.query(
+      `INSERT INTO public.users (id, name, email, password, role, status, team, setor, clickup_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $9, $11)
+       ON CONFLICT (id) DO UPDATE SET ${onConflict}
+       RETURNING ${SAFE_COLUMNS}`,
+      params,
+    );
     return Response.json(rowToJson(rows[0]), { status: 201 });
   } finally {
     await pool.end();

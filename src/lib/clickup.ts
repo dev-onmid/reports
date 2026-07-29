@@ -74,6 +74,8 @@ export type ClickupConnection = {
 
 export type ClickupUser = { id: number; username: string; email: string };
 export type ClickupTeam = { id: string; name: string };
+/** Membro do workspace — é o `id` que vai no `assignees` de uma tarefa. */
+export type ClickupMember = { id: number; username: string; email: string };
 export type ClickupSpace = { id: string; name: string };
 export type ClickupList = { id: string; name: string; task_count?: number | null };
 export type ClickupFolder = { id: string; name: string; lists?: ClickupList[] };
@@ -176,6 +178,25 @@ export async function getClickupUser(token: string) {
 export async function getClickupTeams(token: string) {
   const { teams } = await clickupFetch<{ teams: ClickupTeam[] }>(token, '/team');
   return teams ?? [];
+}
+
+/**
+ * Membros do workspace. O `/team` já traz `members` embutido, então isso é uma
+ * chamada só — não existe endpoint dedicado de membros na API v2.
+ *
+ * Quem chama usa isto pra casar `users.email` do ONMID com o ID numérico do
+ * ClickUp, que é o único identificador aceito em `assignees`.
+ */
+export async function getClickupMembers(token: string, teamId?: string): Promise<ClickupMember[]> {
+  type TeamWithMembers = ClickupTeam & { members?: { user?: Partial<ClickupMember> }[] };
+  const { teams } = await clickupFetch<{ teams: TeamWithMembers[] }>(token, '/team');
+  const target = teamId ? (teams ?? []).find((t) => String(t.id) === String(teamId)) : (teams ?? [])[0];
+  const seen = new Set<number>();
+  return (target?.members ?? []).flatMap(({ user }) => {
+    if (!user?.id || seen.has(user.id)) return [];
+    seen.add(user.id);
+    return [{ id: user.id, username: user.username ?? '', email: (user.email ?? '').trim().toLowerCase() }];
+  });
 }
 
 export async function getClickupSpaces(token: string, teamId: string) {

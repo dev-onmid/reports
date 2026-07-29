@@ -8,6 +8,7 @@ import {
   LayoutDashboard, Users, TableProperties, FileText, BarChart3,
   WalletCards, Bot, ShieldCheck, Zap, Plug, ClipboardList, WandSparkles,
   Wifi, WifiOff, QrCode, RefreshCw, Power, X,
+  Link2, Link2Off, AlertTriangle, CheckCircle2, Loader2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -57,7 +58,49 @@ const TEAMS: { value: Team; label: string }[] = [
   { value: 'parceiro', label: 'Parceiro' },
 ];
 
-const emptyForm = { name: '', email: '', password: '', role: 'Usuário', status: 'Ativo', team: 'onmid' as Team };
+// O setor decide o destino da tarefa gerada a partir de uma reunião: tráfego vai
+// para o gestor da conta, social vai para o setor inteiro. Vazio = fora do rateio.
+const SETORES: { value: string; label: string }[] = [
+  { value: 'trafego', label: 'Tráfego' },
+  { value: 'social', label: 'Social' },
+];
+
+function setorLabel(setor: string | null | undefined): string | null {
+  return SETORES.find((s) => s.value === setor)?.label ?? null;
+}
+
+const emptyForm = {
+  name: '', email: '', password: '', role: 'Usuário', status: 'Ativo', team: 'onmid' as Team,
+  setor: '',
+};
+
+/**
+ * `setor` e `clickup_id` chegam do /api/users mas ainda não existem no tipo User
+ * do mock-data, que é compartilhado com o auth-store e a semente de UI. Estender
+ * aqui evita mexer num tipo usado por meio sistema por causa de uma tela só.
+ */
+type UserRow = UserType & { setor?: string | null; clickup_id?: string | null };
+
+// ── Vínculo ONMID ↔ ClickUp (GET/POST /api/clickup/members) ──────────────────
+
+type ClickupMembro = { id: number | string; username: string; email: string };
+type ClickupCandidato = { membro: ClickupMembro; score: number };
+
+type VinculoUsuario = {
+  id: string;
+  name: string;
+  email: string | null;
+  setor: string | null;
+  clickup_id: string | null;
+  sugestao: ClickupMembro | null;
+  candidatos: ClickupCandidato[];
+};
+
+type VinculosResposta = {
+  membros: ClickupMembro[];
+  usuarios: VinculoUsuario[];
+  nao_vinculados: ClickupMembro[];
+};
 
 type AiUsageRow = {
   client_id: string;
@@ -117,7 +160,7 @@ function roleBadge(role: string) {
   return { cls: 'bg-zinc-700/50 text-zinc-400 border border-zinc-600/50', Icon: Eye };
 }
 
-async function persistUser(user: UserType): Promise<boolean> {
+async function persistUser(user: UserRow): Promise<boolean> {
   const res = await fetch('/api/users', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -441,7 +484,7 @@ function InstancesTab() {
 }
 
 export default function ConfiguracoesPage() {
-  const [users, setUsers] = useState<UserType[]>([]);
+  const [users, setUsers] = useState<UserRow[]>([]);
   const [permissions, setPermissions] = useState<Record<string, Permission>>(initialPermissions);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState(emptyForm);
@@ -492,6 +535,18 @@ export default function ConfiguracoesPage() {
   const [aiBillingSaving, setAiBillingSaving] = useState(false);
   const [aiBillingSaved, setAiBillingSaved] = useState<string | null>(null);
 
+  // Vínculo com o ClickUp: só carrega sob demanda porque a rota consulta a API
+  // do ClickUp, e 'usuarios' é a aba padrão — carregar sozinho custaria uma
+  // chamada externa toda vez que alguém abre Configurações.
+  const [vinculos, setVinculos] = useState<VinculosResposta | null>(null);
+  const [vinculosLoading, setVinculosLoading] = useState(false);
+  const [vinculosErro, setVinculosErro] = useState<string | null>(null);
+  // Guarda o clickup_id escolhido no select antes de o humano confirmar.
+  const [escolhaMembro, setEscolhaMembro] = useState<Record<string, string>>({});
+  // Chave do que está salvando ('lote' ou o id do usuário) — trava só aquele botão.
+  const [vinculoSalvando, setVinculoSalvando] = useState<string | null>(null);
+  const [vinculoAviso, setVinculoAviso] = useState<string | null>(null);
+
   // Load from database on mount
   useEffect(() => {
     void (async () => {
@@ -500,7 +555,7 @@ export default function ConfiguracoesPage() {
         fetch('/api/permissions'),
       ]);
       if (usersRes.status === 'fulfilled' && usersRes.value.ok) {
-        const data: UserType[] = await usersRes.value.json();
+        const data: UserRow[] = await usersRes.value.json();
         if (data.length > 0) setUsers(data);
       }
       if (permsRes.status === 'fulfilled' && permsRes.value.ok) {
@@ -581,13 +636,74 @@ export default function ConfiguracoesPage() {
     }
   }
 
+  const recarregarUsuarios = useCallback(async () => {
+    const res = await fetch('/api/users').catch(() => null);
+    if (!res?.ok) return;
+    const data: UserRow[] = await res.json();
+    if (data.length > 0) setUsers(data);
+  }, []);
+
+  const carregarVinculos = useCallback(async () => {
+    setVinculosLoading(true);
+    setVinculosErro(null);
+    setVinculoAviso(null);
+    try {
+      const res = await fetch('/api/clickup/members', { headers: callerHeaders() });
+      const data = await res.json().catch(() => ({})) as VinculosResposta & { error?: string };
+      if (!res.ok) {
+        setVinculos(null);
+        setVinculosErro(data.error ?? 'Falha ao consultar os membros do ClickUp');
+        return;
+      }
+      setVinculos(data);
+      setEscolhaMembro({});
+    } catch {
+      setVinculos(null);
+      setVinculosErro('Falha ao consultar os membros do ClickUp');
+    } finally {
+      setVinculosLoading(false);
+    }
+  }, []);
+
+  /**
+   * Grava vínculos confirmados. Só manda as chaves que o humano tocou — a rota
+   * trata chave ausente como "não altera", então enviar `setor` sem querer
+   * apagaria o setor de quem está só ajustando o ID do ClickUp.
+   */
+  async function salvarVinculos(
+    itens: { user_id: string; clickup_id?: string | null; setor?: string | null }[],
+    chave: string,
+  ) {
+    if (!itens.length) return;
+    setVinculoSalvando(chave);
+    setVinculoAviso(null);
+    try {
+      const res = await fetch('/api/clickup/members', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...callerHeaders() },
+        body: JSON.stringify({ vinculos: itens }),
+      });
+      const data = await res.json().catch(() => ({})) as { atualizados?: number; error?: string };
+      if (!res.ok) {
+        setVinculoAviso(data.error ?? 'Falha ao salvar vínculo');
+        return;
+      }
+      setVinculoAviso(`${data.atualizados ?? itens.length} vínculo(s) salvo(s)`);
+      await Promise.all([carregarVinculos(), recarregarUsuarios()]);
+    } catch {
+      setVinculoAviso('Falha ao salvar vínculo');
+    } finally {
+      setVinculoSalvando(null);
+    }
+  }
+
   function openCreateDialog() {
     setEditingUserId(null);
     setForm(emptyForm);
     setDialogOpen(true);
   }
 
-  function openEditDialog(user: UserType) {
+  function openEditDialog(user: UserRow) {
     setEditingUserId(user.id);
     setForm({
       name: user.name,
@@ -596,6 +712,7 @@ export default function ConfiguracoesPage() {
       role: user.role,
       status: user.status,
       team: user.team ?? 'onmid',
+      setor: user.setor ?? '',
     });
     setDialogOpen(true);
   }
@@ -606,7 +723,12 @@ export default function ConfiguracoesPage() {
     if (!editingUserId && !form.password.trim()) return;
 
     if (editingUserId) {
-      const updated: UserType = {
+      const anterior = users.find((u) => u.id === editingUserId);
+      const updated: UserRow = {
+        // Preserva o clickup_id: o vínculo é gerenciado na seção do ClickUp e
+        // não aparece neste diálogo — reconstruir o objeto sem ele o perderia
+        // da tabela até o próximo reload.
+        ...(anterior ?? {}),
         id: editingUserId,
         name: form.name.trim(),
         email: form.email.trim(),
@@ -614,6 +736,7 @@ export default function ConfiguracoesPage() {
         role: form.role,
         status: form.status,
         team: form.team,
+        setor: form.setor || null,
       };
       const snapshot = users;
       setUsers((prev) => prev.map((u) => u.id === editingUserId ? updated : u));
@@ -625,7 +748,7 @@ export default function ConfiguracoesPage() {
     }
 
     const id = String(Date.now());
-    const user: UserType = {
+    const user: UserRow = {
       id,
       name: form.name.trim(),
       email: form.email.trim(),
@@ -633,6 +756,7 @@ export default function ConfiguracoesPage() {
       role: form.role,
       status: form.status,
       team: form.team,
+      setor: form.setor || null,
     };
     const snapshot = users;
     setUsers((prev) => [...prev, user]);
@@ -850,6 +974,7 @@ export default function ConfiguracoesPage() {
                   <th className="px-6 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Email</th>
                   <th className="px-6 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Perfil</th>
                   <th className="px-6 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Equipe</th>
+                  <th className="px-6 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Setor</th>
                   <th className="px-6 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Status</th>
                   <th className="px-6 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground text-right">Ações</th>
                 </tr>
@@ -897,6 +1022,33 @@ export default function ConfiguracoesPage() {
                         )}>
                           {user.team === 'parceiro' ? 'Parceiro' : 'Time Onmid'}
                         </span>
+                      </td>
+                      {/* Setor + vínculo ClickUp — sem o vínculo a pessoa não
+                          recebe as tarefas geradas por reunião, então a falta
+                          é um aviso, não um detalhe. */}
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm text-muted-foreground">
+                            {setorLabel(user.setor) ?? '—'}
+                          </span>
+                          {user.clickup_id ? (
+                            <span
+                              title="Vinculado ao ClickUp"
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                            >
+                              <Link2 className="w-3 h-3" />
+                              ClickUp
+                            </span>
+                          ) : (
+                            <span
+                              title="Sem vínculo com o ClickUp — não recebe tarefas de reunião"
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-500/10 text-amber-400 border border-amber-500/20"
+                            >
+                              <Link2Off className="w-3 h-3" />
+                              sem vínculo
+                            </span>
+                          )}
+                        </div>
                       </td>
                       {/* Status */}
                       <td className="px-6 py-4">
@@ -954,6 +1106,159 @@ export default function ConfiguracoesPage() {
                 </button>
               </div>
             </div>
+          </div>
+
+          {/* ── Vínculo ONMID ↔ ClickUp ──
+              Sem clickup_id a pessoa é silenciosamente pulada na hora de
+              atribuir a tarefa da reunião, então esta seção existe pra tornar
+              essa lacuna visível. */}
+          <div className="bg-card border border-border rounded-[var(--radius)] overflow-hidden">
+            <div className="flex flex-wrap items-center gap-3 px-5 py-4 border-b border-border">
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-bold">Vincular equipe ao ClickUp</p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  As tarefas geradas por reuniões só chegam a quem tem um membro do ClickUp vinculado.
+                  A sugestão é feita pelo nome — o e-mail não serve, porque boa parte da equipe usa
+                  endereço pessoal lá e corporativo aqui.
+                </p>
+              </div>
+              <Button variant="outline" size="sm" onClick={() => void carregarVinculos()} disabled={vinculosLoading}>
+                {vinculosLoading
+                  ? <><Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />Consultando…</>
+                  : <><RefreshCw className="w-3.5 h-3.5 mr-1.5" />{vinculos ? 'Recarregar' : 'Carregar'}</>}
+              </Button>
+            </div>
+
+            {vinculosErro && (
+              <div className="flex items-start gap-2 m-5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3">
+                <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                <div className="text-xs">
+                  <p className="font-medium text-amber-300">{vinculosErro}</p>
+                  <p className="text-muted-foreground mt-1">
+                    Se o ClickUp ainda não foi conectado, conecte a integração antes — é ela que
+                    guarda o token usado para ler os membros.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {vinculoAviso && (
+              <p className="mx-5 mt-5 text-xs text-muted-foreground">{vinculoAviso}</p>
+            )}
+
+            {!vinculos && !vinculosErro && !vinculosLoading && (
+              <p className="px-5 py-6 text-xs text-muted-foreground">
+                Clique em Carregar para consultar os membros do ClickUp.
+              </p>
+            )}
+
+            {vinculos && (() => {
+              const comSugestao = vinculos.usuarios.filter((u) => u.sugestao);
+              return (
+                <div className="divide-y divide-border">
+                  {comSugestao.length > 0 && (
+                    <div className="flex flex-wrap items-center gap-3 px-5 py-3 bg-emerald-500/5">
+                      <p className="text-xs text-muted-foreground flex-1">
+                        {comSugestao.length} vínculo(s) com correspondência clara de nome.
+                      </p>
+                      <Button
+                        size="sm"
+                        disabled={vinculoSalvando !== null}
+                        onClick={() => void salvarVinculos(
+                          comSugestao.map((u) => ({ user_id: u.id, clickup_id: String(u.sugestao!.id) })),
+                          'lote',
+                        )}
+                      >
+                        {vinculoSalvando === 'lote'
+                          ? <><Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />Salvando…</>
+                          : <>Aplicar {comSugestao.length} sugestão(ões)</>}
+                      </Button>
+                    </div>
+                  )}
+
+                  {vinculos.usuarios.map((u) => {
+                    const vinculado = vinculos.membros.find((m) => String(m.id) === u.clickup_id) ?? null;
+                    const ambiguo = !u.clickup_id && !u.sugestao && u.candidatos.length > 0;
+                    const escolha = escolhaMembro[u.id] ?? '';
+                    return (
+                      <div key={u.id} className="flex flex-wrap items-center gap-3 px-5 py-3">
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-medium truncate">{u.name}</p>
+                          <p className="text-[11px] text-muted-foreground truncate">
+                            {setorLabel(u.setor) ?? 'sem setor'}
+                          </p>
+                        </div>
+
+                        {u.clickup_id ? (
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-300 border border-emerald-500/30">
+                            <Link2 className="w-3 h-3" />
+                            {vinculado?.username ?? `ID ${u.clickup_id}`}
+                          </span>
+                        ) : u.sugestao ? (
+                          <>
+                            <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                              Sugerido: <strong className="text-foreground">{u.sugestao.username}</strong>
+                            </span>
+                            <Button
+                              size="sm" variant="outline"
+                              disabled={vinculoSalvando !== null}
+                              onClick={() => void salvarVinculos(
+                                [{ user_id: u.id, clickup_id: String(u.sugestao!.id) }], u.id,
+                              )}
+                            >
+                              Aceitar
+                            </Button>
+                          </>
+                        ) : (
+                          <>
+                            {ambiguo && (
+                              <span className="inline-flex items-center gap-1.5 text-xs text-amber-300">
+                                <AlertTriangle className="w-3.5 h-3.5" />
+                                mais de um nome parecido — escolha
+                              </span>
+                            )}
+                            {!ambiguo && (
+                              <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+                                <Link2Off className="w-3.5 h-3.5" />
+                                sem correspondência
+                              </span>
+                            )}
+                            <select
+                              value={escolha}
+                              onChange={(e) => setEscolhaMembro((prev) => ({ ...prev, [u.id]: e.target.value }))}
+                              className={cn(
+                                'h-8 rounded-lg border bg-background px-2 text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500',
+                                ambiguo ? 'border-amber-500/40' : 'border-input',
+                              )}
+                            >
+                              <option value="">Selecione…</option>
+                              {(ambiguo ? u.candidatos.map((c) => c.membro) : vinculos.membros).map((m) => (
+                                <option key={m.id} value={String(m.id)}>{m.username}</option>
+                              ))}
+                            </select>
+                            <Button
+                              size="sm" variant="outline"
+                              disabled={!escolha || vinculoSalvando !== null}
+                              onClick={() => void salvarVinculos([{ user_id: u.id, clickup_id: escolha }], u.id)}
+                            >
+                              Vincular
+                            </Button>
+                          </>
+                        )}
+                      </div>
+                    );
+                  })}
+
+                  {vinculos.nao_vinculados.length > 0 && (
+                    <p className="px-5 py-3 text-[11px] text-muted-foreground">
+                      No ClickUp e sem usuário no ONMID:{' '}
+                      {vinculos.nao_vinculados.map((m) => m.username).join(', ')}
+                    </p>
+                  )}
+                </div>
+              );
+            })()}
           </div>
         </div>
       )}
@@ -1660,6 +1965,23 @@ export default function ConfiguracoesPage() {
               </Select>
               <p className="text-xs text-muted-foreground">
                 Parceiro só vê as próprias instâncias e campanhas em Disparos — nunca as de outras pessoas.
+              </p>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Setor</Label>
+              <select
+                value={form.setor}
+                onChange={(event) => setForm({ ...form, setor: event.target.value })}
+                className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-emerald-500"
+              >
+                <option value="">— Nenhum</option>
+                {SETORES.map((s) => (
+                  <option key={s.value} value={s.value}>{s.label}</option>
+                ))}
+              </select>
+              <p className="text-xs text-muted-foreground">
+                Define quem recebe as tarefas geradas por reuniões: as de tráfego vão para o gestor
+                da conta, as de social vão para todo mundo marcado como Social.
               </p>
             </div>
             <div className="space-y-1.5">
