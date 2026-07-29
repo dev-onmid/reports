@@ -1,5 +1,28 @@
 @AGENTS.md
 
+## Integração ClickUp — fundação (conexão + mapa cliente↔lista) (2026-07-28)
+
+Matheus pediu a integração "deixada pronta pra futuramente puxar ou enviar informação". Decisões dele: **token pessoal da API** (não OAuth — é o workspace da própria agência) e **vínculo cliente ↔ lista** já funcionando. Nada plugado em fluxo nenhum ainda (sem gatilho de alerta, sem tools na Luna) — é fundação deliberada.
+
+| Arquivo | Papel |
+|---|---|
+| `src/lib/clickup.ts` | Núcleo: `ensureClickupSchema` (memoizada, DDL inline), cliente HTTP `clickupFetch` + `ClickupError`, leitura (`getClickupUser/Teams/Spaces/Folders/FolderlessLists`, `fetchClickupHierarchy`, `getListTasks`), escrita (`createClickupTask`, `updateClickupTask`, `createClickupComment`), resolução (`getClickupConnection`, **`resolveClientList`**, **`createTaskForClient`**), `maskToken` |
+| `src/app/api/clickup/config/route.ts` | GET (conexão com token MASCARADO + nº de vínculos), POST (valida no ClickUp antes de salvar), PUT (testar sem salvar), DELETE (apaga conexão + vínculos) |
+| `src/app/api/clickup/hierarchy/route.ts` | GET árvore espaços→pastas→listas (alimenta o seletor) |
+| `src/app/api/clickup/links/route.ts` | GET/POST (aceita 1 ou lote)/DELETE do vínculo cliente↔lista |
+| `src/app/api/clickup/tasks/route.ts` | **Porta genérica de entrada/saída**: GET `?clientId=` ou `?listId=` lista tarefas; POST cria. É por aqui que o resto do sistema fala com o ClickUp sem montar HTTP na mão |
+| `src/app/(dashboard)/integracoes/clickup/page.tsx` | Tela: conectar/testar/desconectar, tabela cliente↔lista com **"Vincular pelo nome"**, teste de leitura |
+
+- **Tabelas** (inline, sem `.sql` — padrão recente do repo): `clickup_connections` (owner_id, api_token, workspace_id/name, user_name/email) e `clickup_client_links` (**`client_id` é a PK** — um cliente aponta pra uma lista só; `ON CONFLICT (client_id) DO UPDATE`).
+- **Token cru NUNCA volta ao browser**: o GET devolve `token_masked` (`pk_1234••••••••••9f2a`). Divergência proposital do Leadlovers, que vaza `auth_key` no `SELECT *`.
+- **POST reaproveita a linha existente** (UPDATE, não INSERT novo) — assim trocar o token não órfã os vínculos, que apontam pro `connection_id`.
+- **`resolveClientList` / `createTaskForClient` devolvem `null`** (não lançam) quando o cliente não tem vínculo — um cron futuro pode varrer a carteira inteira sem se preocupar com quem está fora.
+- **"Vincular pelo nome"**: as listas do ClickUp já se chamam como os clientes (Cinfel, Panino'77, Cão Veio…); `normalizeName` tira acento/caixa/pontuação, então "Cão Véio" (ONMID) casa com "Cão Veio" (ClickUp) e "Panino'77" com "Panino 77". Só preenche quem ainda não tem vínculo.
+- **Auth**: config/links-write/tasks-POST exigem `getCallerScope` **unrestricted** (integração da agência, não de parceiro); leituras exigem `userId`. ⚠️ Descoberta importante da sessão: **existe `src/proxy.ts`** (o `middleware.ts` do Next 16 foi RENOMEADO — arquivo com nome antigo é ignorado em silêncio), que nega `/api/*` por padrão e **sobrescreve `x-onmid-user-id` a partir do cookie assinado**. Rota nova não precisa de nada: só não entrar em `PUBLIC_PREFIXES`/`CRON_PREFIXES`.
+- **Timeout de 8s** em toda chamada ao ClickUp (o teto do Vercel Hobby é 10s) — aborta e devolve erro legível em vez de morrer sem corpo. A árvore busca os espaços em paralelo.
+- ✅ Verificado: tsc + `next build` limpos (rota `/integracoes/clickup` registrada); preview com session forjada + fetch mockado espelhando o workspace real — conectar (token mascarado + workspace), "Vincular pelo nome" (6/7, cliente sem lista correspondente fica de fora), seletor com caminho `Espaço › Pasta › Lista`, teste de leitura listando tarefas com status, zero erros de console. ⚠️ API real do ClickUp exige produção — validar colando o token em Integrações → ClickUp e clicando "Testar conexão".
+- Próximos passos naturais (não feitos): tools na Luna (ler/criar tarefa), abrir task automática quando alerta de saldo/instância dispara, e comentário no ClickUp quando o relatório mensal é gerado.
+
 ## Economia de IA — cache correto + toggles Ativo/Desativado (2026-07-27)
 
 Matheus reclamou do gasto de API (R$77/mês no painel). Diagnóstico: o plano Max NÃO cobre a API (cobrança separada, pré-paga no console.anthropic.com); o painel estava "meio certo" (preços ok, mas selinho "estimado" = sem `ANTHROPIC_ADMIN_API_KEY`, e a Luna SUBCONTAVA por ignorar tokens de cache). Duas frentes entregues:

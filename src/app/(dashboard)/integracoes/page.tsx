@@ -21,6 +21,7 @@ import {
   X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { callerHeaders } from '@/lib/auth-store';
 import { cn } from '@/lib/utils';
 import {
   GOOGLE_ADS_DEFAULT_MANAGER_ID,
@@ -1819,7 +1820,7 @@ function SpreadsheetImportPanel() {
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type IntegrationId = 'meta-ads' | 'google-ads' | 'google-my-business' | 'website' | 'leadlovers';
+type IntegrationId = 'meta-ads' | 'google-ads' | 'google-my-business' | 'website' | 'leadlovers' | 'clickup';
 
 type Integration = {
   id: IntegrationId;
@@ -1869,6 +1870,17 @@ const BASE_INTEGRATIONS: Integration[] = [
       </div>
     ),
   },
+  {
+    id: 'clickup',
+    name: 'ClickUp',
+    description: 'Conecte o workspace e vincule cada cliente à sua lista de tarefas.',
+    category: 'Automação',
+    logo: (
+      <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-[#1a1a2e] border border-[#7b68ee]/40">
+        <span className="text-sm font-extrabold text-[#7b68ee]">CU</span>
+      </div>
+    ),
+  },
 ];
 
 const CATEGORIES = ['Todos', 'Anúncios', 'Presença Digital', 'Automação'];
@@ -1901,6 +1913,15 @@ export default function IntegracoesPage() {
   const [googleDisplayInfo, setGoogleDisplayInfo] = useState<GoogleAdsIntegration | null>(null);
   const [selectedMetaId, setSelectedMetaId] = useState<string | null>(null);
   const [oauthBanner, setOauthBanner] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
+  const [clickupConnected, setClickupConnected] = useState(false);
+
+  // ClickUp não tem hook próprio: um GET leve só pra decidir o selo do card.
+  useEffect(() => {
+    fetch('/api/clickup/config', { headers: callerHeaders() })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setClickupConnected(!!d?.connection))
+      .catch(() => {});
+  }, []);
 
   // Connection status derived from hooks
   const metaConnected = !metaLoading && metaConns.length > 0;
@@ -1982,6 +2003,10 @@ export default function IntegracoesPage() {
       router.push('/integracoes/leadlovers');
       return;
     }
+    if (id === 'clickup') {
+      router.push('/integracoes/clickup');
+      return;
+    }
   }
 
   const filtered =
@@ -1992,12 +2017,14 @@ export default function IntegracoesPage() {
   const totalConnected =
     (metaConnected ? 1 : 0) +
     (googleAdsConnected ? 1 : 0) +
-    (gmbConnected ? 1 : 0);
+    (gmbConnected ? 1 : 0) +
+    (clickupConnected ? 1 : 0);
 
   function isConnected(id: IntegrationId): boolean {
     if (id === 'meta-ads') return metaConnected;
     if (id === 'google-ads') return googleAdsConnected;
     if (id === 'google-my-business') return gmbConnected;
+    if (id === 'clickup') return clickupConnected;
     return false;
   }
 
