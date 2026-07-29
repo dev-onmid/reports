@@ -74,6 +74,24 @@ type ClientAccountLink = {
 const LOW_BALANCE_THRESHOLD = 100; // R$100
 const CLIENT_BILLING_MODE_PREFIX = 'clientAdsBillingMode_';
 
+/** Only used until the first payment exists to copy the amount from. */
+const DEFAULT_PAYMENT_AMOUNT = 500;
+
+/**
+ * Amount of the most recently registered payment, used to prefill the form.
+ * Payment ids are `pay-<Date.now()>`, so they order by creation; rows loaded
+ * from the API may use another id shape, hence the array-order fallback.
+ */
+function lastRegisteredAmount(payments: InvestmentPayment[]): number | null {
+  if (payments.length === 0) return null;
+  const stamp = (p: InvestmentPayment) => Number(/^pay-(\d+)$/.exec(p.id)?.[1] ?? NaN);
+  const stamped = payments.filter(p => Number.isFinite(stamp(p)));
+  if (stamped.length > 0) {
+    return stamped.reduce((newest, p) => (stamp(p) > stamp(newest) ? p : newest)).amount;
+  }
+  return payments[payments.length - 1].amount;
+}
+
 function MetaAdsMark({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" className={className ?? 'h-4 w-4'} fill="none">
@@ -135,25 +153,61 @@ function PaymentChannelLogo({
 }
 
 // ── Low-balance alerts (list, only below threshold) ───────────────────────────
-function CriticalBalanceAlerts({
+function criticalBalances(balances: AdAccountBalance[]): AdAccountBalance[] {
+  return balances.filter(b => b.balance !== null && b.balance < LOW_BALANCE_THRESHOLD);
+}
+
+/**
+ * Compact header trigger. The full panel lists one card per account and pushed
+ * the calendar far below the fold, so the count lives here and the detail lives
+ * in a modal — the urgency still reads at a glance.
+ */
+function CriticalBalanceButton({
+  balances, loading, onClick,
+}: { balances: AdAccountBalance[]; loading: boolean; onClick: () => void }) {
+  const critical = criticalBalances(balances);
+  if (!loading && critical.length === 0) return null;
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex h-11 items-center gap-2 rounded-[var(--radius)] border border-red-500/35 bg-red-500/10 px-3 text-left transition-colors hover:bg-red-500/20"
+      title="Ver contas com saldo crítico e adicionar saldo"
+    >
+      <AlertTriangle className={cn('h-4 w-4 shrink-0 text-red-400', loading && critical.length === 0 && 'animate-pulse')} />
+      <span className="text-xs font-bold uppercase tracking-wider text-red-400">
+        {loading && critical.length === 0
+          ? 'Verificando saldos...'
+          : `${critical.length} saldo${critical.length > 1 ? 's' : ''} crítico${critical.length > 1 ? 's' : ''}`}
+      </span>
+      {critical.length > 0 && (
+        <span className="rounded-full border border-red-500/40 bg-red-500/15 px-1.5 py-0.5 text-[10px] font-bold text-red-300 tabular-nums">
+          {critical.length}
+        </span>
+      )}
+    </button>
+  );
+}
+
+function CriticalBalanceModal({
   balances,
   loading,
   lastUpdated,
   onRefresh,
+  onClose,
 }: {
   balances: AdAccountBalance[];
   loading: boolean;
   lastUpdated: Date | null;
   onRefresh: () => void;
+  onClose: () => void;
 }) {
-  const [expanded, setExpanded] = useState(false);
-  const critical = balances.filter(b => b.balance !== null && b.balance < LOW_BALANCE_THRESHOLD);
+  const critical = criticalBalances(balances);
   const metaCritical = critical.filter((account) => account.platform === 'meta');
   const googleCritical = critical.filter((account) => account.platform === 'google');
   const visibleMetaCritical = metaCritical;
   const visibleGoogleCritical = googleCritical;
-
-  if (!loading && critical.length === 0) return null;
 
   function renderAccountCard(account: AdAccountBalance) {
     const isMeta = account.platform === 'meta';
@@ -251,58 +305,61 @@ function CriticalBalanceAlerts({
   }
 
   return (
-    <div className="rounded-xl border border-red-500/35 bg-red-500/5">
-      <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
-        <button
-          type="button"
-          onClick={() => setExpanded((value) => !value)}
-          className="flex min-w-0 flex-1 items-center gap-3 text-left"
-        >
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-red-500/30 bg-red-500/10">
-            <AlertTriangle className="h-4 w-4 text-red-400" />
-          </span>
-          <span className="min-w-0">
-            <span className="block text-sm font-bold uppercase tracking-wider text-red-400">
-              {loading && critical.length === 0 ? 'Verificando saldos...' : `${critical.length} conta${critical.length > 1 ? 's' : ''} com saldo crítico`}
+    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm" onClick={onClose}>
+      <div
+        className="flex max-h-[85vh] w-full max-w-4xl flex-col rounded-2xl border border-red-500/30 bg-card shadow-[0_0_60px_rgba(239,68,68,0.18)]"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-red-500/20 p-5">
+          <div className="flex min-w-0 items-center gap-3">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-red-500/30 bg-red-500/10">
+              <AlertTriangle className="h-4 w-4 text-red-400" />
             </span>
-            <span className="mt-0.5 block truncate text-xs text-muted-foreground">
-              {loading && critical.length === 0
-                ? 'Buscando contas Meta Ads e Google Ads com saldo baixo.'
-                : 'Alerta minimizado. Expanda para ver contas e adicionar saldo.'}
-            </span>
-          </span>
-        </button>
-        <div className="flex items-center gap-2">
-          {lastUpdated && (
-            <span className="text-[10px] text-muted-foreground">
-              {lastUpdated.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
-            </span>
+            <div className="min-w-0">
+              <p className="text-sm font-bold uppercase tracking-wider text-red-400">
+                {loading && critical.length === 0 ? 'Verificando saldos...' : `${critical.length} conta${critical.length > 1 ? 's' : ''} com saldo crítico`}
+              </p>
+              <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                Contas ativas pré-pagas com saldo abaixo de {formatCurrencyBRL(LOW_BALANCE_THRESHOLD)}.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            {lastUpdated && (
+              <span className="text-[10px] text-muted-foreground">
+                {lastUpdated.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+              </span>
+            )}
+            <button
+              onClick={onRefresh}
+              disabled={loading}
+              className="flex items-center gap-1 text-[10px] font-bold text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
+            >
+              <RefreshCw className={cn('h-3 w-3', loading && 'animate-spin')} />
+              Atualizar
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+              title="Fechar"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+
+        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-5">
+          {critical.length === 0 && !loading ? (
+            <p className="py-8 text-center text-sm text-muted-foreground">Nenhuma conta com saldo crítico agora.</p>
+          ) : (
+            <>
+              {metaCritical.length > 0 && renderPlatformColumn('meta', metaCritical, visibleMetaCritical)}
+              {googleCritical.length > 0 && renderPlatformColumn('google', googleCritical, visibleGoogleCritical)}
+            </>
           )}
-          <button
-            onClick={onRefresh}
-            disabled={loading}
-            className="flex items-center gap-1 text-[10px] font-bold text-muted-foreground hover:text-foreground disabled:opacity-50 transition-colors"
-          >
-            <RefreshCw className={cn('w-3 h-3', loading && 'animate-spin')} />
-            Atualizar
-          </button>
-          <button
-            type="button"
-            onClick={() => setExpanded((value) => !value)}
-            className="flex items-center gap-1 rounded-md border border-red-500/30 px-2 py-1 text-[10px] font-bold text-red-300 transition-colors hover:bg-red-500/10"
-          >
-            {expanded ? 'Minimizar' : 'Expandir'}
-            <ChevronDown className={cn('h-3 w-3 transition-transform', expanded && 'rotate-180')} />
-          </button>
         </div>
       </div>
-
-      {expanded && (
-        <div className="space-y-3 border-t border-red-500/20 p-4">
-          {metaCritical.length > 0 && renderPlatformColumn('meta', metaCritical, visibleMetaCritical)}
-          {googleCritical.length > 0 && renderPlatformColumn('google', googleCritical, visibleGoogleCritical)}
-        </div>
-      )}
     </div>
   );
 }
@@ -319,7 +376,7 @@ type ZapiClientOption = { id: string; name: string; provider: string | null };
 
 type GroupOption = { id: string; name: string };
 
-function BalanceAlertSettings() {
+function BalanceAlertSettings({ onClose }: { onClose: () => void }) {
   const [configs, setConfigs] = useState<BalanceAlertConfig[]>([]);
   const [zapiClients, setZapiClients] = useState<ZapiClientOption[]>([]);
   const [showForm, setShowForm] = useState(false);
@@ -330,7 +387,6 @@ function BalanceAlertSettings() {
   const [groupSearch, setGroupSearch] = useState('');
   const [zapiGroups, setZapiGroups] = useState<GroupOption[]>([]);
   const [loadingGroups, setLoadingGroups] = useState(false);
-  const [expanded, setExpanded] = useState(false);
 
   useEffect(() => {
     Promise.all([
@@ -445,24 +501,34 @@ function BalanceAlertSettings() {
   }
 
   return (
-    <div className="rounded-xl border border-border bg-card">
-      <button type="button" onClick={() => setExpanded(v => !v)} className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left">
-        <div className="flex items-center gap-3">
-          <span className="flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-background">
-            <Bell className="h-4 w-4 text-muted-foreground" />
-          </span>
-          <div>
-            <p className="text-sm font-bold uppercase tracking-wider">Alertas diários de saldo no WhatsApp</p>
-            <p className="text-xs text-muted-foreground">
-              Todo dia às 7h, avisa no grupo (e por e-mail) as contas que vão ficar sem saldo — e as que já pararam.
-            </p>
+    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm" onClick={onClose}>
+      <div
+        className="flex max-h-[85vh] w-full max-w-2xl flex-col rounded-2xl border border-border bg-card shadow-[0_0_60px_rgba(0,0,0,0.45)]"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between gap-3 border-b border-border p-5">
+          <div className="flex items-center gap-3">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-background">
+              <Bell className="h-4 w-4 text-muted-foreground" />
+            </span>
+            <div>
+              <p className="text-sm font-bold uppercase tracking-wider">Alertas diários de saldo no WhatsApp</p>
+              <p className="text-xs text-muted-foreground">
+                Todo dia às 7h, avisa no grupo (e por e-mail) as contas que vão ficar sem saldo — e as que já pararam.
+              </p>
+            </div>
           </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+            title="Fechar"
+          >
+            <X className="h-4 w-4" />
+          </button>
         </div>
-        <ChevronDown className={cn('h-4 w-4 text-muted-foreground transition-transform shrink-0', expanded && 'rotate-180')} />
-      </button>
 
-      {expanded && (
-        <div className="border-t border-border p-4 space-y-3">
+        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-5">
           {configs.length === 0 && !showForm && (
             <p className="text-xs text-muted-foreground">Nenhum grupo configurado ainda.</p>
           )}
@@ -617,7 +683,7 @@ function BalanceAlertSettings() {
             </button>
           )}
         </div>
-      )}
+      </div>
     </div>
   );
 }
@@ -829,10 +895,6 @@ const WEEKDAY_COLORS = [
   'bg-violet-700',
   'bg-orange-500',
 ];
-
-function makeDate(day: number): string {
-  return `2026-05-${String(day).padStart(2, '0')}`;
-}
 
 function formatDateBR(date: string): string {
   const [year, month, day] = date.split('-');
@@ -1747,23 +1809,39 @@ export default function PagamentosPage() {
     if (linked.length === 0) return null;
     return linked.reduce((sum, b) => sum + (b.balance ?? 0), 0);
   }
-  const [selectedDate, setSelectedDate] = useState(makeDate(6));
+  // Opens on today / the current month. This used to be a hardcoded 2026-05-06
+  // (a leftover makeDate stub), so the screen always booted in May.
+  const [selectedDate, setSelectedDate] = useState(() => toISODate(new Date()));
   const [viewMode, setViewMode] = useState<ViewMode>('mes');
   const [dragOverDate, setDragOverDate] = useState<string | null>(null);
   const [expandedDates, setExpandedDates] = useState<Set<string>>(new Set());
   const [statusFilter, setStatusFilter] = useState<PaymentStatus | 'Todos'>('Todos');
   const [channelFilter, setChannelFilter] = useState<PaymentChannel | 'Todos'>('Todos');
+  // Both alert blocks used to sit full-width above the metrics, pushing the
+  // calendar below the fold — they're header buttons opening modals now.
+  const [showCriticalModal, setShowCriticalModal] = useState(false);
+  const [showAlertConfigModal, setShowAlertConfigModal] = useState(false);
   const [newPayment, setNewPayment] = useState<Omit<InvestmentPayment, 'id'>>({
     clientId: clients[0]?.id ?? '',
     clientName: clients[0]?.name ?? '',
-    date: makeDate(6),
+    date: toISODate(new Date()),
     destination: clients[0] ? `${clients[0].name} - Novo investimento` : '',
-    amount: 500,
+    amount: DEFAULT_PAYMENT_AMOUNT,
     channel: 'Meta ADS',
     status: 'Pendente',
     extra: false,
   });
   const formRef = useRef<HTMLDivElement>(null);
+
+  // The amount defaults to whatever was last sent. Payments arrive async, so the
+  // prefill happens in an effect — and stops as soon as the user types a value of
+  // their own, so a late-arriving fetch can't overwrite what they just entered.
+  const amountTouchedRef = useRef(false);
+  const lastAmount = lastRegisteredAmount(payments);
+  useEffect(() => {
+    if (amountTouchedRef.current || lastAmount === null) return;
+    setNewPayment((p) => (p.amount === lastAmount ? p : { ...p, amount: lastAmount }));
+  }, [lastAmount]);
 
   type RecurMode = 'none' | 'weekdays' | 'interval' | 'monthly';
   const [recurMode, setRecurMode] = useState<RecurMode>('none');
@@ -1889,7 +1967,10 @@ export default function PagamentosPage() {
       if (dates.length > 0) setSelectedDate(dates[0]);
     }
 
-    setNewPayment((prev) => ({ ...prev, destination: `${prev.clientName} - Novo investimento`, amount: 500, extra: false }));
+    // Keep the amount just sent — it's now "the last one", and the next Pix is
+    // usually the same value. Clearing it back to a fixed 500 meant retyping.
+    amountTouchedRef.current = false;
+    setNewPayment((prev) => ({ ...prev, destination: `${prev.clientName} - Novo investimento`, extra: false }));
     setRecurMode('none');
     setRecurHasEnd(false);
     setRecurUntil('');
@@ -1947,14 +2028,36 @@ export default function PagamentosPage() {
             />
             <ChevronDown className="h-4 w-4 text-muted-foreground" />
           </div>
+          {(activeBalances.length > 0 || balancesLoading) && (
+            <CriticalBalanceButton
+              balances={activeBalances}
+              loading={balancesLoading}
+              onClick={() => setShowCriticalModal(true)}
+            />
+          )}
+          <button
+            type="button"
+            onClick={() => setShowAlertConfigModal(true)}
+            className="flex h-11 items-center gap-2 rounded-[var(--radius)] border border-border bg-card/70 px-3 text-xs font-bold uppercase tracking-wider text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
+            title="Configurar os alertas diários de saldo no WhatsApp"
+          >
+            <Bell className="h-4 w-4" />
+            Alertas
+          </button>
         </div>
       </div>
 
-      {(activeBalances.length > 0 || balancesLoading) && (
-        <CriticalBalanceAlerts balances={activeBalances} loading={balancesLoading} lastUpdated={balancesLastUpdated} onRefresh={loadBalances} />
+      {showCriticalModal && (
+        <CriticalBalanceModal
+          balances={activeBalances}
+          loading={balancesLoading}
+          lastUpdated={balancesLastUpdated}
+          onRefresh={loadBalances}
+          onClose={() => setShowCriticalModal(false)}
+        />
       )}
 
-      <BalanceAlertSettings />
+      {showAlertConfigModal && <BalanceAlertSettings onClose={() => setShowAlertConfigModal(false)} />}
 
       <div className="grid gap-4 xl:grid-cols-5">
         {viewMode === 'dia' ? (
@@ -2009,7 +2112,7 @@ export default function PagamentosPage() {
             <span className="text-xs font-bold text-foreground">Valor</span>
             <div className="flex h-10 items-center gap-2 rounded-lg border border-border bg-background px-3">
               <span className="text-sm font-bold text-muted-foreground">R$</span>
-              <CurrencyInput value={newPayment.amount} onChange={(amount) => setNewPayment((p) => ({ ...p, amount }))} className="min-w-0 flex-1 bg-transparent text-sm font-bold outline-none" />
+              <CurrencyInput value={newPayment.amount} onChange={(amount) => { amountTouchedRef.current = true; setNewPayment((p) => ({ ...p, amount })); }} className="min-w-0 flex-1 bg-transparent text-sm font-bold outline-none" />
             </div>
           </label>
           <label className="space-y-2">

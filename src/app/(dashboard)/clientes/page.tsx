@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import {
   Archive, RotateCcw, ShieldAlert, Trash2, Plus, Power, PowerOff,
-  Search, ArrowUpDown, ChevronDown, EyeOff, LayoutList, LayoutGrid,
+  Search, ArrowUpDown, ChevronDown, ChevronLeft, ChevronRight, EyeOff, LayoutList, LayoutGrid,
   MoreHorizontal, SlidersHorizontal, PiggyBank, History, UserCog, X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -31,6 +31,12 @@ type ActivityLog = {
   actor_source: string;
   campaign_name?: string;
   created_at: string;
+};
+
+type ChannelBalance = { key: string; logo: string; label: string; value: string; tone: string };
+type FinancialInfo = {
+  label: string; value: string; sub: string; tone: string; loading: boolean;
+  channels?: ChannelBalance[];
 };
 
 export default function ClientesPage() {
@@ -60,6 +66,11 @@ export default function ClientesPage() {
   const [gestorFilter, setGestorFilter]           = useState('');
   const [viewMode, setViewMode]                   = useState<'list' | 'grid'>('grid');
   const [sortOrder, setSortOrder]                 = useState<'az' | 'za'>('az');
+  // Quantos clientes aparecem por tela — preferência do usuário, salva no
+  // navegador (0 = sem paginação, mostra todos). Default 20: a lista antes
+  // renderizava tudo de uma vez, pesado com a base crescendo.
+  const [pageSize, setPageSize]                   = useState(20);
+  const [page, setPage]                           = useState(1);
   const [menuId, setMenuId]                       = useState<string | null>(null);
   const [clientBalances, setClientBalances]        = useState<Record<string, { meta: number | null; google: number | null }>>({});
   const [balancesLoading, setBalancesLoading]      = useState(true);
@@ -94,6 +105,11 @@ export default function ClientesPage() {
     })
     .sort((a, b) => sortOrder === 'az' ? a.name.localeCompare(b.name) : b.name.localeCompare(a.name));
 
+  // "Select all" / contagem / estado vazio continuam olhando pra lista
+  // filtrada inteira (displayedClients); só o RENDER dos cards é paginado.
+  const totalPages = pageSize === 0 ? 1 : Math.max(1, Math.ceil(displayedClients.length / pageSize));
+  const pagedClients = pageSize === 0 ? displayedClients : displayedClients.slice((page - 1) * pageSize, page * pageSize);
+
   const financialByClient = useMemo(() => {
     const now = new Date();
     const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
@@ -121,7 +137,22 @@ export default function ClientesPage() {
     });
     fetch('/api/users').then(r => r.ok ? r.json() : []).then(setUsers).catch(() => {});
     fetch('/api/clients/categories').then(r => r.ok ? r.json() : []).then(setCategories).catch(() => {});
+
+    const storedPageSize = Number(localStorage.getItem('clientes:page-size'));
+    if ([0, 10, 20, 30, 50].includes(storedPageSize)) setPageSize(storedPageSize);
   }, []);
+
+  // Volta pra 1ª página sempre que o conjunto filtrado muda — senão o usuário
+  // pode ficar "preso" numa página vazia (ex: filtrou e sobraram 2 páginas,
+  // estava na 5ª).
+  useEffect(() => {
+    setPage(1);
+  }, [search, segmentFilter, gestorFilter, showArchived, sortOrder, pageSize]);
+
+  function changePageSize(next: number) {
+    setPageSize(next);
+    localStorage.setItem('clientes:page-size', String(next));
+  }
 
   useEffect(() => {
     Promise.all([
@@ -280,7 +311,7 @@ export default function ClientesPage() {
     return new Date(`${iso}T12:00:00`).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' }).replace('.', '');
   }
 
-  function getFinancialInfo(clientId: string, billingMode?: 'prepaid' | 'card') {
+  function getFinancialInfo(clientId: string, billingMode?: 'prepaid' | 'card'): FinancialInfo {
     const balances = clientBalances[clientId];
     const hasMeta = balances?.meta !== undefined && balances.meta !== null;
     const hasGoogle = balances?.google !== undefined && balances.google !== null;
@@ -293,16 +324,17 @@ export default function ClientesPage() {
     if (hasBalance) {
       const meta = balances?.meta ?? 0;
       const google = balances?.google ?? 0;
-      const parts = [
-        hasMeta ? `Meta ${formatCompactBRL(meta)}` : null,
-        hasGoogle ? `Google ${formatCompactBRL(google)}` : null,
-      ].filter(Boolean).join(' · ');
+      // Por canal, sem soma: um Meta zerado ao lado de um Google saudável
+      // "some" dentro de um total combinado — o gestor precisa ver os dois.
+      const channels: ChannelBalance[] = [
+        hasMeta ? { key: 'meta', logo: '/brand/meta-ads-logo.webp', label: 'Meta Ads', value: formatCompactBRL(meta), tone: meta > 0 ? 'text-emerald-400' : 'text-muted-foreground' } : null,
+        hasGoogle ? { key: 'google', logo: '/brand/google-ads-logo.png', label: 'Google Ads', value: formatCompactBRL(google), tone: google > 0 ? 'text-emerald-400' : 'text-muted-foreground' } : null,
+      ].filter((c): c is ChannelBalance => c !== null);
 
       return {
         label: 'Saldo mídia',
-        value: formatCompactBRL(meta + google),
-        sub: parts,
-        tone: meta + google > 0 ? 'text-emerald-400' : 'text-muted-foreground',
+        value: '', sub: '', tone: '',
+        channels,
         loading: false,
       };
     }
@@ -462,7 +494,7 @@ export default function ClientesPage() {
 
       {/* ── CLIENT LIST ── */}
       <div className={cn('grid grid-cols-1 gap-3', viewMode === 'grid' && 'xl:grid-cols-2')}>
-        {displayedClients.map(cliente => {
+        {pagedClients.map(cliente => {
           const finance = getFinancialInfo(cliente.id, cliente.ads_billing_mode);
 
           return (
@@ -670,11 +702,25 @@ export default function ClientesPage() {
                     </button>
 
                     <div className="flex min-w-0 items-center gap-2 rounded-lg bg-muted/35 px-2.5 py-2">
-                      <PiggyBank className="h-4 w-4 shrink-0 text-primary" />
+                      {(!finance.channels || finance.channels.length === 0) && (
+                        <PiggyBank className="h-4 w-4 shrink-0 text-primary" />
+                      )}
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-[10px] font-bold uppercase tracking-wider text-muted-foreground">{finance.label}</p>
                         {finance.loading ? (
-                          <div className="mt-1 h-3 w-24 animate-pulse rounded bg-muted" />
+                          <div className="mt-1 h-4 w-24 animate-pulse rounded bg-muted" />
+                        ) : finance.channels && finance.channels.length > 0 ? (
+                          // Por canal, sem soma — cada linha traz o logo da própria
+                          // plataforma (Meta/Google) em vez de um ícone genérico.
+                          <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1">
+                            {finance.channels.map(ch => (
+                              <div key={ch.key} className="flex items-center gap-1.5">
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img src={ch.logo} alt={ch.label} title={ch.label} className="h-4 w-4 shrink-0 rounded-[3px] object-contain" />
+                                <span className={cn('text-base font-extrabold tabular-nums', ch.tone)}>{ch.value}</span>
+                              </div>
+                            ))}
+                          </div>
                         ) : (
                           <div className="flex min-w-0 items-baseline gap-2">
                             <p className={cn('truncate text-xs font-bold tabular-nums', finance.tone)}>{finance.value}</p>
@@ -728,6 +774,52 @@ export default function ClientesPage() {
           </div>
         )}
       </div>
+
+      {/* ── PAGINAÇÃO — quantos clientes por tela, lembrado no navegador ── */}
+      {displayedClients.length > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card px-4 py-2.5">
+          <span className="text-xs text-muted-foreground">
+            {pageSize === 0
+              ? `Mostrando todos os ${displayedClients.length} cliente${displayedClients.length !== 1 ? 's' : ''}`
+              : `Mostrando ${(page - 1) * pageSize + 1} a ${Math.min(page * pageSize, displayedClients.length)} de ${displayedClients.length} cliente${displayedClients.length !== 1 ? 's' : ''}`}
+          </span>
+          <div className="flex items-center gap-1.5">
+            {pageSize !== 0 && totalPages > 1 && (
+              <>
+                <button
+                  onClick={() => setPage(p => Math.max(1, p - 1))}
+                  disabled={page === 1}
+                  className="flex h-7 w-7 items-center justify-center rounded border border-border transition-colors hover:bg-muted disabled:opacity-30"
+                >
+                  <ChevronLeft className="h-3.5 w-3.5" />
+                </button>
+                <span className="flex h-7 min-w-[28px] items-center justify-center rounded border border-primary bg-primary/10 px-2.5 text-xs font-bold text-primary">
+                  {page} / {totalPages}
+                </span>
+                <button
+                  onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                  disabled={page === totalPages}
+                  className="flex h-7 w-7 items-center justify-center rounded border border-border transition-colors hover:bg-muted disabled:opacity-30"
+                >
+                  <ChevronRight className="h-3.5 w-3.5" />
+                </button>
+              </>
+            )}
+            <div className="relative ml-2">
+              <select
+                value={pageSize}
+                onChange={e => changePageSize(Number(e.target.value))}
+                className="appearance-none rounded border border-border bg-background pl-2 pr-6 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
+                title="Clientes por tela"
+              >
+                {[10, 20, 30, 50].map(n => <option key={n} value={n}>{n} / tela</option>)}
+                <option value={0}>Todos</option>
+              </select>
+              <ChevronDown className="pointer-events-none absolute right-1.5 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── DIALOGS ── */}
 
