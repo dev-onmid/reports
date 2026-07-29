@@ -237,7 +237,9 @@ export async function processarReuniao(pool: Pool, input: ReuniaoInput): Promise
       description: `${acao.descricao?.trim() ?? ''}${rodape}`.trim() || undefined,
       status: acao.status?.trim() || undefined,
       priority: (acao.prioridade ?? null) as CreateTaskInput['priority'],
-      due_date: typeof acao.prazo_dias === 'number' ? Date.now() + acao.prazo_dias * DIA_MS : null,
+      // Sem prazo definido na reunião, a tarefa vence HOJE (regra da agência):
+      // tarefa sem data some das visões de planejamento do ClickUp.
+      due_date: Date.now() + (typeof acao.prazo_dias === 'number' ? acao.prazo_dias : 0) * DIA_MS,
       assignees: responsaveis.map((r) => r.clickup_id),
     };
 
