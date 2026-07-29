@@ -181,6 +181,12 @@ function setorDe(raw: unknown): Setor {
  */
 export async function processarReuniao(pool: Pool, input: ReuniaoInput): Promise<ReuniaoResult> {
   await ensureClickupSchema(pool);
+  // Quem normalmente cria estas colunas são as rotas de usuários/vínculo — mas
+  // esta rota não pode depender de alguém ter aberto aquelas telas antes do
+  // primeiro webhook chegar. Sem isto, o primeiro uso em produção quebrava com
+  // "column setor does not exist".
+  await pool.query('ALTER TABLE public.users ADD COLUMN IF NOT EXISTS setor TEXT').catch(() => {});
+  await pool.query('ALTER TABLE public.users ADD COLUMN IF NOT EXISTS clickup_id TEXT').catch(() => {});
 
   const { match, sugestoes, ambiguo } = await resolveClientByName(pool, input.cliente);
   if (!match) {

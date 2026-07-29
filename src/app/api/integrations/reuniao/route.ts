@@ -12,6 +12,10 @@ import { processarReuniao, type AcaoInput, type ReuniaoInput } from '@/lib/reuni
  * porque alguém esqueceu a variável de ambiente.
  */
 
+// Cria N tarefas no ClickUp em sequência — o teto default de 10s do plano
+// Hobby derruba reuniões com muitas ações no meio.
+export const maxDuration = 60;
+
 function segredoConfere(req: NextRequest): 'ok' | 'sem-segredo' | 'negado' {
   const esperado = process.env.MAKE_INTEGRATION_SECRET;
   if (!esperado) return 'sem-segredo';
@@ -131,7 +135,14 @@ export async function POST(req: NextRequest) {
     return Response.json(r);
   } catch (err) {
     console.error('[integracao reuniao]', err);
-    return Response.json({ ok: false, erro: 'falha_interna' }, { status: 500 });
+    // 200 de propósito: o Make trata 5xx como "Couldn't connect" e esconde o
+    // corpo. Com 200 + ok:false a falha percorre a rota de erro do cenário e
+    // chega legível no WhatsApp, com o detalhe junto.
+    return Response.json({
+      ok: false,
+      erro: 'falha_interna',
+      detalhe: err instanceof Error ? err.message : String(err),
+    });
   } finally {
     await pool.end();
   }
