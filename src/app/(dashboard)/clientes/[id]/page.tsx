@@ -51,6 +51,7 @@ import { VaultTab } from '@/components/vault-tab';
 import CrmWorkspace from '@/app/(dashboard)/crm/page';
 import { ClientTrackingTab } from './tracking-tab';
 import { LandingPagesTab } from './landing-pages-tab';
+import { ClientDemandasTab } from './demandas-tab';
 
 // ── Funnel types & logic ───────────────────────────────────────────────────────
 type FunnelStage = { id: string; name: string; conversion: number };
@@ -4663,10 +4664,10 @@ function SheetsResultsTab({ clientId }: { clientId: string }) {
 }
 
 // ── Page ───────────────────────────────────────────────────────────────────────
-const TABS = ['planejamento', 'crm', 'rastreio', 'pagamentos', 'lps', 'dna', 'historico', 'mapa'] as const;
+const TABS = ['planejamento', 'demandas', 'crm', 'rastreio', 'pagamentos', 'lps', 'dna', 'historico', 'mapa'] as const;
 type Tab = typeof TABS[number];
 // Abas operacionais sempre visíveis na barra; o resto (referência) vai pro menu "Mais".
-const PRIMARY_TABS: Tab[] = ['planejamento', 'crm', 'rastreio', 'pagamentos'];
+const PRIMARY_TABS: Tab[] = ['planejamento', 'demandas', 'crm', 'rastreio', 'pagamentos'];
 const MORE_TABS: Tab[] = ['lps', 'dna', 'historico', 'mapa'];
 
 function readSavedDashboardBlocks(clientId: string): ClientDashboardWidget[] {
@@ -4881,6 +4882,7 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
 
   const tabLabel: Record<Tab, string> = {
     planejamento: 'Planejamento',
+    demandas:     'Demandas',
     mapa:         'Mapa Mental',
     historico:    'Histórico',
     rastreio:     'Rastreio',
@@ -5076,6 +5078,8 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
           <FunnelTab clientId={id} clientName={client.name} goalConfig={clientGoal} isAdmin={isAdmin} />
         </div>
       )}
+
+      {tab === 'demandas' && <ClientDemandasTab clientId={id} />}
 
       {tab === 'mapa' && <ClientMindMapTab clientId={id} clientName={client.name} />}
 

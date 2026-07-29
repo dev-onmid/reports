@@ -1,5 +1,21 @@
 @AGENTS.md
 
+## Aba Demandas do cliente — espelho ClickUp + backlog de reuniões (2026-07-29)
+
+Pedido do Matheus: dentro do cliente, ver as demandas pendentes do ClickUp (**só status Flow e Tráfego**) + resumos das reuniões como backlog pra retomar contexto ("dar continuidade nas reuniões"). Resumo chega por webhook do Make no final do cenário do TLDV — ele vai atualizar a automação depois; o lado do reports já está pronto.
+
+| Arquivo | Papel |
+|---|---|
+| `src/lib/reuniao-resumos.ts` | Tabela `reuniao_resumos` (ensure memoizado; unique parcial `(client_id, meeting_id) WHERE meeting_id IS NOT NULL` = reexecução do Make sobrescreve em vez de duplicar), `salvarResumoReuniao` (upsert via `xmax = 0` pra reportar inserted/updated), `listarResumos`, `parseDataReuniao` (ISO / `dd/mm/yyyy [hh:mm]` interpretado como BRT / epoch s ou ms; lixo → null → "agora") |
+| `src/app/api/integrations/reuniao/resumo/route.ts` | **Webhook do Make** — irmão de `/api/integrations/reuniao` (mesmo `x-onmid-secret` com timingSafeEqual, mesmo fail-closed 503 sem `MAKE_INTEGRATION_SECRET`, mesmos erros de negócio como 200+ok:false pro Make ler). Body: `cliente` (nome, resolvido por `resolveClientByName` — casamento EXATO, sugestões pro humano) + `resumo`/`texto` + opcionais `titulo`/`meeting_id`/`doc_url`/`data`. O proxy já libera o subcaminho (o match de prefixo cobre `/…/resumo`) |
+| `src/app/api/clients/[id]/reunioes/route.ts` | GET (lista, degrada 200+vazio sem DB) e DELETE `?resumoId=` (limpar teste/duplicata). Auth = deny-by-default do proxy, padrão das subrotas de cliente |
+| `src/app/(dashboard)/clientes/[id]/demandas-tab.tsx` | `ClientDemandasTab`: seção "Demandas em andamento" (GET `/api/clickup/tasks?clientId=` — rota já existia; filtro client-side por status normalizado sem acento/caixa ∈ `STATUS_VISIVEIS = ['flow','trafego']`, agrupado por status com dot na cor real do ClickUp, badge N pendentes, assignees, prazo vencido em vermelho, link "Abrir no ClickUp") + seção "Reuniões" (resumos expansíveis — `role="button"`, não `<button>` aninhado — com doc_url e excluir). Estados: sem vínculo ClickUp → aponta Integrações → ClickUp; erro → mensagem; vazio → 🎉 |
+
+- **Aba `demandas` é PRIMARY_TAB** (entre Planejamento e CRM). Pra mudar quais status aparecem: `STATUS_VISIVEIS` no topo do demandas-tab.
+- **Payload que o Make deve mandar** no `POST /api/integrations/reuniao/resumo` (header `x-onmid-secret`): `{ "cliente": "<nome>", "resumo": "<texto>", "titulo"?, "meeting_id"? (dedupe!), "doc_url"?, "data"? }`.
+- ✅ Verificado: tsc + `next build` limpos; componente renderizado em página de teste com bundle esbuild + fetch mockado (grupos FLOW·1/TRÁFEGO·2 com cor real do status, CONCLUÍDO/BRIEFING filtrados, prazo vencido vermelho, badge, resumo expande com doc+excluir, screenshot ok); rotas por curl em dev — webhook 503 fail-closed sem env, GET 401 sem cookie (proxy) e 200 gracioso com cookie sem DB; 8 asserts do `parseDataReuniao`. ⚠️ Mock de `window.fetch` na página REAL quebra o fetch RSC do Next (nav SPA vira "This page couldn't load") — por isso o teste isolado via bundle; validar em produção: abrir aba Demandas de cliente vinculado ao ClickUp e mandar um resumo de teste pelo webhook.
+- ⚠️ Produção usa a env `MAKE_INTEGRATION_SECRET` (a mesma da rota irmã, já existe na Vercel).
+
 ## Autenticação real — o app NÃO tinha nenhuma (2026-07-28) — branch `fix/auth-server-side`
 
 Matheus apontou 2 falhas; a auditoria achou que eram sintoma de uma causa arquitetural. **237 arquivos de rota, 195 sem guard nenhum.** O login era comparado no BROWSER: `auth-store` baixava `GET /api/users?login=1` (todos os usuários **com senha em texto puro**, sem auth), comparava com `===`, e gravava `{userId,role,team}` no localStorage. Esse objeto voltava como header `x-onmid-user-id` — auto-declarado. Ou seja, `getCallerScope` **nunca foi autenticação**, só filtro de dados: mandar o id de um admin bastava.
