@@ -4,9 +4,10 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import {
   Copy, Check, Trash2, Plus, RefreshCw, Eye, EyeOff,
   Settings2, MessageCircle, ShoppingCart, X, TrendingUp, Wifi, WifiOff, QrCode,
-  HelpCircle, Zap, AlertCircle, ExternalLink, Globe, BarChart3, Search,
+  HelpCircle, Zap, AlertCircle, Globe, BarChart3, Search,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { ConversaoTile, GuideStepModal } from './conversao-guias';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -216,7 +217,8 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
     eventos_ativos: { lead: true, purchase: true }, whatsapp_provider: 'zapi',
   });
   const [saving, setSaving]       = useState(false);
-  const [showToken, setShowToken] = useState(false);
+  /** Qual guia de conversão está aberto (grade de botões → modal passo a passo). */
+  const [guia, setGuia] = useState<'pixel' | 'capi' | 'google' | 'eventos' | null>(null);
 
   // ── Instances ──────────────────────────────────────────────────────────
   const [instances, setInstances]       = useState<Instance[]>([]);
@@ -676,176 +678,279 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
       {/* ══════════ TAB: Conversões ══════════ */}
       {activeTab === 'conversoes' && (
         <div className="space-y-5">
+          <p className="text-xs text-muted-foreground">
+            Escolha o que configurar — cada item abre um passo a passo com o guia de onde achar cada valor.
+          </p>
 
-          {/* Card 1 — Meta rastreio básico */}
-          <div className="rounded-xl border border-border bg-card p-5 space-y-4">
-            <SectionHeader
-              icon={BarChart3} color="text-blue-400"
-              title="Meta — Rastreio por Pixel"
-              subtitle="Envia eventos via Pixel quando o lead chega de anúncio Meta (ctwa_clid) ou quando o atendente digita o gatilho de compra."
-            />
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div>
-                <label className="mb-1 block text-xs font-semibold text-muted-foreground">Pixel ID</label>
-                <input value={config.pixel_id} onChange={e => setConfig(p => ({ ...p, pixel_id: e.target.value }))} placeholder="Ex: 1234567890123456" className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm font-mono outline-none focus:border-primary" />
-              </div>
-              <div>
-                <label className="mb-1 block text-xs font-semibold text-muted-foreground">Token da API de Conversões</label>
-                <div className="relative">
-                  <input type={showToken ? 'text' : 'password'} value={config.meta_token} onChange={e => setConfig(p => ({ ...p, meta_token: e.target.value }))} placeholder="EAAxxxxxxx..." className="w-full rounded-lg border border-border bg-background px-3 py-2 pr-9 text-sm font-mono outline-none focus:border-primary" />
-                  <button type="button" onClick={() => setShowToken(v => !v)} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
-                    {showToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </button>
-                </div>
-              </div>
-              <div>
-                <label className="mb-1 block text-xs font-semibold text-muted-foreground">Gatilho de compra</label>
-                <input value={config.gatilho_compra} onChange={e => setConfig(p => ({ ...p, gatilho_compra: e.target.value }))} placeholder="compra aprovada" className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-primary" />
-                <p className="mt-1 text-[10px] text-muted-foreground">Texto que dispara o evento Purchase. Ex: &quot;compra aprovada 297&quot;</p>
-              </div>
-              <div className="flex flex-col gap-2 pt-1">
-                <p className="text-xs font-semibold text-muted-foreground">Eventos ativos</p>
-                {([
-                  { key: 'lead' as const, label: 'Lead', icon: MessageCircle },
-                  { key: 'purchase' as const, label: 'Compra (Purchase)', icon: ShoppingCart },
-                ] as const).map(({ key, label, icon: Icon }) => (
-                  <label key={key} className="flex cursor-pointer items-center gap-3">
-                    <div onClick={() => setConfig(p => ({ ...p, eventos_ativos: { ...p.eventos_ativos, [key]: !p.eventos_ativos[key] } }))} className={cn('relative h-5 w-9 rounded-full transition-colors cursor-pointer', config.eventos_ativos[key] ? 'bg-primary' : 'bg-muted')}>
-                      <div className={cn('absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform', config.eventos_ativos[key] ? 'translate-x-4' : 'translate-x-0.5')} />
-                    </div>
-                    <Icon className="h-3.5 w-3.5 text-muted-foreground" />
-                    <span className="text-xs font-medium">{label}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
-            <button onClick={saveConfig} disabled={saving} className="flex items-center justify-center gap-1.5 rounded-lg bg-primary px-5 py-2 text-sm font-bold text-black hover:bg-primary/90 disabled:opacity-50 transition-colors">
-              {saving && <RefreshCw className="h-3.5 w-3.5 animate-spin" />}
-              Salvar
-            </button>
-          </div>
-
-          {/* Card 2 — Meta CAPI */}
-          <div className="rounded-xl border border-border bg-card p-5 space-y-4">
-            <SectionHeader
-              icon={Zap} color="text-blue-400"
-              title="Meta Conversions API (server-side)"
-              subtitle="Envio direto do servidor. Funciona para todos os leads, independente da origem do clique."
-              action={
-                <a href="/ajuda/conversoes" target="_blank" className="flex items-center gap-1 text-[10px] text-primary hover:underline whitespace-nowrap">
-                  Ver guia <ExternalLink className="h-3 w-3" />
-                </a>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <ConversaoTile
+              icon={BarChart3} iconColor="text-blue-400"
+              title="Rastreio por Pixel"
+              description="Eventos via Pixel quando o lead chega de anúncio Meta (ctwa_clid) ou o atendente digita o gatilho de compra."
+              status={
+                config.pixel_id && config.meta_token ? { label: 'Configurado', tone: 'on' }
+                  : config.pixel_id || config.meta_token ? { label: 'Incompleto', tone: 'partial' }
+                  : { label: 'Não configurado', tone: 'off' }
               }
+              onClick={() => setGuia('pixel')}
             />
-            <Toggle value={convConfig.meta_ativo} onChange={v => setConvConfig(p => ({ ...p, meta_ativo: v }))} label="Ativar Meta CAPI" />
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div>
-                <label className="mb-1 flex items-center text-xs font-semibold text-muted-foreground">
-                  Pixel ID <HelpBtn text={'1. Acesse business.facebook.com\n2. Vá em "Gerenciador de Eventos"\n3. Selecione seu Pixel na lista\n4. O Pixel ID aparece abaixo do nome (ex: 1234567890123456)'} />
-                </label>
-                <input value={convConfig.meta_pixel_id} onChange={e => setConvConfig(p => ({ ...p, meta_pixel_id: e.target.value }))} placeholder="Ex: 1234567890123456" className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm font-mono outline-none focus:border-primary" />
-              </div>
-              <div>
-                <label className="mb-1 flex items-center text-xs font-semibold text-muted-foreground">
-                  Token da API <HelpBtn text={'1. No Gerenciador de Eventos, clique no Pixel\n2. Aba "Configurações"\n3. Role até "API de Conversões"\n4. "Gerar token de acesso"\n⚠️ Nunca compartilhe este token.'} />
-                </label>
-                <SecretInput value={convConfig.meta_access_token} onChange={v => setConvConfig(p => ({ ...p, meta_access_token: v }))} placeholder="EAAxxxxxxx..." />
-              </div>
-              <div>
-                <label className="mb-1 flex items-center text-xs font-semibold text-muted-foreground">
-                  Código de Teste <HelpBtn text={'Opcional. Só use para testes.\nGerenciador de Eventos → "Testar eventos" → copie o código (ex: TEST12345). Remova após confirmar.'} />
-                </label>
-                <input value={convConfig.meta_test_event_code} onChange={e => setConvConfig(p => ({ ...p, meta_test_event_code: e.target.value }))} placeholder="TEST12345 (opcional)" className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm font-mono outline-none focus:border-primary" />
-              </div>
-              <div>
-                <label className="mb-1 flex items-center text-xs font-semibold text-muted-foreground">
-                  Page ID (obrigatório p/ WhatsApp) <HelpBtn text={'1. Gerenciador de Eventos → clique no Pixel de Mensagem\n2. Aba "Configurações" → "Dados Vinculados"\n3. Copie o ID que aparece embaixo da Página conectada\n⚠️ Sem isso, os eventos são aceitos pela Meta (200 OK) mas NÃO aparecem atribuídos na campanha — falha silenciosa.'} />
-                </label>
-                <input value={convConfig.meta_page_id} onChange={e => setConvConfig(p => ({ ...p, meta_page_id: e.target.value }))} placeholder="Ex: 1029384756" className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm font-mono outline-none focus:border-primary" />
-              </div>
-              <div className="flex items-end">
-                <button onClick={() => testConversion('meta')} disabled={testingMeta} className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-blue-400/30 bg-blue-500/10 px-4 py-2 text-xs font-bold text-blue-400 hover:bg-blue-500/20 disabled:opacity-50 transition-colors">
-                  {testingMeta ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Zap className="h-3.5 w-3.5" />}
-                  Testar conexão
-                </button>
-              </div>
-            </div>
-            {testResult?.platform === 'meta' && (
-              <div className={cn('flex items-start gap-2 rounded-lg border px-3 py-2 text-xs', testResult.sucesso ? 'border-emerald-400/30 bg-emerald-500/10 text-emerald-400' : 'border-red-400/30 bg-red-500/10 text-red-400')}>
-                {testResult.sucesso ? <Check className="mt-0.5 h-3.5 w-3.5 shrink-0" /> : <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />}
-                <span className="font-mono break-all">{testResult.body.slice(0, 200)}</span>
-              </div>
-            )}
-          </div>
-
-          {/* Card 3 — Google Enhanced */}
-          <div className="rounded-xl border border-border bg-card p-5 space-y-4">
-            <SectionHeader
-              icon={Globe} color="text-yellow-400"
+            <ConversaoTile
+              icon={Zap} iconColor="text-blue-400"
+              title="Conversão via API (Meta CAPI)"
+              description="Envio direto do servidor. Funciona para todos os leads, independente da origem do clique."
+              status={
+                convConfig.meta_ativo ? { label: 'Ativo', tone: 'on' }
+                  : convConfig.meta_pixel_id ? { label: 'Desativado', tone: 'partial' }
+                  : { label: 'Não configurado', tone: 'off' }
+              }
+              onClick={() => setGuia('capi')}
+            />
+            <ConversaoTile
+              icon={Globe} iconColor="text-yellow-400"
               title="Google — Conversões"
-              subtitle="Lead com gclid capturado → conversão OFFLINE direto no Google Ads (atribui campanha e palavra-chave, alimenta o Smart Bidding). Sem gclid → fallback GA4 Measurement Protocol."
+              description="Lead com gclid vira conversão offline no Google Ads (atribui campanha e palavra-chave). Sem gclid, cai no GA4."
+              status={
+                convConfig.google_ativo ? { label: 'Ativo', tone: 'on' }
+                  : convConfig.google_conversion_label_lead ? { label: 'Desativado', tone: 'partial' }
+                  : { label: 'Não configurado', tone: 'off' }
+              }
+              onClick={() => setGuia('google')}
             />
-            <Toggle value={convConfig.google_ativo} onChange={v => setConvConfig(p => ({ ...p, google_ativo: v }))} label="Ativar conversões Google" />
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div>
-                <label className="mb-1 flex items-center text-xs font-semibold text-muted-foreground">
-                  Customer ID (opcional) <HelpBtn text={'ID da conta Google Ads (ex: 123-456-7890). Se vazio, usa a conta vinculada ao cliente em Contas de Anúncio.'} />
-                </label>
-                <input value={convConfig.google_customer_id} onChange={e => setConvConfig(p => ({ ...p, google_customer_id: e.target.value }))} placeholder="123-456-7890" className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm font-mono outline-none focus:border-primary" />
-              </div>
-              <div />
-              <div>
-                <label className="mb-1 flex items-center text-xs font-semibold text-muted-foreground">
-                  Ação de conversão — Lead <HelpBtn text={'NOME ou ID da ação de conversão (Google Ads → Metas → Conversões). Usado no upload offline via gclid. Ex: "Lead WhatsApp" ou 987654321'} />
-                </label>
-                <input value={convConfig.google_conversion_label_lead} onChange={e => setConvConfig(p => ({ ...p, google_conversion_label_lead: e.target.value }))} placeholder="Lead WhatsApp" className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm font-mono outline-none focus:border-primary" />
-              </div>
-              <div>
-                <label className="mb-1 flex items-center text-xs font-semibold text-muted-foreground">
-                  Ação de conversão — Engajamento <HelpBtn text={'NOME ou ID da ação de conversão de engajamento/contato no Google Ads.'} />
-                </label>
-                <input value={convConfig.google_conversion_label_contact} onChange={e => setConvConfig(p => ({ ...p, google_conversion_label_contact: e.target.value }))} placeholder="Contato WhatsApp" className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm font-mono outline-none focus:border-primary" />
-              </div>
-              <div>
-                <label className="mb-1 flex items-center text-xs font-semibold text-muted-foreground">
-                  Ação de conversão — Purchase <HelpBtn text={'NOME ou ID da ação de conversão de compra no Google Ads.'} />
-                </label>
-                <input value={convConfig.google_conversion_label_purchase} onChange={e => setConvConfig(p => ({ ...p, google_conversion_label_purchase: e.target.value }))} placeholder="Compra WhatsApp" className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm font-mono outline-none focus:border-primary" />
-              </div>
-              <div>
-                <label className="mb-1 flex items-center text-xs font-semibold text-muted-foreground">
-                  Measurement ID (fallback GA4) <HelpBtn text={'Opcional — só pro fallback GA4 de leads SEM gclid.\n1. analytics.google.com\n2. Administrador → Fluxos de dados\n3. ID começa com G-'} />
-                </label>
-                <input value={convConfig.google_measurement_id} onChange={e => setConvConfig(p => ({ ...p, google_measurement_id: e.target.value }))} placeholder="G-XXXXXXXXXX" className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm font-mono outline-none focus:border-primary" />
-              </div>
-              <div>
-                <label className="mb-1 flex items-center text-xs font-semibold text-muted-foreground">
-                  API Secret (fallback GA4) <HelpBtn text={'Opcional — Analytics → Administrador → Fluxos de dados → "Measurement Protocol API secrets" → Criar'} />
-                </label>
-                <SecretInput value={convConfig.google_api_secret} onChange={v => setConvConfig(p => ({ ...p, google_api_secret: v }))} placeholder="API Secret" />
-              </div>
-              <div className="flex items-end">
-                <button onClick={() => testConversion('google')} disabled={testingGoogle} className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-yellow-400/30 bg-yellow-500/10 px-4 py-2 text-xs font-bold text-yellow-400 hover:bg-yellow-500/20 disabled:opacity-50 transition-colors">
-                  {testingGoogle ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Zap className="h-3.5 w-3.5" />}
-                  Testar conexão
-                </button>
-              </div>
-            </div>
-            {testResult?.platform === 'google' && (
-              <div className={cn('flex items-start gap-2 rounded-lg border px-3 py-2 text-xs', testResult.sucesso ? 'border-emerald-400/30 bg-emerald-500/10 text-emerald-400' : 'border-red-400/30 bg-red-500/10 text-red-400')}>
-                {testResult.sucesso ? <Check className="mt-0.5 h-3.5 w-3.5 shrink-0" /> : <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />}
-                <span className="font-mono break-all">{testResult.body.slice(0, 200)}</span>
-              </div>
-            )}
-          </div>
-
-          {/* Card 4 — Eventos por status */}
-          <div className="rounded-xl border border-border bg-card p-5 space-y-4">
-            <SectionHeader
+            <ConversaoTile
               icon={Settings2}
               title="Eventos por Status"
-              subtitle="Dispara evento Meta e/ou Google quando o lead muda de status no CRM."
+              description="Dispara evento Meta e/ou Google quando o lead muda de status no CRM."
+              status={
+                eventosCustom.length > 0
+                  ? { label: `${eventosCustom.length} evento${eventosCustom.length === 1 ? '' : 's'}`, tone: 'on' }
+                  : { label: 'Nenhum', tone: 'off' }
+              }
+              onClick={() => setGuia('eventos')}
             />
+          </div>
+
+          {/* ── Guia 1: Rastreio por Pixel ─────────────────────────────────── */}
+          <GuideStepModal
+            open={guia === 'pixel'} onClose={() => setGuia(null)}
+            icon={BarChart3} iconColor="text-blue-400"
+            title="Rastreio por Pixel"
+            subtitle="Eventos via Pixel para leads vindos de anúncio Meta."
+            finishing={saving}
+            onFinish={async () => { await saveConfig(); setGuia(null); }}
+            steps={[
+              {
+                label: 'Pixel ID',
+                guide: '1. Acesse business.facebook.com\n2. Vá em "Gerenciador de Eventos"\n3. Selecione seu Pixel na lista\n4. O Pixel ID aparece abaixo do nome (ex: 1234567890123456)',
+                body: (
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold text-muted-foreground">Pixel ID</label>
+                    <input value={config.pixel_id} onChange={e => setConfig(p => ({ ...p, pixel_id: e.target.value }))} placeholder="Ex: 1234567890123456" className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm font-mono outline-none focus:border-primary" />
+                  </div>
+                ),
+              },
+              {
+                label: 'Token',
+                guide: '1. No Gerenciador de Eventos, clique no Pixel\n2. Aba "Configurações"\n3. Role até "API de Conversões"\n4. "Gerar token de acesso"\n⚠️ Nunca compartilhe este token.',
+                body: (
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold text-muted-foreground">Token da API de Conversões</label>
+                    <SecretInput value={config.meta_token} onChange={v => setConfig(p => ({ ...p, meta_token: v }))} placeholder="EAAxxxxxxx..." />
+                  </div>
+                ),
+              },
+              {
+                label: 'Gatilho',
+                guide: 'O atendente digita esse texto na conversa do WhatsApp para marcar a venda.\nEx.: "compra aprovada 297" dispara o evento Purchase com valor 297.',
+                body: (
+                  <div className="space-y-4">
+                    <div>
+                      <label className="mb-1 block text-xs font-semibold text-muted-foreground">Gatilho de compra</label>
+                      <input value={config.gatilho_compra} onChange={e => setConfig(p => ({ ...p, gatilho_compra: e.target.value }))} placeholder="compra aprovada" className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-primary" />
+                    </div>
+                    <div className="flex flex-col gap-2">
+                      <p className="text-xs font-semibold text-muted-foreground">Eventos ativos</p>
+                      {([
+                        { key: 'lead' as const, label: 'Lead', icon: MessageCircle },
+                        { key: 'purchase' as const, label: 'Compra (Purchase)', icon: ShoppingCart },
+                      ] as const).map(({ key, label, icon: Icon }) => (
+                        <label key={key} className="flex cursor-pointer items-center gap-3">
+                          <div onClick={() => setConfig(p => ({ ...p, eventos_ativos: { ...p.eventos_ativos, [key]: !p.eventos_ativos[key] } }))} className={cn('relative h-5 w-9 rounded-full transition-colors cursor-pointer', config.eventos_ativos[key] ? 'bg-primary' : 'bg-muted')}>
+                            <div className={cn('absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform', config.eventos_ativos[key] ? 'translate-x-4' : 'translate-x-0.5')} />
+                          </div>
+                          <Icon className="h-3.5 w-3.5 text-muted-foreground" />
+                          <span className="text-xs font-medium">{label}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                ),
+              },
+            ]}
+          />
+
+          {/* ── Guia 2: Meta CAPI ──────────────────────────────────────────── */}
+          <GuideStepModal
+            open={guia === 'capi'} onClose={() => setGuia(null)}
+            icon={Zap} iconColor="text-blue-400"
+            title="Conversão via API (Meta CAPI)"
+            subtitle="Envio server-side — funciona para todos os leads."
+            finishing={savingConv}
+            onFinish={async () => { await saveConvConfig(); setGuia(null); }}
+            footerExtra={
+              <button onClick={() => testConversion('meta')} disabled={testingMeta} className="flex items-center justify-center gap-1.5 rounded-lg border border-blue-400/30 bg-blue-500/10 px-4 py-2 text-xs font-bold text-blue-400 hover:bg-blue-500/20 disabled:opacity-50 transition-colors">
+                {testingMeta ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Zap className="h-3.5 w-3.5" />}
+                Testar conexão
+              </button>
+            }
+            steps={[
+              {
+                label: 'Ativar',
+                guide: 'Ligue o envio server-side e informe o Pixel.\n1. Acesse business.facebook.com\n2. Vá em "Gerenciador de Eventos"\n3. Selecione seu Pixel na lista\n4. O Pixel ID aparece abaixo do nome',
+                body: (
+                  <div className="space-y-4">
+                    <Toggle value={convConfig.meta_ativo} onChange={v => setConvConfig(p => ({ ...p, meta_ativo: v }))} label="Ativar Meta CAPI" />
+                    <div>
+                      <label className="mb-1 block text-xs font-semibold text-muted-foreground">Pixel ID</label>
+                      <input value={convConfig.meta_pixel_id} onChange={e => setConvConfig(p => ({ ...p, meta_pixel_id: e.target.value }))} placeholder="Ex: 1234567890123456" className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm font-mono outline-none focus:border-primary" />
+                    </div>
+                  </div>
+                ),
+              },
+              {
+                label: 'Token',
+                guide: '1. No Gerenciador de Eventos, clique no Pixel\n2. Aba "Configurações"\n3. Role até "API de Conversões"\n4. "Gerar token de acesso"\n⚠️ Nunca compartilhe este token.',
+                body: (
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold text-muted-foreground">Token da API</label>
+                    <SecretInput value={convConfig.meta_access_token} onChange={v => setConvConfig(p => ({ ...p, meta_access_token: v }))} placeholder="EAAxxxxxxx..." />
+                  </div>
+                ),
+              },
+              {
+                label: 'Page ID',
+                guide: '1. Gerenciador de Eventos → clique no Pixel de Mensagem\n2. Aba "Configurações" → "Dados Vinculados"\n3. Copie o ID que aparece embaixo da Página conectada\n⚠️ Sem isso, os eventos são aceitos pela Meta (200 OK) mas NÃO aparecem atribuídos na campanha — falha silenciosa.',
+                body: (
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold text-muted-foreground">Page ID (obrigatório p/ WhatsApp)</label>
+                    <input value={convConfig.meta_page_id} onChange={e => setConvConfig(p => ({ ...p, meta_page_id: e.target.value }))} placeholder="Ex: 1029384756" className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm font-mono outline-none focus:border-primary" />
+                  </div>
+                ),
+              },
+              {
+                label: 'Teste',
+                optional: true,
+                guide: 'Opcional. Só use para validar o envio.\nGerenciador de Eventos → "Testar eventos" → copie o código (ex: TEST12345). Remova após confirmar.',
+                body: (
+                  <div className="space-y-4">
+                    <div>
+                      <label className="mb-1 block text-xs font-semibold text-muted-foreground">Código de Teste</label>
+                      <input value={convConfig.meta_test_event_code} onChange={e => setConvConfig(p => ({ ...p, meta_test_event_code: e.target.value }))} placeholder="TEST12345 (opcional)" className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm font-mono outline-none focus:border-primary" />
+                    </div>
+                    {testResult?.platform === 'meta' && (
+                      <div className={cn('flex items-start gap-2 rounded-lg border px-3 py-2 text-xs', testResult.sucesso ? 'border-emerald-400/30 bg-emerald-500/10 text-emerald-400' : 'border-red-400/30 bg-red-500/10 text-red-400')}>
+                        {testResult.sucesso ? <Check className="mt-0.5 h-3.5 w-3.5 shrink-0" /> : <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />}
+                        <span className="font-mono break-all">{testResult.body.slice(0, 200)}</span>
+                      </div>
+                    )}
+                    <p className="text-[11px] text-muted-foreground">
+                      Dica: salve antes de testar — o teste usa a configuração já gravada.
+                    </p>
+                  </div>
+                ),
+              },
+            ]}
+          />
+
+          {/* ── Guia 3: Google Conversões ──────────────────────────────────── */}
+          <GuideStepModal
+            open={guia === 'google'} onClose={() => setGuia(null)}
+            icon={Globe} iconColor="text-yellow-400"
+            title="Google — Conversões"
+            subtitle="Conversão offline via gclid, com fallback GA4."
+            finishing={savingConv}
+            onFinish={async () => { await saveConvConfig(); setGuia(null); }}
+            footerExtra={
+              <button onClick={() => testConversion('google')} disabled={testingGoogle} className="flex items-center justify-center gap-1.5 rounded-lg border border-yellow-400/30 bg-yellow-500/10 px-4 py-2 text-xs font-bold text-yellow-400 hover:bg-yellow-500/20 disabled:opacity-50 transition-colors">
+                {testingGoogle ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Zap className="h-3.5 w-3.5" />}
+                Testar conexão
+              </button>
+            }
+            steps={[
+              {
+                label: 'Ativar',
+                optional: true,
+                guide: 'ID da conta Google Ads (ex: 123-456-7890).\nSe deixar vazio, usa a conta já vinculada ao cliente em Contas de Anúncio.',
+                body: (
+                  <div className="space-y-4">
+                    <Toggle value={convConfig.google_ativo} onChange={v => setConvConfig(p => ({ ...p, google_ativo: v }))} label="Ativar conversões Google" />
+                    <div>
+                      <label className="mb-1 block text-xs font-semibold text-muted-foreground">Customer ID (opcional)</label>
+                      <input value={convConfig.google_customer_id} onChange={e => setConvConfig(p => ({ ...p, google_customer_id: e.target.value }))} placeholder="123-456-7890" className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm font-mono outline-none focus:border-primary" />
+                    </div>
+                  </div>
+                ),
+              },
+              {
+                label: 'Ações de conversão',
+                guide: 'NOME ou ID da ação de conversão, como está em Google Ads → Metas → Conversões.\nEx.: "Lead WhatsApp" ou 987654321.\n⚠️ Não é o rótulo do gtag — precisa ser o nome ou ID da ação, senão o upload offline falha.',
+                body: (
+                  <div className="space-y-3">
+                    <div>
+                      <label className="mb-1 block text-xs font-semibold text-muted-foreground">Ação de conversão — Lead</label>
+                      <input value={convConfig.google_conversion_label_lead} onChange={e => setConvConfig(p => ({ ...p, google_conversion_label_lead: e.target.value }))} placeholder="Lead WhatsApp" className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm font-mono outline-none focus:border-primary" />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-semibold text-muted-foreground">Ação de conversão — Engajamento</label>
+                      <input value={convConfig.google_conversion_label_contact} onChange={e => setConvConfig(p => ({ ...p, google_conversion_label_contact: e.target.value }))} placeholder="Contato WhatsApp" className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm font-mono outline-none focus:border-primary" />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-semibold text-muted-foreground">Ação de conversão — Purchase</label>
+                      <input value={convConfig.google_conversion_label_purchase} onChange={e => setConvConfig(p => ({ ...p, google_conversion_label_purchase: e.target.value }))} placeholder="Compra WhatsApp" className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm font-mono outline-none focus:border-primary" />
+                    </div>
+                  </div>
+                ),
+              },
+              {
+                label: 'Fallback GA4',
+                optional: true,
+                guide: 'Opcional — só pro fallback GA4 de leads SEM gclid.\n1. analytics.google.com\n2. Administrador → Fluxos de dados\n3. Measurement ID começa com G-\n4. Na mesma tela, "Measurement Protocol API secrets" → Criar',
+                body: (
+                  <div className="space-y-3">
+                    <div>
+                      <label className="mb-1 block text-xs font-semibold text-muted-foreground">Measurement ID</label>
+                      <input value={convConfig.google_measurement_id} onChange={e => setConvConfig(p => ({ ...p, google_measurement_id: e.target.value }))} placeholder="G-XXXXXXXXXX" className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm font-mono outline-none focus:border-primary" />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-semibold text-muted-foreground">API Secret</label>
+                      <SecretInput value={convConfig.google_api_secret} onChange={v => setConvConfig(p => ({ ...p, google_api_secret: v }))} placeholder="API Secret" />
+                    </div>
+                    {testResult?.platform === 'google' && (
+                      <div className={cn('flex items-start gap-2 rounded-lg border px-3 py-2 text-xs', testResult.sucesso ? 'border-emerald-400/30 bg-emerald-500/10 text-emerald-400' : 'border-red-400/30 bg-red-500/10 text-red-400')}>
+                        {testResult.sucesso ? <Check className="mt-0.5 h-3.5 w-3.5 shrink-0" /> : <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />}
+                        <span className="font-mono break-all">{testResult.body.slice(0, 200)}</span>
+                      </div>
+                    )}
+                  </div>
+                ),
+              },
+            ]}
+          />
+
+          {/* ── Guia 4: Eventos por Status ─────────────────────────────────── */}
+          {/* Passo único de propósito: é gestão de lista (cada linha grava na hora
+              pelos próprios endpoints), não um formulário linear como os outros. */}
+          <GuideStepModal
+            open={guia === 'eventos'} onClose={() => setGuia(null)}
+            icon={Settings2}
+            title="Eventos por Status"
+            subtitle="Dispara evento quando o lead muda de status no CRM."
+            finishLabel="Concluir"
+            onFinish={() => setGuia(null)}
+            steps={[{
+              label: 'Eventos',
+              guide: 'Cada linha liga um status do CRM a um evento nas plataformas.\nO status precisa ser escrito igual à etapa do funil (ex.: "Proposta").\n⚠️ No pixel de mensagem (WhatsApp) o evento de lead chama-se "LeadSubmitted" — não "Lead", que é do pixel de site. "Purchase" é igual nos dois.',
+              body: (
+                <div className="space-y-4">
             {eventosCustom.length > 0 && (
               <div className="overflow-x-auto rounded-lg border border-border">
                 <table className="w-full text-xs">
@@ -898,13 +1003,10 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
                 Adicionar
               </button>
             </div>
-          </div>
-
-          {/* Save CAPI + Google */}
-          <button onClick={saveConvConfig} disabled={savingConv} className="flex items-center justify-center gap-1.5 rounded-lg bg-primary px-5 py-2 text-sm font-bold text-black hover:bg-primary/90 disabled:opacity-50 transition-colors">
-            {savingConv && <RefreshCw className="h-3.5 w-3.5 animate-spin" />}
-            Salvar configurações de conversão
-          </button>
+                </div>
+              ),
+            }]}
+          />
 
         </div>
       )}
