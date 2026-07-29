@@ -1,6 +1,7 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { getCallerScope } from '@/lib/disparos-access';
+import { serializeActiveDays } from '@/lib/disparos-schedule';
 
 export async function GET(
   request: NextRequest,
@@ -59,6 +60,12 @@ export async function PATCH(
     str('name'); str('message'); str('image_url');
     str('active_from'); str('active_until'); str('ends_at');
     num('interval_min'); num('interval_max');
+
+    if (body.active_days !== undefined) {
+      await pool.query(`ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS active_days TEXT`);
+      sets.push(`active_days = $${i++}`);
+      vals.push(serializeActiveDays(body.active_days));
+    }
 
     if (body.messages !== undefined) {
       sets.push(`messages = $${i++}`);

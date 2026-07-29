@@ -7,24 +7,10 @@ import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { sendText, sendImage } from '@/lib/zapi';
 import { sendFollowupMessage, type WaInstance } from '@/lib/followup-send';
+import { isWithinWindow, isActiveDayNow } from '@/lib/disparos-schedule';
 
 function interpolate(template: string, phone: string, name: string) {
   return template.replace(/\{telefone\}/g, phone).replace(/\{nome\}/g, name);
-}
-
-function isWithinWindow(activeFrom: string, activeUntil: string): boolean {
-  const now = new Date();
-  const nowMinutes = now.getUTCHours() * 60 + now.getUTCMinutes();
-  const [fh, fm] = activeFrom.split(':').map(Number);
-  const [uh, um] = activeUntil.split(':').map(Number);
-  const fromMinutes = fh * 60 + fm;
-  const untilMinutes = uh * 60 + um;
-
-  if (fromMinutes <= untilMinutes) {
-    return nowMinutes >= fromMinutes && nowMinutes < untilMinutes;
-  }
-  // overnight window (e.g. 22:00 - 06:00)
-  return nowMinutes >= fromMinutes || nowMinutes < untilMinutes;
 }
 
 export async function POST(
@@ -37,6 +23,7 @@ export async function POST(
   try {
     await pool.query(`ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS next_tick_at TIMESTAMPTZ`);
     await pool.query(`ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS message_index INT NOT NULL DEFAULT 0`);
+    await pool.query(`ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS active_days TEXT`);
 
     const { rows: [campaign] } = await pool.query(
       `SELECT c.*, cl.instance_id, cl.token, cl.security_token, cl.provider
@@ -69,6 +56,11 @@ export async function POST(
       await pool.query(`UPDATE public.zapi_campaigns SET status = 'done' WHERE id = $1`, [id]);
       const { rows: [final] } = await pool.query(`SELECT total, sent, failed FROM public.zapi_campaigns WHERE id = $1`, [id]);
       return Response.json({ status: 'done', done: true, reason: 'end_time_reached', ...final });
+    }
+
+    // Check allowed weekdays (BRT)
+    if (!isActiveDayNow(campaign.active_days)) {
+      return Response.json({ status: 'running', done: false, sleeping: true });
     }
 
     // Check active time window

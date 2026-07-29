@@ -35,6 +35,7 @@ type Campaign = {
   interval_min: number; interval_max: number;
   total: number; sent: number; failed: number;
   created_at: string; active_from: string | null; active_until: string | null;
+  active_days: string | null;
 };
 
 type Progress = {
@@ -50,8 +51,22 @@ type NumberDetail = {
 type CampaignPrefill = {
   clientId: string; name: string; message: string; numbers: string;
   imageUrls?: string[]; intervalMin: number; intervalMax: number;
-  activeFrom?: string; activeUntil?: string;
+  activeFrom?: string; activeUntil?: string; activeDays?: number[];
 };
+
+const WEEKDAYS = [
+  { num: 0, label: 'Dom' }, { num: 1, label: 'Seg' }, { num: 2, label: 'Ter' },
+  { num: 3, label: 'Qua' }, { num: 4, label: 'Qui' }, { num: 5, label: 'Sex' },
+  { num: 6, label: 'Sáb' },
+];
+const ALL_DAYS = [0, 1, 2, 3, 4, 5, 6];
+
+// active_days no banco: "1,2,4" (0=domingo, em BRT); null/vazio = todos os dias
+function parseActiveDaysClient(raw: string | null | undefined): number[] {
+  if (!raw) return ALL_DAYS;
+  const days = [...new Set(String(raw).split(',').map(s => Number(s.trim())).filter(n => Number.isInteger(n) && n >= 0 && n <= 6))];
+  return days.length > 0 ? days.sort((a, b) => a - b) : ALL_DAYS;
+}
 
 // ─── Utils ────────────────────────────────────────────────────────────────────
 
@@ -1056,6 +1071,7 @@ function NovaCampanhaTab({ onCreated, prefill, editCampaign }: { onCreated: () =
     clientId: '', name: '', message: '', numbers: '',
     isNow: true, startsAt: '', endsAt: '',
     activeFrom: '', activeUntil: '',
+    activeDays: ALL_DAYS as number[],
     intervalMin: 5, intervalMax: 15,
   });
   const [imageUrls, setImageUrls] = useState<string[]>([]);
@@ -1086,7 +1102,7 @@ function NovaCampanhaTab({ onCreated, prefill, editCampaign }: { onCreated: () =
 
   useEffect(() => {
     if (!prefill) return;
-    setForm({ clientId: prefill.clientId, name: prefill.name + ' (cópia)', message: prefill.message, numbers: prefill.numbers, isNow: true, startsAt: '', endsAt: '', activeFrom: prefill.activeFrom ?? '', activeUntil: prefill.activeUntil ?? '', intervalMin: prefill.intervalMin, intervalMax: prefill.intervalMax });
+    setForm({ clientId: prefill.clientId, name: prefill.name + ' (cópia)', message: prefill.message, numbers: prefill.numbers, isNow: true, startsAt: '', endsAt: '', activeFrom: prefill.activeFrom ?? '', activeUntil: prefill.activeUntil ?? '', activeDays: prefill.activeDays ?? ALL_DAYS, intervalMin: prefill.intervalMin, intervalMax: prefill.intervalMax });
     setImageUrls(prefill.imageUrls ?? []);
   }, [prefill]);
 
@@ -1112,6 +1128,7 @@ function NovaCampanhaTab({ onCreated, prefill, editCampaign }: { onCreated: () =
       endsAt: editCampaign.ends_at ? new Date(editCampaign.ends_at).toISOString().slice(0, 16) : '',
       activeFrom: utcToLocalTime(editCampaign.active_from ?? ''),
       activeUntil: utcToLocalTime(editCampaign.active_until ?? ''),
+      activeDays: parseActiveDaysClient(editCampaign.active_days),
       intervalMin: editCampaign.interval_min,
       intervalMax: editCampaign.interval_max,
     }));
@@ -1208,11 +1225,13 @@ function NovaCampanhaTab({ onCreated, prefill, editCampaign }: { onCreated: () =
   async function create() {
     if (!isEdit && (!form.clientId || !form.name || !form.message || !form.numbers)) { setError('Preencha todos os campos obrigatórios.'); return; }
     if (!isEdit && !form.isNow && !form.startsAt) { setError('Selecione o horário de início ou escolha "Agora".'); return; }
+    if (form.activeDays.length === 0) { setError('Selecione pelo menos um dia da semana para os disparos.'); return; }
     setSaving(true); setError('');
     try {
       const endsAt     = form.endsAt ? toISO(form.endsAt) : null;
       const activeFrom  = form.activeFrom  && form.activeUntil ? localTimeToUTC(form.activeFrom)  : null;
       const activeUntil = form.activeFrom  && form.activeUntil ? localTimeToUTC(form.activeUntil) : null;
+      const activeDays  = form.activeDays.length < 7 ? form.activeDays : null;
       const allMessages = variations.length > 0 ? [form.message, ...variations.map(v => v.text)] : undefined;
 
       if (isEdit && editCampaign) {
@@ -1224,6 +1243,7 @@ function NovaCampanhaTab({ onCreated, prefill, editCampaign }: { onCreated: () =
           ends_at: endsAt,
           active_from: activeFrom,
           active_until: activeUntil,
+          active_days: activeDays,
           interval_min: form.intervalMin,
           interval_max: form.intervalMax,
         };
@@ -1235,10 +1255,10 @@ function NovaCampanhaTab({ onCreated, prefill, editCampaign }: { onCreated: () =
       }
 
       const startsAt = form.isNow ? new Date().toISOString() : toISO(form.startsAt);
-      const res = await fetch('/api/disparos/campaigns', { method: 'POST', headers: { 'Content-Type': 'application/json', ...callerHeaders() }, body: JSON.stringify({ clientId: form.clientId, name: form.name, message: form.message, messages: allMessages, numbers: form.numbers, startsAt, endsAt, activeFrom, activeUntil, intervalMin: form.intervalMin, intervalMax: form.intervalMax, imageUrls: imageUrls.length > 0 ? imageUrls : undefined }) });
+      const res = await fetch('/api/disparos/campaigns', { method: 'POST', headers: { 'Content-Type': 'application/json', ...callerHeaders() }, body: JSON.stringify({ clientId: form.clientId, name: form.name, message: form.message, messages: allMessages, numbers: form.numbers, startsAt, endsAt, activeFrom, activeUntil, activeDays, intervalMin: form.intervalMin, intervalMax: form.intervalMax, imageUrls: imageUrls.length > 0 ? imageUrls : undefined }) });
       const data = await res.json() as { error?: string };
       if (!res.ok) { setError(data.error ?? 'Erro ao criar campanha.'); return; }
-      setForm({ clientId: clients[0]?.id ?? '', name: '', message: '', numbers: '', isNow: true, startsAt: '', endsAt: '', activeFrom: '', activeUntil: '', intervalMin: 5, intervalMax: 15 });
+      setForm({ clientId: clients[0]?.id ?? '', name: '', message: '', numbers: '', isNow: true, startsAt: '', endsAt: '', activeFrom: '', activeUntil: '', activeDays: ALL_DAYS, intervalMin: 5, intervalMax: 15 });
       setImageUrls([]);
       setVariations([]);
       setPreviewVariationIdx(null);
@@ -1586,6 +1606,49 @@ function NovaCampanhaTab({ onCreated, prefill, editCampaign }: { onCreated: () =
                   </>
                 )}
 
+                {/* Término */}
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Término dos disparos (opcional)
+                    <span className="ml-1 normal-case font-normal text-muted-foreground/60">— A campanha para nessa data, mesmo com contatos pendentes</span>
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <input type="date" value={form.endsAt.split('T')[0] || ''} onChange={e => setForm(p => ({ ...p, endsAt: e.target.value ? e.target.value + 'T' + (p.endsAt.split('T')[1]?.slice(0,5) || '23:59') : '' }))}
+                      className="h-9 rounded-lg border border-border bg-background px-3 text-sm outline-none focus:ring-1 focus:ring-primary" />
+                    <input type="time" value={form.endsAt.split('T')[1]?.slice(0,5) || ''} onChange={e => setForm(p => ({ ...p, endsAt: p.endsAt ? p.endsAt.split('T')[0] + 'T' + e.target.value : p.endsAt }))}
+                      disabled={!form.endsAt}
+                      className="h-9 rounded-lg border border-border bg-background px-3 text-sm outline-none focus:ring-1 focus:ring-primary disabled:opacity-40" />
+                  </div>
+                  {form.endsAt && (
+                    <button type="button" onClick={() => setForm(p => ({ ...p, endsAt: '' }))}
+                      className="text-[10px] text-muted-foreground underline hover:text-foreground">Remover término</button>
+                  )}
+                </div>
+
+                {/* Dias da semana */}
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Dias de disparo
+                    <span className="ml-1 normal-case font-normal text-muted-foreground/60">— Só envia nos dias marcados</span>
+                  </label>
+                  <div className="flex gap-1.5">
+                    {WEEKDAYS.map(({ num, label }) => {
+                      const on = form.activeDays.includes(num);
+                      return (
+                        <button key={num} type="button"
+                          onClick={() => setForm(p => ({ ...p, activeDays: on ? p.activeDays.filter(d => d !== num) : [...p.activeDays, num].sort((a, b) => a - b) }))}
+                          className={cn('flex-1 h-9 rounded-lg border text-[11px] font-bold uppercase tracking-wider transition-colors',
+                            on ? 'border-primary/40 bg-primary/15 text-primary' : 'border-border bg-card text-muted-foreground/60 hover:bg-muted/50')}>
+                          {label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="text-[10px] text-muted-foreground/60">
+                    {form.activeDays.length === 7 ? 'Todos os dias da semana.'
+                      : form.activeDays.length === 0 ? 'Nenhum dia selecionado — a campanha não vai disparar.'
+                      : `Dispara ${form.activeDays.map(d => WEEKDAYS[d].label).join(', ')}. Nos demais dias a campanha fica pausada e retoma sozinha.`}
+                  </p>
+                </div>
+
                 {/* Janela de envio */}
                 <div className="space-y-1.5">
                   <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Janela de envio (opcional)
@@ -1736,7 +1799,7 @@ function DashboardTab({ onReuse, onNewCampaign, onManageInstances, onEdit }: {
       if (c.image_url.startsWith('[')) { try { imageUrls = JSON.parse(c.image_url); } catch { imageUrls = [c.image_url]; } }
       else { imageUrls = [c.image_url]; }
     }
-    onReuse({ clientId: c.client_id, name: c.name, message: c.message, numbers, imageUrls, intervalMin: c.interval_min, intervalMax: c.interval_max, activeFrom: c.active_from ?? undefined, activeUntil: c.active_until ?? undefined });
+    onReuse({ clientId: c.client_id, name: c.name, message: c.message, numbers, imageUrls, intervalMin: c.interval_min, intervalMax: c.interval_max, activeFrom: c.active_from ?? undefined, activeUntil: c.active_until ?? undefined, activeDays: c.active_days ? parseActiveDaysClient(c.active_days) : undefined });
   }
 
   // ── Computed ──────────────────────────────────────────────────────────────
@@ -1937,6 +2000,9 @@ function DashboardTab({ onReuse, onNewCampaign, onManageInstances, onEdit }: {
                                     {c.status === 'done' ? <CheckCircle2 className="h-3 w-3 text-emerald-400 shrink-0" /> : <X className="h-3 w-3 text-red-400 shrink-0" />}
                                     {fmtDateTime(c.ends_at)}
                                   </p>
+                                )}
+                                {c.active_days && (
+                                  <p className="text-[10px] text-cyan-400/80 mt-0.5">{parseActiveDaysClient(c.active_days).map(d => WEEKDAYS[d].label).join(' · ')}</p>
                                 )}
                               </td>
                               <td className="py-2.5 px-4">

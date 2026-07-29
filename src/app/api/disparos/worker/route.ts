@@ -13,6 +13,7 @@ import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { sendText, sendImage } from '@/lib/zapi';
 import { sendFollowupMessage, type WaInstance } from '@/lib/followup-send';
+import { isWithinWindow, isActiveDayNow } from '@/lib/disparos-schedule';
 
 export const maxDuration = 30;
 
@@ -20,17 +21,6 @@ const BUDGET_MS = 25_000;
 
 function interpolate(template: string, phone: string, name: string) {
   return template.replace(/\{telefone\}/g, phone).replace(/\{nome\}/g, name);
-}
-
-function isWithinWindow(activeFrom: string, activeUntil: string): boolean {
-  const now = new Date();
-  const nowMinutes = now.getUTCHours() * 60 + now.getUTCMinutes();
-  const [fh, fm] = activeFrom.split(':').map(Number);
-  const [uh, um] = activeUntil.split(':').map(Number);
-  const fromMinutes = fh * 60 + fm;
-  const untilMinutes = uh * 60 + um;
-  if (fromMinutes <= untilMinutes) return nowMinutes >= fromMinutes && nowMinutes < untilMinutes;
-  return nowMinutes >= fromMinutes || nowMinutes < untilMinutes;
 }
 
 function sleep(ms: number) {
@@ -58,6 +48,7 @@ async function runWorker(req: NextRequest) {
       ADD COLUMN IF NOT EXISTS next_tick_at TIMESTAMPTZ
     `);
     await pool.query(`ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS message_index INT NOT NULL DEFAULT 0`);
+    await pool.query(`ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS active_days TEXT`);
 
     // Transition pending campaigns whose start time has arrived
     await pool.query(`
@@ -77,6 +68,7 @@ async function runWorker(req: NextRequest) {
       ends_at: string | null;
       active_from: string | null;
       active_until: string | null;
+      active_days: string | null;
       interval_min: number;
       interval_max: number;
       instance_id: string;
@@ -85,7 +77,7 @@ async function runWorker(req: NextRequest) {
       provider: string;
     }>(`
       SELECT c.id, c.status, c.message, c.messages, c.message_index, c.image_url, c.ends_at,
-             c.active_from, c.active_until, c.interval_min, c.interval_max,
+             c.active_from, c.active_until, c.active_days, c.interval_min, c.interval_max,
              cl.instance_id, cl.token, cl.security_token, cl.provider
         FROM public.zapi_campaigns c
         JOIN public.zapi_clients cl ON cl.id = c.client_id
@@ -103,8 +95,10 @@ async function runWorker(req: NextRequest) {
         continue;
       }
 
-      // Outside active window — push next_tick_at forward 60 seconds and skip
-      if (campaign.active_from && campaign.active_until && !isWithinWindow(campaign.active_from, campaign.active_until)) {
+      // Outside allowed weekdays or active window — push next_tick_at forward 60 seconds and skip
+      const outsideDay = !isActiveDayNow(campaign.active_days);
+      const outsideWindow = !!(campaign.active_from && campaign.active_until && !isWithinWindow(campaign.active_from, campaign.active_until));
+      if (outsideDay || outsideWindow) {
         await pool.query(
           `UPDATE public.zapi_campaigns SET next_tick_at = NOW() + INTERVAL '60 seconds' WHERE id = $1`,
           [campaign.id],
