@@ -204,6 +204,11 @@ export async function processarReuniao(pool: Pool, input: ReuniaoInput): Promise
   if (!lista) return { ok: false, erro: 'cliente_sem_lista', cliente: match.name };
 
   const avisos: string[] = [];
+  // A reunião aconteceu, então o trabalho existe — mas cliente inativo costuma
+  // ser cadastro desatualizado, e ninguém descobriria isso sozinho.
+  if (match.status && match.status !== 'Ativo') {
+    avisos.push(`cliente está marcado como "${match.status}" no reports — confira se voltou a ser ativo`);
+  }
   const tarefas: Extract<ReuniaoResult, { ok: true }>['tarefas'] = [];
   const rodape = [
     input.doc_url ? `\n\n---\n📄 Resumo da reunião: ${input.doc_url}` : '',
