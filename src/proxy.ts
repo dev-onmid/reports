@@ -86,6 +86,7 @@ const INTEGRATION_PREFIXES = [
   '/api/integrations/reuniao',
   '/api/integrations/agenda',
   '/api/integrations/clientes',
+  '/api/integrations/identificar',
 ];
 
 function matches(pathname: string, prefixes: string[]): boolean {

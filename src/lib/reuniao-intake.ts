@@ -58,6 +58,85 @@ export function similarity(a: string, b: string): number {
 
 export type ClienteRow = { id: string; name: string; gestor_id: string | null; status: string | null };
 
+// ─── Identificação determinística (substitui a IA do Cenário 1) ─────────────
+
+export type Identificacao = {
+  cliente_corrigido: string;
+  /** 0–100. As regras determinísticas ficam todas ≥ 90; abstenção fica ≤ 84. */
+  confianca: number;
+  motivo: string;
+  alternativas: string[];
+};
+
+const tokensDe = (s: string) => normalizeClientName(s).split(' ').filter(Boolean);
+const mesmoConjunto = (a: string[], b: string[]) =>
+  a.length === b.length && [...a].sort().join(' ') === [...b].sort().join(' ');
+const contem = (fora: string[], dentro: string[]) => {
+  const set = new Set(fora);
+  return dentro.every((t) => set.has(t));
+};
+
+/**
+ * Casa o nome lido da agenda com a lista de clientes por REGRAS DE TEXTO, na
+ * ordem: igual → mesmas palavras em outra ordem → cliente contido no título →
+ * título contido no cliente (apelido). Qualquer empate é ambiguidade e vira
+ * abstenção.
+ *
+ * Isto substitui o módulo de IA do Make que fazia a mesma coisa: a IA acertava
+ * o casamento mas de vez em quando mudava o FORMATO da resposta (confiança
+ * "95%" em vez de 95), e o cenário morria num beco sem saída silencioso.
+ * Regra de texto não tem dia ruim, e dá pra rodar a bateria de títulos reais
+ * num teste antes de encostar em produção.
+ */
+export function identificarCliente(nomes: string[], nomeReuniao: string): Identificacao {
+  const abster = (motivo: string, alternativas: string[] = [], confianca = 0): Identificacao =>
+    ({ cliente_corrigido: 'NAO IDENTIFICADO', confianca: Math.min(confianca, 84), motivo, alternativas });
+
+  const alvoNorm = normalizeClientName(nomeReuniao);
+  const alvo = tokensDe(nomeReuniao);
+  if (!alvo.length) return abster('nome da reunião vazio');
+
+  // 1. Igualzinho (já sem acento/caixa/pontuação).
+  const exatos = nomes.filter((n) => normalizeClientName(n) === alvoNorm);
+  if (exatos.length === 1) return { cliente_corrigido: exatos[0], confianca: 100, motivo: 'nome idêntico ao cadastro', alternativas: [] };
+  if (exatos.length > 1) return abster('dois clientes cadastrados com o mesmo nome', exatos.slice(0, 3));
+
+  // 2. Mesmas palavras em outra ordem ("Presidente Prudente Sorrifácil").
+  const reordenados = nomes.filter((n) => mesmoConjunto(tokensDe(n), alvo));
+  if (reordenados.length === 1) return { cliente_corrigido: reordenados[0], confianca: 98, motivo: 'mesmas palavras em outra ordem', alternativas: [] };
+  if (reordenados.length > 1) return abster('mais de um cliente com essas palavras', reordenados.slice(0, 3));
+
+  // 3. Título traz o nome do cliente + palavras extras ("Londrina 02
+  //    Sorrifácil" ⊃ "Sorrifácil Londrina"). Vence o cliente MAIS específico;
+  //    empate na especificidade é ambiguidade.
+  const contidos = nomes.filter((n) => contem(alvo, tokensDe(n)));
+  if (contidos.length) {
+    const max = Math.max(...contidos.map((n) => tokensDe(n).length));
+    const melhores = contidos.filter((n) => tokensDe(n).length === max);
+    if (melhores.length === 1) return { cliente_corrigido: melhores[0], confianca: 92, motivo: 'nome do cliente contido no título', alternativas: [] };
+    return abster('título serve para mais de um cliente', melhores.slice(0, 3));
+  }
+
+  // 4. Apelido: o título é um pedaço do nome do cliente ("Istambul" ⊂
+  //    "Istambul Gastrobar"). Só vale com candidato ÚNICO — "Sorrifácil"
+  //    sozinho casa com dez clientes e tem que ir pra triagem.
+  const apelidos = nomes.filter((n) => contem(tokensDe(n), alvo));
+  if (apelidos.length === 1) return { cliente_corrigido: apelidos[0], confianca: 90, motivo: 'título é apelido do cliente', alternativas: [] };
+  if (apelidos.length > 1) return abster('apelido serve para mais de um cliente', apelidos.slice(0, 3));
+
+  // 5. Nada casou: sugestões por similaridade, só pra ajudar o humano.
+  const sugestoes = nomes
+    .map((n) => ({ n, score: similarity(alvoNorm, normalizeClientName(n)) }))
+    .filter((s) => s.score >= 0.45)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 3);
+  return abster(
+    sugestoes.length ? 'nenhuma regra casou; veja os parecidos' : 'nenhum cliente parecido',
+    sugestoes.map((s) => s.n),
+    Math.round((sugestoes[0]?.score ?? 0) * 84),
+  );
+}
+
 /**
  * Cliente pelo nome. Devolve `match` só em casamento exato do nome normalizado;
  * `sugestoes` é material pro alerta humano e nunca é aplicado sozinho.
