@@ -2,13 +2,15 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { Home, Bell, Sparkles, ArrowRight, Megaphone, ShieldCheck, Clapperboard } from 'lucide-react';
+import { Home, Bell, Sparkles, ArrowRight, Megaphone, ShieldCheck } from 'lucide-react';
+import { RastreioSection } from './rastreio-section';
 import { getAuthSession, useMyPermissions, type AuthSession } from '@/lib/auth-store';
 import { NAV_ITEMS } from '@/lib/nav-items';
 import { useIsMobile } from '@/lib/use-is-mobile';
 import { useInvestmentPayments } from '@/lib/payment-store';
 import { getHolidayPaymentImpacts, getTodayISO, formatDateBR } from '@/lib/holidays';
 import { APP_VERSION } from '@/lib/app-version';
+import { PainelGestor } from '@/components/painel-gestor';
 import { cn } from '@/lib/utils';
 
 // A small curated rotation — picked by day-of-year so it's stable through the day
@@ -35,69 +37,6 @@ function dayOfYear(d: Date): number {
 }
 
 type Note = { id: string; tone: 'warning' | 'danger' | 'info'; title: string; when: string };
-
-type TopCreative = {
-  client_name: string | null;
-  ad_name: string | null;
-  creative_name: string | null;
-  campaign_name: string | null;
-  leads: number;
-  vendas: number;
-  ig_leads: number;
-  fb_leads: number;
-};
-
-// Top criativos dos últimos 30 dias (todos os clientes) — resumo da Biblioteca
-// de Criativos (/resultados/criativos), alimentada pela atribuição do CRM.
-function TopCreativesCard() {
-  const [items, setItems] = useState<TopCreative[] | null>(null);
-
-  useEffect(() => {
-    fetch('/api/creative-library?days=30')
-      .then(r => r.json())
-      .then((j: { creatives?: TopCreative[] }) => setItems((j?.creatives ?? []).slice(0, 5)))
-      .catch(() => setItems([]));
-  }, []);
-
-  return (
-    <section className="rounded-[var(--radius)] border border-border bg-card p-5">
-      <div className="flex items-center gap-2 mb-4">
-        <Clapperboard className="w-4.5 h-4.5 text-foreground" />
-        <span className="text-sm font-semibold">Top criativos · 30 dias</span>
-        <Link href="/resultados/criativos" className="ml-auto text-[11px] font-semibold text-primary hover:underline">
-          Ver biblioteca →
-        </Link>
-      </div>
-      {items === null ? (
-        <p className="text-sm text-muted-foreground">Carregando…</p>
-      ) : items.length === 0 ? (
-        <p className="text-sm text-muted-foreground">Nenhum criativo com atribuição ainda — leads de anúncio entram aqui automaticamente.</p>
-      ) : (
-        <div className="space-y-2.5">
-          {items.map((c, i) => (
-            <div key={i} className="flex items-center gap-3">
-              <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded bg-primary/15 text-[10px] font-black text-primary">
-                {i + 1}
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-[13px] font-semibold text-foreground">
-                  {c.ad_name ?? c.creative_name ?? 'Criativo sem nome'}
-                </p>
-                <p className="truncate text-[11px] text-muted-foreground">{c.client_name ?? ''}</p>
-              </div>
-              <div className="flex shrink-0 items-center gap-2 text-[11px] text-muted-foreground">
-                {c.ig_leads > 0 && <span className="rounded bg-fuchsia-500/15 px-1 text-[9px] font-black text-fuchsia-400">IG {c.ig_leads}</span>}
-                {c.fb_leads > 0 && <span className="rounded bg-blue-500/15 px-1 text-[9px] font-black text-blue-400">FB {c.fb_leads}</span>}
-                <span className="font-bold text-foreground">{c.leads} leads</span>
-                {c.vendas > 0 && <span className="font-bold text-primary">{c.vendas} vendas</span>}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </section>
-  );
-}
 
 const TONE_BORDER: Record<Note['tone'], string> = {
   warning: 'border-amber-400',
@@ -179,6 +118,10 @@ export default function InicioPage() {
         )}
       </div>
 
+      {/* O que precisa de você hoje — primeiro bloco de propósito: é o motivo
+          de abrir esta tela. Atalhos e avisos gerais vêm depois. */}
+      <PainelGestor />
+
       {/* Acesso rápido */}
       <section>
         <p className="text-sm font-semibold text-muted-foreground mb-3">Acesso rápido</p>
@@ -206,15 +149,16 @@ export default function InicioPage() {
         )}
       </section>
 
-      {/* Top criativos (Biblioteca) */}
-      <TopCreativesCard />
+      {/* Rastreio da carteira + top criativos por resultado (Biblioteca) */}
+      <RastreioSection />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {/* Notificações */}
+        {/* Avisos do sistema (feriados/pagamento/versão). O feed por gestor
+            fica no PainelGestor, acima. */}
         <section className="rounded-[var(--radius)] border border-border bg-card p-5">
           <div className="flex items-center gap-2 mb-4">
             <Bell className="w-4.5 h-4.5 text-foreground" />
-            <span className="text-sm font-semibold">Notificações</span>
+            <span className="text-sm font-semibold">Avisos do sistema</span>
             {notes.length > 0 && (
               <span className="ml-auto text-[11px] text-primary bg-primary/10 px-2 py-0.5 rounded-md font-semibold">
                 {notes.length}

@@ -1,6 +1,7 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { ensureLeadTrackingSchema } from '@/lib/lead-tracking';
+import { parseIsoDateRange } from '@/lib/optimizer-period-range';
 
 // ── Leads rastreados (visão rica) ─────────────────────────────────────────────
 // Lê a atribuição REAL de crm_leads (origem, campanha/conjunto/anúncio, keyword,
@@ -19,15 +20,37 @@ export async function GET(req: NextRequest) {
   const clientId = req.nextUrl.searchParams.get('clientId');
   const days = Math.min(Math.max(parseInt(req.nextUrl.searchParams.get('days') ?? '30', 10) || 30, 1), 365);
   const limit = Math.min(Math.max(parseInt(req.nextUrl.searchParams.get('limit') ?? '200', 10) || 200, 1), 500);
+  // `days` = janela corrida legada. `from`/`to` (ISO) expressam janela explícita e são
+  // o único jeito de pedir mês-calendário; ganham do `days` quando ambos são válidos.
+  const range = parseIsoDateRange(req.nextUrl.searchParams.get('from'), req.nextUrl.searchParams.get('to'));
 
   const pool = makeServerPool();
   try {
     await ensureLeadTrackingSchema(pool);
 
-    const where = `l.created_at > NOW() - ($1 || ' days')::interval
+    // Uma cláusula de janela só, compartilhada pelas 7 queries abaixo via ${where}.
+    const params: unknown[] = [];
+    let windowClause: string;
+    if (range) {
+      // `to` inclusivo. Bordas ancoradas em BRT de propósito: created_at é timestamptz e
+      // a sessão do Postgres roda em UTC — um `::date` cru cortaria o dia às 21h BRT.
+      params.push(range.from, range.to);
+      windowClause =
+        `l.created_at >= ($1::timestamp AT TIME ZONE 'America/Sao_Paulo')` +
+        ` AND l.created_at < (($2::timestamp + INTERVAL '1 day') AT TIME ZONE 'America/Sao_Paulo')`;
+    } else {
+      params.push(String(days));
+      windowClause = `l.created_at > NOW() - ($1 || ' days')::interval`;
+    }
+    let clientClause = '';
+    if (clientId) {
+      params.push(clientId);
+      clientClause = `AND l.client_id = $${params.length}`;
+    }
+
+    const where = `${windowClause}
                    AND l.time_interno IS NOT TRUE
-                   ${clientId ? 'AND l.client_id = $2' : ''}`;
-    const params: unknown[] = clientId ? [String(days), clientId] : [String(days)];
+                   ${clientClause}`;
 
     const [leads, porOrigem, porCampanha, porRegiao, porKeyword, porPlacement, totais] = await Promise.all([
       pool.query(
@@ -98,6 +121,9 @@ export async function GET(req: NextRequest) {
     const t = totais.rows[0] ?? { total: 0, com_atribuicao: 0, com_regiao: 0 };
     return Response.json({
       leads: leads.rows,
+      // Janela REALMENTE usada — a tela rotula o período com isso em vez de assumir
+      // que o from/to enviado foi aceito.
+      window: { days: range ? null : days, from: range?.from ?? null, to: range?.to ?? null },
       summary: {
         total: Number(t.total),
         comAtribuicao: Number(t.com_atribuicao),

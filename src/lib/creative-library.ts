@@ -1,4 +1,5 @@
 import type { Pool } from 'pg';
+import { parseIsoDateRange } from '@/lib/optimizer-period-range';
 
 // Biblioteca de Criativos — agrega os leads do CRM por anúncio/criativo.
 // Fonte: crm_leads com atribuição (source_id = ID do anúncio na Meta, vindo do
@@ -20,6 +21,8 @@ export type CreativeStat = {
   leads: number;
   /** Leads que RESPONDERAM no WhatsApp depois do primeiro atendimento (conversa real) */
   conversas: number;
+  /** Leads marcados como compareceu — resultado à prova de funil (boolean, não rótulo de etapa) */
+  comparecimentos: number;
   vendas: number;
   receita: number;
   ig_leads: number;
@@ -29,17 +32,54 @@ export type CreativeStat = {
   last_lead_at: string | null;
 };
 
-export async function aggregateCreatives(
-  pool: Pool,
-  opts: { days: number; clientId?: string | null },
-): Promise<CreativeStat[]> {
+/**
+ * Janela da agregação: ou `days` (janela corrida terminando agora — formato legado,
+ * usado pelo cache do enrich) ou `from`/`to` explícitos em ISO `YYYY-MM-DD`, que é o
+ * único jeito de expressar mês-calendário ("mês passado"). `from`/`to` vence quando
+ * os dois vêm preenchidos.
+ */
+export type CreativeWindow = { days: number; from?: string | null; to?: string | null };
+
+/**
+ * Monta a cláusula de janela + o array de params compartilhado pelas duas queries.
+ * Exportada para poder ser testada sem banco.
+ */
+export function buildCreativeWindow(
+  opts: CreativeWindow & { clientId?: string | null },
+): { windowFilter: string; clientFilter: string; params: unknown[] } {
   const { days, clientId } = opts;
-  const params: unknown[] = [days];
+  const range = parseIsoDateRange(opts.from, opts.to);
+
+  const params: unknown[] = [];
+  let windowFilter: string;
+  if (range) {
+    // `to` é inclusivo: o dia inteiro entra (< to + 1 dia).
+    // ⚠️ As bordas são ancoradas em BRT de propósito: created_at é timestamptz e a
+    // sessão do Postgres roda em UTC, então um `::date` cru cortaria o dia às 21h BRT
+    // e empurraria os leads do fim da noite para o dia (e o mês) seguinte.
+    params.push(range.from, range.to);
+    windowFilter =
+      `l.created_at >= ($1::timestamp AT TIME ZONE 'America/Sao_Paulo')` +
+      ` AND l.created_at < (($2::timestamp + INTERVAL '1 day') AT TIME ZONE 'America/Sao_Paulo')`;
+  } else {
+    params.push(days);
+    windowFilter = `l.created_at >= NOW() - ($1 || ' days')::interval`;
+  }
+
   let clientFilter = '';
   if (clientId) {
     params.push(clientId);
-    clientFilter = 'AND l.client_id = $2';
+    clientFilter = `AND l.client_id = $${params.length}`;
   }
+
+  return { windowFilter, clientFilter, params };
+}
+
+export async function aggregateCreatives(
+  pool: Pool,
+  opts: CreativeWindow & { clientId?: string | null },
+): Promise<CreativeStat[]> {
+  const { windowFilter, clientFilter, params } = buildCreativeWindow(opts);
 
   // Chave do criativo: ID do anúncio quando existe (agrupamento exato), senão o
   // nome do anúncio (leads antigos/manuais sem source_id).
@@ -53,7 +93,7 @@ export async function aggregateCreatives(
         SELECT l.*, ${keyExpr} AS ad_key
           FROM public.crm_leads l
          WHERE (NULLIF(l.source_id, '') IS NOT NULL OR NULLIF(l.ad_name, '') IS NOT NULL OR NULLIF(l.creative_name, '') IS NOT NULL)
-           AND l.created_at >= NOW() - ($1 || ' days')::interval
+           AND ${windowFilter}
            ${clientFilter}
       ),
       resp AS (
@@ -80,6 +120,7 @@ export async function aggregateCreatives(
         MAX(NULLIF(l.source_url, ''))     AS source_url,
         COUNT(*)::int                                     AS leads,
         COUNT(*) FILTER (WHERE r.respondeu)::int          AS conversas,
+        COUNT(*) FILTER (WHERE l.compareceu = TRUE)::int  AS comparecimentos,
         COUNT(*) FILTER (WHERE l.fechou = TRUE)::int      AS vendas,
         COALESCE(SUM(l.valor_rs) FILTER (WHERE l.fechou = TRUE), 0)::float AS receita,
         COUNT(*) FILTER (WHERE l.origin = 'instagram')::int AS ig_leads,
@@ -90,6 +131,9 @@ export async function aggregateCreatives(
       LEFT JOIN resp r ON r.lead_id = l.id
       LEFT JOIN public.clients c ON c.id = l.client_id
      GROUP BY l.client_id, l.ad_key
+     -- ⚠️ O corte é por LEADS. Quem ranqueia por outro eixo (venda, receita, etapa)
+     -- ordena no cliente, sobre estes 500 — então, na visão global da carteira, um
+     -- criativo com poucos leads mas muitas vendas/agendamentos pode ficar de fora.
      ORDER BY COUNT(*) DESC
      LIMIT 500`,
     params,
@@ -100,7 +144,7 @@ export async function aggregateCreatives(
     `SELECT l.client_id, ${keyExpr} AS ad_key, COALESCE(NULLIF(l.status, ''), 'Sem etapa') AS status, COUNT(*)::int AS total
        FROM public.crm_leads l
       WHERE (NULLIF(l.source_id, '') IS NOT NULL OR NULLIF(l.ad_name, '') IS NOT NULL OR NULLIF(l.creative_name, '') IS NOT NULL)
-        AND l.created_at >= NOW() - ($1 || ' days')::interval
+        AND ${windowFilter}
         ${clientFilter}
       GROUP BY l.client_id, ${keyExpr}, COALESCE(NULLIF(l.status, ''), 'Sem etapa')`,
     params,
@@ -126,6 +170,7 @@ export async function aggregateCreatives(
     source_url: r.source_url ?? null,
     leads: Number(r.leads),
     conversas: Number(r.conversas ?? 0),
+    comparecimentos: Number(r.comparecimentos ?? 0),
     vendas: Number(r.vendas),
     receita: Number(r.receita),
     ig_leads: Number(r.ig_leads),

@@ -31,6 +31,23 @@ export function todayInOptimizerTimeZone(referenceDate = new Date()): string {
   return ymdFromParts(year, month, day);
 }
 
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+export function isIsoDate(value: unknown): value is string {
+  return typeof value === 'string' && ISO_DATE_RE.test(value) && !Number.isNaN(Date.parse(value));
+}
+
+/**
+ * Valida um par de datas ISO `YYYY-MM-DD` vindo de query string / body.
+ * Devolve `null` quando qualquer lado falta, é inválido, ou `from > to` — assim o
+ * caller cai na janela por N dias sem precisar checar cada caso.
+ */
+export function parseIsoDateRange(from: unknown, to: unknown): { from: string; to: string } | null {
+  if (!isIsoDate(from) || !isIsoDate(to)) return null;
+  if (from > to) return null;
+  return { from, to };
+}
+
 export function addDaysToIsoDate(date: string, days: number): string {
   const [year, month, day] = date.split('-').map(Number);
   const next = new Date(Date.UTC(year, month - 1, day + days));

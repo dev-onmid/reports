@@ -15,6 +15,7 @@ import {
 const IgBadge = () => <span className="rounded bg-fuchsia-500/15 px-1 text-[9px] font-black text-fuchsia-400">IG</span>;
 const FbBadge = () => <span className="rounded bg-blue-500/15 px-1 text-[9px] font-black text-blue-400">FB</span>;
 import { cn } from '@/lib/utils';
+import { isStageAxis, sortByAxis, stageAxesFrom } from '@/lib/creative-library-ui';
 
 export type CreativeRow = {
   client_id: string;
@@ -29,6 +30,7 @@ export type CreativeRow = {
   source_url: string | null;
   leads: number;
   conversas: number;
+  comparecimentos: number;
   vendas: number;
   receita: number;
   ig_leads: number;
@@ -128,11 +130,7 @@ export function CreativeLibrary({ clientId }: { clientId?: string }) {
     () => [...new Set(rows.map(r => r.segment).filter(Boolean) as string[])].sort(),
     [rows],
   );
-  const etapas = useMemo(() => {
-    const set = new Map<string, number>();
-    for (const r of rows) for (const [k, v] of Object.entries(r.por_status)) set.set(k, (set.get(k) ?? 0) + v);
-    return [...set.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([k]) => k);
-  }, [rows]);
+  const etapas = useMemo(() => stageAxesFrom(rows), [rows]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -154,21 +152,27 @@ export function CreativeLibrary({ clientId }: { clientId?: string }) {
       return s !== null && r.leads > 0 ? s / r.leads : null;
     };
 
-    const sorted = [...list];
-    if (sortBy === 'leads') sorted.sort((a, b) => b.leads - a.leads);
-    else if (sortBy === 'conversas') sorted.sort((a, b) => (b.conversas ?? 0) - (a.conversas ?? 0) || b.leads - a.leads);
-    else if (sortBy === 'taxa_conversa') sorted.sort((a, b) => ((b.conversas ?? 0) / Math.max(b.leads, 1)) - ((a.conversas ?? 0) / Math.max(a.leads, 1)) || b.leads - a.leads);
-    else if (sortBy === 'vendas') sorted.sort((a, b) => b.vendas - a.vendas || b.leads - a.leads);
-    else if (sortBy === 'receita') sorted.sort((a, b) => b.receita - a.receita || b.vendas - a.vendas);
-    else if (sortBy === 'gasto') sorted.sort((a, b) => (spendOf(b) ?? -1) - (spendOf(a) ?? -1));
-    else if (sortBy === 'cpl') {
-      // Menor CPL primeiro (melhor); sem gasto vai pro fim
-      sorted.sort((a, b) => (cplOf(a) ?? Number.POSITIVE_INFINITY) - (cplOf(b) ?? Number.POSITIVE_INFINITY));
-    } else if (sortBy.startsWith('etapa:')) {
-      const etapa = sortBy.slice(6);
-      sorted.sort((a, b) => (b.por_status[etapa] ?? 0) - (a.por_status[etapa] ?? 0) || b.leads - a.leads);
+    // Eixos que dependem do enrich (gasto da Graph API) ficam aqui, porque o módulo
+    // compartilhado só conhece o que vem do CRM. O resto — leads/conversas/vendas/
+    // receita/etapa — delega pro sortByAxis, fonte única dos desempates.
+    if (sortBy === 'taxa_conversa') {
+      return [...list].sort(
+        (a, b) =>
+          ((b.conversas ?? 0) / Math.max(b.leads, 1)) - ((a.conversas ?? 0) / Math.max(a.leads, 1)) ||
+          b.leads - a.leads,
+      );
     }
-    return sorted;
+    if (sortBy === 'gasto') return [...list].sort((a, b) => (spendOf(b) ?? -1) - (spendOf(a) ?? -1));
+    if (sortBy === 'cpl') {
+      // Menor CPL primeiro (melhor); sem gasto vai pro fim
+      return [...list].sort(
+        (a, b) => (cplOf(a) ?? Number.POSITIVE_INFINITY) - (cplOf(b) ?? Number.POSITIVE_INFINITY),
+      );
+    }
+    if (isStageAxis(sortBy) || ['leads', 'conversas', 'vendas', 'receita'].includes(sortBy)) {
+      return sortByAxis(list, sortBy);
+    }
+    return list;
   }, [rows, search, clientFilter, segmentFilter, redeFilter, sortBy, enrich]);
 
   const totals = useMemo(() => ({
