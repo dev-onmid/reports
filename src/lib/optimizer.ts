@@ -69,7 +69,25 @@ export async function ensureOptimizerManualNotesTable(pool: Pool): Promise<void>
     );
     CREATE INDEX IF NOT EXISTS optimizer_manual_notes_cliente_idx
       ON public.optimizer_manual_notes (cliente_id, ativo, created_at DESC);
+    -- Campos do Quadro do Gestor (tela Início). A nota deixou de ser só um
+    -- registro de leitura e virou um cartão que anda entre colunas.
+    ALTER TABLE public.optimizer_manual_notes
+      ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'rapida',
+      ADD COLUMN IF NOT EXISTS categoria TEXT,
+      ADD COLUMN IF NOT EXISTS prazo_em TIMESTAMPTZ,
+      ADD COLUMN IF NOT EXISTS concluida_em TIMESTAMPTZ;
   `).catch(() => {});
+}
+
+/**
+ * Colunas do Quadro do Gestor. `concluida` sai do quadro E deixa de ser injetada
+ * no prompt do Otimizador — ver `loadManualNotesContext` em weekly/route.ts.
+ */
+export const NOTE_STATUS = ['rapida', 'andamento', 'concluida'] as const;
+export type NoteStatus = typeof NOTE_STATUS[number];
+
+export function normalizeNoteStatus(v: unknown): NoteStatus | null {
+  return typeof v === 'string' && (NOTE_STATUS as readonly string[]).includes(v) ? v as NoteStatus : null;
 }
 
 export const OPTIMIZER_MODEL = 'claude-sonnet-4-6';

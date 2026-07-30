@@ -1,7 +1,7 @@
-import { timingSafeEqual } from 'node:crypto';
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { processarReuniao, type AcaoInput, type ReuniaoInput } from '@/lib/reuniao-intake';
+import { conferirSegredoIntegracao, respostaSegredo } from '@/lib/integration-secret';
 
 /**
  * Entrada das reuniões do TLDV, chamada pelo Make.
@@ -15,17 +15,6 @@ import { processarReuniao, type AcaoInput, type ReuniaoInput } from '@/lib/reuni
 // Cria N tarefas no ClickUp em sequência — o teto default de 10s do plano
 // Hobby derruba reuniões com muitas ações no meio.
 export const maxDuration = 60;
-
-function segredoConfere(req: NextRequest): 'ok' | 'sem-segredo' | 'negado' {
-  const esperado = process.env.MAKE_INTEGRATION_SECRET;
-  if (!esperado) return 'sem-segredo';
-  const recebido = req.headers.get('x-onmid-secret') ?? '';
-  const a = Buffer.from(recebido);
-  const b = Buffer.from(esperado);
-  // timingSafeEqual exige mesmo tamanho; o teste de length antes vaza só o
-  // tamanho do segredo, que não ajuda quem estiver adivinhando.
-  return a.length === b.length && timingSafeEqual(a, b) ? 'ok' : 'negado';
-}
 
 /**
  * A prioridade chega como a IA escreve ("Alta") ou como o ClickUp numera (2).
@@ -98,13 +87,8 @@ function extrairAlertas(body: Record<string, unknown>): string | null {
 }
 
 export async function POST(req: NextRequest) {
-  const auth = segredoConfere(req);
-  if (auth === 'sem-segredo') {
-    return Response.json({ ok: false, erro: 'integracao_nao_configurada' }, { status: 503 });
-  }
-  if (auth === 'negado') {
-    return Response.json({ ok: false, erro: 'nao_autorizado' }, { status: 401 });
-  }
+  const auth = conferirSegredoIntegracao(req);
+  if (auth !== 'ok') return respostaSegredo(auth);
 
   let body: Record<string, unknown>;
   try {

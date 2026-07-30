@@ -1,8 +1,8 @@
-import { timingSafeEqual } from 'node:crypto';
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { resolveClientByName } from '@/lib/reuniao-intake';
 import { parseDataReuniao, salvarResumoReuniao } from '@/lib/reuniao-resumos';
+import { conferirSegredoIntegracao, respostaSegredo } from '@/lib/integration-secret';
 
 /**
  * Resumo da reunião, chamado pelo Make no FINAL do cenário — irmão da rota
@@ -16,23 +16,9 @@ import { parseDataReuniao, salvarResumoReuniao } from '@/lib/reuniao-resumos';
 
 export const maxDuration = 30;
 
-function segredoConfere(req: NextRequest): 'ok' | 'sem-segredo' | 'negado' {
-  const esperado = process.env.MAKE_INTEGRATION_SECRET;
-  if (!esperado) return 'sem-segredo';
-  const recebido = req.headers.get('x-onmid-secret') ?? '';
-  const a = Buffer.from(recebido);
-  const b = Buffer.from(esperado);
-  return a.length === b.length && timingSafeEqual(a, b) ? 'ok' : 'negado';
-}
-
 export async function POST(req: NextRequest) {
-  const auth = segredoConfere(req);
-  if (auth === 'sem-segredo') {
-    return Response.json({ ok: false, erro: 'integracao_nao_configurada' }, { status: 503 });
-  }
-  if (auth === 'negado') {
-    return Response.json({ ok: false, erro: 'nao_autorizado' }, { status: 401 });
-  }
+  const auth = conferirSegredoIntegracao(req);
+  if (auth !== 'ok') return respostaSegredo(auth);
 
   let body: Record<string, unknown>;
   try {

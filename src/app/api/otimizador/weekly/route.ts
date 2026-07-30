@@ -399,9 +399,13 @@ async function loadManualNotesContext(clientId: string): Promise<string | null> 
   try {
     await ensureOptimizerManualNotesTable(pool);
     const { rows } = await pool.query<{ nivel: string; objeto_nome: string | null; texto: string; autor_nome: string | null; created_at: string }>(
+      // Nota concluída no Quadro do Gestor sai do contexto: mandá-la como
+      // pendência viva faria a IA decidir com base em algo já resolvido.
+      // `status` pode não existir em instalação antiga — o COALESCE cobre isso.
       `SELECT nivel, objeto_nome, texto, autor_nome, created_at
          FROM public.optimizer_manual_notes
         WHERE cliente_id = $1 AND ativo = true
+          AND COALESCE(status, 'rapida') <> 'concluida'
           AND created_at >= NOW() - INTERVAL '45 days'
         ORDER BY created_at DESC
         LIMIT 20`,

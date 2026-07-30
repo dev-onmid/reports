@@ -4,6 +4,7 @@ import { getFreshMetaToken } from '@/lib/meta-token';
 import { sendText as sendZapiText, type ZApiClient } from '@/lib/zapi';
 import { sendEvolutionText } from '@/lib/evolution-api';
 import { sendGmail } from '@/lib/gmail';
+import { upsertSinal, resolverSinaisAntigos, AGENCIA } from '@/lib/notificacoes';
 
 /** Days of runway below which an account is considered at risk (UI-configurable). */
 export const DEFAULT_DIAS_ANTECEDENCIA = 3;
@@ -519,6 +520,14 @@ async function ensureAlertLogTable(pool: ReturnType<typeof makeServerPool>) {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
     ALTER TABLE public.balance_alerts_log ADD COLUMN IF NOT EXISTS config_id TEXT NOT NULL DEFAULT '';
+    -- Os números do momento do alerta. Antes eram calculados e descartados, então
+    -- o painel do Início não tinha como dizer "dura 2 dias" sem refazer as
+    -- chamadas à Meta/Google — caras e fora do teto de 10s da primeira tela.
+    ALTER TABLE public.balance_alerts_log
+      ADD COLUMN IF NOT EXISTS saldo          NUMERIC,
+      ADD COLUMN IF NOT EXISTS dias_restantes NUMERIC,
+      ADD COLUMN IF NOT EXISTS ritmo_diario   NUMERIC,
+      ADD COLUMN IF NOT EXISTS parada         BOOLEAN;
   `);
   // The original key was (account_id, alert_date), which made the first
   // destination consume the day's slot and left every other configured group
@@ -596,13 +605,49 @@ export async function sendBalanceAlerts(
     // Only burn the daily slot if the warning actually reached someone.
     if (wa.ok || emailOk) {
       result.alerted = novos;
+
+      // Gestor de cada cliente afetado — a notificação é dele. Cliente sem
+      // gestor cai em AGENCIA ('') e aparece para todos, em vez de sumir.
+      const clientIds = [...new Set(novos.map(a => a.clientId).filter(Boolean))];
+      const gestorPorCliente = new Map<string, string>();
+      if (clientIds.length) {
+        const { rows } = await pool.query<{ id: string; gestor_id: string | null }>(
+          `SELECT id, gestor_id FROM public.clients WHERE id = ANY($1::text[])`,
+          [clientIds],
+        ).catch(() => ({ rows: [] as { id: string; gestor_id: string | null }[] }));
+        for (const r of rows) if (r.gestor_id) gestorPorCliente.set(r.id, r.gestor_id);
+      }
+
+      const hoje = brtDateStr(0);
       for (const a of novos) {
         await pool.query(
-          `INSERT INTO public.balance_alerts_log (account_id, config_id) VALUES ($1, $2)
+          `INSERT INTO public.balance_alerts_log
+             (account_id, config_id, saldo, dias_restantes, ritmo_diario, parada)
+           VALUES ($1, $2, $3, $4, $5, $6)
              ON CONFLICT (account_id, config_id, alert_date) DO NOTHING`,
-          [a.accountId, opts.configId],
+          [a.accountId, opts.configId, a.balance, a.diasRestantes, a.ritmoDiario, a.parada],
         );
+
+        // Feed do painel. A chave inclui o dia porque o alerta de saldo repete
+        // todo dia até a conta ser recarregada — cada dia é um sinal novo.
+        await upsertSinal(pool, {
+          userId: gestorPorCliente.get(a.clientId) ?? AGENCIA,
+          tipo: 'saldo',
+          signalKey: `saldo:${a.accountId}:${hoje}`,
+          severidade: a.parada || (a.diasRestantes ?? 99) <= 1 ? 'critico' : 'atencao',
+          titulo: a.parada
+            ? `${a.clientName} — conta parada por saldo`
+            : `${a.clientName} — saldo acaba em ${a.diasRestantes ?? '?'} dia(s)`,
+          descricao: `${a.platform === 'meta' ? 'Meta Ads' : 'Google Ads'} · ${a.accountName} · saldo ${fmtMoney(a.balance, a.currency)}`
+            + (a.ritmoDiario > 0 ? ` · gasta ${fmtMoney(a.ritmoDiario, a.currency)}/dia` : ''),
+          href: '/pagamentos',
+          clientId: a.clientId || null,
+        });
       }
+
+      // Alerta de ontem não fica pendurado no feed: a chave do dia seguinte é
+      // outra, então a lista de chaves ativas nunca o alcançaria.
+      await resolverSinaisAntigos(pool, 'saldo', 36);
     }
 
     return result;

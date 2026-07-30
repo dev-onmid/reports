@@ -84,6 +84,7 @@ const CRON_PREFIXES = [
  */
 const INTEGRATION_PREFIXES = [
   '/api/integrations/reuniao',
+  '/api/integrations/agenda',
 ];
 
 function matches(pathname: string, prefixes: string[]): boolean {
