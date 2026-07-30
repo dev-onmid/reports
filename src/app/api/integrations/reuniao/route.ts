@@ -108,6 +108,7 @@ export async function POST(req: NextRequest) {
     doc_url: typeof body.doc_url === 'string' ? body.doc_url : undefined,
     acoes: extrairAcoes(body),
     alertas: extrairAlertas(body),
+    dry_run: body.dry_run === true,
   };
 
   const pool = makeServerPool();

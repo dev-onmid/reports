@@ -153,6 +153,12 @@ export type ReuniaoInput = {
   acoes: AcaoInput[];
   /** Alerta global da reunião — vira a tarefa "NOVA INFORMAÇÃO" para o social. */
   alertas?: string | null;
+  /**
+   * Resolve tudo (cliente, lista, responsáveis) e devolve o que ACONTECERIA,
+   * sem escrever nada no ClickUp. Serve para conferir a configuração sem
+   * encher a workspace de tarefa de teste.
+   */
+  dry_run?: boolean;
 };
 
 export type ReuniaoResult =
@@ -164,6 +170,7 @@ export type ReuniaoResult =
       lista: { id: string; nome: string | null };
       tarefas: { titulo: string; setor: Setor; task_id: string; url: string; assignees: Responsavel[] }[];
       avisos: string[];
+      dry_run?: true;
     };
 
 const DIA_MS = 24 * 60 * 60 * 1000;
@@ -243,6 +250,11 @@ export async function processarReuniao(pool: Pool, input: ReuniaoInput): Promise
       assignees: responsaveis.map((r) => r.clickup_id),
     };
 
+    if (input.dry_run) {
+      tarefas.push({ titulo: payload.name, setor, task_id: '(simulado)', url: '', assignees: responsaveis });
+      continue;
+    }
+
     try {
       const task = await createClickupTask(lista.connection.api_token, lista.listId, payload);
       tarefas.push({ titulo: payload.name, setor, task_id: task.id, url: task.url, assignees: responsaveis });
@@ -260,5 +272,6 @@ export async function processarReuniao(pool: Pool, input: ReuniaoInput): Promise
     lista: { id: lista.listId, nome: lista.listName },
     tarefas,
     avisos,
+    ...(input.dry_run ? { dry_run: true as const } : {}),
   };
 }
