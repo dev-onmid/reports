@@ -51,6 +51,14 @@ export async function GET(req: NextRequest) {
 
     // `texto` é o que o Make injeta direto no prompt — economiza o Aggregator
     // que existia só para transformar registros em linhas.
+    //
+    // `chaves` existe para o Make conferir, num filtro de uma linha, se o nome
+    // que a IA devolveu está mesmo na lista: `chaves contém |Nome|`. Os pipes
+    // nas pontas tornam a checagem exata — sem eles, "Sorrifácil Londrina"
+    // passaria por casar dentro de "Sorrifácil Londrina Bandeirantes". Montar
+    // isso com map()/join() dentro do Make seria possível, mas uma expressão
+    // errada lá falha calada e manda toda reunião para o aviso de "não
+    // cadastrado"; aqui dá para testar.
     return Response.json({
       total: rows.length,
       clientes: rows.map((r) => ({
@@ -59,6 +67,7 @@ export async function GET(req: NextRequest) {
         tem_lista: r.tem_lista,
       })),
       texto: rows.map((r) => r.name).join('\n'),
+      chaves: `|${rows.map((r) => r.name).join('|')}|`,
     });
   } catch (err) {
     console.error('[integracao clientes]', err);
