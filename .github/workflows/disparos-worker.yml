@@ -1,0 +1,36 @@
+name: Disparos Worker
+
+# Motor de FUNDO das campanhas de disparo — processa as mensagens pendentes de
+# todas as campanhas rodando, SEM depender de ninguém estar com a tela aberta
+# (o tick do navegador continua funcionando como acelerador quando a tela está
+# aberta; o claim atômico do next_tick_at impede envio duplicado).
+#
+# Disparo precisa de cadência de ~1 min e o cron do GitHub só desce até 5 min —
+# por isso cada execução chama o worker VÁRIAS vezes em loop (a cada ~35s),
+# cobrindo a janela inteira até a próxima execução.
+#
+# Secret necessário no GitHub: DISPAROS_WORKER_URL
+#   = https://reports.onmid.app/api/disparos/worker?secret=<valor de REPORTS_CRON_SECRET>
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch: {}
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Processar campanhas de disparo (loop de ~5 min)
+        run: |
+          if [ -z "${{ secrets.DISPAROS_WORKER_URL }}" ]; then
+            echo "Secret DISPAROS_WORKER_URL não configurado"; exit 1
+          fi
+          for i in 1 2 3 4 5 6 7 8; do
+            status=$(curl -s -o resp.json -w "%{http_code}" --max-time 60 "${{ secrets.DISPAROS_WORKER_URL }}")
+            echo "chamada $i: HTTP $status $(cat resp.json)"
+            if [ "$status" != "200" ]; then
+              echo "HTTP $status"; exit 1
+            fi
+            if [ "$i" != "8" ]; then sleep 35; fi
+          done

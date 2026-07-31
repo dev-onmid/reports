@@ -28,11 +28,15 @@ function sleep(ms: number) {
 }
 
 async function runWorker(req: NextRequest) {
-  const secret = process.env.CRON_SECRET;
-  if (secret) {
+  // Mesma família de secrets dos outros crons (CRON_SECRET da Vercel é
+  // write-only — os workflows do GitHub usam REPORTS_CRON_SECRET).
+  const validSecrets = [process.env.CRON_SECRET, process.env.REPORTS_CRON_SECRET, process.env.CRM_CRON_SECRET]
+    .filter(Boolean);
+  if (validSecrets.length > 0) {
     const authHeader = req.headers.get('authorization');
     const urlSecret = new URL(req.url).searchParams.get('secret');
-    if (authHeader !== `Bearer ${secret}` && urlSecret !== secret) {
+    const ok = validSecrets.some(s => authHeader === `Bearer ${s}` || urlSecret === s);
+    if (!ok) {
       return Response.json({ error: 'Unauthorized' }, { status: 401 });
     }
   }
