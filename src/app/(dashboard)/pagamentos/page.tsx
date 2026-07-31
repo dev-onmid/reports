@@ -887,13 +887,18 @@ function PagSparkline({ data, color }: { data: number[]; color: string }) {
   );
 }
 
-const WEEKDAY_LABELS = ['SEGUNDA', 'TERÇA', 'QUARTA', 'QUINTA', 'SEXTA'];
+/** O calendário é semana cheia, começando na segunda. */
+const DAYS_PER_WEEK = 7;
+
+const WEEKDAY_LABELS = ['SEGUNDA', 'TERÇA', 'QUARTA', 'QUINTA', 'SEXTA', 'SÁBADO', 'DOMINGO'];
 const WEEKDAY_COLORS = [
   'bg-emerald-600',
   'bg-fuchsia-600',
   'bg-blue-700',
   'bg-violet-700',
   'bg-orange-500',
+  'bg-slate-600',
+  'bg-slate-600',
 ];
 
 function formatDateBR(date: string): string {
@@ -917,14 +922,14 @@ function getWeekDates(date: string): string[] {
   const monday = new Date(base);
   monday.setDate(base.getDate() + mondayOffset);
 
-  return Array.from({ length: 5 }, (_, index) => {
+  return Array.from({ length: DAYS_PER_WEEK }, (_, index) => {
     const day = new Date(monday);
     day.setDate(monday.getDate() + index);
     return toISODate(day);
   });
 }
 
-function getMonthWeekdays(date: string): string[] {
+function getMonthDays(date: string): string[] {
   const base = parseDate(date);
   const year = base.getFullYear();
   const month = base.getMonth();
@@ -932,34 +937,33 @@ function getMonthWeekdays(date: string): string[] {
   const result: string[] = [];
 
   for (let day = 1; day <= totalDays; day++) {
-    const current = new Date(year, month, day);
-    const weekday = current.getDay();
-    if (weekday !== 0 && weekday !== 6) result.push(toISODate(current));
+    result.push(toISODate(new Date(year, month, day)));
   }
 
   return result;
 }
 
-function getMonthBusinessWeeks(date: string): string[][] {
+/** Monday-first column index: Mon=0 … Sat=5, Sun=6. */
+function weekColumn(weekday: number): number {
+  return (weekday + 6) % 7;
+}
+
+function getMonthCalendarWeeks(date: string): string[][] {
   const base = parseDate(date);
   const year = base.getFullYear();
   const month = base.getMonth();
   const totalDays = new Date(year, month + 1, 0).getDate();
   const weeks: string[][] = [];
-  let week = Array<string>(5).fill('');
+  let week = Array<string>(DAYS_PER_WEEK).fill('');
 
   for (let day = 1; day <= totalDays; day++) {
     const current = new Date(year, month, day);
-    const weekday = current.getDay();
-
-    if (weekday === 0 || weekday === 6) continue;
-
-    const col = weekday - 1;
+    const col = weekColumn(current.getDay());
     week[col] = toISODate(current);
 
-    if (col === 4) {
+    if (col === DAYS_PER_WEEK - 1) {
       weeks.push(week);
-      week = Array<string>(5).fill('');
+      week = Array<string>(DAYS_PER_WEEK).fill('');
     }
   }
 
@@ -967,9 +971,9 @@ function getMonthBusinessWeeks(date: string): string[][] {
   return weeks;
 }
 
-function isBusinessDate(date: string): boolean {
+function isWeekendDate(date: string): boolean {
   const weekday = parseDate(date).getDay();
-  return weekday !== 0 && weekday !== 6;
+  return weekday === 0 || weekday === 6;
 }
 
 function getMonthLabel(date: string): string {
@@ -986,7 +990,9 @@ function shiftMonth(date: string, delta: number): string {
 }
 
 function isDateInView(date: string, selectedDate: string, viewMode: ViewMode): boolean {
-  if (!isBusinessDate(date)) return false;
+  // Sábado e domingo já foram excluídos aqui, o que escondia da tela — e dos
+  // totais — qualquer pagamento salvo no fim de semana. O calendário mostra a
+  // semana inteira, então o recorte é só de período.
   if (viewMode === 'dia') return date === selectedDate;
   if (viewMode === 'semana') return getWeekDates(selectedDate).includes(date);
 
@@ -1920,7 +1926,7 @@ export default function PagamentosPage() {
 
   const availableDates = Array.from(new Set(visiblePayments.map((payment) => payment.date))).sort();
   const weekDates = getWeekDates(selectedDate);
-  const monthWeeks = getMonthBusinessWeeks(selectedDate);
+  const monthWeeks = getMonthCalendarWeeks(selectedDate);
   const monthAllWeeks = monthWeeks;
   const summaryLabel = viewMode === 'dia' ? 'do dia' : 'do período';
   const [showNewForm, setShowNewForm] = useState(false);
@@ -2357,14 +2363,18 @@ export default function PagamentosPage() {
             </div>
           </div>
           <div className="overflow-x-auto">
-          <div className="min-w-[640px]">
-          <div className="grid grid-cols-5 border-b border-border/70">
+          <div className="min-w-[900px]">
+          <div className="grid grid-cols-7 border-b border-border/70">
             {[
               { label: 'SEG', color: '#55f52f' },
               { label: 'TER', color: '#f59e0b' },
               { label: 'QUA', color: '#2498ff' },
               { label: 'QUI', color: '#a855f7' },
               { label: 'SEX', color: '#ff4778' },
+              // Fim de semana em tom neutro: a coluna existe e recebe pagamento,
+              // mas não disputa atenção com os dias em que o movimento acontece.
+              { label: 'SÁB', color: '#94a3b8' },
+              { label: 'DOM', color: '#94a3b8' },
             ].map((day, i) => (
               <div key={day.label} className="border-r border-border/70 py-4 text-center last:border-r-0">
                 <p className="text-sm font-bold tracking-widest text-foreground">
@@ -2375,14 +2385,14 @@ export default function PagamentosPage() {
             ))}
           </div>
           {monthAllWeeks.map((week, wi) => (
-            <div key={wi} className="grid grid-cols-5 border-b border-border/70 last:border-b-0">
+            <div key={wi} className="grid grid-cols-7 border-b border-border/70 last:border-b-0">
               {week.map((date, di) => {
                 const dayPayments = date ? filteredPayments.filter(p => p.date === date) : [];
                 const isToday = date === todayStr;
                 return (
                   <div
                     key={`${wi}-${di}`}
-                    className={cn('group min-h-[148px] border-r border-border/70 p-2.5 last:border-r-0 transition-colors', !date && 'bg-muted/5 opacity-40', dragOverDate === date && date && 'bg-violet-500/10 ring-1 ring-inset ring-violet-500/30')}
+                    className={cn('group min-h-[148px] border-r border-border/70 p-2.5 last:border-r-0 transition-colors', !date && 'bg-muted/5 opacity-40', date && isWeekendDate(date) && 'bg-muted/[0.07]', dragOverDate === date && date && 'bg-violet-500/10 ring-1 ring-inset ring-violet-500/30')}
                     onDragOver={(e) => { if (date) { e.preventDefault(); setDragOverDate(date); } }}
                     onDragLeave={() => setDragOverDate(null)}
                     onDrop={(e) => { e.preventDefault(); const id = e.dataTransfer.getData('text/plain'); if (id && date) movePaymentDate(id, date); setDragOverDate(null); }}
@@ -2606,13 +2616,15 @@ export default function PagamentosPage() {
           SEMANA VIEW
       ────────────────────────────────────────────── */}
       {viewMode === 'semana' && (() => {
-        const DAY_LABELS = ['SEG', 'TER', 'QUA', 'QUI', 'SEX'];
+        const DAY_LABELS = ['SEG', 'TER', 'QUA', 'QUI', 'SEX', 'SÁB', 'DOM'];
         const DAY_NAMES: Record<string, string> = {
           SEG: 'Segunda-feira',
           TER: 'Terça-feira',
           QUA: 'Quarta-feira',
           QUI: 'Quinta-feira',
           SEX: 'Sexta-feira',
+          'SÁB': 'Sábado',
+          DOM: 'Domingo',
         };
         const dailyData = weekDates.map((date, i) => {
           const dayPs = filteredPayments.filter(p => p.date === date);
@@ -2640,8 +2652,8 @@ export default function PagamentosPage() {
           <div className="space-y-4">
             <div className="overflow-hidden rounded-[var(--radius)] border border-border bg-card shadow-[0_0_34px_rgba(15,23,42,0.28)]">
               <div className="overflow-x-auto">
-              <div className="min-w-[640px]">
-              <div className="grid grid-cols-5 border-b border-border/70">
+              <div className="min-w-[900px]">
+              <div className="grid grid-cols-7 border-b border-border/70">
                 {dailyData.map((day, i) => (
                   <div key={day.date} className="border-r border-border/70 px-4 py-5 text-center last:border-r-0">
                     <p className="text-lg font-bold text-foreground">{day.label}</p>
@@ -2651,7 +2663,7 @@ export default function PagamentosPage() {
                   </div>
                 ))}
               </div>
-              <div className="grid min-h-[370px] grid-cols-5">
+              <div className="grid min-h-[370px] grid-cols-7">
                 {dailyData.map((day, di) => (
                   <div
                     key={day.date}
