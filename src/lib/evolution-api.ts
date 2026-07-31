@@ -191,6 +191,38 @@ export function webhookOrigin(requestUrl: string): string {
 }
 
 // Webhook atualmente configurado na instância (pra detectar URL antiga/preview e curar).
+// Valida números contra o WhatsApp (existe/não existe) — usado no upload de
+// listas de disparo pra impedir que número quebrado entre na campanha.
+// Best-effort: falha da API (timeout, instância off) devolve null e o caller
+// segue SEM validação (nunca bloquear a criação por indisponibilidade).
+export async function checkWhatsappNumbers(
+  instanceName: string,
+  numbers: string[],
+): Promise<Map<string, boolean> | null> {
+  const result = new Map<string, boolean>();
+  try {
+    for (let i = 0; i < numbers.length; i += 100) {
+      const batch = numbers.slice(i, i + 100);
+      const res = await fetch(`${base()}/chat/whatsappNumbers/${encodeURIComponent(instanceName)}`, {
+        method: 'POST',
+        headers: headers(),
+        body: JSON.stringify({ numbers: batch }),
+        signal: AbortSignal.timeout(20_000),
+      });
+      if (!res.ok) return result.size > 0 ? result : null;
+      const rows = await res.json().catch(() => null) as Array<{ number?: string; exists?: boolean; jid?: string }> | null;
+      if (!Array.isArray(rows)) return result.size > 0 ? result : null;
+      for (const r of rows) {
+        const digits = String(r.number ?? r.jid ?? '').split('@')[0].replace(/\D/g, '');
+        if (digits) result.set(digits, r.exists === true);
+      }
+    }
+    return result;
+  } catch {
+    return result.size > 0 ? result : null;
+  }
+}
+
 export async function getEvolutionWebhook(instanceName: string): Promise<{ url: string | null; enabled: boolean }> {
   const res = await fetch(`${base()}/webhook/find/${encodeURIComponent(instanceName)}`, {
     headers: headers(),

@@ -24,6 +24,7 @@ export async function POST(
     await pool.query(`ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS next_tick_at TIMESTAMPTZ`);
     await pool.query(`ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS message_index INT NOT NULL DEFAULT 0`);
     await pool.query(`ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS active_days TEXT`);
+    await pool.query(`ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS daily_limit INT`);
 
     const { rows: [campaign] } = await pool.query(
       `SELECT c.*, cl.instance_id, cl.token, cl.security_token, cl.provider
@@ -70,9 +71,28 @@ export async function POST(
       }
     }
 
+    // Teto diário anti-bloqueio (mesma régua do worker): envios de HOJE em BRT
+    // da instância inteira — atingiu, dorme até a virada do dia.
+    if (campaign.daily_limit && Number(campaign.daily_limit) > 0) {
+      const { rows: [cnt] } = await pool.query<{ sent_today: number }>(
+        `SELECT COUNT(*)::int AS sent_today
+           FROM public.zapi_numbers n
+           JOIN public.zapi_campaigns c2 ON c2.id = n.campaign_id
+          WHERE c2.client_id = $1 AND n.status = 'sent'
+            AND n.sent_at >= date_trunc('day', NOW() AT TIME ZONE 'America/Sao_Paulo') AT TIME ZONE 'America/Sao_Paulo'`,
+        [campaign.client_id],
+      );
+      if (Number(cnt?.sent_today ?? 0) >= Number(campaign.daily_limit)) {
+        return Response.json({ status: 'running', done: false, sleeping: true, reason: 'limite_diario' });
+      }
+    }
+
     // Atomically claim the tick slot — if next_tick_at is in the future, the background
-    // worker just processed this campaign; skip to avoid double-sending
-    const intervalSec = campaign.interval_min + Math.random() * (campaign.interval_max - campaign.interval_min);
+    // worker just processed this campaign; skip to avoid double-sending.
+    // Piso anti-bloqueio de 90s — vale também pra campanhas antigas.
+    const minSec = Math.max(90, Number(campaign.interval_min) || 0);
+    const maxSec = Math.max(minSec + 30, Number(campaign.interval_max) || 0);
+    const intervalSec = minSec + Math.random() * (maxSec - minSec);
     const { rows: [claimed] } = await pool.query(
       `UPDATE public.zapi_campaigns
           SET next_tick_at = NOW() + ($1 * INTERVAL '1 second')

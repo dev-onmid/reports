@@ -59,7 +59,16 @@ export async function PATCH(
 
     str('name'); str('message'); str('image_url');
     str('active_from'); str('active_until'); str('ends_at');
+    // Piso anti-bloqueio de 90s também na edição
+    if (body.interval_min !== undefined) body.interval_min = Math.max(90, Number(body.interval_min) || 90);
+    if (body.interval_max !== undefined) body.interval_max = Math.max(Number(body.interval_min ?? 90) + 30, Number(body.interval_max) || 0);
     num('interval_min'); num('interval_max');
+
+    if (body.daily_limit !== undefined) {
+      await pool.query(`ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS daily_limit INT`);
+      sets.push(`daily_limit = $${i++}`);
+      vals.push(body.daily_limit === null ? null : Math.max(1, Number(body.daily_limit) || 120));
+    }
 
     if (body.active_days !== undefined) {
       await pool.query(`ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS active_days TEXT`);

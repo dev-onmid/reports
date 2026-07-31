@@ -32,7 +32,7 @@ type Campaign = {
   message: string; messages?: string | string[] | null; image_url: string | null;
   status: 'pending' | 'running' | 'paused' | 'done' | 'cancelled';
   starts_at: string; ends_at: string | null;
-  interval_min: number; interval_max: number;
+  interval_min: number; interval_max: number; daily_limit?: number | null;
   total: number; sent: number; failed: number;
   created_at: string; active_from: string | null; active_until: string | null;
   active_days: string | null;
@@ -50,7 +50,7 @@ type NumberDetail = {
 
 type CampaignPrefill = {
   clientId: string; name: string; message: string; numbers: string;
-  imageUrls?: string[]; intervalMin: number; intervalMax: number;
+  imageUrls?: string[]; intervalMin: number; intervalMax: number; dailyLimit?: number;
   activeFrom?: string; activeUntil?: string; activeDays?: number[];
 };
 
@@ -1072,7 +1072,8 @@ function NovaCampanhaTab({ onCreated, prefill, editCampaign }: { onCreated: () =
     isNow: true, startsAt: '', endsAt: '',
     activeFrom: '', activeUntil: '',
     activeDays: ALL_DAYS as number[],
-    intervalMin: 5, intervalMax: 15,
+    intervalMin: 90, intervalMax: 210,
+    dailyLimit: 120,
   });
   const [imageUrls, setImageUrls] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
@@ -1102,7 +1103,7 @@ function NovaCampanhaTab({ onCreated, prefill, editCampaign }: { onCreated: () =
 
   useEffect(() => {
     if (!prefill) return;
-    setForm({ clientId: prefill.clientId, name: prefill.name + ' (cópia)', message: prefill.message, numbers: prefill.numbers, isNow: true, startsAt: '', endsAt: '', activeFrom: prefill.activeFrom ?? '', activeUntil: prefill.activeUntil ?? '', activeDays: prefill.activeDays ?? ALL_DAYS, intervalMin: prefill.intervalMin, intervalMax: prefill.intervalMax });
+    setForm({ clientId: prefill.clientId, name: prefill.name + ' (cópia)', message: prefill.message, numbers: prefill.numbers, isNow: true, startsAt: '', endsAt: '', activeFrom: prefill.activeFrom ?? '', activeUntil: prefill.activeUntil ?? '', activeDays: prefill.activeDays ?? ALL_DAYS, intervalMin: Math.max(90, prefill.intervalMin), intervalMax: Math.max(120, prefill.intervalMax), dailyLimit: prefill.dailyLimit ?? 120 });
     setImageUrls(prefill.imageUrls ?? []);
   }, [prefill]);
 
@@ -1129,8 +1130,9 @@ function NovaCampanhaTab({ onCreated, prefill, editCampaign }: { onCreated: () =
       activeFrom: utcToLocalTime(editCampaign.active_from ?? ''),
       activeUntil: utcToLocalTime(editCampaign.active_until ?? ''),
       activeDays: parseActiveDaysClient(editCampaign.active_days),
-      intervalMin: editCampaign.interval_min,
-      intervalMax: editCampaign.interval_max,
+      intervalMin: Math.max(90, editCampaign.interval_min),
+      intervalMax: Math.max(120, editCampaign.interval_max),
+      dailyLimit: editCampaign.daily_limit ?? 120,
     }));
     // Parse image_url (may be JSON array or plain string)
     if (editCampaign.image_url) {
@@ -1246,6 +1248,7 @@ function NovaCampanhaTab({ onCreated, prefill, editCampaign }: { onCreated: () =
           active_days: activeDays,
           interval_min: form.intervalMin,
           interval_max: form.intervalMax,
+          daily_limit: form.dailyLimit,
         };
         const res = await fetch(`/api/disparos/campaigns/${editCampaign.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', ...callerHeaders() }, body: JSON.stringify(body) });
         const data = await res.json() as { error?: string };
@@ -1255,10 +1258,13 @@ function NovaCampanhaTab({ onCreated, prefill, editCampaign }: { onCreated: () =
       }
 
       const startsAt = form.isNow ? new Date().toISOString() : toISO(form.startsAt);
-      const res = await fetch('/api/disparos/campaigns', { method: 'POST', headers: { 'Content-Type': 'application/json', ...callerHeaders() }, body: JSON.stringify({ clientId: form.clientId, name: form.name, message: form.message, messages: allMessages, numbers: form.numbers, startsAt, endsAt, activeFrom, activeUntil, activeDays, intervalMin: form.intervalMin, intervalMax: form.intervalMax, imageUrls: imageUrls.length > 0 ? imageUrls : undefined }) });
-      const data = await res.json() as { error?: string };
+      const res = await fetch('/api/disparos/campaigns', { method: 'POST', headers: { 'Content-Type': 'application/json', ...callerHeaders() }, body: JSON.stringify({ clientId: form.clientId, name: form.name, message: form.message, messages: allMessages, numbers: form.numbers, startsAt, endsAt, activeFrom, activeUntil, activeDays, intervalMin: form.intervalMin, intervalMax: form.intervalMax, dailyLimit: form.dailyLimit, imageUrls: imageUrls.length > 0 ? imageUrls : undefined }) });
+      const data = await res.json() as { error?: string; invalid_count?: number };
       if (!res.ok) { setError(data.error ?? 'Erro ao criar campanha.'); return; }
-      setForm({ clientId: clients[0]?.id ?? '', name: '', message: '', numbers: '', isNow: true, startsAt: '', endsAt: '', activeFrom: '', activeUntil: '', activeDays: ALL_DAYS, intervalMin: 5, intervalMax: 15 });
+      if (data.invalid_count && data.invalid_count > 0) {
+        alert(`${data.invalid_count} número(s) não existem no WhatsApp e foram removidos da campanha automaticamente.`);
+      }
+      setForm({ clientId: clients[0]?.id ?? '', name: '', message: '', numbers: '', isNow: true, startsAt: '', endsAt: '', activeFrom: '', activeUntil: '', activeDays: ALL_DAYS, intervalMin: 90, intervalMax: 210, dailyLimit: 120 });
       setImageUrls([]);
       setVariations([]);
       setPreviewVariationIdx(null);
@@ -1666,17 +1672,28 @@ function NovaCampanhaTab({ onCreated, prefill, editCampaign }: { onCreated: () =
                 {/* Intervals */}
                 <div className="grid grid-cols-2 gap-3">
                   {[
-                    { key: 'intervalMin', label: 'Intervalo mínimo (seg) *', sub: 'Tempo mínimo entre envios' },
+                    { key: 'intervalMin', label: 'Intervalo mínimo (seg) *', sub: 'Piso de 90s (proteção anti-bloqueio)' },
                     { key: 'intervalMax', label: 'Intervalo máximo (seg) *', sub: 'Tempo máximo entre envios' },
                   ].map(({ key, label, sub }) => (
                     <div key={key} className="space-y-1.5">
                       <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">{label}</label>
-                      <input type="number" min={1} value={form[key as 'intervalMin'|'intervalMax']}
+                      <input type="number" min={90} value={form[key as 'intervalMin'|'intervalMax']}
                         onChange={e => setForm(p => ({ ...p, [key]: Number(e.target.value) }))}
                         className="w-full h-9 rounded-lg border border-border bg-background px-3 text-sm outline-none focus:ring-1 focus:ring-primary" />
                       <p className="text-[10px] text-muted-foreground/60">{sub}</p>
                     </div>
                   ))}
+                </div>
+
+                {/* Limite diário anti-bloqueio */}
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Limite diário por número</label>
+                  <input type="number" min={1} value={form.dailyLimit}
+                    onChange={e => setForm(p => ({ ...p, dailyLimit: Math.max(1, Number(e.target.value) || 1) }))}
+                    className="w-full h-9 rounded-lg border border-border bg-background px-3 text-sm outline-none focus:ring-1 focus:ring-primary" />
+                  <p className="text-[10px] text-muted-foreground/60">
+                    Atingiu o teto do dia, a campanha dorme e retoma sozinha no dia seguinte (recomendado: até 120/dia por número aquecido)
+                  </p>
                 </div>
               </div>
             </div>
@@ -1799,7 +1816,7 @@ function DashboardTab({ onReuse, onNewCampaign, onManageInstances, onEdit }: {
       if (c.image_url.startsWith('[')) { try { imageUrls = JSON.parse(c.image_url); } catch { imageUrls = [c.image_url]; } }
       else { imageUrls = [c.image_url]; }
     }
-    onReuse({ clientId: c.client_id, name: c.name, message: c.message, numbers, imageUrls, intervalMin: c.interval_min, intervalMax: c.interval_max, activeFrom: c.active_from ?? undefined, activeUntil: c.active_until ?? undefined, activeDays: c.active_days ? parseActiveDaysClient(c.active_days) : undefined });
+    onReuse({ clientId: c.client_id, name: c.name, message: c.message, numbers, imageUrls, intervalMin: c.interval_min, intervalMax: c.interval_max, dailyLimit: c.daily_limit ?? undefined, activeFrom: c.active_from ?? undefined, activeUntil: c.active_until ?? undefined, activeDays: c.active_days ? parseActiveDaysClient(c.active_days) : undefined });
   }
 
   // ── Computed ──────────────────────────────────────────────────────────────

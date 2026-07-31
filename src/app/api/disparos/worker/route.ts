@@ -53,6 +53,7 @@ async function runWorker(req: NextRequest) {
     `);
     await pool.query(`ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS message_index INT NOT NULL DEFAULT 0`);
     await pool.query(`ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS active_days TEXT`);
+    await pool.query(`ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS daily_limit INT`);
 
     // Transition pending campaigns whose start time has arrived
     await pool.query(`
@@ -75,6 +76,8 @@ async function runWorker(req: NextRequest) {
       active_days: string | null;
       interval_min: number;
       interval_max: number;
+      daily_limit: number | null;
+      client_id: string;
       instance_id: string;
       token: string;
       security_token: string | null;
@@ -82,6 +85,7 @@ async function runWorker(req: NextRequest) {
     }>(`
       SELECT c.id, c.status, c.message, c.messages, c.message_index, c.image_url, c.ends_at,
              c.active_from, c.active_until, c.active_days, c.interval_min, c.interval_max,
+             c.daily_limit, c.client_id,
              cl.instance_id, cl.token, cl.security_token, cl.provider
         FROM public.zapi_campaigns c
         JOIN public.zapi_clients cl ON cl.id = c.client_id
@@ -110,6 +114,29 @@ async function runWorker(req: NextRequest) {
         continue;
       }
 
+      // Teto diário anti-bloqueio: conta os envios de HOJE (dia BRT) da
+      // INSTÂNCIA inteira (todas as campanhas do mesmo número compartilham a
+      // reputação). Atingiu o limite → dorme até a virada do dia em BRT.
+      if (campaign.daily_limit && campaign.daily_limit > 0) {
+        const { rows: [cnt] } = await pool.query<{ sent_today: number }>(
+          `SELECT COUNT(*)::int AS sent_today
+             FROM public.zapi_numbers n
+             JOIN public.zapi_campaigns c2 ON c2.id = n.campaign_id
+            WHERE c2.client_id = $1 AND n.status = 'sent'
+              AND n.sent_at >= date_trunc('day', NOW() AT TIME ZONE 'America/Sao_Paulo') AT TIME ZONE 'America/Sao_Paulo'`,
+          [campaign.client_id],
+        );
+        if (Number(cnt?.sent_today ?? 0) >= campaign.daily_limit) {
+          await pool.query(
+            `UPDATE public.zapi_campaigns
+                SET next_tick_at = (date_trunc('day', NOW() AT TIME ZONE 'America/Sao_Paulo') + INTERVAL '1 day') AT TIME ZONE 'America/Sao_Paulo'
+              WHERE id = $1`,
+            [campaign.id],
+          );
+          continue;
+        }
+      }
+
       const client = {
         instanceId: campaign.instance_id,
         token: campaign.token,
@@ -136,9 +163,13 @@ async function runWorker(req: NextRequest) {
       }
       let localIndex = campaign.message_index ?? 0;
 
-      // Process messages for this campaign until time budget runs out
+      // Process messages for this campaign until time budget runs out.
+      // Piso anti-bloqueio de 90s no intervalo — vale também pra campanhas
+      // antigas criadas com valores agressivos (o default da UI já foi 5-15s).
+      const minSec = Math.max(90, campaign.interval_min || 0);
+      const maxSec = Math.max(minSec + 30, campaign.interval_max || 0);
       while (Date.now() - startTime < BUDGET_MS) {
-        const intervalSec = campaign.interval_min + Math.random() * (campaign.interval_max - campaign.interval_min);
+        const intervalSec = minSec + Math.random() * (maxSec - minSec);
 
         // Atomically claim the campaign slot and advance next_tick_at to prevent
         // the browser tick and other worker invocations from double-processing
