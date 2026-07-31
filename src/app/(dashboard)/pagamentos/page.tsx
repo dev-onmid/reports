@@ -1143,29 +1143,29 @@ function PaymentMetricCard({
 }) {
   return (
     <div
-      className="relative min-h-[126px] overflow-hidden rounded-xl border p-4"
+      className="relative min-h-[84px] overflow-hidden rounded-xl border p-3"
       style={{
         borderColor: `${color}35`,
         background: `radial-gradient(circle at 12% 28%, ${glow}, transparent 34%), linear-gradient(135deg, ${color}12, rgba(15,18,29,0.88) 58%, rgba(6,8,15,0.94))`,
         boxShadow: `inset 0 0 0 1px rgba(255,255,255,0.025), 0 0 26px ${color}12`,
       }}
     >
-      <div className="flex items-start gap-4">
+      <div className="flex items-start gap-3">
         <span
-          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full"
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full"
           style={{ background: `${color}22`, boxShadow: `0 0 22px ${color}28` }}
         >
-          <Icon className="h-5 w-5" style={{ color }} />
+          <Icon className="h-4 w-4" style={{ color }} />
         </span>
         <div className="min-w-0">
           <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color }}>{label}</p>
-          <p className="mt-2 font-heading font-normal text-xl leading-none text-foreground tabular-nums">
+          <p className="mt-1 font-heading font-normal text-lg leading-none text-foreground tabular-nums">
             {formatCurrencyBRL(value)}
           </p>
-          <div className="mt-4 text-[11px] font-bold leading-none">{sub}</div>
+          <div className="mt-1.5 text-[11px] font-bold leading-none">{sub}</div>
         </div>
       </div>
-      <div className="absolute bottom-4 right-4">
+      <div className="absolute bottom-3 right-3">
         <PagSparkline data={trend} color={color} />
       </div>
     </div>
@@ -1189,26 +1189,26 @@ function DayMetricCard({
 }) {
   return (
     <div
-      className="relative min-h-[118px] overflow-hidden rounded-xl border p-5"
+      className="relative min-h-[84px] overflow-hidden rounded-xl border p-3"
       style={{
         borderColor: `${color}30`,
         background: `radial-gradient(circle at 10% 30%, ${glow}, transparent 36%), linear-gradient(135deg, ${color}10, rgba(10,13,22,0.9) 58%, rgba(5,8,14,0.96))`,
         boxShadow: `inset 0 0 0 1px rgba(255,255,255,0.025), 0 0 28px ${color}10`,
       }}
     >
-      <div className="flex items-start gap-4">
+      <div className="flex items-start gap-3">
         <span
-          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full"
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full"
           style={{ background: `${color}22`, boxShadow: `0 0 22px ${color}26` }}
         >
-          <Icon className="h-5 w-5" style={{ color }} />
+          <Icon className="h-4 w-4" style={{ color }} />
         </span>
         <div>
           <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color }}>{label}</p>
-          <p className="mt-3 font-heading font-normal text-xl leading-none text-foreground tabular-nums">
+          <p className="mt-1 font-heading font-normal text-lg leading-none text-foreground tabular-nums">
             {formatCurrencyBRL(value)}
           </p>
-          <p className="mt-5 text-xs font-bold" style={{ color }}>{count}</p>
+          <p className="mt-1.5 text-xs font-bold" style={{ color }}>{count}</p>
         </div>
       </div>
     </div>
@@ -2085,45 +2085,45 @@ export default function PagamentosPage() {
         )}
       </div>
 
-      {viewMode !== 'dia' && <div ref={formRef} id="novo-pagamento-form" className="rounded-xl border border-violet-400/25 bg-card/80 p-4 shadow-[0_0_34px_rgba(124,58,237,0.08)]">
-        <div className="mb-4 flex items-center gap-3">
-          <span className="flex h-8 w-8 items-center justify-center rounded-full bg-violet-500/20 text-violet-300 shadow-[0_0_18px_rgba(124,58,237,0.25)]">
-            <Plus className="h-4 w-4" />
+      {viewMode !== 'dia' && <div ref={formRef} id="novo-pagamento-form" className="rounded-xl border border-violet-400/25 bg-card/80 p-3 shadow-[0_0_34px_rgba(124,58,237,0.08)]">
+        <div className="mb-3 flex items-center gap-2.5">
+          <span className="flex h-7 w-7 items-center justify-center rounded-full bg-violet-500/20 text-violet-300 shadow-[0_0_18px_rgba(124,58,237,0.25)]">
+            <Plus className="h-3.5 w-3.5" />
           </span>
           <h2 className="text-sm font-bold uppercase tracking-wider">Novo Pagamento</h2>
           <p className="text-xs text-muted-foreground">Cadastre um novo Pix ou agende para futuras datas.</p>
         </div>
-        <div className="grid gap-4 xl:grid-cols-[1.15fr_0.85fr_1.25fr_0.9fr_0.7fr_0.75fr_auto_0.8fr]">
-          <label className="space-y-2">
+        <div className="grid gap-3 xl:grid-cols-[1.15fr_0.85fr_1.25fr_0.9fr_0.7fr_0.75fr_auto_0.8fr]">
+          <label className="space-y-1.5">
             <span className="text-xs font-bold text-foreground">Cliente</span>
-            <select value={newPayment.clientId} onChange={(e) => handleClientChange(e.target.value)} className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm text-muted-foreground outline-none focus:border-primary">
+            <select value={newPayment.clientId} onChange={(e) => handleClientChange(e.target.value)} className="h-9 w-full rounded-lg border border-border bg-background px-3 text-sm text-muted-foreground outline-none focus:border-primary">
               {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           </label>
-          <label className="space-y-2">
+          <label className="space-y-1.5">
             <span className="text-xs font-bold text-foreground">Data de envio</span>
-            <Input type="date" value={newPayment.date} onChange={(e) => setNewPayment((p) => ({ ...p, date: e.target.value }))} className="h-10 bg-background" />
+            <Input type="date" value={newPayment.date} onChange={(e) => setNewPayment((p) => ({ ...p, date: e.target.value }))} className="h-9 bg-background" />
           </label>
-          <label className="space-y-2">
+          <label className="space-y-1.5">
             <span className="text-xs font-bold text-foreground">Destino / Campanha</span>
-            <Input value={newPayment.destination} onChange={(e) => setNewPayment((p) => ({ ...p, destination: e.target.value }))} className="h-10 bg-background" placeholder="Selecione a campanha" />
+            <Input value={newPayment.destination} onChange={(e) => setNewPayment((p) => ({ ...p, destination: e.target.value }))} className="h-9 bg-background" placeholder="Selecione a campanha" />
           </label>
-          <label className="space-y-2">
+          <label className="space-y-1.5">
             <span className="text-xs font-bold text-foreground">Canal</span>
-            <select value={newPayment.channel} onChange={(e) => setNewPayment((p) => ({ ...p, channel: e.target.value as PaymentChannel }))} className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm text-foreground outline-none focus:border-primary">
+            <select value={newPayment.channel} onChange={(e) => setNewPayment((p) => ({ ...p, channel: e.target.value as PaymentChannel }))} className="h-9 w-full rounded-lg border border-border bg-background px-3 text-sm text-foreground outline-none focus:border-primary">
               {PAYMENT_CHANNELS.filter((ch) => ch !== 'Todos').map((ch) => <option key={ch}>{ch}</option>)}
             </select>
           </label>
-          <label className="space-y-2">
+          <label className="space-y-1.5">
             <span className="text-xs font-bold text-foreground">Valor</span>
-            <div className="flex h-10 items-center gap-2 rounded-lg border border-border bg-background px-3">
+            <div className="flex h-9 items-center gap-2 rounded-lg border border-border bg-background px-3">
               <span className="text-sm font-bold text-muted-foreground">R$</span>
               <CurrencyInput value={newPayment.amount} onChange={(amount) => { amountTouchedRef.current = true; setNewPayment((p) => ({ ...p, amount })); }} className="min-w-0 flex-1 bg-transparent text-sm font-bold outline-none" />
             </div>
           </label>
-          <label className="space-y-2">
+          <label className="space-y-1.5">
             <span className="text-xs font-bold text-foreground">Status</span>
-            <select value={newPayment.status} onChange={(e) => setNewPayment((p) => ({ ...p, status: e.target.value as PaymentStatus }))} className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm font-bold text-amber-400 outline-none focus:border-primary">
+            <select value={newPayment.status} onChange={(e) => setNewPayment((p) => ({ ...p, status: e.target.value as PaymentStatus }))} className="h-9 w-full rounded-lg border border-border bg-background px-3 text-sm font-bold text-amber-400 outline-none focus:border-primary">
               {PAYMENT_STATUS_OPTIONS.map((status) => <option key={status}>{status}</option>)}
             </select>
           </label>
@@ -2134,7 +2134,7 @@ export default function PagamentosPage() {
               onClick={() => setNewPayment((p) => ({ ...p, extra: !p.extra }))}
               title={newPayment.extra ? 'Remover destaque extra' : 'Marcar como pagamento extra'}
               className={cn(
-                'flex h-10 w-14 items-center justify-center rounded-lg border transition-all',
+                'flex h-9 w-14 items-center justify-center rounded-lg border transition-all',
                 newPayment.extra
                   ? 'border-violet-500/60 bg-violet-500/20 text-violet-300 shadow-[0_0_14px_rgba(168,85,247,0.4)]'
                   : 'border-border bg-background text-muted-foreground hover:border-violet-500/40 hover:text-violet-400',
@@ -2147,14 +2147,14 @@ export default function PagamentosPage() {
             type="button"
             onClick={handleAddPayment}
             disabled={recurMode !== 'none' && previewCount === 0}
-            className="mt-6 flex h-14 items-center justify-center gap-2 rounded-xl border border-primary/60 bg-primary/15 px-4 text-sm font-bold text-foreground shadow-[0_0_24px_rgba(85,245,47,0.28)] transition-all hover:bg-primary/25 disabled:opacity-50"
+            className="mt-5 flex h-9 items-center justify-center gap-2 rounded-xl border border-primary/60 bg-primary/15 px-4 text-sm font-bold text-foreground shadow-[0_0_24px_rgba(85,245,47,0.28)] transition-all hover:bg-primary/25 disabled:opacity-50"
           >
             <Plus className="h-4 w-4" />
             Adicionar Pix
           </button>
         </div>
         {/* ── Recorrência ─────────────────────────────────────────── */}
-        <div className="mt-4 border-t border-border/50 pt-4">
+        <div className="mt-3 border-t border-border/50 pt-3">
           <div className="flex flex-wrap items-center gap-3">
             <button
               type="button"
