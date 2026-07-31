@@ -8,11 +8,12 @@ name: Monitor de Redes Sociais
 
 on:
   schedule:
-    # 3x ao dia — 06h, 12h e 18h BRT (09h, 15h, 21h UTC). O aviso WhatsApp só
-    # dispara na 1ª coleta com contas vermelhas do dia (trava por data em system_settings).
-    - cron: '0 9 * * *'
-    - cron: '0 15 * * *'
-    - cron: '0 21 * * *'
+    # 3x ao dia (horário de Brasília, UTC-3). O aviso WhatsApp dispara na 1ª
+    # coleta do dia (trava por data em system_settings), então a 1ª batida define
+    # a hora do aviso: 09h15 BRT. As outras duas só mantêm os dados frescos.
+    - cron: '15 12 * * *'  # 09h15 BRT (12h15 UTC) — coleta + dispara o aviso do dia
+    - cron: '0 15 * * *'   # 12h00 BRT (15h UTC) — só atualiza os dados
+    - cron: '0 21 * * *'   # 18h00 BRT (21h UTC) — só atualiza os dados
   workflow_dispatch: {}
 
 jobs:
