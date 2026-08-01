@@ -341,6 +341,61 @@ function VaultModal({
 
 // ── Tab (per-client) ──────────────────────────────────────────────────────────
 
+/**
+ * Aviso de senhas ainda em texto puro, com a migração a um clique.
+ *
+ * Existe porque a migração é o passo que de fato converte o que já está
+ * gravado — deixá-la só como chamada de API significaria, na prática, que ela
+ * nunca aconteceria, e o Cofre seguiria em texto puro com a cifragem "ligada".
+ *
+ * Só aparece quando há o que migrar: banner permanente vira paisagem e some da
+ * atenção de quem trabalha na tela todo dia.
+ */
+function BannerCifragem({ entries, onMigrado }: { entries: VaultEntry[]; onMigrado: () => void }) {
+  const [migrando, setMigrando] = useState(false);
+  const [resultado, setResultado] = useState('');
+
+  const puras = entries.filter(e => e.password_estado === 'puro').length;
+  if (puras === 0 && !resultado) return null;
+
+  async function migrar() {
+    setMigrando(true); setResultado('');
+    try {
+      const res = await fetch('/api/vault/migrar', { method: 'POST' });
+      const json = await res.json() as { cifradas?: number; error?: string };
+      if (!res.ok) {
+        // 503 = VAULT_KEY ausente no servidor. Mostrar o motivo real evita a
+        // conclusão errada de que "o botão não funciona".
+        setResultado(json.error ?? 'Não foi possível migrar agora.');
+        return;
+      }
+      setResultado(`${json.cifradas ?? 0} senha(s) cifrada(s).`);
+      onMigrado();
+    } catch {
+      setResultado('Não foi possível migrar agora.');
+    } finally {
+      setMigrando(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-3 rounded-[var(--radius)] border border-yellow-400/30 bg-yellow-400/10 p-3">
+      <ShieldCheck className="w-4 h-4 shrink-0 text-yellow-400" />
+      <p className="flex-1 min-w-0 text-xs text-yellow-400">
+        {puras > 0
+          ? <>{puras} senha(s) deste cliente ainda estão <strong>em texto puro</strong> no banco. A cifragem vale para o que for gravado de agora em diante — o que já existe precisa ser convertido.</>
+          : resultado}
+      </p>
+      {puras > 0 && (
+        <Button size="sm" onClick={() => void migrar()} disabled={migrando} className="shrink-0">
+          {migrando ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Cifrar agora'}
+        </Button>
+      )}
+      {puras > 0 && resultado && <span className="w-full text-xs text-yellow-400/80">{resultado}</span>}
+    </div>
+  );
+}
+
 export function VaultTab({ clientId }: { clientId: string }) {
   const [entries, setEntries]       = useState<VaultEntry[]>([]);
   const [loading, setLoading]       = useState(true);
@@ -388,6 +443,8 @@ export function VaultTab({ clientId }: { clientId: string }) {
 
   return (
     <div className="space-y-5">
+      <BannerCifragem entries={entries} onMigrado={load} />
+
       {/* Toolbar */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2 flex-1 min-w-0 max-w-sm">
