@@ -1,6 +1,7 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { getSession, unauthorized } from '@/lib/api-auth';
+import { randomBytes } from 'node:crypto';
 import { maskToken, tokenEhMascara } from '@/lib/anotaai';
 
 const ENSURE = `
@@ -44,6 +45,24 @@ function semToken(r: any) {
   return { ...resto, integrationToken: maskToken(_rawToken), tokenConfigurado: Boolean(_rawToken) };
 }
 
+/**
+ * "Token Externo" do Portal de Integração — o valor que o Anota AI devolve pra
+ * nós em cada webhook, e a única autenticação disponível nesse caminho.
+ *
+ * Gerado sob demanda na primeira leitura: a loja pode ter sido cadastrada antes
+ * desta coluna existir, e exigir recadastro só pra isso seria atrito à toa.
+ * Diferente do token DELES, este pode voltar inteiro ao browser — é justamente
+ * o que precisa ser copiado pro portal, e sozinho não dá acesso a nada.
+ */
+async function garantirWebhookToken(pool: ReturnType<typeof makeServerPool>, clientId: string) {
+  await pool.query(
+    `UPDATE public.client_anota_ai_stores
+        SET webhook_token = $2, updated_at = NOW()
+      WHERE client_id = $1 AND (webhook_token IS NULL OR webhook_token = '')`,
+    [clientId, randomBytes(24).toString('hex')],
+  ).catch(() => {});
+}
+
 function clean(value: unknown): string {
   return String(value ?? '').trim();
 }
@@ -57,6 +76,8 @@ export async function GET(
   const pool = makeServerPool();
   try {
     await pool.query(ENSURE);
+    await pool.query('ALTER TABLE public.client_anota_ai_stores ADD COLUMN IF NOT EXISTS webhook_token TEXT').catch(() => {});
+    await garantirWebhookToken(pool, clientId);
     const { rows } = await pool.query(
       `SELECT
          id::text,
@@ -64,6 +85,7 @@ export async function GET(
          store_id AS "storeId",
          ifood_store_id AS "ifoodStoreId",
          integration_token AS "_rawToken",
+         webhook_token AS "webhookToken",
          active,
          last_test_status AS "lastTestStatus",
          last_test_message AS "lastTestMessage",

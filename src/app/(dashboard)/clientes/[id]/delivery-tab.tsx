@@ -36,7 +36,7 @@ type Painel = {
   regua?: { janelaDias: number; inatividadeDias: number };
   reguaSugerida?: { janelaDias: number; inatividadeDias: number } | null;
   sincronizacao?: { historico_concluido: boolean; ultima_sync_em: string | null; ultimo_erro: string | null; total_pedidos: number };
-  lojasAnotaAi?: { id: string; nome: string; storeId: string }[];
+  lojasAnotaAi?: { id: string; nome: string; storeId: string; webhookToken?: string | null }[];
   fontes?: { provedor: string; conectado: boolean; pedidos: number; desde: string | null }[];
   periodo?: { de: string; ate: string; chave: string };
   anterior?: { de: string; ate: string };
@@ -297,6 +297,7 @@ export function ClientDeliveryTab({ clientId }: { clientId: string }) {
   const k = painel?.kpis;
   const kv = painel?.kpis?.variacao;
   const sync = painel?.sincronizacao;
+  const origem = typeof window !== 'undefined' ? window.location.origin : '';
   const webhookUrl = typeof window !== 'undefined'
     ? `${window.location.origin}/api/webhook/cardapioweb/${clientId}` : '';
 
@@ -601,6 +602,44 @@ export function ClientDeliveryTab({ clientId }: { clientId: string }) {
         <ListaClientes titulo="Em risco" cor={COR_ETAPA.em_risco} clientes={painel?.emRisco ?? []} />
         <ListaClientes titulo="Inativos" cor={COR_ETAPA.inativo} clientes={painel?.inativos ?? []} />
       </div>
+
+      {temAnotaAi && (
+        <Card>
+          <h3 className="font-heading text-xl uppercase leading-none">Webhook do Anota AI</h3>
+          <p className="mt-1 text-sm text-muted-foreground">
+            No Portal de Integração, ligue <strong>Status</strong> e preencha os campos abaixo.
+            Aqui o webhook não é opcional: a API do Anota AI não guarda histórico, então pedido que
+            não chegar na hora <strong>não pode ser buscado depois</strong>.
+          </p>
+          <div className="mt-3 space-y-2">
+            {[
+              { rotulo: 'Root', valor: origem, tag: 'aa-root' },
+              { rotulo: 'Pedidos Realizados · Atualizados · Cancelados (os três iguais, método POST)',
+                valor: `/api/webhook/anotaai/${clientId}`, tag: 'aa-url' },
+              { rotulo: 'Token Externo', valor: painel?.lojasAnotaAi?.[0]?.webhookToken ?? '—', tag: 'aa-tok' },
+            ].map(campo => (
+              <div key={campo.tag}>
+                <Rotulo>{campo.rotulo}</Rotulo>
+                <div className="mt-1 flex items-center gap-2">
+                  <code className="min-w-0 flex-1 truncate rounded-[var(--radius)] border border-border bg-surface-soft px-2 py-1.5 text-xs text-foreground">
+                    {campo.valor}
+                  </code>
+                  <button
+                    type="button" onClick={() => copiar(campo.valor, campo.tag)}
+                    className="shrink-0 rounded-[var(--radius)] border border-border px-2 py-1.5 text-muted-foreground hover:text-foreground"
+                  >
+                    {copiado === campo.tag ? <Check className="h-3.5 w-3.5 text-primary" /> : <Copy className="h-3.5 w-3.5" />}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+          <p className="mt-2 text-[11px] text-muted-foreground">
+            Os três eventos apontam para o mesmo endereço de propósito: o pedido é relido na fonte a
+            cada aviso, então a ordem de chegada não importa.
+          </p>
+        </Card>
+      )}
 
       {temAnotaAi && <AnotaAiImportCard clientId={clientId} onImportado={() => void carregar()} />}
 

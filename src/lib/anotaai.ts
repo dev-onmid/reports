@@ -88,6 +88,10 @@ export async function ensureAnotaAiSchema(pool: Pool) {
        sincronizado_em TIMESTAMPTZ NOT NULL DEFAULT NOW(),
        PRIMARY KEY (client_id, order_id)
      )`,
+    // "Token Externo" do Portal de Integração: o valor que o Anota AI envia de
+    // volta pra nós em cada webhook. É a única autenticação disponível nesse
+    // caminho — sem ele, qualquer um que descubra a URL injeta pedido falso.
+    `ALTER TABLE public.client_anota_ai_stores ADD COLUMN IF NOT EXISTS webhook_token TEXT`,
     `CREATE INDEX IF NOT EXISTS anotaai_orders_cliente_data_idx
        ON public.anotaai_orders (client_id, created_at DESC)`,
     // Fila de reconsulta: pedido não-final precisa ser relido até fechar.
@@ -119,6 +123,7 @@ export type AnotaAiStore = {
   store_id: string;
   ifood_store_id: string | null;
   integration_token: string;
+  webhook_token: string | null;
   active: boolean;
 };
 
@@ -232,7 +237,8 @@ export async function testarToken(token: string): Promise<{ ok: true; pedidosHoj
 export async function listarLojas(pool: Pool, clientId?: string): Promise<AnotaAiStore[]> {
   await ensureAnotaAiSchema(pool);
   const { rows } = await pool.query<AnotaAiStore>(
-    `SELECT id::text, client_id, store_name, store_id, ifood_store_id, integration_token, active
+    `SELECT id::text, client_id, store_name, store_id, ifood_store_id, integration_token,
+              webhook_token, active
        FROM public.client_anota_ai_stores
       WHERE active = true ${clientId ? 'AND client_id = $1' : ''}
       ORDER BY client_id, store_name`,
