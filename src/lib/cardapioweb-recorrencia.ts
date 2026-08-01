@@ -54,8 +54,8 @@ export function normalizarRegua(r?: Partial<Regua> | null): Regua {
 
 /** Pedido mínimo que a classificação precisa (shape de `cardapioweb_orders`). */
 export type PedidoLite = {
-  /** ISO 8601 */
-  created_at: string;
+  /** ISO 8601 ou Date — o driver pg devolve Date. */
+  created_at: string | Date;
   total: number;
   status: string;
   sales_channel: string | null;
@@ -70,6 +70,24 @@ export function pedidoValido(p: PedidoLite): boolean {
 }
 
 const DIA_MS = 86_400_000;
+
+/**
+ * Normaliza data vinda do banco.
+ *
+ * ⚠️ O driver `pg` devolve coluna `timestamptz` como objeto **Date**, não
+ * string — e `Date` não tem `.localeCompare`, então ordenar direto lança
+ * TypeError. Com a tabela vazia isso nunca acontecia, o que fez o defeito
+ * passar por tsc, build e testes (que usam string, como o tipo declara) e só
+ * aparecer na primeira loja com pedido de verdade.
+ *
+ * Aceitar os dois formatos aqui mata a classe inteira do problema, em vez de
+ * depender de todo SQL futuro lembrar de converter.
+ */
+export function paraIso(v: string | Date | null | undefined): string {
+  if (v == null) return '';
+  if (v instanceof Date) return Number.isNaN(v.getTime()) ? '' : v.toISOString();
+  return String(v);
+}
 
 export function diasEntre(deIso: string, ateIso: string): number {
   const de = new Date(deIso).getTime();
@@ -167,8 +185,8 @@ export function agruparPorCliente(pedidos: PedidoAgrupavel[], regua: Regua, agor
 
   const out: ClienteDelivery[] = [];
   for (const [chave, lista] of porChave) {
-    lista.sort((a, b) => a.created_at.localeCompare(b.created_at));
-    const datas = lista.map(p => p.created_at);
+    // Normaliza ANTES de ordenar: `Date` não tem localeCompare.
+    const datas = lista.map(p => paraIso(p.created_at)).sort((a, b) => a.localeCompare(b));
     const etapa = classificarEtapa(datas, regua, agoraIso);
     if (!etapa) continue;
 

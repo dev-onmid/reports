@@ -8,6 +8,19 @@
 
 export type Severidade = 'critico' | 'atencao' | 'info';
 
+/**
+ * ⚠️ O driver `pg` devolve `timestamptz` como objeto **Date**, e `Date` não tem
+ * `.localeCompare` — ordenar direto lança TypeError. Com as tabelas vazias isso
+ * nunca acontecia, então passou por tsc, build e testes (que usam string, como
+ * o tipo declara). Descoberto na primeira carga real do Cardápio Web, onde o
+ * mesmo padrão derrubou a rota do painel de delivery.
+ */
+export function paraIso(v: string | Date | null | undefined): string {
+  if (v == null) return '';
+  if (v instanceof Date) return Number.isNaN(v.getTime()) ? '' : v.toISOString();
+  return String(v);
+}
+
 export const RANK_SEVERIDADE: Record<Severidade, number> = { critico: 0, atencao: 1, info: 2 };
 
 /**
@@ -28,8 +41,8 @@ export type NotificacaoBruta = {
   href: string | null;
   client_id: string | null;
   importante: boolean;
-  lida_em: string | null;
-  created_at: string;
+  lida_em: string | Date | null;
+  created_at: string | Date;
 };
 
 export type ItemFeed = {
@@ -75,7 +88,7 @@ export function normalizarFeed(
       meu: Boolean(c && c.gestor_id && c.gestor_id === userId),
       lida: r.lida_em !== null,
       importante: r.importante,
-      criadoEm: r.created_at,
+      criadoEm: paraIso(r.created_at),
     };
   });
 }
@@ -143,10 +156,10 @@ export type NotaBruta = {
   texto: string;
   categoria: string | null;
   status: string | null;
-  prazo_em: string | null;
+  prazo_em: string | Date | null;
   autor_id: string | null;
   autor_nome: string | null;
-  created_at: string;
+  created_at: string | Date;
 };
 
 export type CardQuadro = {
@@ -179,7 +192,8 @@ export function montarQuadro(
     .filter(n => (n.status ?? 'rapida') !== 'concluida')
     .map<CardQuadro>(n => {
       const c = porId.get(n.cliente_id);
-      const prazo = n.prazo_em ? new Date(n.prazo_em).getTime() : NaN;
+      const prazoIso = paraIso(n.prazo_em);
+      const prazo = prazoIso ? new Date(prazoIso).getTime() : NaN;
       return {
         id: n.id,
         clientId: n.cliente_id,
@@ -187,12 +201,12 @@ export function montarQuadro(
         texto: n.texto,
         categoria: n.categoria,
         status: (n.status ?? 'rapida') === 'andamento' ? 'andamento' : 'rapida',
-        prazoEm: n.prazo_em,
+        prazoEm: prazoIso || null,
         atrasada: Number.isFinite(prazo) && prazo < t,
         autorNome: n.autor_nome,
         // Nota é "minha" por autoria OU por ser de cliente que eu gerencio.
         meu: n.autor_id === userId || Boolean(c && c.gestor_id && c.gestor_id === userId),
-        criadoEm: n.created_at,
+        criadoEm: paraIso(n.created_at),
       };
     })
     // Atrasada primeiro, depois quem tem prazo mais próximo, depois mais recente.
