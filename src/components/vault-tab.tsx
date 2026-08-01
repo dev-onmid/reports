@@ -21,6 +21,8 @@ export type VaultEntry = {
   url?: string | null;
   login?: string | null;
   password_enc?: string | null;
+  /** Vem da API: 'ok' decifrada, 'puro' legado sem cifrar, 'erro' chave não abre. */
+  password_estado?: 'ok' | 'puro' | 'erro' | 'vazio';
   category: string;
   notes?: string | null;
   created_at: string;
@@ -163,6 +165,17 @@ export function VaultCard({
               {showPw ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
             </button>
             <CopyButton value={entry.password_enc} />
+          </div>
+        )}
+        {/* Senha cifrada que a chave atual não abre. Precisa aparecer: sem este
+            aviso a entrada pareceria "sem senha", e alguém gravaria por cima —
+            destruindo a credencial em vez de recuperá-la. */}
+        {entry.password_estado === 'erro' && (
+          <div className="flex items-center gap-2 rounded-lg bg-destructive/10 px-2.5 py-1.5 text-destructive">
+            <KeyRound className="w-3.5 h-3.5 shrink-0" />
+            <span className="flex-1 text-xs">
+              Existe uma senha aqui, mas não foi possível decifrá-la (VAULT_KEY ausente ou diferente da usada ao gravar). Não sobrescreva.
+            </span>
           </div>
         )}
         {entry.notes && (
