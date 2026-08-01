@@ -52,6 +52,7 @@ import CrmWorkspace from '@/app/(dashboard)/crm/page';
 import { ClientTrackingTab } from './tracking-tab';
 import { LandingPagesTab } from './landing-pages-tab';
 import { ClientDemandasTab } from './demandas-tab';
+import { ClientDeliveryTab } from './delivery-tab';
 
 // ── Funnel types & logic ───────────────────────────────────────────────────────
 type FunnelStage = { id: string; name: string; conversion: number };
@@ -4664,11 +4665,14 @@ function SheetsResultsTab({ clientId }: { clientId: string }) {
 }
 
 // ── Page ───────────────────────────────────────────────────────────────────────
-const TABS = ['planejamento', 'demandas', 'crm', 'rastreio', 'pagamentos', 'lps', 'dna', 'historico', 'mapa'] as const;
+const TABS = ['planejamento', 'demandas', 'crm', 'rastreio', 'pagamentos', 'delivery', 'lps', 'dna', 'historico', 'mapa'] as const;
 type Tab = typeof TABS[number];
 // Abas operacionais sempre visíveis na barra; o resto (referência) vai pro menu "Mais".
 const PRIMARY_TABS: Tab[] = ['planejamento', 'demandas', 'crm', 'rastreio', 'pagamentos'];
-const MORE_TABS: Tab[] = ['lps', 'dna', 'historico', 'mapa'];
+// `delivery` fica no overflow porque só interessa a cliente de cardápio digital.
+// A aba aparece para todos de propósito: é por ela que se CONECTA uma loja nova
+// (sem conexão, ela mostra o formulário em vez do painel).
+const MORE_TABS: Tab[] = ['delivery', 'lps', 'dna', 'historico', 'mapa'];
 
 function readSavedDashboardBlocks(clientId: string): ClientDashboardWidget[] {
   if (typeof window === 'undefined') return [];
@@ -4890,6 +4894,7 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
     pagamentos:   'Pagamentos',
     dna:          'DNA do Cliente',
     crm:          'CRM',
+    delivery:     'Delivery',
   };
 
   if (onboardingPending) {
@@ -5080,6 +5085,7 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
       )}
 
       {tab === 'demandas' && <ClientDemandasTab clientId={id} />}
+      {tab === 'delivery' && <ClientDeliveryTab clientId={id} />}
 
       {tab === 'mapa' && <ClientMindMapTab clientId={id} clientName={client.name} />}
 
