@@ -2,13 +2,15 @@ import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { getSession, unauthorized } from '@/lib/api-auth';
 import { ensureCardapioWebSchema, getConnection } from '@/lib/cardapioweb';
+import { ensureAnotaAiSchema, listarLojas } from '@/lib/anotaai';
+import { lerPedidosDelivery } from '@/lib/delivery-orders';
 import { optimizerDateRangeForPeriod } from '@/lib/optimizer-period-range';
 import { autoPreviousPeriod } from '@/lib/delivery-report-builder';
 import type { OptimizerPeriodKey } from '@/lib/optimizer';
 import {
   agruparPorCliente, agregarFunil, sugerirRegua, normalizarRegua, normalizarTelefoneBR,
-  resumoPeriodo, agregarCupons, variacao, funilEm, limitesBRT,
-  type PedidoComDesconto, type ClienteDelivery, type Periodo,
+  resumoPeriodo, agregarCupons, variacao, funilEm, limitesBRT, noPeriodo,
+  type ClienteDelivery, type Periodo,
 } from '@/lib/cardapioweb-recorrencia';
 
 /**
@@ -50,12 +52,17 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
 
   const pool = makeServerPool();
   try {
-    await ensureCardapioWebSchema(pool);
-    const conn = await getConnection(pool, clientId);
-    if (!conn) return Response.json({ conectado: false });
+    await Promise.all([ensureCardapioWebSchema(pool), ensureAnotaAiSchema(pool)]);
+    const [conn, lojasAnota] = await Promise.all([
+      getConnection(pool, clientId),
+      listarLojas(pool, clientId),
+    ]);
+    // O painel existe se QUALQUER plataforma estiver conectada — um cliente
+    // pode usar só Anota AI, só Cardápio Web, ou os dois.
+    if (!conn && lojasAnota.length === 0) return Response.json({ conectado: false });
 
     const regua = normalizarRegua({
-      janelaDias: conn.janela_dias, inatividadeDias: conn.inatividade_dias,
+      janelaDias: conn?.janela_dias, inatividadeDias: conn?.inatividade_dias,
     });
 
     const { periodo, chave } = resolverPeriodo(req);
@@ -64,14 +71,8 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
     // que rotulava o comparativo de julho como "Maio".
     const anterior = autoPreviousPeriod(periodo.de, periodo.ate);
 
-    const { rows: pedidos } = await pool.query<PedidoComDesconto & { order_id: string }>(
-      `SELECT order_id, customer_id, customer_name, customer_phone,
-              total::float8 AS total, status, sales_channel, created_at, discounts
-         FROM public.cardapioweb_orders
-        WHERE client_id = $1
-        ORDER BY created_at ASC`,
-      [clientId],
-    );
+    // Uma leitura só para as duas plataformas — ver delivery-orders.ts.
+    const { pedidos, fontes } = await lerPedidosDelivery(pool, clientId);
 
     const agora = new Date().toISOString();
     // Funil de HOJE é o que orienta ação (quem ligar agora); o do período é o
@@ -87,26 +88,34 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
     const kpiAtual = resumoPeriodo(pedidos, periodo);
     const kpiAnterior = resumoPeriodo(pedidos, { de: anterior.from, ate: anterior.to });
 
-    const { rows: canais } = await pool.query<{ sales_channel: string | null; receita: number; pedidos: number }>(
-      `SELECT sales_channel, COALESCE(SUM(total),0)::float8 AS receita, COUNT(*)::int AS pedidos
-         FROM public.cardapioweb_orders
-        WHERE client_id = $1 AND status <> 'canceled'
-          AND created_at >= $2::timestamptz AND created_at < $3::timestamptz
-        GROUP BY sales_channel ORDER BY receita DESC`,
-      [clientId, limitesBRT(periodo.de, periodo.ate).inicio, fimDoPeriodo],
-    );
+    // Agregado em JS e não em SQL: os pedidos vêm de duas tabelas, e um GROUP BY
+    // por tabela voltaria a dividir o que a camada de leitura acabou de unir.
+    const canaisMap = new Map<string, { receita: number; pedidos: number }>();
+    for (const o of pedidos) {
+      if (o.status === 'canceled' || !noPeriodo(o.created_at, periodo)) continue;
+      const k = o.sales_channel ?? 'desconhecido';
+      const cur = canaisMap.get(k) ?? { receita: 0, pedidos: 0 };
+      cur.receita += Number(o.total) || 0;
+      cur.pedidos += 1;
+      canaisMap.set(k, cur);
+    }
+    const canais = [...canaisMap.entries()]
+      .map(([sales_channel, v]) => ({ sales_channel, ...v }))
+      .sort((a, b) => b.receita - a.receita);
 
     return Response.json({
       conectado: true,
-      merchant: { id: conn.merchant_id, nome: conn.merchant_name },
+      merchant: conn ? { id: conn.merchant_id, nome: conn.merchant_name } : null,
+      lojasAnotaAi: lojasAnota.map(l => ({ id: l.id, nome: l.store_name, storeId: l.store_id })),
+      fontes,
       regua,
       reguaSugerida: sugerirRegua(clientesHoje),
       periodo: { ...periodo, chave },
       anterior: { de: anterior.from, ate: anterior.to },
       sincronizacao: {
-        historico_concluido: conn.historico_concluido,
-        ultima_sync_em: conn.ultima_sync_em,
-        ultimo_erro: conn.ultimo_erro,
+        historico_concluido: conn?.historico_concluido ?? true,
+        ultima_sync_em: conn?.ultima_sync_em ?? null,
+        ultimo_erro: conn?.ultimo_erro ?? null,
         total_pedidos: pedidos.length,
       },
       kpis: {

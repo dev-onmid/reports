@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ETAPAS, ETAPA_LABEL, type Etapa, type ClienteDelivery } from '@/lib/cardapioweb-recorrencia';
+import { AnotaAiImportCard } from './anotaai-import-card';
 
 /**
  * Dashboard de delivery (Cardápio Web) na tela do cliente.
@@ -31,10 +32,12 @@ type Conexao = {
 type Painel = {
   conectado: boolean;
   error?: string;
-  merchant?: { id: string | null; nome: string | null };
+  merchant?: { id: string | null; nome: string | null } | null;
   regua?: { janelaDias: number; inatividadeDias: number };
   reguaSugerida?: { janelaDias: number; inatividadeDias: number } | null;
   sincronizacao?: { historico_concluido: boolean; ultima_sync_em: string | null; ultimo_erro: string | null; total_pedidos: number };
+  lojasAnotaAi?: { id: string; nome: string; storeId: string }[];
+  fontes?: { provedor: string; conectado: boolean; pedidos: number; desde: string | null }[];
   periodo?: { de: string; ate: string; chave: string };
   anterior?: { de: string; ate: string };
   kpis?: {
@@ -219,7 +222,8 @@ export function ClientDeliveryTab({ clientId }: { clientId: string }) {
   }
 
   // ---------------------------------------------------------- sem conexão
-  if (!conexao) {
+  const temAnotaAi = (painel?.lojasAnotaAi?.length ?? 0) > 0;
+  if (!conexao && !temAnotaAi) {
     return (
       <div className="max-w-2xl space-y-4 p-1">
         <Card>
@@ -298,20 +302,21 @@ export function ClientDeliveryTab({ clientId }: { clientId: string }) {
 
   return (
     <div className="space-y-4 p-1">
-      {/* estado da conexão */}
+      {/* estado da conexão. `conexao` é do Cardápio Web e pode não existir:
+          um cliente pode estar só no Anota AI. */}
       <Card className="flex flex-wrap items-center gap-x-6 gap-y-2">
         <div className="flex items-center gap-2">
           <Store className="h-4 w-4 text-primary" />
           <span className="font-heading text-lg uppercase leading-none">
-            {conexao.merchant_name ?? 'Loja conectada'}
+            {conexao?.merchant_name ?? painel?.lojasAnotaAi?.[0]?.nome ?? 'Loja conectada'}
           </span>
-          {conexao.merchant_id && (
+          {conexao?.merchant_id && (
             <span className="rounded border border-border px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">
               loja {conexao.merchant_id}
             </span>
           )}
         </div>
-        <span className="text-xs text-muted-foreground">token {conexao.token_masked}</span>
+        {conexao && <span className="text-xs text-muted-foreground">token {conexao.token_masked}</span>}
         <span className="text-xs text-muted-foreground">
           {sync?.total_pedidos ?? 0} pedidos · última sync {dataBR(sync?.ultima_sync_em)}
         </span>
@@ -336,6 +341,24 @@ export function ClientDeliveryTab({ clientId }: { clientId: string }) {
         <div className="flex items-start gap-2 rounded-[var(--radius)] border border-destructive/30 bg-destructive/10 p-3 text-destructive">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
           <p className="text-xs">Último sincronismo falhou: {sync.ultimo_erro}</p>
+        </div>
+      )}
+
+      {/* De onde vêm os números. No Anota AI a data de início importa: não há
+          histórico anterior a ela, e omitir isso faria o gestor comparar
+          períodos que simplesmente não existiam. */}
+      {painel?.fontes && painel.fontes.some(f => f.conectado) && (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
+          {painel.fontes.filter(f => f.conectado).map(f => (
+            <span key={f.provedor} className="flex items-center gap-1.5">
+              <span className="h-1.5 w-1.5 shrink-0 bg-primary" />
+              <strong className="text-foreground">
+                {f.provedor === 'anotaai' ? 'Anota AI' : 'Cardápio Web'}
+              </strong>
+              {f.pedidos} pedidos
+              {f.desde && <>· desde {dataBR(f.desde)}</>}
+            </span>
+          ))}
         </div>
       )}
 
@@ -579,8 +602,11 @@ export function ClientDeliveryTab({ clientId }: { clientId: string }) {
         <ListaClientes titulo="Inativos" cor={COR_ETAPA.inativo} clientes={painel?.inativos ?? []} />
       </div>
 
-      {/* webhook */}
-      <Card>
+      {temAnotaAi && <AnotaAiImportCard clientId={clientId} onImportado={() => void carregar()} />}
+
+      {/* webhook — específico do Cardápio Web; o do Anota AI é cadastrado no
+          Portal de Integração deles. */}
+      {conexao && <Card>
         <h3 className="font-heading text-xl uppercase leading-none">Tempo real (opcional)</h3>
         <p className="mt-1 text-sm text-muted-foreground">
           Sem isso os pedidos entram pelo sincronismo periódico. Com isso, entram em segundos.
@@ -607,7 +633,7 @@ export function ClientDeliveryTab({ clientId }: { clientId: string }) {
             </div>
           ))}
         </div>
-      </Card>
+      </Card>}
     </div>
   );
 }

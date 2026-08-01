@@ -38,6 +38,7 @@ const PUBLIC_PREFIXES = [
   // Webhooks de entrada — quem chama é Meta/Evolution/integrações, sem cookie.
   '/api/webhook/whatsapp',
   '/api/webhook/cardapioweb',
+  '/api/webhook/anotaai',
   '/api/meta/webhook',
   '/api/webhooks/',
   '/api/automations/multi/trigger/',
@@ -65,6 +66,7 @@ const CRON_PREFIXES = [
   '/api/alerts/webshare-cron',
   '/api/automations/multi/worker',
   '/api/cardapioweb/sync-cron',
+  '/api/anotaai/sync-cron',
   '/api/crm/backfill-ctwa',
   '/api/crm/disparos/worker',
   '/api/crm/followup/worker',
