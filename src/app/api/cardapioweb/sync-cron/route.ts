@@ -25,7 +25,15 @@ export const maxDuration = 300;
 /** Orçamento por execução, com folga para a rota responder antes do teto. */
 const ORCAMENTO_MS = 240_000;
 /** Teto de detalhes por execução: fica abaixo dos 300/3min por estabelecimento. */
-const DETALHES_POR_LOJA = 60;
+/**
+ * Uma página do histórico tem 100 pedidos. Com teto de 60, cada página exigia
+ * DUAS execuções (60 + 40), metade da velocidade — e deixava a página parada no
+ * meio do caminho. 110 fecha a página numa passada.
+ *
+ * Continua dentro do limite: 100 detalhes + 1 histórico por execução, a cada 2
+ * minutos, dá ~150 requisições por 3 minutos, contra o teto de 300/3min.
+ */
+const DETALHES_POR_LOJA = 110;
 const JANELA_HISTORICO_MESES = 6;
 
 function autorizado(req: NextRequest): boolean {
@@ -189,6 +197,16 @@ export async function GET(req: NextRequest) {
           r.historico_importados = h.importados;
           r.historico_concluido = h.concluido;
         }
+        // Carimba a sincronização SEMPRE que a execução chegou até aqui, e não
+        // só quando uma página fecha. Antes, uma passada que importava 60 de
+        // 100 pedidos deixava `ultima_sync_em` nulo — e a tela dizia "última
+        // sync —", como se nada estivesse acontecendo, no exato momento em que
+        // estava importando.
+        await pool.query(
+          `UPDATE public.cardapioweb_connections
+              SET ultima_sync_em = NOW(), ultimo_erro = NULL WHERE client_id = $1`,
+          [conn.client_id],
+        ).catch(() => {});
       } catch (err) {
         r.erro = err instanceof Error ? err.message : String(err);
         await pool.query(
