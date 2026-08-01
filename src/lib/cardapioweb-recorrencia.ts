@@ -278,3 +278,213 @@ export function sufixo8(raw: string | null | undefined): string | null {
   const n = normalizarTelefoneBR(raw);
   return n && n.length >= 8 ? n.slice(-8) : null;
 }
+
+// ---------------------------------------------------------------- Período
+
+/**
+ * Converte um intervalo de DATAS em BRT para os instantes UTC correspondentes.
+ *
+ * `created_at` é gravado em UTC, mas o lojista pensa em dias de Brasília — sem
+ * essa conversão, pedido feito às 22h de 31/jul cairia em agosto no relatório.
+ * BRT fixo em UTC-3: o Brasil não tem mais horário de verão desde 2019, e é a
+ * mesma escolha já feita em `disparos-schedule`.
+ *
+ * O fim é EXCLUSIVO (dia seguinte às 00h BRT), então o último dia entra inteiro.
+ */
+export function limitesBRT(deData: string, ateData: string): { inicio: string; fimExclusivo: string } {
+  return {
+    inicio: `${deData}T03:00:00.000Z`,
+    fimExclusivo: new Date(new Date(`${ateData}T03:00:00.000Z`).getTime() + DIA_MS).toISOString(),
+  };
+}
+
+export type Periodo = { de: string; ate: string };
+
+export function noPeriodo(createdAt: string | Date, p: Periodo): boolean {
+  const iso = paraIso(createdAt);
+  if (!iso) return false;
+  const { inicio, fimExclusivo } = limitesBRT(p.de, p.ate);
+  return iso >= inicio && iso < fimExclusivo;
+}
+
+export type ResumoPeriodo = {
+  receita: number;
+  pedidos: number;
+  ticketMedio: number;
+  clientesUnicos: number;
+  /** Clientes cuja PRIMEIRA compra de toda a base caiu neste período. */
+  clientesNovos: number;
+};
+
+/**
+ * KPIs somados no período. Cancelado fica de fora — ele não é receita.
+ *
+ * ⚠️ Isto é uma SOMA sobre um intervalo, conceito diferente do funil, que é uma
+ * FOTO num instante. Misturar os dois numa mesma leitura é a principal fonte de
+ * confusão nesse tipo de painel, por isso são funções separadas.
+ */
+export function resumoPeriodo(pedidos: PedidoAgrupavel[], p: Periodo): ResumoPeriodo {
+  const validos = pedidos.filter(pedidoValido);
+
+  // Primeira compra histórica de cada cliente — precisa varrer TUDO, não só o
+  // período: quem comprou pela primeira vez em maio não é "novo" em julho.
+  const primeiraCompra = new Map<string, string>();
+  for (const o of validos) {
+    const chave = chaveCliente(o);
+    if (!chave) continue;
+    const iso = paraIso(o.created_at);
+    const atual = primeiraCompra.get(chave);
+    if (!atual || iso < atual) primeiraCompra.set(chave, iso);
+  }
+
+  const doPeriodo = validos.filter(o => noPeriodo(o.created_at, p));
+  const receita = doPeriodo.reduce((s, o) => s + (Number(o.total) || 0), 0);
+  const clientes = new Set<string>();
+  let novos = 0;
+  for (const o of doPeriodo) {
+    const chave = chaveCliente(o);
+    if (!chave || clientes.has(chave)) continue;
+    clientes.add(chave);
+    const pc = primeiraCompra.get(chave);
+    if (pc && noPeriodo(pc, p)) novos++;
+  }
+
+  return {
+    receita,
+    pedidos: doPeriodo.length,
+    ticketMedio: doPeriodo.length ? receita / doPeriodo.length : 0,
+    clientesUnicos: clientes.size,
+    clientesNovos: novos,
+  };
+}
+
+/** Identidade do cliente: telefone normalizado, senão o id da plataforma. */
+function chaveCliente(o: PedidoAgrupavel): string | null {
+  const fone = normalizarTelefoneBR(o.customer_phone);
+  if (fone) return fone;
+  return o.customer_id != null && String(o.customer_id) !== '' ? `id:${o.customer_id}` : null;
+}
+
+/**
+ * Variação percentual. `null` quando não há base de comparação — dividir por
+ * zero viraria "∞%" ou "+100%", que mentiria sobre um período sem histórico.
+ */
+export function variacao(atual: number, anterior: number): number | null {
+  if (!Number.isFinite(atual) || !Number.isFinite(anterior)) return null;
+  if (anterior === 0) return null;
+  return ((atual - anterior) / Math.abs(anterior)) * 100;
+}
+
+/**
+ * Funil COMO ESTAVA num instante do passado.
+ *
+ * Só é possível porque `classificarEtapa` recebe o "agora" por parâmetro:
+ * filtrando os pedidos até a data e passando essa data como referência, a
+ * classificação vale para aquele momento. É o que permite dizer "no mês passado
+ * eram 138 recorrentes, hoje são 150".
+ */
+export function funilEm(pedidos: PedidoAgrupavel[], regua: Regua, momentoIso: string): FunilDelivery {
+  const ate = pedidos.filter(o => paraIso(o.created_at) <= momentoIso);
+  return agregarFunil(agruparPorCliente(ate, regua, momentoIso));
+}
+
+// ---------------------------------------------------------------- Cupons
+
+export type DescontoBruto = {
+  kind?: string;
+  category?: string;
+  coupon_code?: string | null;
+  coupon_name?: string | null;
+  total?: number;
+};
+
+export type PedidoComDesconto = PedidoAgrupavel & { discounts?: DescontoBruto[] | string | null };
+
+export type UsoCupom = {
+  codigo: string;
+  nome: string | null;
+  categoria: string;
+  usos: number;
+  descontoTotal: number;
+  /** Receita dos pedidos em que este cupom apareceu (já líquida do desconto). */
+  receita: number;
+  ticketMedio: number;
+};
+
+export type ResumoCupons = {
+  cupons: UsoCupom[];
+  pedidosComDesconto: number;
+  pedidosSemDesconto: number;
+  descontoTotal: number;
+  ticketComDesconto: number;
+  ticketSemDesconto: number;
+  /** Pedidos ainda sem o campo lido (importados antes da coluna existir). */
+  semDadoDeDesconto: number;
+};
+
+function lerDescontos(v: DescontoBruto[] | string | null | undefined): DescontoBruto[] | null {
+  if (v == null) return null; // NULL = nunca lido, diferente de "sem desconto"
+  if (Array.isArray(v)) return v;
+  try {
+    const p = JSON.parse(v) as unknown;
+    return Array.isArray(p) ? p as DescontoBruto[] : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Uso real de cupom, derivado dos PEDIDOS.
+ *
+ * O endpoint de cupons do Cardápio Web só devolve a definição (código, valor,
+ * limite) — não há contagem de uso nem valor descontado. Isso só existe dentro
+ * do pedido, em `discounts[]`, e por isso é calculado aqui.
+ *
+ * `semDadoDeDesconto` é reportado de propósito: enquanto a recaptura não passa
+ * por todos os pedidos antigos, os números são parciais — e um total parcial
+ * apresentado como completo levaria a decisão errada sobre a campanha.
+ */
+export function agregarCupons(pedidos: PedidoComDesconto[], p: Periodo): ResumoCupons {
+  const doPeriodo = pedidos.filter(pedidoValido).filter(o => noPeriodo(o.created_at, p));
+
+  const porCodigo = new Map<string, UsoCupom>();
+  let comDesconto = 0, semDesconto = 0, semDado = 0;
+  let descontoTotal = 0, receitaCom = 0, receitaSem = 0;
+
+  for (const o of doPeriodo) {
+    const ds = lerDescontos(o.discounts);
+    if (ds === null) { semDado++; continue; }
+
+    const valor = Number(o.total) || 0;
+    if (ds.length === 0) { semDesconto++; receitaSem += valor; continue; }
+
+    comDesconto++; receitaCom += valor;
+    for (const d of ds) {
+      const desc = Number(d.total) || 0;
+      descontoTotal += desc;
+      // Fidelidade e cortesia não têm código; agrupa pela categoria para não
+      // sumirem do relatório nem se misturarem com cupom de campanha.
+      const codigo = d.coupon_code?.trim() || (d.category ? `(${d.category})` : '(sem código)');
+      const cur = porCodigo.get(codigo) ?? {
+        codigo, nome: d.coupon_name?.trim() || null,
+        categoria: d.category ?? 'other', usos: 0, descontoTotal: 0, receita: 0, ticketMedio: 0,
+      };
+      cur.usos += 1;
+      cur.descontoTotal += desc;
+      cur.receita += valor;
+      porCodigo.set(codigo, cur);
+    }
+  }
+
+  return {
+    cupons: [...porCodigo.values()]
+      .map(c => ({ ...c, ticketMedio: c.usos ? c.receita / c.usos : 0 }))
+      .sort((a, b) => b.usos - a.usos || b.descontoTotal - a.descontoTotal),
+    pedidosComDesconto: comDesconto,
+    pedidosSemDesconto: semDesconto,
+    descontoTotal,
+    ticketComDesconto: comDesconto ? receitaCom / comDesconto : 0,
+    ticketSemDesconto: semDesconto ? receitaSem / semDesconto : 0,
+    semDadoDeDesconto: semDado,
+  };
+}

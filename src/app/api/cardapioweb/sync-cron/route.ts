@@ -53,6 +53,7 @@ type Resultado = {
   eventos_processados: number;
   historico_importados: number;
   historico_concluido: boolean;
+  descontos_recapturados?: number;
   /** Quantos pedidos existem DE FATO no banco para esta loja. */
   pedidos_no_banco?: number;
   pagina_atual?: number;
@@ -93,6 +94,47 @@ async function drenarEventos(
             SET tentativas = tentativas + 1, erro = $2 WHERE event_id = $1`,
         [ev.event_id, e.message?.slice(0, 300) ?? 'erro'],
       );
+    }
+  }
+  return feitos;
+}
+
+/**
+ * Recaptura pedidos gravados antes da coluna `discounts` existir.
+ *
+ * `discounts IS NULL` significa "detalhe nunca lido com este campo" — diferente
+ * de `'[]'`, que é "lido e sem desconto nenhum". Sem essa distinção seria
+ * preciso refazer TODAS as chamadas de detalhe já pagas, em vez de só as que
+ * faltam.
+ *
+ * Roda depois da fila e do histórico: dado novo vale mais que enriquecer antigo.
+ */
+async function recapturarDescontos(
+  pool: ReturnType<typeof makeServerPool>, conn: CardapioWebConnection, limite: number,
+): Promise<number> {
+  if (limite <= 0) return 0;
+  const { rows } = await pool.query<{ order_id: string }>(
+    `SELECT order_id FROM public.cardapioweb_orders
+      WHERE client_id = $1 AND discounts IS NULL
+      ORDER BY created_at DESC LIMIT $2`,
+    [conn.client_id, limite],
+  );
+
+  let feitos = 0;
+  for (const r of rows) {
+    try {
+      const detalhe = await getOrderDetail(conn, r.order_id);
+      await upsertOrder(pool, conn.client_id, detalhe);
+      feitos++;
+    } catch (err) {
+      if ((err as CardapioWebError).status === 429) break;
+      // Pedido que não volta mais (apagado na origem) ficaria em loop eterno na
+      // fila de recaptura: marca como lido-sem-desconto pra sair dela.
+      await pool.query(
+        `UPDATE public.cardapioweb_orders SET discounts = '[]'::jsonb
+          WHERE client_id = $1 AND order_id = $2`,
+        [conn.client_id, r.order_id],
+      ).catch(() => {});
     }
   }
   return feitos;
@@ -194,11 +236,18 @@ export async function GET(req: NextRequest) {
         // Fila primeiro: pedido de HOJE vale mais que histórico de 5 meses atrás.
         r.eventos_processados = await drenarEventos(pool, conn, DETALHES_POR_LOJA);
 
-        const restante = DETALHES_POR_LOJA - r.eventos_processados;
+        let restante = DETALHES_POR_LOJA - r.eventos_processados;
         if (restante > 0 && Date.now() - inicio < ORCAMENTO_MS) {
           const h = await avancarHistorico(pool, conn, restante);
           r.historico_importados = h.importados;
           r.historico_concluido = h.concluido;
+          restante -= h.importados;
+        }
+
+        // Enriquecer o antigo so com a sobra do orcamento — pedido de hoje e o
+        // avanco do historico vem antes.
+        if (restante > 0 && Date.now() - inicio < ORCAMENTO_MS) {
+          r.descontos_recapturados = await recapturarDescontos(pool, conn, restante);
         }
         // Carimba a sincronização SEMPRE que a execução chegou até aqui, e não
         // só quando uma página fecha. Antes, uma passada que importava 60 de

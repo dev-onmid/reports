@@ -35,8 +35,16 @@ type Painel = {
   regua?: { janelaDias: number; inatividadeDias: number };
   reguaSugerida?: { janelaDias: number; inatividadeDias: number } | null;
   sincronizacao?: { historico_concluido: boolean; ultima_sync_em: string | null; ultimo_erro: string | null; total_pedidos: number };
-  kpis?: { receita30d: number; pedidos30d: number; ticketMedio30d: number; clientesAtivos: number; totalClientes: number };
-  funil?: { etapas: Record<Etapa, { clientes: number; receita: number }>; totalClientes: number };
+  periodo?: { de: string; ate: string; chave: string };
+  anterior?: { de: string; ate: string };
+  kpis?: {
+    atual: ResumoPeriodo; anterior: ResumoPeriodo;
+    variacao: Record<keyof ResumoPeriodo, number | null>;
+  };
+  funil?: {
+    hoje: FunilEtapas; periodo: FunilEtapas; anterior: FunilEtapas;
+  };
+  cupons?: ResumoCupons;
   canais?: { canal: string; marketplace: boolean; receita: number; pedidos: number }[];
   emRisco?: ClienteDelivery[];
   inativos?: ClienteDelivery[];
@@ -45,6 +53,27 @@ type Painel = {
     campanhas: { campanha: string; clientes: number; receita: number; pedidos: number; ticketMedio: number }[];
   };
 };
+
+type ResumoPeriodo = {
+  receita: number; pedidos: number; ticketMedio: number;
+  clientesUnicos: number; clientesNovos: number;
+};
+type FunilEtapas = { etapas: Record<Etapa, { clientes: number; receita: number }>; totalClientes: number };
+type ResumoCupons = {
+  cupons: { codigo: string; nome: string | null; categoria: string; usos: number;
+            descontoTotal: number; receita: number; ticketMedio: number }[];
+  pedidosComDesconto: number; pedidosSemDesconto: number; descontoTotal: number;
+  ticketComDesconto: number; ticketSemDesconto: number; semDadoDeDesconto: number;
+};
+
+/** Os mesmos rótulos do Otimizador — vocabulário único de período no sistema. */
+const PERIODOS: { chave: string; label: string }[] = [
+  { chave: 'last_7d', label: '7 dias' },
+  { chave: 'last_30d', label: '30 dias' },
+  { chave: 'this_month', label: 'Mês atual' },
+  { chave: 'last_month', label: 'Mês passado' },
+  { chave: 'last_90d', label: '90 dias' },
+];
 
 const COR_ETAPA: Record<Etapa, string> = {
   novo: 'var(--primary)',
@@ -68,6 +97,38 @@ function Card({ children, className }: { children: React.ReactNode; className?: 
   );
 }
 
+/**
+ * Badge de variação. `null` (sem base de comparação) NÃO vira "0%" nem "+100%":
+ * mostra travessão, porque inventar uma variação sobre período sem histórico é
+ * pior que admitir que não dá pra comparar.
+ */
+function Delta({ v, inverso = false }: { v: number | null | undefined; inverso?: boolean }) {
+  if (v == null || !Number.isFinite(v)) {
+    return <span className="text-[10px] text-muted-foreground" title="Sem período anterior para comparar">—</span>;
+  }
+  const positivo = inverso ? v < 0 : v > 0;
+  const neutro = Math.abs(v) < 0.05;
+  const cor = neutro ? 'text-muted-foreground' : positivo ? 'text-primary' : 'text-destructive';
+  const sinal = v > 0 ? '▲' : v < 0 ? '▼' : '·';
+  return (
+    <span className={cn('text-[10px] font-bold', cor)}>
+      {sinal} {Math.abs(v).toFixed(v >= 10 || v <= -10 ? 0 : 1)}%
+    </span>
+  );
+}
+
+/** Mesma regra do servidor: sem base anterior não se inventa percentual. */
+function variacaoPct(atual: number, anterior: number): number | null {
+  if (anterior === 0) return null;
+  return ((atual - anterior) / Math.abs(anterior)) * 100;
+}
+
+function periodoBR(p?: { de: string; ate: string }): string {
+  if (!p) return '';
+  const f = (d: string) => d.split('-').reverse().slice(0, 2).join('/');
+  return `${f(p.de)} a ${f(p.ate)}`;
+}
+
 function Rotulo({ children }: { children: React.ReactNode }) {
   return <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{children}</p>;
 }
@@ -81,12 +142,13 @@ export function ClientDeliveryTab({ clientId }: { clientId: string }) {
   const [erroPainel, setErroPainel] = useState('');
   const [form, setForm] = useState({ token: '', janela: 30, inatividade: 60 });
   const [copiado, setCopiado] = useState('');
+  const [periodo, setPeriodo] = useState('last_30d');
 
   const carregar = useCallback(async () => {
     try {
       const [c, p] = await Promise.all([
         fetch(`/api/cardapioweb/config?clientId=${encodeURIComponent(clientId)}`).then(r => r.json()),
-        fetch(`/api/clients/${encodeURIComponent(clientId)}/cardapioweb`).then(r => r.json()),
+        fetch(`/api/clients/${encodeURIComponent(clientId)}/cardapioweb?period=${periodo}`).then(r => r.json()),
       ]);
       setConexao(c?.conexao ?? null);
       setPainel(p ?? null);
@@ -103,7 +165,7 @@ export function ClientDeliveryTab({ clientId }: { clientId: string }) {
     } finally {
       setCarregando(false);
     }
-  }, [clientId]);
+  }, [clientId, periodo]);
 
   useEffect(() => { void carregar(); }, [carregar]);
 
@@ -229,6 +291,7 @@ export function ClientDeliveryTab({ clientId }: { clientId: string }) {
 
   // ---------------------------------------------------------- conectado
   const k = painel?.kpis;
+  const kv = painel?.kpis?.variacao;
   const sync = painel?.sincronizacao;
   const webhookUrl = typeof window !== 'undefined'
     ? `${window.location.origin}/api/webhook/cardapioweb/${clientId}` : '';
@@ -276,18 +339,43 @@ export function ClientDeliveryTab({ clientId }: { clientId: string }) {
         </div>
       )}
 
-      {/* KPIs */}
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      {/* Seletor de período */}
+      <div className="flex flex-wrap items-center gap-2">
+        {PERIODOS.map(p => (
+          <button
+            key={p.chave}
+            type="button"
+            onClick={() => setPeriodo(p.chave)}
+            className={cn(
+              'rounded-[var(--radius)] px-3 py-1.5 text-xs font-bold uppercase tracking-wider transition-colors',
+              periodo === p.chave ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground',
+            )}
+          >
+            {p.label}
+          </button>
+        ))}
+        <span className="ml-auto text-[11px] text-muted-foreground">
+          {periodoBR(painel?.periodo)}
+          {painel?.anterior && <> · comparado com {periodoBR(painel.anterior)}</>}
+        </span>
+      </div>
+
+      {/* KPIs do período, com variação contra o anterior */}
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
         {[
-          { icone: Wallet, rotulo: 'Receita 30d', valor: brl(k?.receita30d ?? 0) },
-          { icone: TrendingUp, rotulo: 'Ticket médio 30d', valor: brl(k?.ticketMedio30d ?? 0) },
-          { icone: Users, rotulo: 'Clientes ativos', valor: String(k?.clientesAtivos ?? 0) },
-          { icone: Users, rotulo: 'Base total', valor: String(k?.totalClientes ?? 0) },
+          { icone: Wallet, rotulo: 'Receita', valor: brl(k?.atual.receita ?? 0), v: kv?.receita },
+          { icone: TrendingUp, rotulo: 'Pedidos', valor: String(k?.atual.pedidos ?? 0), v: kv?.pedidos },
+          { icone: TrendingUp, rotulo: 'Ticket médio', valor: brl(k?.atual.ticketMedio ?? 0), v: kv?.ticketMedio },
+          { icone: Users, rotulo: 'Clientes', valor: String(k?.atual.clientesUnicos ?? 0), v: kv?.clientesUnicos },
+          { icone: Users, rotulo: 'Novos', valor: String(k?.atual.clientesNovos ?? 0), v: kv?.clientesNovos },
         ].map(m => (
           <Card key={m.rotulo}>
             <m.icone className="h-4 w-4 text-primary" />
             <p className="mt-2 font-heading text-2xl leading-none text-foreground">{m.valor}</p>
-            <p className="mt-1 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{m.rotulo}</p>
+            <div className="mt-1 flex items-center gap-1.5">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{m.rotulo}</p>
+              <Delta v={m.v} />
+            </div>
           </Card>
         ))}
       </div>
@@ -296,22 +384,33 @@ export function ClientDeliveryTab({ clientId }: { clientId: string }) {
       <Card>
         <div className="mb-1 flex flex-wrap items-baseline justify-between gap-2">
           <h3 className="font-heading text-xl uppercase leading-none">Funil de recorrência</h3>
-          <p className="text-[11px] text-muted-foreground">
-            Calculado da última compra — ninguém arrasta card aqui. Janela {painel?.regua?.janelaDias}d ·
-            inatividade {painel?.regua?.inatividadeDias}d
+          <p className="max-w-md text-[11px] text-muted-foreground">
+            Foto de como a base estava no <strong>fim do período</strong>, comparada com o fim do
+            período anterior — diferente dos KPIs acima, que somam o intervalo. Calculado da última
+            compra; ninguém arrasta card aqui. Janela {painel?.regua?.janelaDias}d · inatividade{' '}
+            {painel?.regua?.inatividadeDias}d
           </p>
         </div>
         <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
           {ETAPAS.map(e => {
-            const dado = painel?.funil?.etapas[e] ?? { clientes: 0, receita: 0 };
+            const dado = painel?.funil?.periodo.etapas[e] ?? { clientes: 0, receita: 0 };
+            const antes = painel?.funil?.anterior.etapas[e]?.clientes ?? 0;
+            // "Em risco" e "inativo" crescendo é PIOR, então a seta verde tem
+            // que ser a de baixo nessas duas — senão o painel comemora perda.
+            const inverso = e === 'em_risco' || e === 'inativo';
             return (
               <div key={e} className="relative overflow-hidden rounded-[var(--radius)] border border-border bg-surface-soft p-3">
                 <div className="pointer-events-none absolute inset-x-0 top-0 h-0.5" style={{ backgroundColor: COR_ETAPA[e] }} />
                 <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: COR_ETAPA[e] }}>
                   {ETAPA_LABEL[e]}
                 </p>
-                <p className="mt-2 font-heading text-2xl leading-none text-foreground">{dado.clientes}</p>
-                <p className="mt-1 text-[11px] text-muted-foreground">{brl(dado.receita)}</p>
+                <div className="mt-2 flex items-baseline gap-2">
+                  <p className="font-heading text-2xl leading-none text-foreground">{dado.clientes}</p>
+                  <Delta v={variacaoPct(dado.clientes, antes)} inverso={inverso} />
+                </div>
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  {brl(dado.receita)} · era {antes}
+                </p>
               </div>
             );
           })}
@@ -380,6 +479,59 @@ export function ClientDeliveryTab({ clientId }: { clientId: string }) {
               </li>
             ))}
           </ul>
+        </Card>
+      )}
+
+      {/* cupons e descontos */}
+      {painel?.cupons && (painel.cupons.cupons.length > 0 || painel.cupons.semDadoDeDesconto > 0) && (
+        <Card>
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h3 className="font-heading text-xl uppercase leading-none">Cupons e descontos</h3>
+            <span className="text-[11px] text-muted-foreground">
+              {painel.cupons.pedidosComDesconto} de{' '}
+              {painel.cupons.pedidosComDesconto + painel.cupons.pedidosSemDesconto} pedidos usaram desconto
+              {' · '}total {brl(painel.cupons.descontoTotal)}
+            </span>
+          </div>
+
+          {/* A pergunta que o painel do lojista não responde: cupom traz
+              pedido maior ou só corrói margem? */}
+          {painel.cupons.pedidosComDesconto > 0 && painel.cupons.pedidosSemDesconto > 0 && (
+            <p className="mt-2 text-xs text-muted-foreground">
+              Ticket médio <strong className="text-foreground">com</strong> desconto{' '}
+              {brl(painel.cupons.ticketComDesconto)} · <strong className="text-foreground">sem</strong>{' '}
+              desconto {brl(painel.cupons.ticketSemDesconto)}
+              {painel.cupons.ticketComDesconto < painel.cupons.ticketSemDesconto
+                ? ' — o cupom está puxando o ticket para baixo.'
+                : ' — o cupom está trazendo pedido maior.'}
+            </p>
+          )}
+
+          {painel.cupons.cupons.length > 0 && (
+            <ul className="mt-3 space-y-2">
+              {painel.cupons.cupons.map(c => (
+                <li key={c.codigo} className="flex flex-wrap items-center gap-2 text-sm">
+                  <span className="font-mono text-foreground">{c.codigo}</span>
+                  {c.categoria !== 'coupon' && (
+                    <span className="rounded bg-secondary/10 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-secondary">
+                      {c.categoria}
+                    </span>
+                  )}
+                  <span className="ml-auto font-heading text-lg leading-none">{c.usos}x</span>
+                  <span className="text-[11px] text-muted-foreground">
+                    −{brl(c.descontoTotal)} · ticket {brl(c.ticketMedio)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {painel.cupons.semDadoDeDesconto > 0 && (
+            <p className="mt-3 text-[11px] text-yellow-400">
+              ⚠️ {painel.cupons.semDadoDeDesconto} pedido(s) do período foram importados antes da
+              leitura de cupom e ainda estão sendo recapturados — os números acima são parciais.
+            </p>
+          )}
         </Card>
       )}
 

@@ -88,6 +88,10 @@ export async function ensureCardapioWebSchema(pool: Pool) {
        sincronizado_em TIMESTAMPTZ NOT NULL DEFAULT NOW(),
        PRIMARY KEY (client_id, order_id)
      )`,
+    // NULL = detalhe nunca lido (pedido importado antes desta coluna existir);
+    // '[]' = lido e sem desconto. A distincao e o que permite recapturar so o
+    // que falta, em vez de refazer as 528 chamadas ja pagas.
+    `ALTER TABLE public.cardapioweb_orders ADD COLUMN IF NOT EXISTS discounts JSONB`,
     `CREATE INDEX IF NOT EXISTS cardapioweb_orders_cliente_data_idx
        ON public.cardapioweb_orders (client_id, created_at DESC)`,
     `CREATE INDEX IF NOT EXISTS cardapioweb_orders_fone_idx
@@ -162,6 +166,24 @@ export type CwOrderDetail = {
   order_type?: string;
   created_at: string;
   customer?: { id?: number; name?: string; phone?: string; ddi?: string } | null;
+  /**
+   * Cupom e fidelidade aplicados. O endpoint /merchant/coupons so devolve a
+   * DEFINICAO do cupom (codigo, valor, limite) — sem contagem de uso. O uso
+   * real so existe aqui, no pedido.
+   */
+  discounts?: CwDiscount[] | null;
+};
+
+export type CwDiscount = {
+  /** discount | free_delivery | item */
+  kind?: string;
+  /** coupon | loyalty | other */
+  category?: string;
+  coupon_id?: number | string | null;
+  coupon_name?: string | null;
+  coupon_code?: string | null;
+  total?: number;
+  total_points?: number;
 };
 
 export class CardapioWebError extends Error {
@@ -297,8 +319,8 @@ export async function upsertOrder(pool: Pool, clientId: string, d: CwOrderDetail
   await pool.query(
     `INSERT INTO public.cardapioweb_orders
        (client_id, order_id, customer_id, customer_name, customer_phone, total,
-        status, sales_channel, order_type, created_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+        status, sales_channel, order_type, created_at, discounts)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
      ON CONFLICT (client_id, order_id) DO UPDATE SET
        customer_id = COALESCE(EXCLUDED.customer_id, cardapioweb_orders.customer_id),
        customer_name = COALESCE(EXCLUDED.customer_name, cardapioweb_orders.customer_name),
@@ -307,6 +329,7 @@ export async function upsertOrder(pool: Pool, clientId: string, d: CwOrderDetail
        status = EXCLUDED.status,
        sales_channel = COALESCE(EXCLUDED.sales_channel, cardapioweb_orders.sales_channel),
        order_type = COALESCE(EXCLUDED.order_type, cardapioweb_orders.order_type),
+       discounts = EXCLUDED.discounts,
        sincronizado_em = NOW()`,
     [
       clientId,
@@ -321,6 +344,9 @@ export async function upsertOrder(pool: Pool, clientId: string, d: CwOrderDetail
       d.sales_channel ?? null,
       d.order_type ?? null,
       d.created_at,
+      // Array vazio (nao NULL) quando o pedido nao teve desconto: NULL significa
+      // "nunca li o detalhe" e dispara recaptura.
+      JSON.stringify(Array.isArray(d.discounts) ? d.discounts : []),
     ],
   );
 }

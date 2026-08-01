@@ -2,21 +2,47 @@ import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { getSession, unauthorized } from '@/lib/api-auth';
 import { ensureCardapioWebSchema, getConnection } from '@/lib/cardapioweb';
+import { optimizerDateRangeForPeriod } from '@/lib/optimizer-period-range';
+import { autoPreviousPeriod } from '@/lib/delivery-report-builder';
+import type { OptimizerPeriodKey } from '@/lib/optimizer';
 import {
   agruparPorCliente, agregarFunil, sugerirRegua, normalizarRegua, normalizarTelefoneBR,
-  type PedidoAgrupavel, type ClienteDelivery,
+  resumoPeriodo, agregarCupons, variacao, funilEm, limitesBRT,
+  type PedidoComDesconto, type ClienteDelivery, type Periodo,
 } from '@/lib/cardapioweb-recorrencia';
 
 /**
- * Dados do dashboard de delivery de um cliente.
+ * Dados do dashboard de delivery.
  *
  * Leitura pura do que já foi sincronizado — nenhuma chamada ao Cardápio Web
- * aqui. Quem fala com a API é o sync-cron; a tela nunca pode depender de um
- * rate limit de 5 req/min para renderizar.
+ * aqui. A tela nunca pode depender de um rate limit de 5 req/min pra renderizar.
+ *
+ * ⚠️ Duas naturezas de número convivem, e a distinção é deliberada:
+ *  - **KPIs e cupons** são SOMA sobre o intervalo escolhido;
+ *  - **funil** é uma FOTO no fim do intervalo (quem estava em risco naquele
+ *    dia), comparada com a foto no fim do intervalo anterior.
+ * Tratar as duas como a mesma coisa é o erro clássico desse tipo de painel.
  */
 
-/** Canais que NÃO são o cardápio próprio do lojista. */
 const CANAIS_MARKETPLACE = new Set(['ifood']);
+
+const PERIODOS_VALIDOS: OptimizerPeriodKey[] = [
+  'last_7d', 'last_30d', 'this_month', 'last_month', 'last_90d',
+];
+
+function resolverPeriodo(req: NextRequest): { periodo: Periodo; chave: string } {
+  const de = req.nextUrl.searchParams.get('from');
+  const ate = req.nextUrl.searchParams.get('to');
+  const iso = /^\d{4}-\d{2}-\d{2}$/;
+  if (de && ate && iso.test(de) && iso.test(ate) && de <= ate) {
+    return { periodo: { de, ate }, chave: 'custom' };
+  }
+  const p = req.nextUrl.searchParams.get('period') as OptimizerPeriodKey | null;
+  const chave = p && PERIODOS_VALIDOS.includes(p) ? p : 'last_30d';
+  // Reusa o resolvedor do Otimizador: já é BRT e já trata mês-calendário.
+  const r = optimizerDateRangeForPeriod(chave);
+  return { periodo: { de: r.dateFrom, ate: r.dateTo }, chave };
+}
 
 export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   if (!getSession(req)) return unauthorized();
@@ -32,9 +58,15 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
       janelaDias: conn.janela_dias, inatividadeDias: conn.inatividade_dias,
     });
 
-    const { rows: pedidos } = await pool.query<PedidoAgrupavel & { order_id: string }>(
+    const { periodo, chave } = resolverPeriodo(req);
+    // `autoPreviousPeriod` sabe que mês-calendário compara com o mês anterior
+    // inteiro (julho → junho), e não com "31 dias atrás" — a correção do bug
+    // que rotulava o comparativo de julho como "Maio".
+    const anterior = autoPreviousPeriod(periodo.de, periodo.ate);
+
+    const { rows: pedidos } = await pool.query<PedidoComDesconto & { order_id: string }>(
       `SELECT order_id, customer_id, customer_name, customer_phone,
-              total::float8 AS total, status, sales_channel, created_at
+              total::float8 AS total, status, sales_channel, created_at, discounts
          FROM public.cardapioweb_orders
         WHERE client_id = $1
         ORDER BY created_at ASC`,
@@ -42,41 +74,35 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
     );
 
     const agora = new Date().toISOString();
-    const clientes = agruparPorCliente(pedidos, regua, agora);
-    const funil = agregarFunil(clientes);
+    // Funil de HOJE é o que orienta ação (quem ligar agora); o do período é o
+    // que mostra evolução.
+    const clientesHoje = agruparPorCliente(pedidos, regua, agora);
+    const funilHoje = agregarFunil(clientesHoje);
 
-    // KPIs de 30 dias em BRT: `created_at` é timestamptz e a sessão do Postgres
-    // roda em UTC — cortar por data crua jogaria os pedidos da noite pro dia
-    // seguinte. Mesmo cuidado do creative-library e do tracking/leads.
-    const { rows: kpi } = await pool.query<{
-      receita_30d: number; pedidos_30d: number; ticket_30d: number;
-    }>(
-      `SELECT COALESCE(SUM(total),0)::float8 AS receita_30d,
-              COUNT(*)::int                  AS pedidos_30d,
-              COALESCE(AVG(total),0)::float8 AS ticket_30d
-         FROM public.cardapioweb_orders
-        WHERE client_id = $1 AND status <> 'canceled'
-          AND created_at >= (NOW() AT TIME ZONE 'America/Sao_Paulo') - INTERVAL '30 days'`,
-      [clientId],
-    );
+    const fimDoPeriodo = limitesBRT(periodo.de, periodo.ate).fimExclusivo;
+    const fimDoAnterior = limitesBRT(anterior.from, anterior.to).fimExclusivo;
+    const funilPeriodo = funilEm(pedidos, regua, fimDoPeriodo);
+    const funilAnterior = funilEm(pedidos, regua, fimDoAnterior);
 
-    // Cardápio próprio vs marketplace. Receita de iFood não é resultado da mídia
-    // da agência — somar tudo infla o retorno e leva a decisão errada.
+    const kpiAtual = resumoPeriodo(pedidos, periodo);
+    const kpiAnterior = resumoPeriodo(pedidos, { de: anterior.from, ate: anterior.to });
+
     const { rows: canais } = await pool.query<{ sales_channel: string | null; receita: number; pedidos: number }>(
       `SELECT sales_channel, COALESCE(SUM(total),0)::float8 AS receita, COUNT(*)::int AS pedidos
          FROM public.cardapioweb_orders
         WHERE client_id = $1 AND status <> 'canceled'
+          AND created_at >= $2::timestamptz AND created_at < $3::timestamptz
         GROUP BY sales_channel ORDER BY receita DESC`,
-      [clientId],
+      [clientId, limitesBRT(periodo.de, periodo.ate).inicio, fimDoPeriodo],
     );
-
-    const atribuicao = await receitaPorCampanha(pool, clientId, clientes);
 
     return Response.json({
       conectado: true,
       merchant: { id: conn.merchant_id, nome: conn.merchant_name },
       regua,
-      reguaSugerida: sugerirRegua(clientes),
+      reguaSugerida: sugerirRegua(clientesHoje),
+      periodo: { ...periodo, chave },
+      anterior: { de: anterior.from, ate: anterior.to },
       sincronizacao: {
         historico_concluido: conn.historico_concluido,
         ultima_sync_em: conn.ultima_sync_em,
@@ -84,23 +110,28 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
         total_pedidos: pedidos.length,
       },
       kpis: {
-        receita30d: kpi[0]?.receita_30d ?? 0,
-        pedidos30d: kpi[0]?.pedidos_30d ?? 0,
-        ticketMedio30d: kpi[0]?.ticket_30d ?? 0,
-        clientesAtivos: funil.etapas.recorrente.clientes + funil.etapas.novo.clientes + funil.etapas.reconquistado.clientes,
-        totalClientes: funil.totalClientes,
+        atual: kpiAtual,
+        anterior: kpiAnterior,
+        variacao: {
+          receita: variacao(kpiAtual.receita, kpiAnterior.receita),
+          pedidos: variacao(kpiAtual.pedidos, kpiAnterior.pedidos),
+          ticketMedio: variacao(kpiAtual.ticketMedio, kpiAnterior.ticketMedio),
+          clientesUnicos: variacao(kpiAtual.clientesUnicos, kpiAnterior.clientesUnicos),
+          clientesNovos: variacao(kpiAtual.clientesNovos, kpiAnterior.clientesNovos),
+        },
       },
-      funil,
+      funil: { hoje: funilHoje, periodo: funilPeriodo, anterior: funilAnterior },
+      cupons: agregarCupons(pedidos, periodo),
       canais: canais.map(c => ({
         canal: c.sales_channel ?? 'desconhecido',
         marketplace: CANAIS_MARKETPLACE.has((c.sales_channel ?? '').toLowerCase()),
         receita: c.receita,
         pedidos: c.pedidos,
       })),
-      // Quem precisa de ação primeiro: sumidos com maior valor histórico.
-      emRisco: clientes.filter(c => c.etapa === 'em_risco').slice(0, 50),
-      inativos: clientes.filter(c => c.etapa === 'inativo').slice(0, 50),
-      atribuicao,
+      // Ação é sempre sobre o estado de HOJE, não sobre o do período escolhido.
+      emRisco: clientesHoje.filter(c => c.etapa === 'em_risco').slice(0, 50),
+      inativos: clientesHoje.filter(c => c.etapa === 'inativo').slice(0, 50),
+      atribuicao: await receitaPorCampanha(pool, clientId, clientesHoje),
     });
   } catch (err) {
     return Response.json(
@@ -114,14 +145,11 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
 
 /**
  * Casa o cliente de delivery com o lead do CRM pelo TELEFONE e soma a receita
- * por campanha.
+ * por campanha — deixa de ser "o anúncio trouxe 40 leads" e passa a ser "o
+ * anúncio trouxe R$ 3.200 em pedidos".
  *
- * É a resposta que a agência não tinha: deixa de ser "o anúncio trouxe 40
- * leads" e passa a ser "o anúncio trouxe R$ 3.200 em pedidos".
- *
- * ⚠️ A taxa de casamento vai junto na resposta de propósito. Sem ela, uma
- * atribuição parcial parece completa — e o gestor decide orçamento com um
- * número que só cobre metade da base.
+ * ⚠️ A taxa de casamento vai junto de propósito: sem ela, uma atribuição
+ * parcial parece completa e o gestor decide orçamento com metade da base.
  */
 async function receitaPorCampanha(
   pool: ReturnType<typeof makeServerPool>, clientId: string, clientes: ClienteDelivery[],
@@ -131,9 +159,6 @@ async function receitaPorCampanha(
     return { casados: 0, total: clientes.length, taxa: 0, campanhas: [] as unknown[] };
   }
 
-  // Traz os leads do cliente e normaliza no NOSSO lado: o `numero` do CRM tem
-  // formato irregular (com/sem DDI, com/sem 9º dígito) e casar no SQL exigiria
-  // repetir a mesma normalização em expressão — a lib já é testada.
   const { rows: leads } = await pool.query<{
     numero: string | null; campanha: string | null; origin: string | null;
   }>(
@@ -146,7 +171,6 @@ async function receitaPorCampanha(
   const porFone = new Map<string, { campanha: string | null; origin: string | null }>();
   for (const l of leads) {
     const n = normalizarTelefoneBR(l.numero);
-    // First-touch vence: o primeiro lead com aquele telefone define a origem.
     if (n && !porFone.has(n)) porFone.set(n, { campanha: l.campanha, origin: l.origin });
   }
 
