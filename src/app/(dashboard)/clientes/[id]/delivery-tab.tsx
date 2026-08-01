@@ -30,6 +30,7 @@ type Conexao = {
 
 type Painel = {
   conectado: boolean;
+  error?: string;
   merchant?: { id: string | null; nome: string | null };
   regua?: { janelaDias: number; inatividadeDias: number };
   reguaSugerida?: { janelaDias: number; inatividadeDias: number } | null;
@@ -77,6 +78,7 @@ export function ClientDeliveryTab({ clientId }: { clientId: string }) {
   const [carregando, setCarregando] = useState(true);
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState('');
+  const [erroPainel, setErroPainel] = useState('');
   const [form, setForm] = useState({ token: '', janela: 30, inatividade: 60 });
   const [copiado, setCopiado] = useState('');
 
@@ -88,6 +90,11 @@ export function ClientDeliveryTab({ clientId }: { clientId: string }) {
       ]);
       setConexao(c?.conexao ?? null);
       setPainel(p ?? null);
+      // Falha na rota do painel NÃO pode virar "tudo zero": zero é um número
+      // válido (loja sem pedido), então um erro silencioso é indistinguível de
+      // um resultado real e manda o usuário procurar filtro de período que não
+      // existe. O erro tem que aparecer.
+      setErroPainel(typeof p?.error === 'string' ? p.error : '');
       if (c?.conexao) {
         setForm(f => ({ ...f, janela: c.conexao.janela_dias, inatividade: c.conexao.inatividade_dias }));
       }
@@ -251,6 +258,16 @@ export function ClientDeliveryTab({ clientId }: { clientId: string }) {
           </span>
         )}
       </Card>
+
+      {erroPainel && (
+        <div className="flex items-start gap-2 rounded-[var(--radius)] border border-destructive/30 bg-destructive/10 p-3 text-destructive">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          <p className="text-xs">
+            Não foi possível carregar os números: {erroPainel}. Os zeros abaixo NÃO significam
+            que não há pedidos — significam que a leitura falhou.
+          </p>
+        </div>
+      )}
 
       {sync?.ultimo_erro && (
         <div className="flex items-start gap-2 rounded-[var(--radius)] border border-destructive/30 bg-destructive/10 p-3 text-destructive">

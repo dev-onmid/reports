@@ -53,6 +53,9 @@ type Resultado = {
   eventos_processados: number;
   historico_importados: number;
   historico_concluido: boolean;
+  /** Quantos pedidos existem DE FATO no banco para esta loja. */
+  pedidos_no_banco?: number;
+  pagina_atual?: number;
   erro?: string;
 };
 
@@ -207,6 +210,20 @@ export async function GET(req: NextRequest) {
               SET ultima_sync_em = NOW(), ultimo_erro = NULL WHERE client_id = $1`,
           [conn.client_id],
         ).catch(() => {});
+
+        // Conferência: quantos pedidos EXISTEM no banco, não quantos o loop
+        // acha que gravou. Sem isso não dá pra distinguir "não gravou" de
+        // "gravou e a tela não lê" — foi exatamente a dúvida que apareceu na
+        // primeira importação real.
+        const cont = await pool.query<{ n: string; pag: number }>(
+          `SELECT (SELECT COUNT(*) FROM public.cardapioweb_orders WHERE client_id = $1)::text AS n,
+                  (SELECT historico_pagina FROM public.cardapioweb_connections WHERE client_id = $1) AS pag`,
+          [conn.client_id],
+        ).catch(() => null);
+        if (cont?.rows[0]) {
+          r.pedidos_no_banco = Number(cont.rows[0].n);
+          r.pagina_atual = cont.rows[0].pag;
+        }
       } catch (err) {
         r.erro = err instanceof Error ? err.message : String(err);
         await pool.query(
