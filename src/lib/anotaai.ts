@@ -234,6 +234,23 @@ export async function testarToken(token: string): Promise<{ ok: true; pedidosHoj
 
 // ─── Persistência ─────────────────────────────────────────────────────────────
 
+/**
+ * Gera o "Token Externo" do Portal de Integração se ainda não existir.
+ *
+ * Fica aqui, e não na rota de configuração, porque a tela que MOSTRA o token é
+ * outra (a aba Delivery). Gerar só na tela de config significava que quem
+ * nunca a abrisse veria o campo vazio — e configuraria o webhook sem
+ * autenticação nenhuma.
+ */
+export async function garantirWebhookToken(pool: Pool, clientId: string): Promise<void> {
+  await pool.query(
+    `UPDATE public.client_anota_ai_stores
+        SET webhook_token = encode(gen_random_bytes(24), 'hex'), updated_at = NOW()
+      WHERE client_id = $1 AND (webhook_token IS NULL OR webhook_token = '')`,
+    [clientId],
+  ).catch(() => {});
+}
+
 export async function listarLojas(pool: Pool, clientId?: string): Promise<AnotaAiStore[]> {
   await ensureAnotaAiSchema(pool);
   const { rows } = await pool.query<AnotaAiStore>(

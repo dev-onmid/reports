@@ -2,7 +2,7 @@ import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { getSession, unauthorized } from '@/lib/api-auth';
 import { ensureCardapioWebSchema, getConnection } from '@/lib/cardapioweb';
-import { ensureAnotaAiSchema, listarLojas } from '@/lib/anotaai';
+import { ensureAnotaAiSchema, listarLojas, garantirWebhookToken } from '@/lib/anotaai';
 import { lerPedidosDelivery } from '@/lib/delivery-orders';
 import { optimizerDateRangeForPeriod } from '@/lib/optimizer-period-range';
 import { autoPreviousPeriod } from '@/lib/delivery-report-builder';
@@ -53,6 +53,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
   const pool = makeServerPool();
   try {
     await Promise.all([ensureCardapioWebSchema(pool), ensureAnotaAiSchema(pool)]);
+    await garantirWebhookToken(pool, clientId);
     const [conn, lojasAnota] = await Promise.all([
       getConnection(pool, clientId),
       listarLojas(pool, clientId),
@@ -106,7 +107,12 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
     return Response.json({
       conectado: true,
       merchant: conn ? { id: conn.merchant_id, nome: conn.merchant_name } : null,
-      lojasAnotaAi: lojasAnota.map(l => ({ id: l.id, nome: l.store_name, storeId: l.store_id })),
+      // `webhookToken` vai junto porque é o valor que a tela manda copiar pro
+      // Portal de Integração. Sem ele o campo aparecia vazio e o webhook ficava
+      // sem autenticação — a tela pedia algo que ela mesma não fornecia.
+      lojasAnotaAi: lojasAnota.map(l => ({
+        id: l.id, nome: l.store_name, storeId: l.store_id, webhookToken: l.webhook_token,
+      })),
       fontes,
       regua,
       reguaSugerida: sugerirRegua(clientesHoje),
