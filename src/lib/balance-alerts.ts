@@ -537,6 +537,76 @@ async function ensureAlertLogTable(pool: ReturnType<typeof makeServerPool>) {
                       ON public.balance_alerts_log (account_id, config_id, alert_date)`);
 }
 
+/** Prefixo da chave do sinal de canal quebrado, por destino. */
+const CANAL_SIGNAL_PREFIX = 'sistema:alerta-saldo-whatsapp';
+
+/**
+ * Publica (ou fecha) o aviso de "o WhatsApp do alerta de saldo não entregou".
+ *
+ * A chave leva a data porque um canal quebrado precisa voltar a chamar atenção
+ * todo dia: `upsertSinal` preserva o `lida_em`, então uma chave fixa sumiria da
+ * caixa depois da primeira leitura e o canal seguiria quebrado em silêncio.
+ *
+ * Quando o envio volta a funcionar, os avisos de todos os dias são fechados de
+ * uma vez pelo prefixo — o gestor não precisa limpar nada na mão.
+ */
+async function sinalizarCanalWhatsapp(
+  pool: ReturnType<typeof makeServerPool>,
+  configId: string,
+  wa: { ok: boolean; error?: string },
+  emailOk: boolean,
+  contasEmRisco: number,
+): Promise<void> {
+  const prefixo = `${CANAL_SIGNAL_PREFIX}:${configId}`;
+
+  if (wa.ok) {
+    await pool.query(
+      `UPDATE public.notificacoes SET resolvido_em = NOW(), updated_at = NOW()
+        WHERE signal_key LIKE $1 AND resolvido_em IS NULL`,
+      [`${prefixo}%`],
+    ).catch(() => {});
+    return;
+  }
+
+  await upsertSinal(pool, {
+    userId: AGENCIA,
+    tipo: 'sistema',
+    signalKey: `${prefixo}:${brtDateStr(0)}`,
+    severidade: 'critico',
+    titulo: 'Alerta de saldo não saiu no WhatsApp',
+    descricao:
+      `${contasEmRisco} conta(s) com saldo curto não foram avisadas no grupo. `
+      + `Motivo: ${wa.error ?? 'erro desconhecido'}.`
+      + (emailOk
+        ? ' O e-mail de backup foi entregue.'
+        : ' O e-mail de backup também não saiu — ninguém foi avisado.'),
+    href: '/pagamentos',
+  });
+}
+
+/**
+ * Aviso para quando não existe canal capaz de enviar: nenhum destino ativo, ou
+ * a instância do destino saiu do ar / perdeu credencial.
+ *
+ * Sem isto o cron responde `ok: true` com zero envios e o alerta de saldo deixa
+ * de existir sem nenhum sintoma — a falha mais cara, porque parece normal.
+ */
+export async function sinalizarAlertaSemCanal(
+  pool: ReturnType<typeof makeServerPool>,
+  motivo: string,
+  configId?: string,
+): Promise<void> {
+  await upsertSinal(pool, {
+    userId: AGENCIA,
+    tipo: 'sistema',
+    signalKey: `${CANAL_SIGNAL_PREFIX}:${configId ?? 'sem-destino'}:${brtDateStr(0)}`,
+    severidade: 'critico',
+    titulo: 'Alerta de saldo sem canal de envio',
+    descricao: motivo,
+    href: '/pagamentos',
+  });
+}
+
 export type SendBalanceResult = {
   whatsapp: string;
   email: string;
@@ -601,6 +671,12 @@ export async function sendBalanceAlerts(
         result.email = 'nenhuma conta Gmail conectada';
       }
     }
+
+    // O WhatsApp é o canal principal — é nele que a equipe olha. Quando ele
+    // falha, o e-mail de backup ainda faz o cron responder ok e gravar a vaga do
+    // dia, então o grupo fica mudo sem ninguém saber por quê. Este sinal é o que
+    // torna esse buraco visível dentro do sistema.
+    await sinalizarCanalWhatsapp(pool, opts.configId, wa, emailOk, novos.length);
 
     // Only burn the daily slot if the warning actually reached someone.
     if (wa.ok || emailOk) {

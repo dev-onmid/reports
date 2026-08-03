@@ -1,6 +1,11 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
-import { getAccountBalances, sendBalanceAlerts, DEFAULT_DIAS_ANTECEDENCIA } from '@/lib/balance-alerts';
+import {
+  getAccountBalances,
+  sendBalanceAlerts,
+  sinalizarAlertaSemCanal,
+  DEFAULT_DIAS_ANTECEDENCIA,
+} from '@/lib/balance-alerts';
 import {
   ensureBalanceAlertTables,
   buildTarget,
@@ -47,6 +52,13 @@ export async function GET(request: NextRequest) {
       `${BALANCE_CONFIG_SELECT} WHERE bac.active = true`,
     );
     configs = rows;
+
+    if (configs.length === 0) {
+      await sinalizarAlertaSemCanal(
+        pool,
+        'Nenhum destino ativo em Pagamentos → Alertas. Enquanto isso, nenhuma conta com saldo curto é avisada.',
+      );
+    }
   } finally {
     await pool.end();
   }
@@ -58,6 +70,18 @@ export async function GET(request: NextRequest) {
   for (const cfg of configs) {
     const target = buildTarget(cfg);
     if (!target) {
+      // A instância do destino saiu do ar ou perdeu credencial. Sem este aviso o
+      // alerta simplesmente deixa de existir, e a resposta do cron segue ok.
+      const p = makeServerPool();
+      try {
+        await sinalizarAlertaSemCanal(
+          p,
+          `O destino "${cfg.whatsapp_group}" aponta para uma instância de WhatsApp inativa ou sem credenciais. Reconfigure em Pagamentos → Alertas.`,
+          cfg.id,
+        );
+      } finally {
+        await p.end();
+      }
       results.push({ configId: cfg.id, whatsapp: 'instância inativa ou sem credenciais', email: 'skipped' });
       continue;
     }

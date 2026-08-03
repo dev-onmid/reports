@@ -54,6 +54,16 @@ export async function GET() {
       crmByInstance.set(r.instance_id, arr);
     }
 
+    // ⚠️ O connectionStatus do fetchInstances é o campo PERSISTIDO da Evolution e
+    // fica DESATUALIZADO quando a conexão trava (ex: proxy Webshare caiu → todas
+    // presas em "connecting" mas o campo segue "open"). O estado AO VIVO vem do
+    // connectionState — é ele que o chat usa, e os dois painéis têm que concordar.
+    const liveStates = new Map<string, string>();
+    await Promise.all(instances.map(async inst => {
+      const live = await getEvolutionState(inst.name).catch(() => null);
+      if (live?.state) liveStates.set(inst.name, live.state);
+    }));
+
     const result = instances.map(inst => {
       const zapi = zapiByInstance.get(inst.name);
       const crm = crmByInstance.get(inst.name) ?? [];
@@ -65,7 +75,7 @@ export async function GET() {
       const active = hasRows ? (zapi?.active === true || crm.some(c => c.ativo)) : null;
       return {
         name: inst.name,
-        status: inst.connectionStatus,
+        status: liveStates.get(inst.name) ?? inst.connectionStatus,
         profileName: inst.profileName ?? null,
         phone: inst.ownerJid ? inst.ownerJid.replace('@s.whatsapp.net', '').replace('@c.us', '') : null,
         vinculos,

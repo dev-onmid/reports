@@ -890,6 +890,16 @@ function PagSparkline({ data, color }: { data: number[]; color: string }) {
 /** O calendário é semana cheia, começando na segunda. */
 const DAYS_PER_WEEK = 7;
 
+/**
+ * Sábado e domingo ficam com ~40% da largura de um dia útil.
+ *
+ * Pagamento em fim de semana é exceção, então a coluna cheia ficava quase sempre
+ * vazia ocupando 2/7 da tela. Estreita, ela some do caminho sem sumir do mês — e
+ * quando cai algo lá, o dia recebe um marcador em vez do card inteiro, que não
+ * caberia nessa largura.
+ */
+const MONTH_GRID_COLS = 'grid-cols-[repeat(5,1fr)_0.4fr_0.4fr]';
+
 const WEEKDAY_LABELS = ['SEGUNDA', 'TERÇA', 'QUARTA', 'QUINTA', 'SEXTA', 'SÁBADO', 'DOMINGO'];
 const WEEKDAY_COLORS = [
   'bg-emerald-600',
@@ -2093,7 +2103,7 @@ export default function PagamentosPage() {
           <h2 className="text-sm font-bold uppercase tracking-wider">Novo Pagamento</h2>
           <p className="text-xs text-muted-foreground">Cadastre um novo Pix ou agende para futuras datas.</p>
         </div>
-        <div className="grid gap-3 xl:grid-cols-[1.15fr_0.85fr_1.25fr_0.9fr_0.7fr_0.75fr_auto_0.8fr]">
+        <div className="grid gap-3 xl:grid-cols-[1.3fr_0.9fr_1fr_0.85fr_0.95fr_auto_auto_0.9fr]">
           <label className="space-y-1.5">
             <span className="text-xs font-bold text-foreground">Cliente</span>
             <select value={newPayment.clientId} onChange={(e) => handleClientChange(e.target.value)} className="h-9 w-full rounded-lg border border-border bg-background px-3 text-sm text-muted-foreground outline-none focus:border-primary">
@@ -2103,10 +2113,6 @@ export default function PagamentosPage() {
           <label className="space-y-1.5">
             <span className="text-xs font-bold text-foreground">Data de envio</span>
             <Input type="date" value={newPayment.date} onChange={(e) => setNewPayment((p) => ({ ...p, date: e.target.value }))} className="h-9 bg-background" />
-          </label>
-          <label className="space-y-1.5">
-            <span className="text-xs font-bold text-foreground">Destino / Campanha</span>
-            <Input value={newPayment.destination} onChange={(e) => setNewPayment((p) => ({ ...p, destination: e.target.value }))} className="h-9 bg-background" placeholder="Selecione a campanha" />
           </label>
           <label className="space-y-1.5">
             <span className="text-xs font-bold text-foreground">Canal</span>
@@ -2143,24 +2149,14 @@ export default function PagamentosPage() {
               <Zap className={cn('h-4 w-4', newPayment.extra && 'fill-violet-400')} />
             </button>
           </div>
-          <button
-            type="button"
-            onClick={handleAddPayment}
-            disabled={recurMode !== 'none' && previewCount === 0}
-            className="mt-5 flex h-9 items-center justify-center gap-2 rounded-xl border border-primary/60 bg-primary/15 px-4 text-sm font-bold text-foreground shadow-[0_0_24px_rgba(85,245,47,0.28)] transition-all hover:bg-primary/25 disabled:opacity-50"
-          >
-            <Plus className="h-4 w-4" />
-            Adicionar Pix
-          </button>
-        </div>
-        {/* ── Recorrência ─────────────────────────────────────────── */}
-        <div className="mt-3 border-t border-border/50 pt-3">
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="flex flex-col items-center justify-end gap-1">
+            <span className="text-xs font-bold text-foreground">Repetir</span>
             <button
               type="button"
               onClick={() => setRecurMode(prev => prev === 'none' ? 'weekdays' : 'none')}
+              title="Repetir este pagamento"
               className={cn(
-                'flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-bold transition-all',
+                'flex h-9 items-center gap-1.5 whitespace-nowrap rounded-lg border px-3 text-xs font-bold transition-all',
                 recurMode !== 'none'
                   ? 'border-violet-400/40 bg-violet-500/15 text-violet-300 shadow-[0_0_14px_rgba(168,85,247,0.2)]'
                   : 'border-border text-muted-foreground hover:border-violet-400/30 hover:text-violet-400',
@@ -2169,33 +2165,43 @@ export default function PagamentosPage() {
               <RefreshCw className="h-3.5 w-3.5" />
               Recorrência
             </button>
-            {recurMode !== 'none' && (
-              <div className="flex gap-1">
-                {([
-                  { key: 'weekdays' as const, label: 'Dias da semana' },
-                  { key: 'interval' as const, label: 'A cada N dias' },
-                  { key: 'monthly' as const, label: 'Mensal' },
-                ]).map(m => (
-                  <button
-                    key={m.key}
-                    type="button"
-                    onClick={() => setRecurMode(m.key)}
-                    className={cn(
-                      'rounded-full border px-3 py-1 text-xs font-bold transition-all',
-                      recurMode === m.key
-                        ? 'border-violet-400/40 bg-violet-500/15 text-violet-300'
-                        : 'border-border text-muted-foreground hover:text-foreground',
-                    )}
-                  >
-                    {m.label}
-                  </button>
-                ))}
-              </div>
-            )}
+          </div>
+          <button
+            type="button"
+            onClick={handleAddPayment}
+            disabled={recurMode !== 'none' && previewCount === 0}
+            className="mt-6 flex h-9 items-center justify-center gap-2 whitespace-nowrap rounded-xl border border-primary/60 bg-primary/15 px-4 text-sm font-bold text-foreground shadow-[0_0_24px_rgba(85,245,47,0.28)] transition-all hover:bg-primary/25 disabled:opacity-50"
+          >
+            <Plus className="h-4 w-4 shrink-0" />
+            Adicionar Pix
+          </button>
+        </div>
+        {/* ── Recorrência ─────────────────────────────────────────── */}
+        {recurMode !== 'none' && (
+        <div className="mt-3 border-t border-border/50 pt-3">
+          <div className="flex flex-wrap items-center gap-1">
+            {([
+              { key: 'weekdays' as const, label: 'Dias da semana' },
+              { key: 'interval' as const, label: 'A cada N dias' },
+              { key: 'monthly' as const, label: 'Mensal' },
+            ]).map(m => (
+              <button
+                key={m.key}
+                type="button"
+                onClick={() => setRecurMode(m.key)}
+                className={cn(
+                  'rounded-full border px-3 py-1 text-xs font-bold transition-all',
+                  recurMode === m.key
+                    ? 'border-violet-400/40 bg-violet-500/15 text-violet-300'
+                    : 'border-border text-muted-foreground hover:text-foreground',
+                )}
+              >
+                {m.label}
+              </button>
+            ))}
           </div>
 
-          {recurMode !== 'none' && (
-            <div className="mt-3 space-y-3">
+          <div className="mt-3 space-y-3">
               {/* Config by mode */}
               {recurMode === 'weekdays' && (
                 <div className="flex flex-wrap items-center gap-2">
@@ -2300,9 +2306,9 @@ export default function PagamentosPage() {
                   <p className="text-xs text-amber-400">Selecione pelo menos um dia da semana.</p>
                 )
               )}
-            </div>
-          )}
+          </div>
         </div>
+        )}
         <HolidayPaymentNotice date={newPayment.date} />
       </div>}
 
@@ -2364,15 +2370,15 @@ export default function PagamentosPage() {
           </div>
           <div className="overflow-x-auto">
           <div className="min-w-[900px]">
-          <div className="grid grid-cols-7 border-b border-border/70">
+          <div className={cn('grid border-b border-border/70', MONTH_GRID_COLS)}>
             {[
               { label: 'SEG', color: '#55f52f' },
               { label: 'TER', color: '#f59e0b' },
               { label: 'QUA', color: '#2498ff' },
               { label: 'QUI', color: '#a855f7' },
               { label: 'SEX', color: '#ff4778' },
-              // Fim de semana em tom neutro: a coluna existe e recebe pagamento,
-              // mas não disputa atenção com os dias em que o movimento acontece.
+              // Fim de semana em tom neutro e coluna estreita: quase sempre vazio,
+              // não faz sentido gastar 2/7 da largura com ele.
               { label: 'SÁB', color: '#94a3b8' },
               { label: 'DOM', color: '#94a3b8' },
             ].map((day, i) => (
@@ -2385,19 +2391,56 @@ export default function PagamentosPage() {
             ))}
           </div>
           {monthAllWeeks.map((week, wi) => (
-            <div key={wi} className="grid grid-cols-7 border-b border-border/70 last:border-b-0">
+            <div key={wi} className={cn('grid border-b border-border/70 last:border-b-0', MONTH_GRID_COLS)}>
               {week.map((date, di) => {
                 const dayPayments = date ? filteredPayments.filter(p => p.date === date) : [];
                 const isToday = date === todayStr;
+                const isWeekend = !!date && isWeekendDate(date);
+                const weekendTotal = isWeekend ? dayPayments.reduce((s, p) => s + p.amount, 0) : 0;
                 return (
                   <div
                     key={`${wi}-${di}`}
-                    className={cn('group min-h-[148px] border-r border-border/70 p-2.5 last:border-r-0 transition-colors', !date && 'bg-muted/5 opacity-40', date && isWeekendDate(date) && 'bg-muted/[0.07]', dragOverDate === date && date && 'bg-violet-500/10 ring-1 ring-inset ring-violet-500/30')}
+                    className={cn(
+                      'group min-h-[148px] border-r border-border/70 p-2.5 last:border-r-0 transition-colors',
+                      !date && 'bg-muted/5 opacity-40',
+                      isWeekend && 'bg-muted/[0.07] px-1.5',
+                      // O alerta: fim de semana com pagamento deixa de ser coluna
+                      // morta e passa a chamar atenção.
+                      isWeekend && dayPayments.length > 0 && 'bg-amber-500/[0.07] ring-1 ring-inset ring-amber-400/25',
+                      dragOverDate === date && date && 'bg-violet-500/10 ring-1 ring-inset ring-violet-500/30',
+                    )}
                     onDragOver={(e) => { if (date) { e.preventDefault(); setDragOverDate(date); } }}
                     onDragLeave={() => setDragOverDate(null)}
                     onDrop={(e) => { e.preventDefault(); const id = e.dataTransfer.getData('text/plain'); if (id && date) movePaymentDate(id, date); setDragOverDate(null); }}
                   >
-                    {date && (
+                    {date && isWeekend && (
+                      <>
+                        {wi > 0 && (
+                          <div className="mb-2 flex h-5 items-center justify-center">
+                            <span className={cn('text-sm font-bold text-muted-foreground/70', isToday && 'rounded-full bg-primary px-2 text-black shadow-[0_0_14px_rgba(85,245,47,0.4)]')}>
+                              {date.split('-')[2]}
+                            </span>
+                          </div>
+                        )}
+                        {dayPayments.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => { setSelectedDate(date); setViewMode('dia'); }}
+                            title={`${dayPayments.length} pagamento${dayPayments.length !== 1 ? 's' : ''} em ${formatDateBR(date)} — ver o dia`}
+                            className="flex w-full flex-col items-center gap-0.5 rounded-lg border border-amber-400/40 bg-amber-500/10 px-1 py-1.5 text-amber-300 transition-colors hover:bg-amber-500/20"
+                          >
+                            <span className="text-sm font-bold leading-none tabular-nums">{dayPayments.length}</span>
+                            <span className="text-[9px] font-bold uppercase leading-none opacity-70">
+                              {dayPayments.length !== 1 ? 'pagtos' : 'pagto'}
+                            </span>
+                            <span className="w-full truncate text-center text-[10px] font-bold leading-tight tabular-nums">
+                              {formatCurrencyBRL(weekendTotal)}
+                            </span>
+                          </button>
+                        )}
+                      </>
+                    )}
+                    {date && !isWeekend && (
                       <>
                         {wi > 0 && (
                           <div className="mb-2 flex h-5 items-center justify-between">
