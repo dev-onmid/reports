@@ -62,12 +62,28 @@ async function tldvFetch<T>(caminho: string): Promise<T> {
   return r.json() as Promise<T>;
 }
 
+/**
+ * Data em ISO. A LISTAGEM devolve `happenedAt` no formato de `Date.toString()`
+ * ("Tue Aug 04 2026 13:07:17 GMT+0000 (...)"), enquanto o detalhe devolve ISO
+ * — o Postgres recusa o primeiro e o Make não o parseia na janela da agenda.
+ */
+export function dataIso(bruta: string | undefined): string | null {
+  if (!bruta) return null;
+  const t = Date.parse(bruta);
+  return Number.isFinite(t) ? new Date(t).toISOString() : null;
+}
+
 /** Reuniões mais recentes primeiro. */
 export async function listarReunioes(limite = 20): Promise<TldvMeeting[]> {
   const d = await tldvFetch<{ results?: TldvMeeting[]; data?: TldvMeeting[] }>(
     `/meetings?page=1&limit=${limite}`,
   );
   return d.results ?? d.data ?? [];
+}
+
+/** Detalhe de uma reunião — é o que o webhook do TLDV mandaria, verbatim. */
+export async function buscarReuniao(meetingId: string): Promise<TldvMeeting> {
+  return tldvFetch<TldvMeeting>(`/meetings/${meetingId}`);
 }
 
 export async function buscarTranscricao(meetingId: string): Promise<TldvTranscript> {

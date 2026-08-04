@@ -2,11 +2,12 @@ import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { conferirSegredoIntegracao, respostaSegredo } from '@/lib/integration-secret';
 import {
+  buscarReuniao,
   buscarTranscricao,
+  dataIso,
   dispararReuniaoPronta,
   dispararTranscricaoPronta,
   listarReunioes,
-  type TldvMeeting,
 } from '@/lib/tldv';
 
 /**
@@ -88,16 +89,20 @@ export async function GET(req: NextRequest) {
           await pool.query(
             `INSERT INTO public.tldv_reunioes (meeting_id, nome, happened_at, etapa, doc_em, transcricao_em)
              VALUES ($1, $2, $3, 'pronta', now(), now()) ON CONFLICT (meeting_id) DO NOTHING`,
-            [m.id, m.name ?? null, m.happenedAt ?? null],
+            [m.id, m.name ?? null, dataIso(m.happenedAt)],
           );
           continue;
         }
         try {
-          await dispararReuniaoPronta(m as TldvMeeting);
+          // O detalhe traz o bundle completo (e a data em ISO); a listagem é
+          // resumida, e mandar o item da lista faria o Cenário 1 receber menos
+          // do que o webhook do TLDV mandaria.
+          const completa = await buscarReuniao(m.id);
+          await dispararReuniaoPronta(completa);
           await pool.query(
             `INSERT INTO public.tldv_reunioes (meeting_id, nome, happened_at, etapa, doc_em)
              VALUES ($1, $2, $3, 'doc', now()) ON CONFLICT (meeting_id) DO NOTHING`,
-            [m.id, m.name ?? null, m.happenedAt ?? null],
+            [m.id, m.name ?? null, dataIso(completa.happenedAt ?? m.happenedAt)],
           );
           novas.push(m.id);
         } catch (err) {
