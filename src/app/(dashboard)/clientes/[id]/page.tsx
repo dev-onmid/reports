@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { mockDashboardData, mockClients, type ClientStatus, type DashboardType } from '@/lib/mock-data';
 import { useClients } from '@/lib/client-store';
+import { normalizeClientName } from '@/lib/client-name';
 import { getAuthSession, verifyUserCredentials } from '@/lib/auth-store';
 import { DictateButton } from '@/components/ui/dictate-button';
 import {
@@ -21,7 +22,7 @@ import {
   Power, PowerOff, Search, BookMarked, ExternalLink, RefreshCw, ChevronRight,
   PiggyBank, Wallet, Info, Lightbulb, UserPlus, Brain, Save, MousePointer2,
   Maximize2, Minimize2, ZoomIn, ZoomOut, ImageIcon, Unlink, History, Copy, Sparkles,
-  Store, Settings,
+  Store, Settings, Pencil,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -4754,6 +4755,14 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
   const [categories, setCategories] = useState<{ id: string; name: string; is_default: boolean }[]>([]);
   const [clientCategoryId, setClientCategoryId] = useState<string>(storedClient?.category_id ?? '');
   const [clientDashType, setClientDashType] = useState<DashboardType>(storedClient?.dashboard_type ?? 'leads');
+  const [editingName, setEditingName]     = useState(false);
+  const [nameDraft, setNameDraft]         = useState('');
+  const [nameError, setNameError]         = useState('');
+  const [savingName, setSavingName]       = useState(false);
+  // Sobrescreve o nome exibido assim que salva, sem esperar o refetch de
+  // /api/clients (mesmo padrão otimista do clientCategoryId acima).
+  const [nameOverride, setNameOverride]   = useState<string | null>(null);
+  const displayName = nameOverride ?? client.name;
 
   useEffect(() => {
     fetch('/api/clients/categories').then(r => r.ok ? r.json() : []).then(setCategories).catch(() => {});
@@ -4772,6 +4781,40 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
     });
     window.dispatchEvent(new Event('clients-updated'));
   }
+
+  function startEditingName() {
+    setNameDraft(displayName);
+    setNameError('');
+    setEditingName(true);
+  }
+
+  function cancelEditingName() {
+    setEditingName(false);
+    setNameError('');
+  }
+
+  async function saveClientName() {
+    const trimmed = nameDraft.trim();
+    if (!trimmed) { setNameError('O nome não pode ficar vazio.'); return; }
+    if (trimmed === displayName) { setEditingName(false); return; }
+
+    const alvo = normalizeClientName(trimmed);
+    const colide = allClients.some(c => c.id !== id && normalizeClientName(c.name) === alvo);
+    if (colide) {
+      setNameError('Já existe outro cliente com esse nome (ou muito parecido) — a automação de reuniões via ClickUp não consegue distinguir os dois.');
+      return;
+    }
+
+    setSavingName(true);
+    try {
+      await patchClient({ name: trimmed });
+      setNameOverride(trimmed);
+      setEditingName(false);
+    } finally {
+      setSavingName(false);
+    }
+  }
+
   const [clientGoal, setClientGoal] = useState<ClientGoalConfig>(() =>
     readSavedClientGoal(id, isNewClient ? ZERO_CLIENT_GOAL : DEFAULT_CLIENT_GOAL)
   );
@@ -4908,12 +4951,59 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b border-border pb-5">
         <div className="flex items-center gap-4">
-          <ClientAvatar clientId={id} name={client.name} size="lg" />
+          <ClientAvatar clientId={id} name={displayName} size="lg" />
           <div>
             <div className="px-2 py-0.5 rounded text-[10px] font-bold tracking-widest bg-primary/20 text-primary border border-primary/30 uppercase w-fit mb-2">
               {client.status}
             </div>
-            <h1 className="font-heading font-normal text-xl uppercase leading-none tracking-wide text-foreground">{client.name}</h1>
+            {editingName ? (
+              <div className="flex items-center gap-1.5">
+                <input
+                  autoFocus
+                  value={nameDraft}
+                  onChange={e => { setNameDraft(e.target.value); if (nameError) setNameError(''); }}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') void saveClientName();
+                    if (e.key === 'Escape') cancelEditingName();
+                  }}
+                  disabled={savingName}
+                  className="max-w-[260px] rounded border border-primary/50 bg-background px-2 py-0.5 font-heading text-xl font-normal uppercase leading-none tracking-wide text-foreground outline-none focus:border-primary disabled:opacity-60"
+                />
+                <button
+                  type="button"
+                  onClick={() => void saveClientName()}
+                  disabled={savingName}
+                  title="Salvar"
+                  className="rounded p-1 text-primary transition-colors hover:bg-primary/10 disabled:opacity-50"
+                >
+                  <Check className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={cancelEditingName}
+                  disabled={savingName}
+                  title="Cancelar"
+                  className="rounded p-1 text-muted-foreground transition-colors hover:bg-muted disabled:opacity-50"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            ) : (
+              <div className="group flex items-center gap-1.5">
+                <h1 className="font-heading font-normal text-xl uppercase leading-none tracking-wide text-foreground">{displayName}</h1>
+                {isAdmin && (
+                  <button
+                    type="button"
+                    onClick={startEditingName}
+                    title="Editar nome do cliente"
+                    className="rounded p-1 text-muted-foreground/50 opacity-0 transition-opacity hover:bg-primary/10 hover:text-primary group-hover:opacity-100"
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+            )}
+            {nameError && <p className="mt-1 max-w-xs text-xs text-red-400">{nameError}</p>}
             <div className="flex items-center gap-2 mt-1 flex-wrap">
               <p className="text-sm text-muted-foreground uppercase tracking-wide">
                 {storedClient?.category_name ?? storedClient?.segment ?? client.segment}

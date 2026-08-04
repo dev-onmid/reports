@@ -1,5 +1,16 @@
 @AGENTS.md
 
+## Editar nome de cliente (2026-07-30)
+
+Pedido do Matheus: poder corrigir o nome de um cliente já cadastrado. O backend já aceitava (`PATCH /api/clients?id=` sempre suportou `name` — só não tinha UI nenhuma pra chamar isso).
+
+- **`src/lib/client-name.ts` (novo)**: `normalizeClientName` — cópia client-safe de `normalizeClientName` de `reuniao-intake.ts` (que é server-only, puxa `@/lib/clickup` → `pg`, não pode ser importada num client component). Mesma lógica exata (NFD, remove diacríticos, minúsculas, colapsa não-alfanumérico). ⚠️ **Cuidado ao editar essa regex**: digitar o range de marcas diacríticas como caractere literal (`̀-ͯ`) em vez de `̀-ͯ` escapado corrompe fácil em copy-paste/encoding — usar sempre a forma escapada.
+- **Duas telas, mesma trava**: `clientes/[id]/page.tsx` (nome no header, ícone lápis ao lado, `isAdmin` only) e `clientes/page.tsx` (nome no card da lista, mesmo padrão). Ambas antes de salvar rodam `allClients.some(c => c.id !== id && normalizeClientName(c.name) === normalizeClientName(novoNome))` — **é a mesma regra que `resolveClientByName` usa pra casar reunião/ClickUp** (ver entrada abaixo). Colisão bloqueia o salvar com aviso explícito ("a automação de reuniões via ClickUp não consegue distinguir os dois") em vez de deixar renomear pra um nome ambíguo — evitar reintroduzir silenciosamente o mesmo bug que a entrada abaixo consertou.
+- **`updateClientMeta`** (`client-store.ts`) ganhou `name?: string` no tipo de update — já era um PATCH genérico (`{...prev, ...updates}` + fire-and-forget), só faltava o campo no tipo.
+- Editor inline (input + ✓ salvar + ✕ cancelar, Enter/Escape), sem modal. `nameOverride` no detail page mostra o novo nome na hora, sem esperar o refetch de `/api/clients` (mesmo padrão otimista que `clientCategoryId` já usava ali).
+- ✅ Verificado: tsc + `next build` limpos. UI validada em harness isolado (não dá pra montar a página inteira em bundle solto — usa `next/link`, que não roda fora do runtime do Next, nem lança erro, só fica em branco): lápis abre edição, colisão acento/caixa-insensível bloqueia com o aviso certo, nome vazio bloqueia, Escape cancela sem salvar, nome válido salva e volta pro modo exibição. ⚠️ Lição de teste: disparar `input` + `keydown Enter` no MESMO `javascript_exec` síncrono pode fazer o snapshot lido logo em seguida não refletir o commit do React ainda — separar em execuções distintas (mesma lição já registrada alhures neste arquivo).
+- ⚠️ Não verificado: fluxo real contra banco (rename→refetch→nome batendo no ClickUp) exige produção.
+
 ## Reuniões — casamento de cliente por regra, não por nome idêntico (2026-07-30)
 
 Matheus: reunião do **Panino** aconteceu e gravou, mas não chegou nem tarefa nem resumo. Causa raiz achada no código: existiam **dois motores de casamento no mesmo arquivo** e as rotas usavam o errado.

@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   Archive, RotateCcw, ShieldAlert, Trash2, Plus, Power, PowerOff,
   Search, ArrowUpDown, ChevronDown, ChevronLeft, ChevronRight, EyeOff, LayoutList, LayoutGrid,
-  MoreHorizontal, SlidersHorizontal, PiggyBank, History, UserCog, X,
+  MoreHorizontal, SlidersHorizontal, PiggyBank, History, UserCog, X, Pencil, Check,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -14,6 +14,7 @@ import {
   Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
 import { canManageClients, useClients } from '@/lib/client-store';
+import { normalizeClientName } from '@/lib/client-name';
 import { getAuthSession, verifyUserCredentials } from '@/lib/auth-store';
 import { useInvestmentPayments } from '@/lib/payment-store';
 import type { ClientStatus, DashboardType } from '@/lib/mock-data';
@@ -41,7 +42,7 @@ type FinancialInfo = {
 
 export default function ClientesPage() {
   const {
-    clients, archivedClients, archiveClient,
+    clients, allClients, archivedClients, archiveClient,
     restoreClient, setClientStatus, deleteClient, updateClientGestor, updateClientMeta,
   } = useClients();
   const { payments, loading: paymentsLoading, setPayments } = useInvestmentPayments();
@@ -86,6 +87,9 @@ export default function ClientesPage() {
   const [bulkDashType, setBulkDashType]            = useState('');
   const [bulkConfirm, setBulkConfirm]              = useState<'delete' | 'archive' | 'inativar' | null>(null);
   const [inlineEdit, setInlineEdit]                = useState<{ id: string; field: 'category' | 'dashtype' } | null>(null);
+  const [editingNameId, setEditingNameId]          = useState<string | null>(null);
+  const [nameDraft, setNameDraft]                  = useState('');
+  const [nameError, setNameError]                  = useState('');
 
   const isAdmin = canManageClients(currentRole);
 
@@ -311,6 +315,33 @@ export default function ClientesPage() {
     return new Date(`${iso}T12:00:00`).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' }).replace('.', '');
   }
 
+  function startEditingName(cliente: { id: string; name: string }) {
+    setEditingNameId(cliente.id);
+    setNameDraft(cliente.name);
+    setNameError('');
+  }
+
+  function cancelEditingName() {
+    setEditingNameId(null);
+    setNameError('');
+  }
+
+  function saveClientName(cliente: { id: string; name: string }) {
+    const trimmed = nameDraft.trim();
+    if (!trimmed) { setNameError('O nome não pode ficar vazio.'); return; }
+    if (trimmed === cliente.name) { setEditingNameId(null); return; }
+
+    const alvo = normalizeClientName(trimmed);
+    const colide = allClients.some(c => c.id !== cliente.id && normalizeClientName(c.name) === alvo);
+    if (colide) {
+      setNameError('Já existe outro cliente com esse nome (ou muito parecido) — a automação de reuniões via ClickUp não consegue distinguir os dois.');
+      return;
+    }
+
+    updateClientMeta(cliente.id, { name: trimmed });
+    setEditingNameId(null);
+  }
+
   function getFinancialInfo(clientId: string, billingMode?: 'prepaid' | 'card'): FinancialInfo {
     const balances = clientBalances[clientId];
     const hasMeta = balances?.meta !== undefined && balances.meta !== null;
@@ -526,9 +557,46 @@ export default function ClientesPage() {
                 <div className="min-w-0 flex-1">
                   <div className="flex min-w-0 items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <Link href={`/clientes/${cliente.id}`}>
-                        <p className="truncate text-sm font-bold text-foreground hover:text-primary transition-colors">{cliente.name}</p>
-                      </Link>
+                      {editingNameId === cliente.id ? (
+                        <div className="flex items-center gap-1">
+                          <input
+                            autoFocus
+                            value={nameDraft}
+                            onChange={e => { setNameDraft(e.target.value); if (nameError) setNameError(''); }}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter') saveClientName(cliente);
+                              if (e.key === 'Escape') cancelEditingName();
+                            }}
+                            onClick={e => e.preventDefault()}
+                            className="min-w-0 max-w-[220px] rounded border border-primary/50 bg-background px-1.5 py-0.5 text-sm font-bold text-foreground outline-none focus:border-primary"
+                          />
+                          <button type="button" onClick={() => saveClientName(cliente)} title="Salvar" className="shrink-0 rounded p-1 text-primary transition-colors hover:bg-primary/10">
+                            <Check className="h-3.5 w-3.5" />
+                          </button>
+                          <button type="button" onClick={cancelEditingName} title="Cancelar" className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-muted">
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex min-w-0 items-center gap-1">
+                          <Link href={`/clientes/${cliente.id}`} className="min-w-0">
+                            <p className="truncate text-sm font-bold text-foreground hover:text-primary transition-colors">{cliente.name}</p>
+                          </Link>
+                          {isAdmin && (
+                            <button
+                              type="button"
+                              onClick={e => { e.preventDefault(); startEditingName(cliente); }}
+                              title="Editar nome"
+                              className="shrink-0 rounded p-1 text-muted-foreground/50 opacity-0 transition-opacity hover:bg-primary/10 hover:text-primary group-hover:opacity-100"
+                            >
+                              <Pencil className="h-3 w-3" />
+                            </button>
+                          )}
+                        </div>
+                      )}
+                      {editingNameId === cliente.id && nameError && (
+                        <p className="mt-1 max-w-[220px] text-[10px] leading-snug text-red-400">{nameError}</p>
+                      )}
                       <div className="mt-1 flex flex-wrap items-center gap-1.5">
                         {inlineEdit?.id === cliente.id && inlineEdit.field === 'category' ? (
                           <select
