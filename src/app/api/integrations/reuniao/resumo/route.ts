@@ -37,10 +37,10 @@ export async function POST(req: NextRequest) {
 
   const pool = makeServerPool();
   try {
-    const { match, sugestoes, ambiguo } = await resolveClientByName(pool, cliente);
+    const { match, sugestoes, ambiguo, motivo } = await resolveClientByName(pool, cliente);
     if (!match) {
       // Mesmo contrato da rota irmã: cliente novo não é falha de requisição.
-      return Response.json({ ok: false, erro: 'cliente_nao_encontrado', nome_recebido: cliente, sugestoes, ambiguo });
+      return Response.json({ ok: false, erro: 'cliente_nao_encontrado', nome_recebido: cliente, sugestoes, ambiguo, motivo });
     }
 
     const r = await salvarResumoReuniao(pool, {

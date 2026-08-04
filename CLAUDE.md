@@ -1,5 +1,21 @@
 @AGENTS.md
 
+## Reuniões — casamento de cliente por regra, não por nome idêntico (2026-07-30)
+
+Matheus: reunião do **Panino** aconteceu e gravou, mas não chegou nem tarefa nem resumo. Causa raiz achada no código: existiam **dois motores de casamento no mesmo arquivo** e as rotas usavam o errado.
+
+- **`identificarCliente`** (bom, 5 níveis: igual → palavras reordenadas → cliente contido no título → **apelido** → sugestões) já existia como substituto determinístico do módulo de IA do Make, mas só era consumido por `/api/integrations/identificar`.
+- **`resolveClientByName`** (só casamento EXATO) era quem servia `/api/integrations/reuniao`, `/api/integrations/reuniao/resumo` e `agenda-intake`. `normalizeClientName("Panino")` = `"panino"` vs `"Panino'77"` = `"panino 77"` → **não casa** → `ok:false, cliente_nao_encontrado`. E como a rota responde **200 de propósito** (pro Make ler o corpo), o cenário lá **não marca erro**: falha perfeitamente silenciosa, some tarefa e resumo juntos.
+- **Correção**: `resolveClientByName` passou a delegar ao `identificarCliente`. O nível 4 (apelido) resolve `["panino"] ⊂ ["panino","77"]` com **confiança 90**.
+- ⚠️ **A trava contra o caso Outlet Jeans continua de pé** — e o comentário do topo do arquivo foi reescrito porque mentia ("casamento é EXATO, sem similaridade"). O que protege contra reunião cair no cliente errado é a **ABSTENÇÃO** (empate → `NAO IDENTIFICADO`, nunca um destino de sobra), não a exigência de nome idêntico. Exigir identidade literal só fazia reunião real sumir.
+- **Duas passadas, ATIVOS primeiro**: com casamento aproximado, ex-cliente de nome parecido passa a competir com o ativo e a reunião iria pro morto. A 2ª passada (carteira inteira) só roda quando os ativos não deram candidato — `ambiguo` novo em `Identificacao` distingue "empate" de "ausência", porque ambiguidade não melhora com mais nomes. Cliente inativo que casa segue gerando o aviso no `processarReuniao`.
+- **Bug de regressão encontrado de brinde**: cliente com `name` vazio tokeniza pra `[]`, e `contem(alvo, [])` é **vacuosamente true** → a regra 3 casava QUALQUER reunião com o cliente sem nome. `identificarCliente` agora filtra nomes vazios na entrada (protege também a rota `identificar`).
+- **`motivo` agora volta no corpo** das duas rotas de reunião — foi justamente a ausência dele que deixou a falha indecifrável no Make.
+- ✅ Verificado: tsc + `next build` limpos; **26 asserts** com a carteira real (Panino/panino/PANINO/"Panino 77" → `Panino'77` conf. 90; exato 100; acento; reordenado 98; contido 92; "Sorrifácil" sozinho → abstém com 3 alternativas; cliente não cadastrado → abstém; nome duplicado → abstém; cliente sem nome não captura reunião).
+- ⚠️ **Não verificado contra produção**: o `MAKE_INTEGRATION_SECRET` do `.env.local` é placeholder de dev (`dev-…`), então o `dry_run` contra `reports.onmid.app` volta `nao_autorizado`. As rotas estão vivas (401, não 404).
+- ⚠️ **Isto conserta a hipótese do NOME.** Se o cenário do Make nem disparou (TLDV não processou, trigger parado), nada aqui muda — conferir o **histórico de execuções do cenário no Make**, que mostra se rodou, qual `cliente` foi enviado e o que o reports respondeu.
+- ⚠️ A reunião do Panino de 30/07 **não se recupera sozinha** — precisa reexecutar o cenário no Make (o `meeting_id` deduplica, então rodar de novo não duplica).
+
 ## Início — Resumo de rastreio + top criativos ranqueáveis por resultado (2026-07-29)
 
 Pedido do Matheus: trazer pra tela inicial o que as rodadas de atribuição destravaram — "resumo de rastreios" e "top criativos por resultado (Agendamento, venda e etc)". O `TopCreativesCard` que existia mostrava top 5 **por leads**, janela fixa de 30d, sem controle nenhum — justo a métrica mais rasa que temos. Escopo decidido por ele: **só a tela de Início**, nenhum painel novo no `/dashboard`.

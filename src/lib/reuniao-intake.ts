@@ -16,10 +16,15 @@ type Pool = ReturnType<typeof makeServerPool>;
  * A automação anterior mandava a IA escolher um cliente sem permitir abstenção
  * e usava "Onmid" como destino de sobra; reunião de cliente não cadastrado
  * (ex.: Outlet Jeans) virava tarefa na lista da Onmid e ninguém percebia,
- * porque o destino era um cliente válido. Aqui o casamento é EXATO sobre o
- * nome normalizado — sem similaridade, sem fallback. Não bateu, ninguém
- * escreve nada no ClickUp e quem chamou recebe as sugestões pra perguntar a um
- * humano.
+ * porque o destino era um cliente válido.
+ *
+ * "Não adivinhar" ≠ "só aceitar o nome idêntico". O casamento é feito por
+ * `identificarCliente` — REGRAS DE TEXTO exatas (igual → palavras reordenadas →
+ * cliente contido no título → apelido), cada uma com resposta única ou
+ * abstenção. O que mata o problema do Outlet Jeans é a ABSTENÇÃO, não a
+ * exigência de nome idêntico: empate vira `NAO IDENTIFICADO`, nunca um destino
+ * de sobra. Exigir identidade literal só fazia "Panino" perder "Panino'77" —
+ * reunião real sumindo em silêncio, que foi o que aconteceu em 30/07.
  */
 
 // ─── Nome do cliente ─────────────────────────────────────────────────────────
@@ -60,12 +65,21 @@ export type ClienteRow = { id: string; name: string; gestor_id: string | null; s
 
 // ─── Identificação determinística (substitui a IA do Cenário 1) ─────────────
 
+/** Sentinela de abstenção — contrato herdado da IA que este módulo substituiu. */
+export const NAO_IDENTIFICADO = 'NAO IDENTIFICADO';
+
 export type Identificacao = {
   cliente_corrigido: string;
   /** 0–100. As regras determinísticas ficam todas ≥ 90; abstenção fica ≤ 84. */
   confianca: number;
   motivo: string;
   alternativas: string[];
+  /**
+   * Abstenção por EMPATE (vários candidatos plausíveis) em vez de ausência.
+   * Quem chama usa isso pra decidir se vale alargar a busca: ambiguidade não
+   * melhora com mais candidatos, ausência sim.
+   */
+  ambiguo?: boolean;
 };
 
 const tokensDe = (s: string) => normalizeClientName(s).split(' ').filter(Boolean);
@@ -78,8 +92,8 @@ const contem = (fora: string[], dentro: string[]) => {
 
 /**
  * Casa o nome lido da agenda com a lista de clientes por REGRAS DE TEXTO, na
- * ordem: igual → mesmas palavras em outra ordem → cliente contido no título →
- * título contido no cliente (apelido). Qualquer empate é ambiguidade e vira
+ * ordem: igual → igual ignorando pontuação → mesmas palavras em outra ordem →
+ * cliente contido no título → título contido no cliente (apelido). Qualquer empate é ambiguidade e vira
  * abstenção.
  *
  * Isto substitui o módulo de IA do Make que fazia a mesma coisa: a IA acertava
@@ -88,9 +102,14 @@ const contem = (fora: string[], dentro: string[]) => {
  * Regra de texto não tem dia ruim, e dá pra rodar a bateria de títulos reais
  * num teste antes de encostar em produção.
  */
-export function identificarCliente(nomes: string[], nomeReuniao: string): Identificacao {
-  const abster = (motivo: string, alternativas: string[] = [], confianca = 0): Identificacao =>
-    ({ cliente_corrigido: 'NAO IDENTIFICADO', confianca: Math.min(confianca, 84), motivo, alternativas });
+export function identificarCliente(nomesBrutos: string[], nomeReuniao: string): Identificacao {
+  const abster = (motivo: string, alternativas: string[] = [], confianca = 0, ambiguo = false): Identificacao =>
+    ({ cliente_corrigido: NAO_IDENTIFICADO, confianca: Math.min(confianca, 84), motivo, alternativas, ambiguo });
+
+  // Nome vazio no cadastro tokeniza pra [] — e `contem(alvo, [])` é
+  // vacuosamente true, o que faria a regra 3 casar QUALQUER reunião com o
+  // cliente sem nome. Fora antes de qualquer comparação.
+  const nomes = nomesBrutos.filter((n) => typeof n === 'string' && normalizeClientName(n).length > 0);
 
   const alvoNorm = normalizeClientName(nomeReuniao);
   const alvo = tokensDe(nomeReuniao);
@@ -99,14 +118,26 @@ export function identificarCliente(nomes: string[], nomeReuniao: string): Identi
   // 1. Igualzinho (já sem acento/caixa/pontuação).
   const exatos = nomes.filter((n) => normalizeClientName(n) === alvoNorm);
   if (exatos.length === 1) return { cliente_corrigido: exatos[0], confianca: 100, motivo: 'nome idêntico ao cadastro', alternativas: [] };
-  if (exatos.length > 1) return abster('dois clientes cadastrados com o mesmo nome', exatos.slice(0, 3));
+  if (exatos.length > 1) return abster('dois clientes cadastrados com o mesmo nome', exatos.slice(0, 3), 0, true);
 
-  // 2. Mesmas palavras em outra ordem ("Presidente Prudente Sorrifácil").
+  // 2. Mesmo nome com a pontuação em outro lugar: "Panino77" na agenda vs
+  //    "Panino'77" no cadastro. Sem isto o apóstrofo separa o cadastro em
+  //    ["panino","77"] enquanto a agenda vira ["panino77"], e a regra 4 casava
+  //    o título com "Panino77 Curitiba" — cliente ERRADO, com 90 de confiança,
+  //    passando direto pelo corte. Comparar sem separador nenhum é exato: só
+  //    casa quem tem as mesmas letras e números na mesma ordem.
+  const compacto = (s: string) => normalizeClientName(s).replace(/ /g, '');
+  const alvoCompacto = compacto(nomeReuniao);
+  const compactos = nomes.filter((n) => compacto(n) === alvoCompacto);
+  if (compactos.length === 1) return { cliente_corrigido: compactos[0], confianca: 99, motivo: 'nome idêntico ao cadastro (pontuação diferente)', alternativas: [] };
+  if (compactos.length > 1) return abster('dois clientes com o mesmo nome', compactos.slice(0, 3), 0, true);
+
+  // 3. Mesmas palavras em outra ordem ("Presidente Prudente Sorrifácil").
   const reordenados = nomes.filter((n) => mesmoConjunto(tokensDe(n), alvo));
   if (reordenados.length === 1) return { cliente_corrigido: reordenados[0], confianca: 98, motivo: 'mesmas palavras em outra ordem', alternativas: [] };
-  if (reordenados.length > 1) return abster('mais de um cliente com essas palavras', reordenados.slice(0, 3));
+  if (reordenados.length > 1) return abster('mais de um cliente com essas palavras', reordenados.slice(0, 3), 0, true);
 
-  // 3. Título traz o nome do cliente + palavras extras ("Londrina 02
+  // 4. Título traz o nome do cliente + palavras extras ("Londrina 02
   //    Sorrifácil" ⊃ "Sorrifácil Londrina"). Vence o cliente MAIS específico;
   //    empate na especificidade é ambiguidade.
   const contidos = nomes.filter((n) => contem(alvo, tokensDe(n)));
@@ -114,17 +145,17 @@ export function identificarCliente(nomes: string[], nomeReuniao: string): Identi
     const max = Math.max(...contidos.map((n) => tokensDe(n).length));
     const melhores = contidos.filter((n) => tokensDe(n).length === max);
     if (melhores.length === 1) return { cliente_corrigido: melhores[0], confianca: 92, motivo: 'nome do cliente contido no título', alternativas: [] };
-    return abster('título serve para mais de um cliente', melhores.slice(0, 3));
+    return abster('título serve para mais de um cliente', melhores.slice(0, 3), 0, true);
   }
 
-  // 4. Apelido: o título é um pedaço do nome do cliente ("Istambul" ⊂
+  // 5. Apelido: o título é um pedaço do nome do cliente ("Istambul" ⊂
   //    "Istambul Gastrobar"). Só vale com candidato ÚNICO — "Sorrifácil"
   //    sozinho casa com dez clientes e tem que ir pra triagem.
   const apelidos = nomes.filter((n) => contem(tokensDe(n), alvo));
   if (apelidos.length === 1) return { cliente_corrigido: apelidos[0], confianca: 90, motivo: 'título é apelido do cliente', alternativas: [] };
-  if (apelidos.length > 1) return abster('apelido serve para mais de um cliente', apelidos.slice(0, 3));
+  if (apelidos.length > 1) return abster('apelido serve para mais de um cliente', apelidos.slice(0, 3), 0, true);
 
-  // 5. Nada casou: sugestões por similaridade, só pra ajudar o humano.
+  // 6. Nada casou: sugestões por similaridade, só pra ajudar o humano.
   const sugestoes = nomes
     .map((n) => ({ n, score: similarity(alvoNorm, normalizeClientName(n)) }))
     .filter((s) => s.score >= 0.45)
@@ -138,29 +169,43 @@ export function identificarCliente(nomes: string[], nomeReuniao: string): Identi
 }
 
 /**
- * Cliente pelo nome. Devolve `match` só em casamento exato do nome normalizado;
- * `sugestoes` é material pro alerta humano e nunca é aplicado sozinho.
+ * Cliente pelo nome, pelas mesmas regras do `identificarCliente` — inclusive
+ * apelido, que é o caso "Panino" → "Panino'77". `sugestoes` continua sendo
+ * material pro alerta humano e só aparece quando NÃO houve casamento.
+ *
+ * Duas passadas, ativos primeiro: com casamento aproximado um ex-cliente de
+ * nome parecido passa a competir com o ativo, e a reunião iria pro morto. A
+ * segunda passada (carteira inteira) só roda quando os ativos não deram
+ * candidato nenhum — ambiguidade não melhora com mais nomes, então empate entre
+ * ativos para aqui. Cliente inativo que casa segue gerando o aviso lá no
+ * `processarReuniao`.
  */
 export async function resolveClientByName(pool: Pool, nome: string) {
-  const alvo = normalizeClientName(nome);
   const { rows } = await pool.query<ClienteRow>(
     'SELECT id, name, gestor_id, status FROM public.clients',
   );
 
-  const exatos = rows.filter((c) => normalizeClientName(c.name) === alvo);
-  // Dois clientes com o mesmo nome normalizado: ambíguo, trata como não achado.
-  const match = exatos.length === 1 ? exatos[0] : null;
+  const ativos = rows.filter((c) => (c.status ?? 'Ativo') === 'Ativo');
 
-  const sugestoes = match
-    ? []
-    : rows
-        .map((c) => ({ nome: c.name, score: similarity(alvo, normalizeClientName(c.name)) }))
-        .filter((s) => s.score >= 0.45)
-        .sort((a, b) => b.score - a.score)
-        .slice(0, 3)
-        .map((s) => s.nome);
+  let ident = identificarCliente(ativos.map((c) => c.name), nome);
+  let universo = ativos;
+  if (ident.cliente_corrigido === NAO_IDENTIFICADO && !ident.ambiguo) {
+    ident = identificarCliente(rows.map((c) => c.name), nome);
+    universo = rows;
+  }
 
-  return { match, sugestoes, ambiguo: exatos.length > 1 };
+  const match = ident.cliente_corrigido === NAO_IDENTIFICADO
+    ? null
+    : universo.find((c) => c.name === ident.cliente_corrigido) ?? null;
+
+  return {
+    match,
+    sugestoes: match ? [] : ident.alternativas,
+    ambiguo: ident.ambiguo === true,
+    /** Por que casou (ou não) — vai no corpo da resposta pro Make. */
+    confianca: ident.confianca,
+    motivo: ident.motivo,
+  };
 }
 
 // ─── Responsáveis ────────────────────────────────────────────────────────────
@@ -241,7 +286,7 @@ export type ReuniaoInput = {
 };
 
 export type ReuniaoResult =
-  | { ok: false; erro: 'cliente_nao_encontrado'; nome_recebido: string; sugestoes: string[]; ambiguo: boolean }
+  | { ok: false; erro: 'cliente_nao_encontrado'; nome_recebido: string; sugestoes: string[]; ambiguo: boolean; motivo: string }
   | { ok: false; erro: 'cliente_sem_lista'; cliente: string }
   | {
       ok: true;
@@ -274,9 +319,9 @@ export async function processarReuniao(pool: Pool, input: ReuniaoInput): Promise
   await pool.query('ALTER TABLE public.users ADD COLUMN IF NOT EXISTS setor TEXT').catch(() => {});
   await pool.query('ALTER TABLE public.users ADD COLUMN IF NOT EXISTS clickup_id TEXT').catch(() => {});
 
-  const { match, sugestoes, ambiguo } = await resolveClientByName(pool, input.cliente);
+  const { match, sugestoes, ambiguo, motivo } = await resolveClientByName(pool, input.cliente);
   if (!match) {
-    return { ok: false, erro: 'cliente_nao_encontrado', nome_recebido: input.cliente, sugestoes, ambiguo };
+    return { ok: false, erro: 'cliente_nao_encontrado', nome_recebido: input.cliente, sugestoes, ambiguo, motivo };
   }
 
   const lista = await resolveClientList(pool, match.id);
