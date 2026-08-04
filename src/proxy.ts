@@ -92,6 +92,7 @@ const INTEGRATION_PREFIXES = [
   '/api/integrations/clientes',
   '/api/integrations/identificar',
   '/api/integrations/tldv-sync',
+  '/api/integrations/tldv-backfill',
 ];
 
 function matches(pathname: string, prefixes: string[]): boolean {
