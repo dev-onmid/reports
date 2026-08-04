@@ -1,5 +1,18 @@
 @AGENTS.md
 
+## Aba Reuniões do cliente — repositório de reuniões gravadas (2026-08-04)
+
+Pedido do Matheus: toda reunião gravada espelhada dentro do cliente — resumo, **link da gravação clicável** e o **último checklist em evidência** pra dar continuidade de onde parou. Aproveita a tubulação que já existia (polling `tldv-sync` → Make → webhook `/api/integrations/reuniao/resumo` → `reuniao_resumos`); o que faltava era gravação+checklist no repositório e uma aba própria.
+
+- **`reuniao_resumos` ganhou `recording_url TEXT` + `checklist JSONB`** (ALTER IF NOT EXISTS no ensure). `ChecklistItem = {texto, feito}`. `parseChecklist` (exportada) aceita o que a automação mandar: array de strings, array de objetos (`texto|item|text|title` + `feito|done|checked`) ou texto com um item por linha (prefixos `-`/`*`/`•`/`1.`/`[x]`); caps 50 itens × 400 chars; irreconhecível → null.
+- **⚠️ Reenvio do Make NÃO desmarca checks**: `mesclarChecklist` reaplica os `feito` da versão gravada por texto normalizado (caixa/espaço-insensível) antes do upsert, e o `DO UPDATE` usa `COALESCE(EXCLUDED.x, atual)` em doc_url/recording_url/checklist — reenvio sem esses campos não apaga o que já existe. Título/resumo/data continuam sobrescrevendo (versão mais nova da IA vale).
+- **Webhook** aceita os campos novos: `gravacao_url` (aliases `recording_url`/`video_url`/`gravacao`) e `checklist` (aliases `pendencias`/`acoes`). Payload completo documentado no comentário da rota. Nada quebra pro Make atual — tudo opcional.
+- **PATCH novo em `/api/clients/[id]/reunioes`** `{resumoId, checklist}`: a UI manda o array completo ao marcar/desmarcar item (otimista + fire-and-forget).
+- **Aba "Reuniões" própria** (`reunioes-tab.tsx`, PRIMARY_TAB entre Demandas e CRM — a seção Reuniões SAIU da aba Demandas, que ficou só com o ClickUp): a mais recente vem aberta e destacada (badge ÚLTIMA REUNIÃO, borda primary) com checklist interativo (contador N/M, risco no feito) acima do resumo; histórico expansível abaixo com os mesmos recursos + excluir.
+- **Link da gravação com fallback TLDV**: `recording_url` explícita vence; sem ela, `meeting_id` com cara de ObjectId (24 hex) deriva `https://tldv.io/app/meetings/{id}` — reunião vinda do pipeline TLDV ganha o botão "Ver gravação" mesmo se o Make ainda não mandar a URL.
+- ✅ Verificado: tsc + `next build` limpos; **17 asserts** (parseChecklist todos os formatos/caps, mesclarChecklist preservando feito em reenvio, reenvio sem checklist não apaga); harness no browser (bundle esbuild + Tailwind compilado via `@tailwindcss/cli -i globals.css`, servido por `public/__reunioes_test/` no dev server — receita que funciona) — hero com badge e 1/3, toggle → 2/3 + risco + PATCH com payload completo conferido, fallback TLDV no href, gravação explícita vencendo no histórico, reunião antiga sem checklist/gravação renderiza sem quebrar, mobile 375px empilhado, zero erros de console.
+- ⚠️ Só produção valida: upsert/merge real no banco e o Make mandando os campos novos. **Automação pendente (lado de fora)**: atualizar o cenário v4 do Make pra incluir `gravacao_url` + `checklist` no POST do resumo — ver recomendação registrada na conversa (caminho mais curto: Make; alternativa futura: o reports gerar resumo+checklist sozinho da transcrição que o polling já busca).
+
 ## Editar nome de cliente (2026-07-30)
 
 Pedido do Matheus: poder corrigir o nome de um cliente já cadastrado. O backend já aceitava (`PATCH /api/clients?id=` sempre suportou `name` — só não tinha UI nenhuma pra chamar isso).

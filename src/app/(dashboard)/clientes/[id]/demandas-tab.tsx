@@ -2,19 +2,17 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  CalendarDays, CheckSquare, ChevronDown, ExternalLink, FileText,
-  ListTodo, RefreshCw, Trash2, Users,
+  CalendarDays, CheckSquare, ExternalLink,
+  ListTodo, RefreshCw, Users,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
 /**
- * Aba "Demandas" — espelho do progresso do cliente pra retomar reuniões:
- *
- * 1. Tarefas pendentes da lista do ClickUp vinculada ao cliente, SÓ dos status
- *    Flow e Tráfego (decisão do Matheus — o resto da lista não interessa aqui).
- * 2. Resumos das reuniões (backlog), gravados pelo webhook do Make
- *    (`/api/integrations/reuniao/resumo`) no final do cenário do TLDV.
+ * Aba "Demandas" — tarefas pendentes da lista do ClickUp vinculada ao cliente,
+ * SÓ dos status Flow e Tráfego (decisão do Matheus — o resto da lista não
+ * interessa aqui). As reuniões gravadas moram na aba irmã "Reuniões"
+ * (`reunioes-tab.tsx`).
  */
 
 // Status do ClickUp que aparecem aqui. Comparação sobre o nome normalizado
@@ -39,16 +37,6 @@ type ClickupTaskRow = {
   assignees?: { id: number; username: string }[];
 };
 
-type ResumoRow = {
-  id: string;
-  meeting_id: string | null;
-  titulo: string | null;
-  resumo: string;
-  doc_url: string | null;
-  reuniao_em: string;
-  created_at: string;
-};
-
 function fmtData(iso: string | null | undefined): string {
   if (!iso) return '—';
   const d = new Date(/^\d+$/.test(String(iso)) ? Number(iso) : iso);
@@ -61,10 +49,6 @@ export function ClientDemandasTab({ clientId }: { clientId: string }) {
   const [tasksError, setTasksError] = useState('');
   const [tasksLoading, setTasksLoading] = useState(true);
   const [semVinculo, setSemVinculo] = useState(false);
-
-  const [resumos, setResumos] = useState<ResumoRow[]>([]);
-  const [resumosLoading, setResumosLoading] = useState(true);
-  const [expandido, setExpandido] = useState<string | null>(null);
 
   const loadTasks = useCallback(async () => {
     setTasksLoading(true);
@@ -84,26 +68,7 @@ export function ClientDemandasTab({ clientId }: { clientId: string }) {
     }
   }, [clientId]);
 
-  const loadResumos = useCallback(async () => {
-    setResumosLoading(true);
-    try {
-      const r = await fetch(`/api/clients/${clientId}/reunioes`);
-      const data = await r.json().catch(() => ({})) as { resumos?: ResumoRow[] };
-      setResumos(data.resumos ?? []);
-    } catch {
-      setResumos([]);
-    } finally {
-      setResumosLoading(false);
-    }
-  }, [clientId]);
-
-  useEffect(() => { void loadTasks(); void loadResumos(); }, [loadTasks, loadResumos]);
-
-  async function excluirResumo(r: ResumoRow) {
-    if (!window.confirm('Excluir este resumo de reunião? A ação não desfaz.')) return;
-    await fetch(`/api/clients/${clientId}/reunioes?resumoId=${encodeURIComponent(r.id)}`, { method: 'DELETE' }).catch(() => {});
-    setResumos(prev => prev.filter(item => item.id !== r.id));
-  }
+  useEffect(() => { void loadTasks(); }, [loadTasks]);
 
   // Só Flow e Tráfego, agrupadas por status na ordem de STATUS_VISIVEIS.
   const grupos = useMemo(() => {
@@ -215,95 +180,6 @@ export function ClientDemandasTab({ clientId }: { clientId: string }) {
                   </div>
                 </div>
               ))}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* ── Resumos de reunião (backlog) ────────────────────────────────── */}
-      <div className="rounded-xl border border-border bg-card">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-4">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-border bg-background">
-              <FileText className="h-5 w-5 text-primary" />
-            </div>
-            <div>
-              <h3 className="font-bold text-foreground">Reuniões</h3>
-              <p className="text-xs text-muted-foreground">
-                Resumos recebidos da automação — o backlog pra retomar de onde a última reunião parou.
-              </p>
-            </div>
-          </div>
-          <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={() => void loadResumos()} disabled={resumosLoading}>
-            <RefreshCw className={cn('h-3.5 w-3.5', resumosLoading && 'animate-spin')} />
-            Atualizar
-          </Button>
-        </div>
-
-        <div className="p-5">
-          {resumosLoading ? (
-            <p className="text-sm text-muted-foreground">Carregando resumos...</p>
-          ) : resumos.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              Nenhum resumo de reunião recebido ainda. Quando a automação enviar
-              (webhook <code className="rounded bg-background px-1.5 py-0.5 text-[11px]">/api/integrations/reuniao/resumo</code>),
-              eles aparecem aqui do mais recente pro mais antigo.
-            </p>
-          ) : (
-            <div className="space-y-3">
-              {resumos.map(r => {
-                const aberto = expandido === r.id;
-                return (
-                  <div key={r.id} className="rounded-xl border border-border bg-background">
-                    <div
-                      role="button"
-                      tabIndex={0}
-                      onClick={() => setExpandido(aberto ? null : r.id)}
-                      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setExpandido(aberto ? null : r.id); } }}
-                      className="flex w-full cursor-pointer flex-wrap items-center justify-between gap-3 px-4 py-3"
-                    >
-                      <div className="flex min-w-0 items-center gap-2.5">
-                        <ChevronDown className={cn('h-4 w-4 shrink-0 text-muted-foreground transition-transform', aberto && 'rotate-180')} />
-                        <div className="min-w-0">
-                          <p className="font-medium text-sm text-foreground">
-                            {r.titulo?.trim() || `Reunião de ${fmtData(r.reuniao_em)}`}
-                          </p>
-                          <p className="text-[11px] text-muted-foreground">{fmtData(r.reuniao_em)}</p>
-                        </div>
-                      </div>
-                      {!aberto && (
-                        <p className="hidden max-w-[45%] truncate text-xs text-muted-foreground sm:block">
-                          {r.resumo}
-                        </p>
-                      )}
-                    </div>
-                    {aberto && (
-                      <div className="border-t border-border px-4 py-3">
-                        <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground/90">{r.resumo}</p>
-                        <div className="mt-3 flex items-center justify-between gap-3">
-                          {r.doc_url ? (
-                            <a
-                              href={r.doc_url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="flex items-center gap-1 text-xs font-semibold text-primary hover:underline"
-                            >
-                              Documento completo <ExternalLink className="h-3 w-3" />
-                            </a>
-                          ) : <span />}
-                          <button
-                            type="button"
-                            onClick={() => void excluirResumo(r)}
-                            className="flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-red-400"
-                          >
-                            <Trash2 className="h-3 w-3" /> Excluir
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
             </div>
           )}
         </div>

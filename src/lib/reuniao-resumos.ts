@@ -3,13 +3,14 @@ import type { makeServerPool } from '@/lib/server-db';
 type Pool = ReturnType<typeof makeServerPool>;
 
 /**
- * Resumos de reunião por cliente — o "backlog" que a aba Demandas da tela do
- * cliente exibe pra retomar contexto entre reuniões.
+ * Reuniões por cliente — o repositório que a aba Reuniões da tela do cliente
+ * exibe pra retomar contexto entre reuniões: resumo, link da gravação (TLDV),
+ * doc completo e o checklist de continuidade (interativo na tela).
  *
  * Quem escreve é o webhook `/api/integrations/reuniao/resumo` (Make, no final
  * do cenário do TLDV); quem lê é `/api/clients/[id]/reunioes`. As tarefas da
  * reunião seguem indo pro ClickUp pelo fluxo já existente (`reuniao-intake`) —
- * aqui fica só o texto do resumo, que não tem lugar no ClickUp.
+ * aqui fica o que não tem lugar no ClickUp.
  */
 
 let schemaReady: Promise<void> | null = null;

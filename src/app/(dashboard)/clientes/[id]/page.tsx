@@ -53,6 +53,7 @@ import CrmWorkspace from '@/app/(dashboard)/crm/page';
 import { ClientTrackingTab } from './tracking-tab';
 import { LandingPagesTab } from './landing-pages-tab';
 import { ClientDemandasTab } from './demandas-tab';
+import { ClientReunioesTab } from './reunioes-tab';
 import { ClientDeliveryTab } from './delivery-tab';
 
 // ── Funnel types & logic ───────────────────────────────────────────────────────
@@ -4666,10 +4667,10 @@ function SheetsResultsTab({ clientId }: { clientId: string }) {
 }
 
 // ── Page ───────────────────────────────────────────────────────────────────────
-const TABS = ['planejamento', 'demandas', 'crm', 'rastreio', 'pagamentos', 'delivery', 'lps', 'dna', 'historico', 'mapa'] as const;
+const TABS = ['planejamento', 'demandas', 'reunioes', 'crm', 'rastreio', 'pagamentos', 'delivery', 'lps', 'dna', 'historico', 'mapa'] as const;
 type Tab = typeof TABS[number];
 // Abas operacionais sempre visíveis na barra; o resto (referência) vai pro menu "Mais".
-const PRIMARY_TABS: Tab[] = ['planejamento', 'demandas', 'crm', 'rastreio', 'pagamentos'];
+const PRIMARY_TABS: Tab[] = ['planejamento', 'demandas', 'reunioes', 'crm', 'rastreio', 'pagamentos'];
 // `delivery` fica no overflow porque só interessa a cliente de cardápio digital.
 // A aba aparece para todos de propósito: é por ela que se CONECTA uma loja nova
 // (sem conexão, ela mostra o formulário em vez do painel).
@@ -4930,6 +4931,7 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
   const tabLabel: Record<Tab, string> = {
     planejamento: 'Planejamento',
     demandas:     'Demandas',
+    reunioes:     'Reuniões',
     mapa:         'Mapa Mental',
     historico:    'Histórico',
     rastreio:     'Rastreio',
@@ -5175,6 +5177,7 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
       )}
 
       {tab === 'demandas' && <ClientDemandasTab clientId={id} />}
+      {tab === 'reunioes' && <ClientReunioesTab clientId={id} />}
       {tab === 'delivery' && <ClientDeliveryTab clientId={id} />}
 
       {tab === 'mapa' && <ClientMindMapTab clientId={id} clientName={client.name} />}
