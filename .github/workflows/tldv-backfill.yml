@@ -1,0 +1,50 @@
+name: Backfill reuniões TLDV (manual)
+
+# Puxa as reuniões recentes do TLDV que ainda não estão na aba Reuniões do
+# cliente e gera resumo+checklist retroativo (rota /api/integrations/tldv-backfill).
+# SÓ manual (workflow_dispatch) — backfill não é rotina; a rotina é o pipeline
+# tldv-sync → Make → webhook de resumo.
+
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: 'Quantas reuniões recentes olhar (1-20)'
+        default: '10'
+        required: false
+      dry:
+        description: 'Dry-run: só mostra o casamento título→cliente (1 = sim)'
+        default: '0'
+        required: false
+
+concurrency:
+  group: tldv-backfill
+  cancel-in-progress: false
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Rodar backfill
+        run: |
+          SECRET="${{ secrets.ONMID_INTEGRATION_SECRET }}"
+          if [ -z "$SECRET" ]; then
+            echo "::error::Configure o secret ONMID_INTEGRATION_SECRET."
+            exit 1
+          fi
+
+          URL="https://reports.onmid.app/api/integrations/tldv-backfill?limit=${{ inputs.limit }}&dry=${{ inputs.dry }}"
+          HTTP_CODE=$(curl -s -o /tmp/resposta.json -w "%{http_code}" --max-time 300 \
+            -H "x-onmid-secret: $SECRET" "$URL")
+          echo "HTTP $HTTP_CODE"
+          cat /tmp/resposta.json | python3 -m json.tool || cat /tmp/resposta.json
+
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "::error::tldv-backfill retornou HTTP $HTTP_CODE"
+            exit 1
+          fi
+          if grep -q '"ok":false' /tmp/resposta.json; then
+            echo "::error::tldv-backfill respondeu ok:false"
+            exit 1
+          fi
