@@ -209,6 +209,19 @@ export async function GET(req: NextRequest) {
           ORDER BY r.reuniao_em DESC LIMIT $1`,
         [limit],
       );
+      // Diagnóstico: sem isto, "sem_evento_na_agenda" não diz se a tabela está
+      // vazia ou se o formato do conferenceId não bate com o meeting_url.
+      await ensureAgendaSchema(poolV);
+      const { rows: [agendaInfo] } = await poolV.query<{ total: string; com_url: string; mais_antigo: string | null }>(
+        `SELECT COUNT(*)::text AS total,
+                COUNT(meeting_url)::text AS com_url,
+                MIN(inicio)::text AS mais_antigo
+           FROM public.agenda_eventos`,
+      );
+      const { rows: exemploUrls } = await poolV.query<{ meeting_url: string }>(
+        'SELECT meeting_url FROM public.agenda_eventos WHERE meeting_url IS NOT NULL ORDER BY inicio DESC LIMIT 3',
+      );
+
       const reunioesAuditadas = [];
       for (const s of salvas) {
         const detalhe = await buscarReuniao(s.meeting_id).catch(() => null);
@@ -225,6 +238,7 @@ export async function GET(req: NextRequest) {
         reunioesAuditadas.push({
           meeting_id: s.meeting_id,
           titulo: s.titulo,
+          conference_id: detalhe?.extraProperties?.conferenceId ?? null,
           cliente_gravado: s.name ?? s.client_id,
           titulo_agenda: agenda?.tituloAgenda ?? null,
           cliente_agenda: clienteAgenda,
@@ -234,7 +248,12 @@ export async function GET(req: NextRequest) {
             : clienteAgenda === s.name ? 'confere' : 'DIVERGENTE',
         });
       }
-      return Response.json({ ok: true, acao: 'verificar', reunioes: reunioesAuditadas });
+      return Response.json({
+        ok: true,
+        acao: 'verificar',
+        agenda: { ...agendaInfo, exemplos_meeting_url: exemploUrls.map((r) => r.meeting_url) },
+        reunioes: reunioesAuditadas,
+      });
     } catch (err) {
       console.error('[tldv-backfill verificar]', err);
       return Response.json({ ok: false, erro: 'falha_interna', detalhe: err instanceof Error ? err.message : String(err) });
