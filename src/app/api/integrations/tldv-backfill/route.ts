@@ -3,6 +3,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { makeServerPool } from '@/lib/server-db';
 import { conferirSegredoIntegracao, respostaSegredo } from '@/lib/integration-secret';
 import { normalizeClientName, resolveClientByName } from '@/lib/reuniao-intake';
+import { ensureAgendaSchema } from '@/lib/agenda-intake';
 import { parseChecklist, salvarResumoReuniao } from '@/lib/reuniao-resumos';
 import { logAiUsage } from '@/lib/ai-usage-logger';
 import { buscarReuniao, buscarTranscricao, dataIso, listarReunioes } from '@/lib/tldv';
@@ -114,6 +115,33 @@ async function analisarReuniao(opts: {
 }
 
 /**
+ * Identificação DETERMINÍSTICA pela agenda (o mesmo cruzamento que o Make
+ * faz): o TLDV traz o `conferenceId` do Google Meet, e a `agenda_eventos`
+ * (alimentada pelo Make com os eventos do Calendar) guarda o `meeting_url`
+ * com esse código + o cliente já resolvido pelo título do evento. Quando o
+ * cruzamento existe, ele vence qualquer palpite de IA.
+ */
+async function clientePorAgenda(
+  pool: ReturnType<typeof makeServerPool>,
+  conferenceId: string | undefined,
+): Promise<{ clientId: string | null; tituloAgenda: string } | null> {
+  const conf = (conferenceId ?? '').trim().toLowerCase().replace(/[^a-z0-9-]/g, '');
+  if (!conf) return null;
+  await ensureAgendaSchema(pool);
+  const { rows } = await pool.query<{ client_id: string | null; titulo: string }>(
+    `SELECT client_id, titulo FROM public.agenda_eventos
+      WHERE meeting_url IS NOT NULL AND strpos(lower(meeting_url), $1) > 0
+      ORDER BY inicio DESC LIMIT 2`,
+    [conf],
+  );
+  if (!rows.length) return null;
+  // Dois eventos com o mesmo Meet e clientes diferentes = link reaproveitado
+  // na agenda; aí a fonte não é confiável pra ESTA reunião.
+  if (rows.length > 1 && rows[0].client_id !== rows[1].client_id) return null;
+  return { clientId: rows[0].client_id, tituloAgenda: rows[0].titulo };
+}
+
+/**
  * Correção manual de atribuição errada: `?reatribuir=<meeting_ids separados
  * por vírgula>&cliente=<nome>` move as reuniões pro cliente certo (resolvido
  * por `resolveClientByName` — o nome pode ser apelido). Com `dry=1` só mostra
@@ -167,6 +195,54 @@ export async function GET(req: NextRequest) {
   const dry = url.searchParams.get('dry') === '1';
   const inicio = Date.now();
 
+  // Auditoria: confere as reuniões JÁ gravadas contra o evento da agenda
+  // (conferenceId do Meet → agenda_eventos). Não escreve nada — aponta
+  // DIVERGENTE pra corrigir via ?reatribuir=.
+  if (url.searchParams.get('verificar') === '1') {
+    const poolV = makeServerPool();
+    try {
+      const { rows: salvas } = await poolV.query<{ meeting_id: string; titulo: string | null; client_id: string; name: string | null }>(
+        `SELECT r.meeting_id, r.titulo, r.client_id, c.name
+           FROM public.reuniao_resumos r
+           LEFT JOIN public.clients c ON c.id = r.client_id
+          WHERE r.meeting_id IS NOT NULL
+          ORDER BY r.reuniao_em DESC LIMIT $1`,
+        [limit],
+      );
+      const reunioesAuditadas = [];
+      for (const s of salvas) {
+        const detalhe = await buscarReuniao(s.meeting_id).catch(() => null);
+        const agenda = detalhe ? await clientePorAgenda(poolV, detalhe.extraProperties?.conferenceId) : null;
+        let clienteAgenda: string | null = null;
+        if (agenda) {
+          if (agenda.clientId) {
+            const { rows: [c] } = await poolV.query<{ name: string }>('SELECT name FROM public.clients WHERE id = $1', [agenda.clientId]);
+            clienteAgenda = c?.name ?? agenda.clientId;
+          } else {
+            clienteAgenda = (await resolveClientByName(poolV, agenda.tituloAgenda)).match?.name ?? null;
+          }
+        }
+        reunioesAuditadas.push({
+          meeting_id: s.meeting_id,
+          titulo: s.titulo,
+          cliente_gravado: s.name ?? s.client_id,
+          titulo_agenda: agenda?.tituloAgenda ?? null,
+          cliente_agenda: clienteAgenda,
+          status: !detalhe ? 'tldv_indisponivel'
+            : !agenda ? 'sem_evento_na_agenda'
+            : !clienteAgenda ? 'agenda_sem_cliente'
+            : clienteAgenda === s.name ? 'confere' : 'DIVERGENTE',
+        });
+      }
+      return Response.json({ ok: true, acao: 'verificar', reunioes: reunioesAuditadas });
+    } catch (err) {
+      console.error('[tldv-backfill verificar]', err);
+      return Response.json({ ok: false, erro: 'falha_interna', detalhe: err instanceof Error ? err.message : String(err) });
+    } finally {
+      await poolV.end();
+    }
+  }
+
   const reatribuirIds = (url.searchParams.get('reatribuir') ?? '').split(',').map((s) => s.trim()).filter(Boolean);
   if (reatribuirIds.length) {
     const clienteNome = (url.searchParams.get('cliente') ?? '').trim();
@@ -217,32 +293,44 @@ export async function GET(req: NextRequest) {
       if (Date.now() - inicio > ORCAMENTO_MS) { semTempo++; continue; }
 
       try {
-        const { match, motivo } = await resolveClientByName(pool, m.name ?? '');
+        // Ordem de identificação: título → agenda (determinística, mesmo
+        // cruzamento do Make via conferenceId do Meet) → IA pela transcrição.
+        const detalhe = await buscarReuniao(m.id).catch(() => m);
+        let clientePre: { id: string; name: string } | null =
+          (await resolveClientByName(pool, m.name ?? '')).match;
+        let fonte = clientePre ? 'título' : '';
+        if (!clientePre) {
+          const agenda = await clientePorAgenda(pool, detalhe.extraProperties?.conferenceId);
+          if (agenda) {
+            const porId = agenda.clientId ? carteira.find((c) => c.id === agenda.clientId) ?? null : null;
+            const achado = porId ?? (await resolveClientByName(pool, agenda.tituloAgenda)).match;
+            if (achado) { clientePre = achado; fonte = `agenda (${agenda.tituloAgenda})`; }
+          }
+        }
 
         if (dry) {
-          if (match) gravadas.push({ ...base, cliente: match.name, motivo: `dry-run: ${motivo}` });
-          else semCliente.push({ ...base, motivo: `${motivo} — na execução real a IA tenta identificar pela transcrição` });
+          if (clientePre) gravadas.push({ ...base, cliente: clientePre.name, motivo: `dry-run: ${fonte}` });
+          else semCliente.push({ ...base, motivo: 'título/agenda não resolveram — na execução real a IA tenta pela transcrição' });
           continue;
         }
 
-        const detalhe = await buscarReuniao(m.id).catch(() => m);
         const t = await buscarTranscricao(m.id);
-        if (!t?.data?.length) { semTranscricao.push({ ...base, cliente: match?.name }); continue; }
+        if (!t?.data?.length) { semTranscricao.push({ ...base, cliente: clientePre?.name }); continue; }
         const transcricao = t.data.map((f) => `[${f.speaker}] ${f.text}`).join('\n');
 
         const ia = await analisarReuniao({
-          clienteConhecido: match?.name ?? null,
+          clienteConhecido: clientePre?.name ?? null,
           nomesCarteira: ativos.map((c) => c.name),
           tituloReuniao: m.name ?? '',
           transcricao,
         });
 
-        // Título casou → vale o título. Senão, vale a IA — mas só com
+        // Título/agenda casaram → valem eles. Senão, vale a IA — mas só com
         // confiança ALTA e nome que existe na carteira; o resto vira relatório
         // pro humano decidir, nunca gravação no cliente errado. (Na 1ª rodada
         // real, "media" gravava também — e 2 de 5 "media" saíram erradas, caso
         // Kumon×IGA: segmento parecido engana. Média agora é só palpite.)
-        const cliente = match
+        const cliente = clientePre
           ?? (ia.confianca === 'alta' ? porNomeNorm.get(normalizeClientName(ia.cliente)) ?? null : null);
         if (!cliente) {
           semCliente.push({ ...base, motivo: `IA: ${ia.cliente} (confiança ${ia.confianca}) — não gravado` });
@@ -259,7 +347,7 @@ export async function GET(req: NextRequest) {
           checklist: ia.checklist,
           reuniaoEm: quando ? new Date(quando) : null,
         });
-        gravadas.push({ ...base, cliente: cliente.name, resumo_id: r.id, motivo: match ? 'título' : `transcrição (confiança ${ia.confianca})` });
+        gravadas.push({ ...base, cliente: cliente.name, resumo_id: r.id, motivo: fonte || `transcrição (confiança ${ia.confianca})` });
       } catch (err) {
         erros.push({ ...base, motivo: err instanceof Error ? err.message : String(err) });
       }

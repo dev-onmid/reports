@@ -24,6 +24,10 @@ on:
         description: 'Cliente destino da reatribuição (nome ou apelido)'
         default: ''
         required: false
+      verificar:
+        description: 'Auditoria: confere as gravadas contra a agenda (1 = sim)'
+        default: '0'
+        required: false
 
 concurrency:
   group: tldv-backfill
@@ -48,6 +52,7 @@ jobs:
             --data-urlencode "dry=${{ inputs.dry }}" \
             --data-urlencode "reatribuir=${{ inputs.reatribuir }}" \
             --data-urlencode "cliente=${{ inputs.cliente }}" \
+            --data-urlencode "verificar=${{ inputs.verificar }}" \
             "https://reports.onmid.app/api/integrations/tldv-backfill")
           echo "HTTP $HTTP_CODE"
           cat /tmp/resposta.json | python3 -m json.tool || cat /tmp/resposta.json
