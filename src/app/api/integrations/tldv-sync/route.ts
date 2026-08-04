@@ -50,6 +50,14 @@ async function garantirTabela(pool: ReturnType<typeof makeServerPool>) {
       erro            TEXT,
       criado_em       TIMESTAMPTZ NOT NULL DEFAULT now()
     )`);
+  // Sinal de vida do cron. Sem isto, trocaríamos o ponto cego do webhook por
+  // outro: o polling pode parar (Actions desabilitado, secret trocado) e o
+  // silêncio é idêntico ao de um dia sem reunião. Quem vigia lê este carimbo.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS public.integracao_heartbeat (
+      nome       TEXT PRIMARY KEY,
+      ultimo_em  TIMESTAMPTZ NOT NULL
+    )`);
 }
 
 export async function GET(req: NextRequest) {
@@ -63,6 +71,17 @@ export async function GET(req: NextRequest) {
 
   try {
     await garantirTabela(pool);
+
+    // Lido ANTES de carimbar: é a resposta para "quando o cron rodou pela
+    // última vez antes desta chamada?", que é o que denuncia um cron parado.
+    const { rows: hb } = await pool.query<{ ultimo_em: string }>(
+      `SELECT ultimo_em FROM public.integracao_heartbeat WHERE nome = 'tldv-sync'`,
+    );
+    const execucaoAnterior = hb[0]?.ultimo_em ?? null;
+    await pool.query(
+      `INSERT INTO public.integracao_heartbeat (nome, ultimo_em) VALUES ('tldv-sync', now())
+       ON CONFLICT (nome) DO UPDATE SET ultimo_em = now()`,
+    );
 
     const reunioes = await listarReunioes(20);
     const limite = Date.now() - JANELA_HORAS * 60 * 60 * 1000;
@@ -138,6 +157,7 @@ export async function GET(req: NextRequest) {
     return Response.json({
       ok: true,
       bootstrap,
+      execucao_anterior: execucaoAnterior,
       vistas: recentes.length,
       docs_pedidos: novas,
       transcricoes_enviadas: transcritas,
