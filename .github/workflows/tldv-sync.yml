@@ -1,0 +1,54 @@
+name: Reuniões TLDV (polling)
+
+# Pergunta ao TLDV se há reunião nova e empurra pro pipeline do Make
+# (doc no Drive → resumo → tarefas no ClickUp).
+#
+# Existe porque o webhook do TLDV sumiu sozinho do painel duas vezes, sem
+# aviso e sem erro — a chave de API continuava válida. Cada sumiço custou um
+# dia de reuniões perdidas em silêncio. A API do TLDV não permite recriar o
+# webhook por código, então o polling é a fonte primária e não depende de
+# ninguém lembrar de reconfigurar nada.
+#
+# A rota é idempotente (tabela tldv_reunioes): rodar demais não duplica.
+
+on:
+  schedule:
+    # A cada 5 minutos. Uma reunião leva ~2 rodadas para virar doc + resumo.
+    - cron: '*/5 * * * *'
+  workflow_dispatch: {}
+
+# Duas execuções simultâneas veriam a mesma reunião como "nova" ao mesmo tempo.
+concurrency:
+  group: tldv-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Procurar reuniões novas
+        run: |
+          URL="${{ secrets.TLDV_SYNC_URL }}"
+          SECRET="${{ secrets.ONMID_INTEGRATION_SECRET }}"
+          if [ -z "$URL" ] || [ -z "$SECRET" ]; then
+            echo "::error::Configure os secrets TLDV_SYNC_URL e ONMID_INTEGRATION_SECRET."
+            exit 1
+          fi
+
+          HTTP_CODE=$(curl -s -o /tmp/resposta.json -w "%{http_code}" \
+            -H "x-onmid-secret: $SECRET" "$URL")
+          echo "HTTP $HTTP_CODE"
+          cat /tmp/resposta.json 2>/dev/null && echo ""
+
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "::error::tldv-sync retornou HTTP $HTTP_CODE"
+            exit 1
+          fi
+
+          # A rota responde 200 com ok:false quando falha internamente (para o
+          # corpo do erro não se perder); sem isto o cron ficaria verde à toa.
+          if grep -q '"ok":false' /tmp/resposta.json; then
+            echo "::error::tldv-sync respondeu ok:false"
+            exit 1
+          fi

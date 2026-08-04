@@ -91,6 +91,7 @@ const INTEGRATION_PREFIXES = [
   '/api/integrations/agenda',
   '/api/integrations/clientes',
   '/api/integrations/identificar',
+  '/api/integrations/tldv-sync',
 ];
 
 function matches(pathname: string, prefixes: string[]): boolean {
