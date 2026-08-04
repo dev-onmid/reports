@@ -16,6 +16,14 @@ on:
         description: 'Dry-run: só mostra o casamento título→cliente (1 = sim)'
         default: '0'
         required: false
+      reatribuir:
+        description: 'Corrigir atribuição: meeting_ids separados por vírgula'
+        default: ''
+        required: false
+      cliente:
+        description: 'Cliente destino da reatribuição (nome ou apelido)'
+        default: ''
+        required: false
 
 concurrency:
   group: tldv-backfill
@@ -34,9 +42,13 @@ jobs:
             exit 1
           fi
 
-          URL="https://reports.onmid.app/api/integrations/tldv-backfill?limit=${{ inputs.limit }}&dry=${{ inputs.dry }}"
-          HTTP_CODE=$(curl -s -o /tmp/resposta.json -w "%{http_code}" --max-time 300 \
-            -H "x-onmid-secret: $SECRET" "$URL")
+          HTTP_CODE=$(curl -s -G -o /tmp/resposta.json -w "%{http_code}" --max-time 300 \
+            -H "x-onmid-secret: $SECRET" \
+            --data-urlencode "limit=${{ inputs.limit }}" \
+            --data-urlencode "dry=${{ inputs.dry }}" \
+            --data-urlencode "reatribuir=${{ inputs.reatribuir }}" \
+            --data-urlencode "cliente=${{ inputs.cliente }}" \
+            "https://reports.onmid.app/api/integrations/tldv-backfill")
           echo "HTTP $HTTP_CODE"
           cat /tmp/resposta.json | python3 -m json.tool || cat /tmp/resposta.json
 

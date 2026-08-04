@@ -18,8 +18,9 @@ import { buscarReuniao, buscarTranscricao, dataIso, listarReunioes } from '@/lib
  * genéricos ("04/08/2026-Meeting", confirmado no dry-run), então o caminho
  * normal é a IA identificar o cliente PELA TRANSCRIÇÃO, escolhendo de uma
  * lista fechada da carteira (com abstenção e nível de confiança; só grava
- * confiança alta/média — baixa vai pro relatório como palpite, sem gravar).
- * A mesma chamada gera resumo + checklist. Grava com o link da gravação.
+ * confiança ALTA — média/baixa vai pro relatório como palpite, sem gravar,
+ * e o humano confirma via `?reatribuir=`). A mesma chamada gera resumo +
+ * checklist. Grava com o link da gravação.
  *
  * NÃO dispara os webhooks do Make (nada de doc no Drive, tarefa no ClickUp ou
  * WhatsApp) — escreve só na tabela da aba. Idempotente: reunião já gravada
@@ -112,6 +113,51 @@ async function analisarReuniao(opts: {
   };
 }
 
+/**
+ * Correção manual de atribuição errada: `?reatribuir=<meeting_ids separados
+ * por vírgula>&cliente=<nome>` move as reuniões pro cliente certo (resolvido
+ * por `resolveClientByName` — o nome pode ser apelido). Com `dry=1` só mostra
+ * em quem o nome resolveu, sem mover — rodar o dry ANTES, sempre.
+ */
+async function reatribuir(
+  pool: ReturnType<typeof makeServerPool>,
+  meetingIds: string[],
+  clienteNome: string,
+  dry: boolean,
+) {
+  const { match, motivo, sugestoes } = await resolveClientByName(pool, clienteNome);
+  if (!match) return { ok: false, erro: 'cliente_nao_encontrado', nome_recebido: clienteNome, motivo, sugestoes };
+
+  const movidas: { meeting_id: string; de?: string }[] = [];
+  const naoEncontradas: string[] = [];
+  for (const mid of meetingIds) {
+    const { rows } = await pool.query<{ id: string; client_id: string }>(
+      'SELECT id, client_id FROM public.reuniao_resumos WHERE meeting_id = $1',
+      [mid],
+    );
+    if (!rows.length) { naoEncontradas.push(mid); continue; }
+    if (!dry) {
+      // Se o destino já tem essa reunião, apagar a duplicata errada basta;
+      // senão, mover a linha preserva id e checks marcados.
+      const jaNoDestino = rows.some((r) => r.client_id === match.id);
+      if (jaNoDestino) {
+        await pool.query('DELETE FROM public.reuniao_resumos WHERE meeting_id = $1 AND client_id <> $2', [mid, match.id]);
+      } else {
+        await pool.query('UPDATE public.reuniao_resumos SET client_id = $2 WHERE meeting_id = $1', [mid, match.id]);
+      }
+    }
+    movidas.push({ meeting_id: mid, de: rows[0].client_id });
+  }
+  return {
+    ok: true,
+    acao: 'reatribuir',
+    dry,
+    cliente_destino: { id: match.id, nome: match.name, motivo },
+    movidas,
+    nao_encontradas: naoEncontradas,
+  };
+}
+
 export async function GET(req: NextRequest) {
   const auth = conferirSegredoIntegracao(req);
   if (auth !== 'ok') return respostaSegredo(auth);
@@ -120,6 +166,21 @@ export async function GET(req: NextRequest) {
   const limit = Math.min(Math.max(Number(url.searchParams.get('limit') ?? 10) || 10, 1), 20);
   const dry = url.searchParams.get('dry') === '1';
   const inicio = Date.now();
+
+  const reatribuirIds = (url.searchParams.get('reatribuir') ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+  if (reatribuirIds.length) {
+    const clienteNome = (url.searchParams.get('cliente') ?? '').trim();
+    if (!clienteNome) return Response.json({ ok: false, erro: 'cliente_obrigatorio' });
+    const poolFix = makeServerPool();
+    try {
+      return Response.json(await reatribuir(poolFix, reatribuirIds, clienteNome, dry));
+    } catch (err) {
+      console.error('[tldv-backfill reatribuir]', err);
+      return Response.json({ ok: false, erro: 'falha_interna', detalhe: err instanceof Error ? err.message : String(err) });
+    } finally {
+      await poolFix.end();
+    }
+  }
 
   const pool = makeServerPool();
   const gravadas: Saida[] = [];
@@ -177,10 +238,12 @@ export async function GET(req: NextRequest) {
         });
 
         // Título casou → vale o título. Senão, vale a IA — mas só com
-        // confiança alta/média E nome que existe na carteira; o resto vira
-        // relatório pro humano decidir, nunca gravação no cliente errado.
+        // confiança ALTA e nome que existe na carteira; o resto vira relatório
+        // pro humano decidir, nunca gravação no cliente errado. (Na 1ª rodada
+        // real, "media" gravava também — e 2 de 5 "media" saíram erradas, caso
+        // Kumon×IGA: segmento parecido engana. Média agora é só palpite.)
         const cliente = match
-          ?? (ia.confianca !== 'baixa' ? porNomeNorm.get(normalizeClientName(ia.cliente)) ?? null : null);
+          ?? (ia.confianca === 'alta' ? porNomeNorm.get(normalizeClientName(ia.cliente)) ?? null : null);
         if (!cliente) {
           semCliente.push({ ...base, motivo: `IA: ${ia.cliente} (confiança ${ia.confianca}) — não gravado` });
           continue;
