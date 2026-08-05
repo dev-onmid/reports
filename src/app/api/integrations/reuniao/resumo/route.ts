@@ -35,8 +35,19 @@ export async function POST(req: NextRequest) {
   }
 
   const cliente = typeof body.cliente === 'string' ? body.cliente.trim() : '';
+
+  /**
+   * A saída da IA repassada verbatim, como a rota irmã já recebe.
+   *
+   * O Make NÃO consegue montar `{"resumo": "<texto>"}` à mão: o resumo tem
+   * quebra de linha e aspas, e a concatenação quebra o JSON no primeiro
+   * apóstrofo de "planejamento do cliente". Repassar `{{203.result}}` inteiro
+   * é a única forma que não depende do conteúdo do texto.
+   */
+  const ia = (body.ia && typeof body.ia === 'object' ? body.ia : {}) as Record<string, unknown>;
+
   // `resumo` é o nome canônico; `texto` cobre configuração alternativa no Make.
-  const resumo = [body.resumo, body.texto]
+  const resumo = [body.resumo, body.texto, ia.resumo_documento, ia.resumo]
     .find((v): v is string => typeof v === 'string' && v.trim().length > 0) ?? '';
 
   if (!cliente) return Response.json({ ok: false, erro: 'cliente_obrigatorio' }, { status: 400 });
@@ -61,7 +72,7 @@ export async function POST(req: NextRequest) {
       meetingId: typeof body.meeting_id === 'string' ? body.meeting_id : null,
       docUrl: typeof body.doc_url === 'string' ? body.doc_url : null,
       recordingUrl: gravacao,
-      checklist: parseChecklist(body.checklist ?? body.pendencias ?? body.acoes),
+      checklist: parseChecklist(body.checklist ?? body.pendencias ?? ia.checklist ?? body.acoes),
       reuniaoEm: parseDataReuniao(body.data ?? body.reuniao_em),
     });
     return Response.json({ ok: true, cliente: { id: match.id, nome: match.name }, resumo_id: r.id, atualizado: r.atualizado });
