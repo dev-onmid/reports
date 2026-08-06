@@ -1,5 +1,6 @@
 import { makeServerPool } from '@/lib/server-db';
 import { getFreshMetaToken } from '@/lib/meta-token';
+import { sanitizeJsonValue } from '@/lib/delivery-report-builder';
 import type { DiagnosticoData, CriativoItem, OrigemItem, ClienteItem } from '@/components/diagnostico-template/types';
 
 // ── Formatters ─────────────────────────────────────────────────────────────
@@ -373,7 +374,8 @@ export async function saveReport(opts: {
         opts.clientId, opts.clientName,
         `Diagnóstico de Performance — ${opts.clientName}`,
         opts.periodFrom, opts.periodTo,
-        JSON.stringify(opts.reportData),
+        // sanitizeJsonValue OBRIGATÓRIO — ver comentário em saveOmniReport/report-builder.
+        JSON.stringify(sanitizeJsonValue(opts.reportData)),
         opts.generatedBy,
         opts.configId ?? null,
         'diagnostico-performance',

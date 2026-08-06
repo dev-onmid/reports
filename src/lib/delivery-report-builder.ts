@@ -45,7 +45,11 @@ function cleanJsonString(value: string): string {
   return out;
 }
 
-function sanitizeJsonValue<T>(value: T): T {
+// Exportada: TODO save de relatório (performance/social/delivery/runner) deve passar o
+// report_data por aqui antes do INSERT. A coluna é JSON no Postgres e ele REJEITA byte nulo
+// e surrogate órfão com "invalid input syntax for type json" — erro que aborta a geração
+// inteira no fim do processo, depois de já ter buscado tudo.
+export function sanitizeJsonValue<T>(value: T): T {
   if (typeof value === 'string') return cleanJsonString(value) as T;
   if (Array.isArray(value)) return value.map((item) => sanitizeJsonValue(item)) as T;
   if (value && typeof value === 'object') {
@@ -54,6 +58,16 @@ function sanitizeJsonValue<T>(value: T): T {
     ) as T;
   }
   return value;
+}
+
+// Corta legenda SEM partir emoji ao meio. `slice` fatia por unidade UTF-16, então cortar
+// no meio de um par surrogate deixa metade de um emoji — surrogate órfão que o Postgres
+// recusa ao gravar (ver sanitizeJsonValue). Array.from itera por code point, então o
+// emoji entra inteiro ou não entra. Também torna `max` uma contagem de caracteres reais.
+function truncateCaptionText(text: string, max: number): string {
+  const clean = text.replace(/\s+/g, ' ').trim();
+  const chars = Array.from(clean);
+  return chars.length > max ? `${chars.slice(0, max - 1).join('')}…` : clean;
 }
 
 function deltaInfo(current: number, prev: number): { label: string; up: boolean; hasData: boolean } {
@@ -3487,10 +3501,7 @@ export function sInstagramCalendar(posts: InstagramPost[], idx: number, total: n
     return `<span style="display:inline-flex;max-width:84px;height:16px;align-items:center;border-radius:999px;border:1px solid ${s.border};background:${s.bg};color:${s.color};padding:0 7px;font-family:${INTER};font-size:8px;font-weight:850;line-height:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex-shrink:0">${kind}</span>`;
   };
 
-  const truncate = (text: string, max: number) => {
-    const clean = text.replace(/\s+/g, ' ').trim();
-    return clean.length > max ? `${clean.slice(0, max - 1)}…` : clean;
-  };
+  const truncate = truncateCaptionText;
 
   const thumbBox = (post: InstagramPost) => {
     const s = kindStyles[displayKind(post)] ?? kindStyles.Feed;
@@ -3618,10 +3629,7 @@ export function sInstagramPosts(posts: InstagramPost[], idx: number, total: numb
   const score = (p: InstagramPost) => (p.reach > 0 ? p.reach : 0) + (p.likes + p.comments + p.saves) * 12 + p.videoViews * 0.2;
   const featuredPosts = [...posts].sort((a, b) => score(b) - score(a)).slice(0, 4);
 
-  const truncateCaption = (text: string, max: number) => {
-    const clean = text.replace(/\s+/g, ' ').trim();
-    return clean.length > max ? `${clean.slice(0, max - 1)}…` : clean;
-  };
+  const truncateCaption = truncateCaptionText;
 
   // Compact pill: icon + label + value on one line. `highlight` styles the Engajamento cell.
   // white-space:nowrap nos wrappers com overflow:hidden casa com o passe de "descorte" do
@@ -3703,10 +3711,7 @@ export function ordenarPostsPorData(posts: InstagramPost[]): InstagramPost[] {
 }
 
 export function sInstagramTodosConteudos(pagePosts: InstagramPost[], idx: number, total: number, pageNum: number, pageCount: number): string {
-  const truncateCaption = (text: string, max: number) => {
-    const clean = text.replace(/\s+/g, ' ').trim();
-    return clean.length > max ? `${clean.slice(0, max - 1)}…` : clean;
-  };
+  const truncateCaption = truncateCaptionText;
 
   // white-space:nowrap nos wrappers com overflow:hidden é PROPOSITAL: casa com o passe
   // de "descorte" do export-report-pdf (que libera overflow só de elementos nowrap+hidden),

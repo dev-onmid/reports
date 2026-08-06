@@ -2,7 +2,7 @@ import { makeServerPool } from '@/lib/server-db';
 import { getFreshMetaToken } from '@/lib/meta-token';
 import { RESULT_ACTIONS, NEW_CONTACT_ACTIONS, PURCHASE_ACTIONS, sumActions } from './report-runner';
 import {
-  fetchBairros, fetchMetaData, fetchInstagramData, autoPreviousPeriod,
+  fetchBairros, fetchMetaData, fetchInstagramData, autoPreviousPeriod, sanitizeJsonValue,
   sCapa, sVisaoGeral, sRegioes, sPaidTrafficResumo, sMetaAdsResumo, sMetaAdsCampanhas, sCriativos,
   sGoogleAdsResumo, sGoogleAdsCampanhas, sGoogleAdsPalavrasChave,
   sInstagram, sInstagramCalendar, sInstagramPosts, sInstagramSpotlight,
@@ -42,7 +42,10 @@ export async function saveOmniReport(opts: {
         opts.clientId, opts.clientName,
         `Relatório de Performance — ${opts.clientName}`,
         opts.periodFrom, opts.periodTo,
-        JSON.stringify(opts.reportData),
+        // sanitizeJsonValue OBRIGATÓRIO: sem ele, um byte nulo/surrogate órfão vindo de
+        // legenda do Instagram ou nome de campanha faz o Postgres recusar o INSERT com
+        // "invalid input syntax for type json" e o relatório inteiro se perde no fim.
+        JSON.stringify(sanitizeJsonValue(opts.reportData)),
         opts.generatedBy, opts.configId ?? null,
         'onmid-narrative-performance',
       ],
