@@ -84,10 +84,16 @@ export type ClickupTask = {
   id: string;
   name: string;
   url: string;
-  status?: { status: string; color: string } | null;
+  /** `type` vem do ClickUp ('open'|'closed'|'done'|'custom') — é o jeito
+   * confiável de saber se a tarefa terminou, sem adivinhar pelo rótulo. */
+  status?: { status: string; color: string; type?: string } | null;
   date_created?: string | null;
   due_date?: string | null;
   assignees?: { id: number; username: string }[];
+  /** Descrição carrega a assinatura das tarefas criadas por reunião
+   * (`🔗 meetingId: …`, ver `processarReuniao`) — a API devolve os dois campos. */
+  description?: string | null;
+  text_content?: string | null;
 };
 
 /** Espelha a hierarquia que a tela usa pra montar o seletor de lista. */
