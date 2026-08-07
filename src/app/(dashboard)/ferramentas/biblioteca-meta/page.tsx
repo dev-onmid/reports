@@ -1,7 +1,6 @@
 "use client";
 
 import { useMemo, useState } from 'react';
-import { ResultsTabs } from '@/components/results-tabs';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -18,7 +17,8 @@ import { cn } from '@/lib/utils';
 // Baixar criativos da Biblioteca de Anúncios do Meta: cola o link (página
 // inteira via view_all_page_id ou anúncio único via id), o servidor extrai os
 // vídeos/imagens e cada card ganha botão de download — sem inspecionar página.
-// Herda a flag `radar` pelo prefixo /resultados.
+// Vive no grupo "Ferramentas" da sidebar; o gate de /ferramentas (flag `radar`)
+// está registrado no auth-guard (routeRoles/routeFeature).
 
 interface AdMedia {
   type: 'video' | 'image';
@@ -164,7 +164,6 @@ export default function BibliotecaMetaPage() {
           inspecionar página.
         </p>
       </div>
-      <ResultsTabs />
 
       <div className="rounded-lg border border-border bg-card p-4 space-y-2">
         <div className="flex flex-col gap-2 sm:flex-row">

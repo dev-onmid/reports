@@ -2,14 +2,15 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { AtSign, BarChart3, Clapperboard, Download } from 'lucide-react';
+import { AtSign, BarChart3, Clapperboard } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
+// A Biblioteca Meta (baixar criativos) NÃO é aba daqui — mora no grupo
+// "Ferramentas" da sidebar, em /ferramentas/biblioteca-meta.
 const TABS = [
   { label: 'Radar', href: '/resultados', icon: BarChart3 },
   { label: 'Redes Sociais', href: '/resultados/redes-sociais', icon: AtSign },
   { label: 'Criativos', href: '/resultados/criativos', icon: Clapperboard },
-  { label: 'Biblioteca Meta', href: '/resultados/biblioteca-meta', icon: Download },
 ];
 
 // Tab-nav do módulo Radar (/resultados e subrotas). A subrota herda a flag

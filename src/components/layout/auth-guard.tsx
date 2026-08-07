@@ -16,6 +16,7 @@ const routeRoles: Record<string, Role[]> = {
   '/crm':         ['Administrador', 'Usuário'],
   '/relatorios':  ['Administrador', 'Usuário'],
   '/resultados':  ['Administrador', 'Usuário'],
+  '/ferramentas': ['Administrador', 'Usuário'],
   '/pagamentos':  ['Administrador', 'Usuário'],
   '/biblioteca':  ['Administrador', 'Usuário'],
   '/disparos':    ['Administrador', 'Usuário'],
@@ -36,6 +37,9 @@ const routeFeature: Record<string, keyof Permission> = {
   '/crm':         'crm',
   '/relatorios':  'relatorios',
   '/resultados':  'radar',
+  // /ferramentas/biblioteca-meta usa a mesma flag do Radar (o item na sidebar
+  // também — ver nav-items.ts); ferramenta nova sob /ferramentas: decidir a flag.
+  '/ferramentas': 'radar',
   '/pagamentos':  'pagamentos',
   '/disparos':    'disparos',
   '/otimizador':  'otimizador',

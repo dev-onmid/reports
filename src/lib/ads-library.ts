@@ -153,8 +153,20 @@ async function fbGet(url: string, cookie: string): Promise<Response> {
 /**
  * Busca o HTML da Ads Library resolvendo o desafio `__rd_verify` quando o
  * Facebook o apresenta. Lança Error com mensagem legível em caso de bloqueio.
+ *
+ * Visto em teste real: logo após verificar o desafio, o Facebook às vezes
+ * responde 200 com a CASCA da página (sem os anúncios embutidos). Uma segunda
+ * tentativa com cookie zerado resolve — por isso o retry quando o HTML vem
+ * sem `ad_archive_id`.
  */
 export async function fetchAdsLibraryHtml(url: string): Promise<string> {
+  const first = await fetchAdsLibraryHtmlOnce(url);
+  if (first.includes('"ad_archive_id"')) return first;
+  cookieCache = null;
+  return fetchAdsLibraryHtmlOnce(url);
+}
+
+async function fetchAdsLibraryHtmlOnce(url: string): Promise<string> {
   let cookie = cookieCache && Date.now() - cookieCache.at < COOKIE_TTL_MS ? cookieCache.value : '';
 
   let res = await fbGet(url, cookie);

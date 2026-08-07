@@ -11,6 +11,8 @@ import {
   LogOut,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
+  Wrench,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { APP_VERSION } from '@/lib/app-version';
@@ -48,10 +50,59 @@ export function Sidebar({
     if (isMobile && !item.mobile) return false;
     return permissions[item.key] || (item.key === 'otimizador' && role === 'Administrador');
   });
+  // Grupo "Ferramentas": só apresentação — a permissão é a de cada item.
+  const mainItems = visibleItems.filter(item => !item.group);
+  const toolItems = visibleItems.filter(item => item.group === 'ferramentas');
+  const isToolActive = toolItems.some(
+    item => pathname === item.href || pathname.startsWith(`${item.href}/`),
+  );
+  const [toolsOpen, setToolsOpen] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return localStorage.getItem('sidebar-tools-open') === 'true';
+  });
+  // Grupo com item ativo nunca fica fechado — senão a tela atual some do menu.
+  const toolsExpanded = toolsOpen || isToolActive;
+
+  function toggleTools() {
+    setToolsOpen(prev => {
+      localStorage.setItem('sidebar-tools-open', String(!prev));
+      return !prev;
+    });
+  }
+
   const showConfiguracoes = role === 'Administrador' && !isMobile;
   const isCollapsed = !isMobile && collapsed;
 
   const isHomeActive = pathname === '/inicio' || pathname.startsWith('/inicio/');
+
+  function renderNavLink(item: (typeof NAV_ITEMS)[number], indented = false) {
+    const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`);
+    return (
+      <Link
+        key={item.name}
+        href={item.href}
+        title={isCollapsed ? item.name : undefined}
+        onClick={onNavigate}
+        className={cn(
+          'flex items-center rounded-md text-sm font-semibold transition-all relative overflow-hidden',
+          isCollapsed ? 'justify-center h-10 w-10 mx-auto' : 'gap-3 py-2.5 pr-3',
+          !isCollapsed && (indented ? 'pl-7' : 'pl-3'),
+          isActive
+            ? 'text-primary bg-primary/10'
+            : 'text-muted-foreground hover:bg-card hover:text-foreground'
+        )}
+      >
+        {isActive && !isCollapsed && (
+          <div className="absolute left-0 top-0 bottom-0 w-1 bg-primary shadow-[0_0_10px_rgba(85,245,47,0.8)]" />
+        )}
+        {isActive && isCollapsed && (
+          <div className="absolute inset-0 rounded-md ring-1 ring-inset ring-primary/40 bg-primary/10" />
+        )}
+        <item.icon className={cn('w-5 h-5 shrink-0 relative z-10', isActive ? 'text-primary drop-shadow-[0_0_5px_rgba(85,245,47,0.5)]' : '')} />
+        {!isCollapsed && item.name}
+      </Link>
+    );
+  }
 
   return (
     <aside className={cn(
@@ -110,33 +161,41 @@ export function Sidebar({
           {!isCollapsed && 'Início'}
         </Link>
 
-        {visibleItems.map((item) => {
-          const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`);
-          return (
-            <Link
-              key={item.name}
-              href={item.href}
-              title={isCollapsed ? item.name : undefined}
-              onClick={onNavigate}
-              className={cn(
-                'flex items-center rounded-md text-sm font-semibold transition-all relative overflow-hidden',
-                isCollapsed ? 'justify-center h-10 w-10 mx-auto' : 'gap-3 px-3 py-2.5',
-                isActive
-                  ? 'text-primary bg-primary/10'
-                  : 'text-muted-foreground hover:bg-card hover:text-foreground'
+        {mainItems.map((item) => renderNavLink(item))}
+
+        {toolItems.length > 0 && (
+          isCollapsed ? (
+            // Menu recolhido: sem cabeçalho de grupo — só um divisor e os ícones.
+            <>
+              <div className="mx-2 my-2 border-t border-border" />
+              {toolItems.map((item) => renderNavLink(item))}
+            </>
+          ) : (
+            <div>
+              <button
+                onClick={toggleTools}
+                aria-expanded={toolsExpanded}
+                className={cn(
+                  'flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-sm font-semibold transition-all',
+                  isToolActive
+                    ? 'text-foreground'
+                    : 'text-muted-foreground hover:bg-card hover:text-foreground',
+                )}
+              >
+                <Wrench className="w-5 h-5 shrink-0" />
+                <span className="flex-1 text-left">Ferramentas</span>
+                <ChevronDown
+                  className={cn('w-4 h-4 shrink-0 transition-transform', toolsExpanded ? 'rotate-180' : '')}
+                />
+              </button>
+              {toolsExpanded && (
+                <div className="mt-1 space-y-1">
+                  {toolItems.map((item) => renderNavLink(item, true))}
+                </div>
               )}
-            >
-              {isActive && !isCollapsed && (
-                <div className="absolute left-0 top-0 bottom-0 w-1 bg-primary shadow-[0_0_10px_rgba(85,245,47,0.8)]" />
-              )}
-              {isActive && isCollapsed && (
-                <div className="absolute inset-0 rounded-md ring-1 ring-inset ring-primary/40 bg-primary/10" />
-              )}
-              <item.icon className={cn('w-5 h-5 shrink-0 relative z-10', isActive ? 'text-primary drop-shadow-[0_0_5px_rgba(85,245,47,0.5)]' : '')} />
-              {!isCollapsed && item.name}
-            </Link>
-          );
-        })}
+            </div>
+          )
+        )}
       </nav>
 
       {/* Footer */}
