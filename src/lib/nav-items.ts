@@ -1,5 +1,5 @@
 import {
-  LayoutDashboard, Users, FileText, Plug, WalletCards, ClipboardList,
+  LayoutDashboard, Users, FileText, WalletCards,
   BarChart3, MessageCircle, TableProperties, Zap, Bot, ShieldCheck, WandSparkles,
   Download,
 } from 'lucide-react';
@@ -32,8 +32,8 @@ export const NAV_ITEMS: NavItem[] = [
   { name: 'Radar',       href: '/resultados',  icon: BarChart3,       key: 'radar',       desc: 'Resultados', mobile: true },
   { name: 'Pagamentos',  href: '/pagamentos',  icon: WalletCards,     key: 'pagamentos',  desc: 'Investimento em mídia', mobile: true },
   { name: 'Luna IA',     href: '/agente',      icon: Bot,             key: 'luna_ia',     desc: 'Assistente', mobile: true },
-  { name: 'Integrações', href: '/integracoes', icon: Plug,            key: 'integracoes', desc: 'Conexões' },
-  { name: 'Logs',        href: '/logs',        icon: ClipboardList,   key: 'logs',        desc: 'Auditoria' },
+  // Integrações e Logs saíram do menu (2026-08-07): viraram abas de Configurações
+  // (?tab=integracoes / ?tab=logs); as rotas antigas redirecionam pra lá.
   // ── Grupo Ferramentas ──
   { name: 'Automações',      href: '/automacoes',                icon: Zap,           key: 'automacoes', desc: 'Fluxos automáticos',            group: 'ferramentas' },
   { name: 'Cofre',           href: '/vault',                     icon: ShieldCheck,   key: 'cofre',      desc: 'Credenciais',                   group: 'ferramentas' },

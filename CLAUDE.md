@@ -1,5 +1,14 @@
 @AGENTS.md
 
+## Integrações e Logs viraram abas de Configurações (2026-08-07)
+
+Pedido do Matheus (3ª rodada da reorganização de menu do dia): "Integrações, logs, vai para dentro de configurações".
+
+- **Os corpos das páginas viraram componentes**: `src/components/settings/integrations-panel.tsx` (`IntegrationsPanel`, ex-`integracoes/page.tsx` inteiro) e `src/components/settings/logs-panel.tsx` (`LogsPanel`, sem o `p-6` do wrapper — Configurações já tem padding). Configurações ganhou as abas `integracoes` e `logs` (union + TABS + render + deep-link `?tab=`).
+- **As rotas antigas ficaram como REDIRECT** (não foram removidas): `/integracoes` → `/configuracoes?tab=integracoes` **preservando a query string** — ⚠️ o fallback do OAuth Google (`auth/google/callback`) redireciona pra `/integracoes?google_connected=…` e o banner de resultado lê esses params na aba de destino; remover o repasse quebraria o feedback do OAuth. `/logs` → `/configuracoes?tab=logs`. Subrotas `/integracoes/clickup` e `/integracoes/leadlovers` seguem páginas próprias (o grid da aba navega pra elas).
+- **nav-items**: os dois itens saíram do menu (sidebar E grid do Início); auth-guard mantém `/integracoes` e `/logs` admin-only (as subrotas e os redirects continuam atrás do gate).
+- ✅ Verificado: build + tsc limpos; no harness do browser — sidebar sem os 2 itens, as 8 abas de Configurações, aba Integrações com o grid completo (cards Meta/Google/GMN/Website, filtros, banner de status), aba Logs com filtros e estado vazio. Erros de console eram do harness (mock de fetch × HMR + dev sem banco), não da mudança.
+
 ## Ferramentas → Biblioteca Meta: baixar criativos da Biblioteca de Anúncios (2026-08-07)
 
 Pedido do Matheus: baixar vídeos/imagens da Biblioteca de Anúncios do Meta colando o link, sem o ritual de inspecionar página → achar o vídeo → abrir individual → botão direito (não escala pros gestores). Mora em `/ferramentas/biblioteca-meta`, dentro do **grupo "Ferramentas" da sidebar** (2ª rodada no mesmo dia, pedido dele: agrupar Automações, Cofre, Otimizador, Disparos e Biblioteca Meta sob "Ferramentas").

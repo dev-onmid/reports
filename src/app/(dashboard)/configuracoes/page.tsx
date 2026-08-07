@@ -28,6 +28,8 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { mockUsers as initialUsers, mockPermissions as initialPermissions, defaultPermission } from '@/lib/mock-data';
+import { IntegrationsPanel } from '@/components/settings/integrations-panel';
+import { LogsPanel } from '@/components/settings/logs-panel';
 import type { User as UserType, Permission, Team } from '@/lib/mock-data';
 import { cn } from '@/lib/utils';
 import { callerHeaders } from '@/lib/auth-store';
@@ -489,11 +491,12 @@ export default function ConfiguracoesPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'usuarios' | 'permissoes' | 'ia' | 'instancias' | 'otimizador' | 'legal'>(() => {
-    // Deep-link ?tab= (o popup de instâncias desconectadas aponta pra cá)
+  const [activeTab, setActiveTab] = useState<'usuarios' | 'permissoes' | 'ia' | 'instancias' | 'otimizador' | 'integracoes' | 'logs' | 'legal'>(() => {
+    // Deep-link ?tab= (o popup de instâncias desconectadas aponta pra cá; os
+    // redirects de /integracoes e /logs também)
     if (typeof window !== 'undefined') {
       const t = new URLSearchParams(window.location.search).get('tab');
-      if (t === 'instancias' || t === 'ia' || t === 'otimizador' || t === 'permissoes' || t === 'legal') return t;
+      if (t === 'instancias' || t === 'ia' || t === 'otimizador' || t === 'permissoes' || t === 'integracoes' || t === 'logs' || t === 'legal') return t;
     }
     return 'usuarios';
   });
@@ -806,6 +809,8 @@ export default function ConfiguracoesPage() {
     { key: 'ia' as const, label: 'Uso IA' },
     { key: 'instancias' as const, label: 'Instâncias' },
     { key: 'otimizador' as const, label: 'Otimizador' },
+    { key: 'integracoes' as const, label: 'Integrações' },
+    { key: 'logs' as const, label: 'Logs' },
     { key: 'legal' as const, label: 'Legal' },
   ];
 
@@ -1703,6 +1708,10 @@ export default function ConfiguracoesPage() {
       ══════════════════════════════════ */}
       {/* ── INSTÂNCIAS (Evolution) ── */}
       {activeTab === 'instancias' && <InstancesTab />}
+
+      {/* ── INTEGRAÇÕES e LOGS (ex-páginas próprias, ver src/components/settings/) ── */}
+      {activeTab === 'integracoes' && <IntegrationsPanel />}
+      {activeTab === 'logs' && <LogsPanel />}
 
       {activeTab === 'otimizador' && (
         <div className="space-y-6">
