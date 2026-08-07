@@ -2,13 +2,14 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { AtSign, BarChart3, Clapperboard } from 'lucide-react';
+import { AtSign, BarChart3, Clapperboard, Download } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const TABS = [
   { label: 'Radar', href: '/resultados', icon: BarChart3 },
   { label: 'Redes Sociais', href: '/resultados/redes-sociais', icon: AtSign },
   { label: 'Criativos', href: '/resultados/criativos', icon: Clapperboard },
+  { label: 'Biblioteca Meta', href: '/resultados/biblioteca-meta', icon: Download },
 ];
 
 // Tab-nav do módulo Radar (/resultados e subrotas). A subrota herda a flag
@@ -16,7 +17,7 @@ const TABS = [
 export function ResultsTabs() {
   const pathname = usePathname();
   return (
-    <div className="flex items-center gap-1 border-b border-border">
+    <div className="flex items-center gap-1 border-b border-border overflow-x-auto">
       {TABS.map(({ label, href, icon: Icon }) => {
         const active = pathname === href;
         return (
@@ -24,7 +25,7 @@ export function ResultsTabs() {
             key={href}
             href={href}
             className={cn(
-              'flex items-center gap-2 px-4 py-2.5 text-sm font-bold uppercase tracking-wide border-b-2 -mb-px transition-colors',
+              'flex shrink-0 items-center gap-2 whitespace-nowrap px-4 py-2.5 text-sm font-bold uppercase tracking-wide border-b-2 -mb-px transition-colors',
               active
                 ? 'border-primary text-foreground'
                 : 'border-transparent text-muted-foreground hover:text-foreground',
