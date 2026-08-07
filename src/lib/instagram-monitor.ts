@@ -64,21 +64,34 @@ export async function getIgAccount(accountId: string, token: string, directIgId?
       return pageToIgResult(await res.json() as PageEntry);
     } catch { return null; }
   };
-  // List of pages (used for the promote_pages / me/accounts guesses)
-  const fetchPageList = async (url: string, matchIgId?: string) => {
+  // Match DETERMINÍSTICO: acha a página cujo instagram_business_account.id bate
+  // com o id do link direto. Nunca "chuta" — se não achar exato, retorna null.
+  const fetchPageMatching = async (url: string, matchIgId: string) => {
     try {
       const res = await fetch(url, { signal: AbortSignal.timeout(12000) });
       if (!res.ok) return null;
       const data = await res.json() as { data?: PageEntry[] };
-      const pages = data.data ?? [];
-      if (matchIgId) return pageToIgResult(pages.find(p => p.instagram_business_account?.id === matchIgId));
-      return pageToIgResult(pages.find(p => p.instagram_business_account) ?? pages[0]);
+      return pageToIgResult((data.data ?? []).find(p => p.instagram_business_account?.id === matchIgId));
+    } catch { return null; }
+  };
+
+  // Fallback SEGURO: só resolve quando a lista tem EXATAMENTE UMA página com conta
+  // IG (conexão/conta de cliente único). Numa conexão de agência com várias páginas,
+  // "a primeira" era um chute que puxava a conta de OUTRO cliente (bug @istambulgastrobar
+  // aparecendo em Istambul, La Pasta Gialla, Leone Gelateria, Sorrifácil Rio Branco…).
+  const fetchUniqueIgPage = async (url: string) => {
+    try {
+      const res = await fetch(url, { signal: AbortSignal.timeout(12000) });
+      if (!res.ok) return null;
+      const data = await res.json() as { data?: PageEntry[] };
+      const withIg = (data.data ?? []).filter(p => p.instagram_business_account);
+      return withIg.length === 1 ? pageToIgResult(withIg[0]) : null;
     } catch { return null; }
   };
 
   // 0) Deterministic: the client was linked directly to this Instagram account.
   if (directIgId) {
-    const result = await fetchPageList(`https://graph.facebook.com/v21.0/me/accounts?fields=${PAGE_FIELDS}&limit=50&access_token=${token}`, directIgId);
+    const result = await fetchPageMatching(`https://graph.facebook.com/v21.0/me/accounts?fields=${PAGE_FIELDS}&limit=100&access_token=${token}`, directIgId);
     if (result) return result;
   }
 
@@ -90,11 +103,13 @@ export async function getIgAccount(accountId: string, token: string, directIgId?
       const result = await fetchSinglePage(`https://graph.facebook.com/v21.0/${pageId}?fields=${PAGE_FIELDS}&access_token=${token}`);
       if (result) return result;
     }
-    // 2) Fallback only if the account has no ads yet: the old "could promote" guess.
-    const result = await fetchPageList(`https://graph.facebook.com/v21.0/${id}/promote_pages?fields=${PAGE_FIELDS}&limit=5&access_token=${token}`);
+    // 2) Conta sem anúncios: usa promote_pages SÓ se for inequívoco (1 página IG).
+    const result = await fetchUniqueIgPage(`https://graph.facebook.com/v21.0/${id}/promote_pages?fields=${PAGE_FIELDS}&limit=25&access_token=${token}`);
     if (result) return result;
   }
-  return fetchPageList(`https://graph.facebook.com/v21.0/me/accounts?fields=${PAGE_FIELDS}&limit=20&access_token=${token}`);
+  // 3) Último recurso: me/accounts SÓ se a conexão tiver 1 página IG (cliente único).
+  //    Conexão com várias páginas → ambíguo → null (cliente aparece "sem conta").
+  return fetchUniqueIgPage(`https://graph.facebook.com/v21.0/me/accounts?fields=${PAGE_FIELDS}&limit=100&access_token=${token}`);
 }
 
 // ── Monitor de Redes Sociais: schema + snapshot ──────────────────────────────
