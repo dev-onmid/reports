@@ -9,7 +9,7 @@ import {
   type ComentarioSorteio, type Ganhador, type MotivoExclusao, type RedeSorteio, type RegrasSorteio,
 } from '@/lib/sorteio';
 import {
-  Copy, Dices, ExternalLink, Gift, History, Loader2, MessageCircle, RefreshCw, Search, Trash2, Trophy, X,
+  Copy, Dices, ExternalLink, Gift, Heart, History, Loader2, MessageCircle, RefreshCw, Search, Trash2, Trophy, X,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -22,7 +22,7 @@ import { cn } from '@/lib/utils';
 
 type PostSorteio = {
   rede: RedeSorteio; id: string; legenda: string; permalink: string;
-  thumb?: string; timestamp?: string; comentarios: number; mediaType?: string;
+  thumb?: string; timestamp?: string; comentarios: number; curtidas?: number; mediaType?: string;
 };
 
 type ContaInfo = { username: string; picture?: string; pageName?: string };
@@ -46,6 +46,8 @@ function fmtDataHora(iso: string): string {
     ? '—'
     : `${d.toLocaleDateString('pt-BR')} ${d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
 }
+
+const fmtNum = new Intl.NumberFormat('pt-BR', { notation: 'compact', maximumFractionDigits: 1 });
 
 function tipoPost(mediaType?: string): string {
   if (mediaType === 'REELS') return 'Reel';
@@ -335,37 +337,57 @@ export default function SorteadorPage() {
                 </button>
               ))}
             </div>
-            <div className="max-h-80 space-y-1.5 overflow-y-auto pr-1">
-              {postsVisiveis.map((p) => (
-                <button
-                  key={`${p.rede}-${p.id}`}
-                  onClick={() => importar(p)}
-                  className={cn(
-                    'flex w-full items-center gap-3 rounded-lg border p-2 text-left transition-colors',
-                    post?.id === p.id ? 'border-primary bg-primary/5' : 'border-border hover:bg-muted/30',
-                  )}
-                >
-                  {p.thumb ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={p.thumb} alt="" className="h-12 w-12 shrink-0 rounded object-cover" loading="lazy" />
-                  ) : (
-                    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded bg-muted/40">
-                      <Gift className="h-5 w-5 text-muted-foreground" />
+            <div className="max-h-[640px] overflow-y-auto pr-1">
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+                {postsVisiveis.map((p) => (
+                  <button
+                    key={`${p.rede}-${p.id}`}
+                    onClick={() => importar(p)}
+                    className={cn(
+                      'group flex flex-col overflow-hidden rounded-lg border text-left transition-colors',
+                      post?.id === p.id
+                        ? 'border-primary ring-1 ring-primary'
+                        : 'border-border hover:border-muted-foreground/40',
+                    )}
+                  >
+                    <div className="relative aspect-square w-full bg-black/40">
+                      {p.thumb ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={p.thumb} alt="" className="h-full w-full object-cover" loading="lazy" />
+                      ) : (
+                        <div className="flex h-full w-full items-center justify-center">
+                          <Gift className="h-8 w-8 text-muted-foreground" />
+                        </div>
+                      )}
+                      <div className="absolute left-1.5 top-1.5 flex gap-1">
+                        <RedeBadge rede={p.rede} />
+                        {p.mediaType && tipoPost(p.mediaType) !== 'Post' && (
+                          <span className="rounded bg-black/70 px-1.5 py-0.5 text-[10px] font-bold uppercase text-white">
+                            {tipoPost(p.mediaType)}
+                          </span>
+                        )}
+                      </div>
+                      {/* Métricas em overlay, estilo feed */}
+                      <div className="absolute inset-x-0 bottom-0 flex items-center gap-3 bg-gradient-to-t from-black/80 to-transparent px-2 pb-1.5 pt-6 text-xs font-semibold text-white">
+                        <span className="flex items-center gap-1">
+                          <Heart className="h-3.5 w-3.5" /> {fmtNum.format(p.curtidas ?? 0)}
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <MessageCircle className="h-3.5 w-3.5" /> {fmtNum.format(p.comentarios)}
+                        </span>
+                        <span className="ml-auto font-normal text-white/80">{fmtData(p.timestamp)}</span>
+                      </div>
                     </div>
-                  )}
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-                      <RedeBadge rede={p.rede} />
-                      <span>{tipoPost(p.mediaType)}</span>
-                      <span>· {fmtData(p.timestamp)}</span>
-                      <span className="flex items-center gap-1">
-                        · <MessageCircle className="h-3 w-3" /> {p.comentarios}
-                      </span>
+                    {/* Padding no wrapper, não no <p> clampado: overflow:hidden corta na
+                        borda do padding e a 3ª linha vazava pintada dentro do py. */}
+                    <div className="px-2 py-1.5">
+                      <p className="line-clamp-2 min-h-8 text-xs text-muted-foreground">
+                        {p.legenda || '(sem legenda)'}
+                      </p>
                     </div>
-                    <p className="truncate text-sm">{p.legenda || <span className="text-muted-foreground">(sem legenda)</span>}</p>
-                  </div>
-                </button>
-              ))}
+                  </button>
+                ))}
+              </div>
               {postsVisiveis.length === 0 && (
                 <div className="py-6 text-center text-sm text-muted-foreground">
                   Nenhum post bate com essa busca (a lista traz os ~30 mais recentes de cada rede).

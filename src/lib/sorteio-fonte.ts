@@ -17,6 +17,7 @@ export type PostSorteio = {
   thumb?: string;
   timestamp?: string;
   comentarios: number;
+  curtidas: number;
   mediaType?: string;
 };
 
@@ -70,12 +71,13 @@ export async function listarPosts(conta: ContaSorteio): Promise<PostSorteio[]> {
   const posts: PostSorteio[] = [];
 
   const igUrl = new URL(`${GRAPH}/${conta.igId}/media`);
-  igUrl.searchParams.set('fields', 'id,caption,media_type,media_product_type,thumbnail_url,media_url,permalink,timestamp,comments_count');
+  igUrl.searchParams.set('fields', 'id,caption,media_type,media_product_type,thumbnail_url,media_url,permalink,timestamp,comments_count,like_count');
   igUrl.searchParams.set('limit', '30');
   igUrl.searchParams.set('access_token', conta.pageToken);
   const igData = await graphGet<{ data?: Array<{
     id: string; caption?: string; media_type?: string; media_product_type?: string;
-    thumbnail_url?: string; media_url?: string; permalink?: string; timestamp?: string; comments_count?: number;
+    thumbnail_url?: string; media_url?: string; permalink?: string; timestamp?: string;
+    comments_count?: number; like_count?: number;
   }> }>(igUrl.toString());
   for (const m of igData?.data ?? []) {
     const isVideo = m.media_product_type === 'REELS' || m.media_type === 'VIDEO';
@@ -87,18 +89,20 @@ export async function listarPosts(conta: ContaSorteio): Promise<PostSorteio[]> {
       thumb: m.thumbnail_url ?? (isVideo ? undefined : m.media_url),
       timestamp: m.timestamp,
       comentarios: m.comments_count ?? 0,
+      curtidas: m.like_count ?? 0,
       mediaType: m.media_product_type ?? m.media_type,
     });
   }
 
   if (conta.pageId) {
     const fbUrl = new URL(`${GRAPH}/${conta.pageId}/posts`);
-    fbUrl.searchParams.set('fields', 'id,message,permalink_url,created_time,full_picture,comments.summary(true).limit(0)');
+    fbUrl.searchParams.set('fields', 'id,message,permalink_url,created_time,full_picture,comments.summary(true).limit(0),reactions.summary(true).limit(0)');
     fbUrl.searchParams.set('limit', '30');
     fbUrl.searchParams.set('access_token', conta.pageToken);
     const fbData = await graphGet<{ data?: Array<{
       id: string; message?: string; permalink_url?: string; created_time?: string; full_picture?: string;
       comments?: { summary?: { total_count?: number } };
+      reactions?: { summary?: { total_count?: number } };
     }> }>(fbUrl.toString());
     for (const p of fbData?.data ?? []) {
       posts.push({
@@ -109,6 +113,7 @@ export async function listarPosts(conta: ContaSorteio): Promise<PostSorteio[]> {
         thumb: p.full_picture,
         timestamp: p.created_time,
         comentarios: p.comments?.summary?.total_count ?? 0,
+        curtidas: p.reactions?.summary?.total_count ?? 0,
       });
     }
   }
