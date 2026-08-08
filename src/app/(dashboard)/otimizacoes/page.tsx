@@ -9,8 +9,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  AlertTriangle, CalendarClock, CheckCircle2, ChevronRight, ClipboardList,
-  History, Mic, Plus, Search, Trash2, X,
+  AlertTriangle, CalendarClock, CheckCircle2, ChevronRight,
+  History, Megaphone, Mic, Plus, Search, Trash2, X,
 } from 'lucide-react';
 import { getAuthSession, type AuthSession } from '@/lib/auth-store';
 import { useClients } from '@/lib/client-store';
@@ -72,11 +72,16 @@ const ESTADO_STYLE: Record<EstadoOtimizacao, { badge: string; border: string; la
   em_dia:       { badge: 'bg-emerald-500/15 border-emerald-400/30 text-emerald-300', border: 'border-l-emerald-500', label: 'Em dia' },
 };
 
-const CANAL_BADGE: Record<string, string> = {
-  meta:   'bg-blue-500/15 border-blue-400/30 text-blue-300',
-  google: 'bg-amber-500/15 border-amber-400/30 text-amber-300',
-  outro:  'bg-purple-500/15 border-purple-400/30 text-purple-300',
-};
+// Logos reais das plataformas (mesmos arquivos de platform-icons.tsx / lista de
+// Clientes). "Outro" não tem marca — cai num ícone genérico.
+function CanalLogo({ canal, className }: { canal: string; className?: string }) {
+  const cls = cn('shrink-0 object-contain', className ?? 'h-3.5 w-3.5');
+  /* eslint-disable @next/next/no-img-element */
+  if (canal === 'meta') return <img src="/brand/meta-ads-logo.webp" alt="Meta Ads" className={cls} />;
+  if (canal === 'google') return <img src="/brand/google-ads-logo.png" alt="Google Ads" className={cls} />;
+  /* eslint-enable @next/next/no-img-element */
+  return <Megaphone className={cn('shrink-0 text-purple-300', className ?? 'h-3.5 w-3.5')} />;
+}
 
 const fmtDataHora = new Intl.DateTimeFormat('pt-BR', {
   day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit',
@@ -232,13 +237,13 @@ function RegistroModal({ client, onClose, onSaved }: {
                   key={c.id}
                   onClick={() => setCanal(c.id)}
                   className={cn(
-                    'rounded-md border px-2.5 py-1 text-xs transition-colors',
+                    'flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs transition-colors',
                     canal === c.id
                       ? 'border-primary/60 bg-primary/15 text-primary'
                       : 'border-border text-muted-foreground hover:bg-muted/30',
                   )}
                 >
-                  {c.label}
+                  <CanalLogo canal={c.id} className="h-3.5 w-3.5" /> {c.label}
                 </button>
               ))}
             </div>
@@ -455,8 +460,8 @@ function BulkAgendaModal({ clients, onClose, onApplied }: {
           <div className="space-y-3">
             {(['meta', 'google'] as const).map((canal) => (
               <div key={canal} className="rounded-lg border border-border bg-muted/10 p-3">
-                <span className={cn('rounded border px-1.5 py-0.5 text-[10px]', CANAL_BADGE[canal])}>
-                  {canalLabel(canal)}
+                <span className="flex items-center gap-1.5 text-xs font-medium">
+                  <CanalLogo canal={canal} className="h-4 w-4" /> {canalLabel(canal)}
                 </span>
                 <select
                   value={modo[canal]}
@@ -602,9 +607,8 @@ function DetalheModal({ client, agenda, me, onClose, onAgendaChange, onRegistrar
             <div className="flex flex-wrap gap-x-6 gap-y-2">
               {(['meta', 'google'] as const).map((canal) => (
                 <label key={canal} className="flex items-center gap-2 text-xs">
-                  <span className={cn('rounded border px-1.5 py-0.5 text-[10px]', CANAL_BADGE[canal])}>
-                    {canalLabel(canal)}
-                  </span>
+                  <CanalLogo canal={canal} className="h-4 w-4" />
+                  <span className="sr-only">{canalLabel(canal)}</span>
                   a cada
                   <input
                     type="number"
@@ -643,8 +647,11 @@ function DetalheModal({ client, agenda, me, onClose, onAgendaChange, onRegistrar
                   <div key={r.id} className="rounded-lg border border-border bg-background/40 p-3">
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className={cn('rounded border px-1.5 py-0.5 text-[10px] font-medium', CANAL_BADGE[r.canal] ?? CANAL_BADGE.outro)}>
-                          {canalLabel(r.canal, r.canal_detalhe)}
+                        <span className="flex items-center gap-1.5" title={canalLabel(r.canal, r.canal_detalhe)}>
+                          <CanalLogo canal={r.canal} className="h-4 w-4" />
+                          {r.canal === 'outro' && (
+                            <span className="text-[11px] text-muted-foreground">{canalLabel(r.canal, r.canal_detalhe)}</span>
+                          )}
                         </span>
                         <span className="text-[11px] text-muted-foreground">
                           {fmtDataHora.format(new Date(r.created_at))} · {r.user_name ?? 'autor desconhecido'}
@@ -948,7 +955,9 @@ export default function OtimizacoesPage() {
                     {l.ultimaGeral
                       ? <>Última {haDias(l.ultimaGeral.created_at)}
                           {l.ultimaGeral.user_name ? ` por ${l.ultimaGeral.user_name}` : ''}
-                          {' · '}{canalLabel(l.ultimaGeral.canal, l.ultimaGeral.canal_detalhe)}
+                          {' · '}
+                          <CanalLogo canal={l.ultimaGeral.canal} className="inline-block h-3 w-3 align-[-2px]" />
+                          {l.ultimaGeral.canal === 'outro' ? ` ${canalLabel(l.ultimaGeral.canal, l.ultimaGeral.canal_detalhe)}` : ''}
                           {l.ultimaGeral.resumo ? ` — ${l.ultimaGeral.resumo}` : ''}</>
                       : 'Nenhuma otimização registrada ainda.'}
                   </p>
@@ -958,9 +967,9 @@ export default function OtimizacoesPage() {
                   {l.canais.map((k) => {
                     const cor = k.status ? ESTADO_STYLE[k.status.estado].badge : 'bg-muted/30 border-border text-muted-foreground';
                     return (
-                      <span key={k.canal} className={cn('rounded border px-1.5 py-0.5 text-[10px]', cor)}
-                        title={k.freq ? `Programado a cada ${k.freq} dias` : 'Sem programação neste canal'}>
-                        {canalLabel(k.canal).replace(' Ads', '')} · {haDias(k.ultima?.created_at ?? null)}
+                      <span key={k.canal} className={cn('flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px]', cor)}
+                        title={`${canalLabel(k.canal, k.ultima?.canal_detalhe)} — ${k.freq ? `programado a cada ${k.freq} dias` : 'sem programação neste canal'}`}>
+                        <CanalLogo canal={k.canal} className="h-3 w-3" /> {haDias(k.ultima?.created_at ?? null)}
                       </span>
                     );
                   })}
