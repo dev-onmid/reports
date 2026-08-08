@@ -1,7 +1,7 @@
 import {
   LayoutDashboard, Users, FileText, WalletCards,
   BarChart3, MessageCircle, TableProperties, Zap, Bot, ShieldCheck, WandSparkles,
-  Download,
+  Download, History,
 } from 'lucide-react';
 import type { Permission } from '@/lib/mock-data';
 
@@ -38,6 +38,8 @@ export const NAV_ITEMS: NavItem[] = [
   { name: 'Automações',      href: '/automacoes',                icon: Zap,           key: 'automacoes', desc: 'Fluxos automáticos',            group: 'ferramentas' },
   { name: 'Cofre',           href: '/vault',                     icon: ShieldCheck,   key: 'cofre',      desc: 'Credenciais',                   group: 'ferramentas' },
   { name: 'Otimizador',      href: '/otimizador',                icon: WandSparkles,  key: 'otimizador', desc: 'Ações de tráfego',              group: 'ferramentas' },
+  // Histórico manual de otimizações por conta — reusa a flag `otimizador`.
+  { name: 'Otimizações',     href: '/otimizacoes',               icon: History,       key: 'otimizador', desc: 'Histórico e programação',       group: 'ferramentas' },
   { name: 'Disparos',        href: '/disparos',                  icon: MessageCircle, key: 'disparos',   desc: 'Campanhas WhatsApp',            group: 'ferramentas' },
   { name: 'Biblioteca Meta', href: '/ferramentas/biblioteca-meta', icon: Download,    key: 'radar',      desc: 'Baixar criativos de anúncios',  group: 'ferramentas' },
 ];
