@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useClients } from '@/lib/client-store';
@@ -9,7 +9,12 @@ import {
   type ComentarioSorteio, type Ganhador, type MotivoExclusao, type RedeSorteio, type RegrasSorteio,
 } from '@/lib/sorteio';
 import {
-  Copy, Dices, ExternalLink, Gift, Heart, History, Loader2, MessageCircle, RefreshCw, Search, Trash2, Trophy, X,
+  carregarAvatar, carregarLogo, runSorteioShow, renderVencedorImagem, baixarBlob,
+  type ArteOpts, type ShowResultado,
+} from '@/lib/sorteio-arte';
+import {
+  Copy, Dices, Download, ExternalLink, Gift, Heart, History, Image as ImageIcon, Loader2,
+  MessageCircle, RefreshCw, Search, Trash2, Trophy, X,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -91,16 +96,20 @@ export default function SorteadorPage() {
   const [bloquearStr, setBloquearStr] = useState('');
 
   const [sorteando, setSorteando] = useState(false);
-  const [nomeGirando, setNomeGirando] = useState('');
+  const [showAberto, setShowAberto] = useState(false);
   const [resultado, setResultado] = useState<{ ganhadores: Ganhador[]; suplentes: Ganhador[]; em: string } | null>(null);
   const [copiado, setCopiado] = useState(false);
-  const girarRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [videoBlob, setVideoBlob] = useState<Blob | null>(null);
+  const [videoExt, setVideoExt] = useState('mp4');
+  const [registroId, setRegistroId] = useState<string | null>(null);
+  const [gerandoImagem, setGerandoImagem] = useState(false);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const arteRef = useRef<ArteOpts | null>(null);
+  const logoRef = useRef<HTMLImageElement | null>(null);
 
   const [historicoAberto, setHistoricoAberto] = useState(false);
   const [historico, setHistorico] = useState<RegistroHistorico[]>([]);
   const [loadingHistorico, setLoadingHistorico] = useState(false);
-
-  useEffect(() => () => { if (girarRef.current) clearInterval(girarRef.current); }, []);
 
   async function carregarPosts(id: string) {
     setClientId(id);
@@ -179,42 +188,82 @@ export default function SorteadorPage() {
     [comentarios, regrasCompletas],
   );
 
-  function rodarSorteio() {
+  async function rodarSorteio() {
     if (!filtro || filtro.participantes.length === 0 || sorteando) return;
     setResultado(null);
-    setSorteando(true);
     setCopiado(false);
-    // Suspense de sorteio: nomes girando por ~3s antes de revelar.
-    const nomes = filtro.participantes.map((p) => p.username);
-    girarRef.current = setInterval(() => {
-      setNomeGirando(nomes[Math.floor(Math.random() * nomes.length)]);
-    }, 70);
-    setTimeout(() => {
-      if (girarRef.current) clearInterval(girarRef.current);
-      const r = sortear(filtro, regrasCompletas);
-      const em = new Date().toISOString();
-      setResultado({ ...r, em });
-      setSorteando(false);
-      // Histórico fire-and-forget — sem banco o sorteio segue funcionando.
-      fetch('/api/sorteios', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          client_id: clientId,
-          rede: post?.rede,
-          post_id: post?.id,
-          post_permalink: post?.permalink,
-          post_legenda: post?.legenda?.slice(0, 300),
-          total_comentarios: filtro.totalComentarios,
-          total_participantes: filtro.participantes.length,
-          total_chances: filtro.totalChances,
-          regras: regrasCompletas,
-          ganhadores: r.ganhadores,
-          suplentes: r.suplentes,
-          excluidos: filtro.excluidos,
-        }),
-      }).catch(() => {});
-    }, 3000);
+    setVideoBlob(null);
+    setRegistroId(null);
+    setSorteando(true);
+    setShowAberto(true);
+
+    const r = sortear(filtro, regrasCompletas);
+    // Foto do vencedor (unavatar via image-proxy — sem CORS o canvas ficaria
+    // tainted e a gravação quebraria) + logo, em paralelo. FB usa a inicial.
+    const [logo, ganhadoresArte] = await Promise.all([
+      logoRef.current ? Promise.resolve(logoRef.current) : carregarLogo(),
+      Promise.all(r.ganhadores.map(async (g) => ({
+        username: g.username,
+        avatar: post?.rede === 'instagram' ? await carregarAvatar(g.username) : null,
+      }))),
+    ]);
+    logoRef.current = logo;
+    const arte: ArteOpts = { conta: conta?.username ?? '', ganhadores: ganhadoresArte };
+    arteRef.current = arte;
+
+    // Espera o canvas do overlay montar antes de gravar.
+    await new Promise((res) => setTimeout(res, 80));
+    let video: ShowResultado = { blob: null, ext: 'webm' };
+    const cv = canvasRef.current;
+    if (cv) {
+      try { video = await runSorteioShow(cv, arte, logo); } catch { /* show falhou — resultado segue valendo */ }
+    }
+    setVideoBlob(video.blob);
+    setVideoExt(video.ext);
+
+    const em = new Date().toISOString();
+    setResultado({ ...r, em });
+    setSorteando(false);
+    setShowAberto(false);
+
+    // Histórico — best-effort; o id do registro vira o "Nº" do card baixável.
+    fetch('/api/sorteios', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        client_id: clientId,
+        rede: post?.rede,
+        post_id: post?.id,
+        post_permalink: post?.permalink,
+        post_legenda: post?.legenda?.slice(0, 300),
+        total_comentarios: filtro.totalComentarios,
+        total_participantes: filtro.participantes.length,
+        total_chances: filtro.totalChances,
+        regras: regrasCompletas,
+        ganhadores: r.ganhadores,
+        suplentes: r.suplentes,
+        excluidos: filtro.excluidos,
+      }),
+    })
+      .then((res) => res.json())
+      .then((data) => { if (data?.registro?.id) setRegistroId(String(data.registro.id)); })
+      .catch(() => {});
+  }
+
+  function baixarVideo() {
+    if (!videoBlob || !resultado) return;
+    baixarBlob(videoBlob, `sorteio-${resultado.ganhadores[0]?.username ?? 'resultado'}.${videoExt}`);
+  }
+
+  async function baixarImagem() {
+    if (!arteRef.current || gerandoImagem) return;
+    setGerandoImagem(true);
+    try {
+      const blob = await renderVencedorImagem({ ...arteRef.current, codigo: registroId }, logoRef.current);
+      if (blob) baixarBlob(blob, `vencedor-${resultado?.ganhadores[0]?.username ?? 'sorteio'}.png`);
+    } finally {
+      setGerandoImagem(false);
+    }
   }
 
   function copiarResultado() {
@@ -576,12 +625,15 @@ export default function SorteadorPage() {
         </div>
       )}
 
-      {/* Sorteio rodando — suspense */}
-      {sorteando && (
-        <div className="rounded-lg border border-primary/40 bg-card p-8 text-center">
-          <div className="text-xs uppercase tracking-widest text-muted-foreground">Sorteando…</div>
-          <div className="mt-2 truncate font-bebas text-4xl uppercase tracking-wide text-primary">
-            @{nomeGirando || '…'}
+      {/* Show do sorteio — contagem 5→0 + revelação, gravado em vídeo */}
+      {showAberto && (
+        <div className="fixed inset-0 z-[210] flex flex-col items-center justify-center gap-3 bg-black/85 p-4">
+          <canvas
+            ref={canvasRef}
+            className="max-h-[82vh] w-auto max-w-full rounded-xl border border-white/15 shadow-2xl"
+          />
+          <div className="flex items-center gap-2 text-xs text-white/70">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" /> Sorteando e gravando o vídeo…
           </div>
         </div>
       )}
@@ -591,7 +643,18 @@ export default function SorteadorPage() {
         <div className="space-y-3 rounded-lg border border-primary/40 bg-card p-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="font-bebas text-xl uppercase tracking-wide">🎉 Resultado do sorteio</div>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
+              {videoBlob && (
+                <Button size="sm" onClick={baixarVideo}>
+                  <Download className="mr-1.5 h-3.5 w-3.5" /> Baixar vídeo (.{videoExt})
+                </Button>
+              )}
+              <Button size="sm" onClick={baixarImagem} disabled={gerandoImagem}>
+                {gerandoImagem
+                  ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                  : <ImageIcon className="mr-1.5 h-3.5 w-3.5" />}
+                Baixar imagem
+              </Button>
               <Button size="sm" variant="outline" onClick={copiarResultado}>
                 <Copy className="mr-1.5 h-3.5 w-3.5" /> {copiado ? 'Copiado!' : 'Copiar resultado'}
               </Button>
