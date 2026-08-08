@@ -103,6 +103,8 @@ export default function SorteadorPage() {
   const [videoExt, setVideoExt] = useState('mp4');
   const [registroId, setRegistroId] = useState<string | null>(null);
   const [gerandoImagem, setGerandoImagem] = useState(false);
+  const [fotoManual, setFotoManual] = useState<string | null>(null);
+  const fotoInputRef = useRef<HTMLInputElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const arteRef = useRef<ArteOpts | null>(null);
   const logoRef = useRef<HTMLImageElement | null>(null);
@@ -194,6 +196,7 @@ export default function SorteadorPage() {
     setCopiado(false);
     setVideoBlob(null);
     setRegistroId(null);
+    setFotoManual(null);
     setSorteando(true);
     setShowAberto(true);
 
@@ -204,7 +207,7 @@ export default function SorteadorPage() {
       logoRef.current ? Promise.resolve(logoRef.current) : carregarLogo(),
       Promise.all(r.ganhadores.map(async (g) => ({
         username: g.username,
-        avatar: post?.rede === 'instagram' ? await carregarAvatar(g.username) : null,
+        avatar: post?.rede === 'instagram' ? await carregarAvatar(g.username, clientId) : null,
       }))),
     ]);
     logoRef.current = logo;
@@ -248,6 +251,46 @@ export default function SorteadorPage() {
       .then((res) => res.json())
       .then((data) => { if (data?.registro?.id) setRegistroId(String(data.registro.id)); })
       .catch(() => {});
+  }
+
+  // Foto manual do vencedor: as fontes automáticas (Business Discovery, endpoint
+  // web do IG, unavatar) falham pra conta pessoal — o gestor tira print/salva a
+  // foto do perfil e sobe aqui; imagem e vídeo regravado saem com ela.
+  async function onFotoManual(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file || !arteRef.current) return;
+    const img = await new Promise<HTMLImageElement | null>((res) => {
+      const i = new Image();
+      i.onload = () => res(i);
+      i.onerror = () => res(null);
+      i.src = URL.createObjectURL(file);
+    });
+    if (!img) return;
+    arteRef.current = {
+      ...arteRef.current,
+      ganhadores: arteRef.current.ganhadores.map((g, idx) => (idx === 0 ? { ...g, avatar: img } : g)),
+    };
+    setFotoManual(file.name);
+  }
+
+  // Reroda contagem + revelação com o MESMO resultado (não sorteia de novo) —
+  // usado depois de subir a foto, pra gravar o vídeo já com ela.
+  async function regravarVideo() {
+    if (!arteRef.current || sorteando) return;
+    setSorteando(true);
+    setShowAberto(true);
+    await new Promise((res) => setTimeout(res, 80));
+    let video: ShowResultado = { blob: null, ext: videoExt };
+    const cv = canvasRef.current;
+    if (cv) {
+      try {
+        video = await runSorteioShow(cv, { ...arteRef.current, codigo: registroId }, logoRef.current);
+      } catch { /* mantém o vídeo anterior */ }
+    }
+    if (video.blob) { setVideoBlob(video.blob); setVideoExt(video.ext); }
+    setShowAberto(false);
+    setSorteando(false);
   }
 
   function baixarVideo() {
@@ -706,6 +749,25 @@ export default function SorteadorPage() {
               </div>
             </div>
           )}
+
+          <div className="flex flex-wrap items-center gap-2">
+            <input ref={fotoInputRef} type="file" accept="image/*" className="hidden" onChange={onFotoManual} />
+            {resultado.ganhadores.length === 1 && (
+              <Button size="sm" variant="outline" onClick={() => fotoInputRef.current?.click()}>
+                <ImageIcon className="mr-1.5 h-3.5 w-3.5" />
+                {fotoManual ? 'Trocar foto do vencedor' : 'Adicionar foto do vencedor'}
+              </Button>
+            )}
+            {fotoManual && (
+              <Button size="sm" variant="outline" onClick={regravarVideo} disabled={sorteando}>
+                <RefreshCw className="mr-1.5 h-3.5 w-3.5" /> Regravar vídeo com a foto
+              </Button>
+            )}
+            <span className="text-xs text-muted-foreground">
+              A foto de perfil nem sempre vem automática (conta pessoal/privada) — salve a foto do perfil do
+              ganhador e suba aqui; a imagem e o vídeo regravado saem com ela.
+            </span>
+          </div>
 
           <p className="text-xs text-muted-foreground">
             Sorteado em {fmtDataHora(resultado.em)} · {filtro?.participantes.length ?? 0} participantes ·

@@ -32,9 +32,12 @@ function loadImage(src: string, timeoutMs = 5000): Promise<HTMLImageElement | nu
   });
 }
 
-export function carregarAvatar(username: string): Promise<HTMLImageElement | null> {
-  const alvo = `https://unavatar.io/instagram/${encodeURIComponent(username)}?fallback=false`;
-  return loadImage(`/api/reports/image-proxy?url=${encodeURIComponent(alvo)}`);
+export function carregarAvatar(username: string, clientId?: string): Promise<HTMLImageElement | null> {
+  // Rota própria com cascata Business Discovery → web_profile_info → unavatar
+  // (mesma origem — canvas nunca fica tainted). 404 → inicial do nome.
+  const qs = new URLSearchParams({ u: username });
+  if (clientId) qs.set('clientId', clientId);
+  return loadImage(`/api/sorteios/avatar?${qs.toString()}`, 9000);
 }
 
 export function carregarLogo(): Promise<HTMLImageElement | null> {
@@ -391,25 +394,27 @@ export function runSorteioShow(canvas: HTMLCanvasElement, opts: ArteOpts, logo: 
       }
     };
 
-    const tick = (agora: number) => {
-      const t = agora - inicio;
+    // setInterval, NÃO requestAnimationFrame: rAF congela com a aba em segundo
+    // plano e o show (e a gravação) travariam pra sempre. O interval é
+    // throttled (~1fps) em background, mas o desenho é baseado em TEMPO — o
+    // show sempre anda e termina.
+    const timer = setInterval(() => {
+      const t = performance.now() - inicio;
       if (t < MS_CONTAGEM) {
         const idx = Math.min(5, Math.floor(t / MS_POR_NUMERO));
         const pop = (t % MS_POR_NUMERO) / MS_POR_NUMERO;
         drawCountdownFrame(ctx, opts.conta, 5 - idx, pop, estrelas);
-        requestAnimationFrame(tick);
       } else if (t < MS_CONTAGEM + MS_REVELACAO) {
         const tr = (t - MS_CONTAGEM) / MS_REVELACAO;
         const escala = 0.9 + 0.1 * Math.min(1, tr * 5); // círculo "assenta"
         drawVencedorFrame(ctx, opts, estrelas, logo, escala);
         drawConfete(ctx, confete);
-        requestAnimationFrame(tick);
       } else {
+        clearInterval(timer);
         drawVencedorFrame(ctx, opts, estrelas, logo, 1);
         finalizar();
       }
-    };
-    requestAnimationFrame(tick);
+    }, 33);
   });
 }
 
