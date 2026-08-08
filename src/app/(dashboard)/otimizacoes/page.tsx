@@ -330,6 +330,187 @@ function RegistroModal({ client, onClose, onSaved }: {
   );
 }
 
+// ── Modal de programação em massa ("Programar vários") ──────────────────────
+type BulkModo = 'manter' | 'definir' | 'remover';
+
+function BulkAgendaModal({ clients, onClose, onApplied }: {
+  clients: Client[];
+  onClose: () => void;
+  /** Chamado após cada PATCH em lote bem-sucedido, pra atualizar o estado local. */
+  onApplied: (clientIds: string[], canal: string, freq: number | null) => void;
+}) {
+  const [busca, setBusca] = useState('');
+  const [sel, setSel] = useState<Set<string>>(new Set());
+  const [modo, setModo] = useState<Record<'meta' | 'google', BulkModo>>({ meta: 'manter', google: 'manter' });
+  const [dias, setDias] = useState<Record<'meta' | 'google', string>>({ meta: '7', google: '7' });
+  const [salvando, setSalvando] = useState(false);
+  const [erro, setErro] = useState<string | null>(null);
+
+  const visiveis = useMemo(() => {
+    const q = busca.trim().toLowerCase();
+    return q
+      ? clients.filter((c) => c.name.toLowerCase().includes(q) || (c.gestor_name ?? '').toLowerCase().includes(q))
+      : clients;
+  }, [clients, busca]);
+
+  function toggle(id: string) {
+    setSel((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
+  const canaisAtivos = (['meta', 'google'] as const).filter((c) => modo[c] !== 'manter');
+  const diasInvalidos = canaisAtivos.some((c) => modo[c] === 'definir' && !(Number(dias[c]) >= 1));
+  const pronto = sel.size > 0 && canaisAtivos.length > 0 && !diasInvalidos;
+
+  async function aplicar() {
+    if (!pronto || salvando) return;
+    setSalvando(true);
+    setErro(null);
+    const ids = [...sel];
+    try {
+      for (const canal of canaisAtivos) {
+        const freq = modo[canal] === 'definir' ? Math.min(90, Math.max(1, Math.floor(Number(dias[canal])))) : null;
+        const res = await fetch('/api/otimizacoes/agenda', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ client_ids: ids, canal, frequencia_dias: freq }),
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => null) as { error?: string } | null;
+          throw new Error(data?.error ?? `HTTP ${res.status}`);
+        }
+        onApplied(ids, canal, freq);
+      }
+      onClose();
+    } catch (e) {
+      setErro(e instanceof Error ? e.message : 'Erro ao aplicar.');
+      setSalvando(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[210] flex items-center justify-center bg-black/70 p-4" onClick={onClose}>
+      <div
+        className="flex max-h-[85vh] w-full max-w-2xl flex-col rounded-xl border border-border bg-card shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between border-b border-border px-4 py-3">
+          <div>
+            <h3 className="text-sm font-semibold">Programar vários clientes</h3>
+            <p className="text-xs text-muted-foreground">
+              Define a frequência de otimização de uma vez pra todos os selecionados.
+            </p>
+          </div>
+          <button onClick={onClose} className="rounded p-1 text-muted-foreground hover:bg-muted/40 hover:text-foreground">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="grid min-h-0 flex-1 gap-4 overflow-y-auto p-4 sm:grid-cols-[1fr_240px]">
+          <div className="flex min-h-0 flex-col">
+            <div className="mb-2 flex items-center gap-2">
+              <div className="relative flex-1">
+                <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                <input
+                  value={busca}
+                  onChange={(e) => setBusca(e.target.value)}
+                  placeholder="Buscar cliente ou gestor…"
+                  className="h-8 w-full rounded-md border border-border bg-background pl-8 pr-3 text-xs outline-none focus:border-primary/60"
+                />
+              </div>
+              <button
+                onClick={() => setSel(new Set(visiveis.map((c) => c.id)))}
+                className="whitespace-nowrap rounded-md border border-border px-2 py-1 text-[11px] text-muted-foreground hover:bg-muted/30"
+              >
+                Selecionar visíveis
+              </button>
+              <button
+                onClick={() => setSel(new Set())}
+                className="whitespace-nowrap rounded-md border border-border px-2 py-1 text-[11px] text-muted-foreground hover:bg-muted/30"
+              >
+                Limpar
+              </button>
+            </div>
+            <div className="max-h-[46vh] space-y-1 overflow-y-auto rounded-md border border-border p-2">
+              {visiveis.length === 0 ? (
+                <p className="py-6 text-center text-xs text-muted-foreground">Nenhum cliente encontrado.</p>
+              ) : visiveis.map((c) => (
+                <label key={c.id} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-xs hover:bg-muted/20">
+                  <input
+                    type="checkbox"
+                    checked={sel.has(c.id)}
+                    onChange={() => toggle(c.id)}
+                    className="h-3.5 w-3.5 accent-[var(--primary)]"
+                  />
+                  <span className="truncate font-medium">{c.name}</span>
+                  <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">{c.gestor_name ?? 'sem gestor'}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            {(['meta', 'google'] as const).map((canal) => (
+              <div key={canal} className="rounded-lg border border-border bg-muted/10 p-3">
+                <span className={cn('rounded border px-1.5 py-0.5 text-[10px]', CANAL_BADGE[canal])}>
+                  {canalLabel(canal)}
+                </span>
+                <select
+                  value={modo[canal]}
+                  onChange={(e) => setModo((p) => ({ ...p, [canal]: e.target.value as BulkModo }))}
+                  className="mt-2 h-8 w-full rounded-md border border-border bg-background px-2 text-xs outline-none focus:border-primary/60"
+                >
+                  <option value="manter">Não alterar</option>
+                  <option value="definir">Otimizar a cada…</option>
+                  <option value="remover">Remover programação</option>
+                </select>
+                {modo[canal] === 'definir' && (
+                  <label className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+                    a cada
+                    <input
+                      type="number"
+                      min={1}
+                      max={90}
+                      value={dias[canal]}
+                      onChange={(e) => setDias((p) => ({ ...p, [canal]: e.target.value }))}
+                      className="h-7 w-16 rounded border border-border bg-background px-2 text-center text-xs outline-none focus:border-primary/60"
+                    />
+                    dias
+                  </label>
+                )}
+              </div>
+            ))}
+            {erro && (
+              <p className="rounded-md border border-red-400/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">{erro}</p>
+            )}
+          </div>
+        </div>
+
+        <div className="flex items-center justify-between border-t border-border px-4 py-3">
+          <span className="text-xs text-muted-foreground">
+            {sel.size} cliente{sel.size === 1 ? '' : 's'} selecionado{sel.size === 1 ? '' : 's'}
+          </span>
+          <div className="flex gap-2">
+            <button onClick={onClose} className="rounded-md border border-border px-3 py-1.5 text-xs text-muted-foreground hover:bg-muted/30">
+              Cancelar
+            </button>
+            <button
+              onClick={() => void aplicar()}
+              disabled={!pronto || salvando}
+              className="rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground disabled:opacity-40"
+            >
+              {salvando ? 'Aplicando…' : `Aplicar a ${sel.size} cliente${sel.size === 1 ? '' : 's'}`}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Modal de detalhe do cliente (timeline + programação) ────────────────────
 function DetalheModal({ client, agenda, me, onClose, onAgendaChange, onRegistrar, registrosVersion }: {
   client: Client;
@@ -521,6 +702,7 @@ export default function OtimizacoesPage() {
   const [detalheId, setDetalheId] = useState<string | null>(null);
   const [registroPara, setRegistroPara] = useState<string | null>(null);
   const [registrosVersion, setRegistrosVersion] = useState(0);
+  const [bulkAberto, setBulkAberto] = useState(false);
 
   useEffect(() => { setMe(getAuthSession()); }, []);
 
@@ -663,11 +845,18 @@ export default function OtimizacoesPage() {
     <div className="space-y-4 p-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="font-bebas text-3xl uppercase tracking-wide">Otimizações</h1>
+          <h1 className="font-bebas text-3xl uppercase tracking-wide">Histórico</h1>
           <p className="text-sm text-muted-foreground">
-            Histórico do que foi feito em cada conta, por quem, em qual canal — e a programação de quando otimizar de novo.
+            O que foi feito em cada conta, por quem, em qual canal — e a programação de quando otimizar de novo.
           </p>
         </div>
+        <div className="flex flex-wrap items-center gap-2">
+        <button
+          onClick={() => setBulkAberto(true)}
+          className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs text-muted-foreground hover:bg-muted/30 hover:text-foreground"
+        >
+          <CalendarClock className="h-3.5 w-3.5" /> Programar vários
+        </button>
         <div className="flex overflow-hidden rounded-lg border border-border">
           <button
             onClick={() => mudarEscopo('meus')}
@@ -683,6 +872,7 @@ export default function OtimizacoesPage() {
           >
             Todos
           </button>
+        </div>
         </div>
       </div>
 
@@ -814,6 +1004,16 @@ export default function OtimizacoesPage() {
           client={registroClient}
           onClose={() => setRegistroPara(null)}
           onSaved={registroSalvo}
+        />
+      )}
+      {bulkAberto && (
+        <BulkAgendaModal
+          clients={clients}
+          onClose={() => setBulkAberto(false)}
+          onApplied={(ids, canal, freq) => {
+            for (const id of ids) aplicarAgendaLocal(id, canal, freq);
+            void loadOverview();
+          }}
         />
       )}
     </div>

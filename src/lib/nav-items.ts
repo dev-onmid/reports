@@ -30,6 +30,9 @@ export const NAV_ITEMS: NavItem[] = [
   { name: 'CRM',         href: '/crm',         icon: TableProperties, key: 'crm',         desc: 'Funil e atendimento' },
   { name: 'Relatórios',  href: '/relatorios',  icon: FileText,        key: 'relatorios',  desc: 'Entregas e PDFs', mobile: true },
   { name: 'Radar',       href: '/resultados',  icon: BarChart3,       key: 'radar',       desc: 'Resultados', mobile: true },
+  // Histórico manual de otimizações por conta — reusa a flag `otimizador`.
+  // Virou aba principal (pedido do Matheus, 2026-08-08; antes estava em Ferramentas).
+  { name: 'Histórico',   href: '/otimizacoes', icon: History,         key: 'otimizador',  desc: 'Otimizações por conta' },
   { name: 'Pagamentos',  href: '/pagamentos',  icon: WalletCards,     key: 'pagamentos',  desc: 'Investimento em mídia', mobile: true },
   { name: 'Luna IA',     href: '/agente',      icon: Bot,             key: 'luna_ia',     desc: 'Assistente', mobile: true },
   // Integrações e Logs saíram do menu (2026-08-07): viraram abas de Configurações
@@ -38,8 +41,6 @@ export const NAV_ITEMS: NavItem[] = [
   { name: 'Automações',      href: '/automacoes',                icon: Zap,           key: 'automacoes', desc: 'Fluxos automáticos',            group: 'ferramentas' },
   { name: 'Cofre',           href: '/vault',                     icon: ShieldCheck,   key: 'cofre',      desc: 'Credenciais',                   group: 'ferramentas' },
   { name: 'Otimizador',      href: '/otimizador',                icon: WandSparkles,  key: 'otimizador', desc: 'Ações de tráfego',              group: 'ferramentas' },
-  // Histórico manual de otimizações por conta — reusa a flag `otimizador`.
-  { name: 'Otimizações',     href: '/otimizacoes',               icon: History,       key: 'otimizador', desc: 'Histórico e programação',       group: 'ferramentas' },
   { name: 'Disparos',        href: '/disparos',                  icon: MessageCircle, key: 'disparos',   desc: 'Campanhas WhatsApp',            group: 'ferramentas' },
   { name: 'Biblioteca Meta', href: '/ferramentas/biblioteca-meta', icon: Download,    key: 'radar',      desc: 'Baixar criativos de anúncios',  group: 'ferramentas' },
 ];

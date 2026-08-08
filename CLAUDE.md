@@ -1,5 +1,9 @@
 @AGENTS.md
 
+## Histórico (ex-Otimizações) — aba principal + programação em massa (2026-08-08)
+
+2ª rodada, pedidos do Matheus: (1) o item saiu do grupo Ferramentas e virou **aba principal "Histórico"** na sidebar (entre Radar e Pagamentos; mesma rota `/otimizacoes`, mesma flag `otimizador`; h1 da página também virou "Histórico"); (2) **"Programar vários"** — botão no header abre modal de programação em massa: busca + checkboxes de clientes ("Selecionar visíveis"/"Limpar") e, por canal (Meta/Google), `Não alterar | Otimizar a cada N dias | Remover programação`. Aplica com **1 PATCH por canal** — `/api/otimizacoes/agenda` agora aceita `client_ids[]` (cap 500; DELETE `ANY($1)` / INSERT `SELECT unnest`) além do `client_id` singular. ✅ tsc+build limpos; no browser (next start :3001, mocks): sidebar com Histórico como item principal fora do grupo (que segue colapsado), modal selecionando 3 clientes → exatamente 2 PATCHes com `client_ids` certos (meta definir 5 / google remover), botão com contador e gate de validação, zero erros de console.
+
 ## Otimizações — histórico manual por conta + programação e alerta (2026-08-07)
 
 Pedido do Matheus: registrar O QUE foi feito em cada conta (público desativado, criativos novos, objetivo mudado + justificativa), por quem, quando e em QUAL canal (Meta/Google/outro) — inclusive **ditado por voz com transcrição** — pra qualquer gestor dar continuidade em conta que nunca viu. Com **programação de otimização** por cliente/canal ("a cada N dias") e **alerta quando estoura o prazo**. Filtro padrão: cada gestor vê só os seus (via `clients.gestor_id`, que já existia), com botão "Todos". Rota `/otimizacoes`, item "Otimizações" no grupo Ferramentas (flag `otimizador` reusada; auth-guard ganhou `/otimizacoes` em routeRoles+routeFeature).
