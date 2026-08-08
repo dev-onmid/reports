@@ -13,6 +13,8 @@ export type PageEntry = {
 
 export type ResolvedIgAccount = {
   igId: string; username: string; picture?: string; followers?: number; pageToken: string;
+  /** Página do Facebook dona da conta IG — usada pelo Sorteador pra listar posts/comentários do FB. */
+  pageId?: string; pageName?: string;
 };
 
 const PAGE_FIELDS = 'id,name,access_token,instagram_business_account{id,username,profile_picture_url,followers_count}';
@@ -49,6 +51,8 @@ export function pageToIgResult(page: PageEntry | undefined): ResolvedIgAccount |
     picture: ig.profile_picture_url,
     followers: ig.followers_count,
     pageToken: page.access_token,
+    pageId: page.id,
+    pageName: page.name,
   };
 }
 
