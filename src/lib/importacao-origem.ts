@@ -162,3 +162,43 @@ export const CAMPOS_DE_STATUS = [
   'revenue', 'valor_rs', 'orcamento', 'pagamento',
   'data_agendada', 'updated_at_external', 'observacao',
 ] as const;
+
+// ---------------------------------------------------------------- Etapas
+
+/**
+ * Traduz o status da planilha para os SINAIS que o funil já lê.
+ *
+ * O `getStage` de /api/crm/summary usa uma lista fixa de palavras
+ * ('Agendado', 'Em Atendimento'…) mais dois booleanos (`compareceu`, `fechou`).
+ * A clínica escreve outro vocabulário — "Avaliação Agendada", "Avaliação
+ * Realizada" — e por isso Agendamentos e Comparecimentos apareciam ZERADOS no
+ * funil mesmo com o CRM mostrando tudo certo.
+ *
+ * A tradução acontece AQUI, na importação, e não no `getStage`: aquela lista é
+ * compartilhada por todos os clientes do CRM, e ampliá-la para caber esta
+ * clínica mudaria o funil de todo mundo. Aqui o efeito fica contido na planilha.
+ *
+ * ⚠️ Só preenche os booleanos. O TEXTO do status continua o da planilha — é o
+ * que o CRM exibe, e o usuário confirmou que ali está correto.
+ */
+export type SinaisDeEtapa = {
+  /** Chegou a comparecer na avaliação. */
+  compareceu: boolean;
+  /** Virou venda. */
+  fechou: boolean;
+  /** Chegou a ter avaliação marcada — inclusive quem depois faltou. */
+  agendou: boolean;
+};
+
+export function sinaisDoStatus(status: unknown): SinaisDeEtapa {
+  const s = normalizarOrigem(status); // reaproveita: sem acento, sem caixa
+
+  // "Efetivada" é a venda concluída; "Realizada" é só o comparecimento.
+  const fechou = /efetivad|fechad|vendid|comprou|contratad|paciente/.test(s);
+  // Compareceu inclui quem fechou: não dá pra efetivar sem ter comparecido.
+  const compareceu = fechou || /realizad|compareceu|atendid[oa] na avaliacao/.test(s);
+  // Agendou inclui quem faltou — o agendamento aconteceu, a presença não.
+  const agendou = compareceu || /agendad|remarcad|reagendad|com falta|faltou|nao compareceu/.test(s);
+
+  return { compareceu, fechou, agendou };
+}

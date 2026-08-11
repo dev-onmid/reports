@@ -1,7 +1,7 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 
-import { origemIntegravel, resumirOrigens, dedupLote, idExterno, chaveTelefone } from '@/lib/importacao-origem';
+import { origemIntegravel, resumirOrigens, dedupLote, idExterno, chaveTelefone, sinaisDoStatus } from '@/lib/importacao-origem';
 
 /** Um grupo de arquivos com o MESMO cabeçalho — mesmo mapeamento serve pros dois. */
 export type SpreadsheetFormato = {
@@ -254,6 +254,7 @@ async function ensureTables(pool: ReturnType<typeof makeServerPool>) {
       ADD COLUMN IF NOT EXISTS nome TEXT,
       ADD COLUMN IF NOT EXISTS numero TEXT,
       ADD COLUMN IF NOT EXISTS canal TEXT,
+      ADD COLUMN IF NOT EXISTS compareceu BOOLEAN DEFAULT FALSE,
       ADD COLUMN IF NOT EXISTS observacao TEXT,
       ADD COLUMN IF NOT EXISTS orcamento NUMERIC,
       ADD COLUMN IF NOT EXISTS pagamento TEXT,
@@ -297,6 +298,8 @@ async function insertLeadBatch(
     notes: string | null;
     revenue: number;
     closed: boolean;
+    compareceu?: boolean;
+    agendou?: boolean;
     raw: string;
   }>,
 ) {
@@ -304,7 +307,7 @@ async function insertLeadBatch(
 
   const values: unknown[] = [];
   const placeholders = rows.map((row, index) => {
-    const base = index * 23;
+    const base = index * 24;
     values.push(
       row.uploadId,
       row.clientId,
@@ -329,15 +332,17 @@ async function insertLeadBatch(
       row.closed ? 'won' : null,
       row.statusRaw || (row.closed ? 'Fechado' : null),
       row.raw,
+      // Booleano que o funil de performance lê pra contar Comparecimentos.
+      row.compareceu ?? false,
     );
-    return `($${base + 1},$${base + 2},$${base + 3},$${base + 4},$${base + 5},$${base + 6},$${base + 7},$${base + 8},$${base + 9},$${base + 10},$${base + 11},$${base + 12},$${base + 13},$${base + 14},$${base + 15},$${base + 16},$${base + 17},$${base + 18},$${base + 19},$${base + 20},$${base + 21},$${base + 22},$${base + 23})`;
+    return `(${Array.from({ length: 24 }, (_, i) => `$${base + i + 1}`).join(',')})`;
   }).join(',');
 
   await pool.query(
     `INSERT INTO public.crm_leads
       (upload_id, client_id, lead_date, lead_name, phone, source, city, status_raw,
        data, nome, numero, canal, observacao, orcamento, pagamento, bairro, data_agendada,
-       revenue, valor_rs, fechou, status_category, status, raw)
+       revenue, valor_rs, fechou, status_category, status, raw, compareceu)
      VALUES ${placeholders}`,
     values,
   );
@@ -372,6 +377,7 @@ async function upsertPorTelefone(
     channel: string | null; statusRaw: string | null; scheduledDate: string | null;
     budget: number; payment: string | null; neighborhood: string | null;
     notes: string | null; revenue: number; closed: boolean; raw: string;
+    compareceu?: boolean; agendou?: boolean;
   }>,
 ) {
   if (rows.length === 0) return;
@@ -407,7 +413,10 @@ async function upsertPorTelefone(
          status = COALESCE($2, status),
          status_raw = COALESCE($3, status_raw),
          status_category = COALESCE($4, status_category),
-         fechou = $5,
+         -- fechou e compareceu só AVANÇAM: um export posterior com status
+         -- diferente não desfaz uma venda nem uma presença que já aconteceram.
+         fechou = public.crm_leads.fechou OR $5,
+         compareceu = COALESCE(public.crm_leads.compareceu, false) OR $12,
          revenue = $6, valor_rs = $6,
          orcamento = COALESCE($7, orcamento),
          pagamento = COALESCE($8, pagamento),
@@ -427,6 +436,7 @@ async function upsertPorTelefone(
         r.scheduledDate,
         r.notes,
         r.uploadId,
+        r.compareceu ?? false,
       ],
     );
   }
@@ -456,6 +466,7 @@ async function upsertLeadBatch(
     notes: string | null;
     revenue: number;
     closed: boolean;
+    compareceu?: boolean;
     raw: string;
   }>,
 ) {
@@ -463,7 +474,7 @@ async function upsertLeadBatch(
 
   const values: unknown[] = [];
   const placeholders = rows.map((row, index) => {
-    const base = index * 26;
+    const base = index * 27;
     values.push(
       row.uploadId, row.clientId, row.externalId,
       row.leadDate, row.leadName, row.phone, row.channel, row.neighborhood, row.statusRaw,
@@ -474,8 +485,9 @@ async function upsertLeadBatch(
       row.closed ? 'won' : null,
       row.statusRaw || (row.closed ? 'Fechado' : null),
       row.raw,
+      row.compareceu ?? false,
     );
-    return `(${Array.from({ length: 26 }, (_, i) => `$${base + i + 1}`).join(',')})`;
+    return `(${Array.from({ length: 27 }, (_, i) => `$${base + i + 1}`).join(',')})`;
   }).join(',');
 
   await pool.query(
@@ -485,7 +497,7 @@ async function upsertLeadBatch(
        data, nome, numero, canal, bairro, data_agendada,
        stage, updated_at_external,
        orcamento, pagamento, observacao,
-       revenue, valor_rs, fechou, status_category, status, raw)
+       revenue, valor_rs, fechou, status_category, status, raw, compareceu)
      VALUES ${placeholders}
      -- ATENCAO: o WHERE abaixo e OBRIGATORIO. O indice unico de
      -- (client_id, external_id) é PARCIAL (só vale com external_id NOT NULL), e
@@ -524,6 +536,9 @@ async function upsertLeadBatch(
        fechou = EXCLUDED.fechou,
        status_category = EXCLUDED.status_category,
        status = EXCLUDED.status,
+       -- compareceu só AVANÇA: quem já compareceu não deixa de ter
+       -- comparecido porque um export posterior veio com status diferente.
+       compareceu = public.crm_leads.compareceu OR EXCLUDED.compareceu,
        raw = EXCLUDED.raw
      WHERE public.crm_leads.updated_at_external IS NULL
         OR EXCLUDED.updated_at_external IS NULL
@@ -782,7 +797,13 @@ export async function POST(req: NextRequest) {
         const toRow = (row: Record<string, unknown>) => {
           const revenue = revenueCol ? parseRevenue(row[revenueCol]) : 0;
           const statusRaw = statusCol ? String(row[statusCol] ?? '').trim() || null : null;
+          // O funil de performance lê os BOOLEANOS `compareceu`/`fechou`, não o
+          // texto. Sem traduzir aqui, "Avaliação Realizada" nunca vira
+          // comparecimento e a etapa fica zerada mesmo com o CRM correto.
+          const sinais = sinaisDoStatus(statusRaw);
           return {
+            compareceu: sinais.compareceu,
+            agendou: sinais.agendou,
             uploadId: upload.id as string,
             clientId,
             leadDate: dateCol ? parseDate(row[dateCol]) : null,
@@ -802,7 +823,9 @@ export async function POST(req: NextRequest) {
               ['Usuário', userCol ? row[userCol] : null],
             ]),
             revenue,
-            closed: statusCol ? isWonStatus(statusRaw) : revenue > 0,
+            // `fechou` pelo vocabulário da planilha OU pela regra antiga —
+            // manter as duas evita quebrar quem já importava com outro texto.
+            closed: sinais.fechou || (statusCol ? isWonStatus(statusRaw) : revenue > 0),
             raw: JSON.stringify(row),
           };
         };

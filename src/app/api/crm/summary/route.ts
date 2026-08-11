@@ -59,6 +59,15 @@ export async function GET(req: NextRequest) {
     );
 
     const byClient: Record<string, FunnelEntry[]> = {};
+    // Total de leads por cliente, ANTES do filtro de etapa. `entries` só guarda
+    // quem tem etapa reconhecida — numa clínica real, 879 de 1.853 leads eram
+    // "Não Contactado" e ficariam de fora. Usar `entries.length` como topo de
+    // funil subcontaria quase metade da base.
+    const leadsPorCliente: Record<string, number> = {};
+    for (const row of rows) {
+      const cid = row.client_id as string;
+      leadsPorCliente[cid] = (leadsPorCliente[cid] ?? 0) + 1;
+    }
     for (const row of rows) {
       const stage = getStage(row);
       if (!stage) continue;
@@ -71,13 +80,21 @@ export async function GET(req: NextRequest) {
       });
     }
 
+    // Itera sobre TODOS os clientes com lead, não só os que têm etapa: cliente
+    // cujos leads são todos "Não Contactado" some da resposta se partirmos de
+    // `byClient`, e o painel dele fica vazio em vez de mostrar o topo.
     return Response.json(
-      Object.entries(byClient).map(([clientId, entries]) => ({
-        clientId,
-        entries,
-        stages: FUNNEL_STAGES.filter(s => entries.some(e => e.stage === s)),
-        total: entries.reduce((sum, e) => sum + (e.amount ?? 0), 0),
-      }))
+      Object.keys(leadsPorCliente).map(clientId => {
+        const entries = byClient[clientId] ?? [];
+        return {
+          clientId,
+          entries,
+          /** Todos os leads do cliente, com ou sem etapa reconhecida. */
+          leads: leadsPorCliente[clientId],
+          stages: FUNNEL_STAGES.filter(s => entries.some(e => e.stage === s)),
+          total: entries.reduce((sum, e) => sum + (e.amount ?? 0), 0),
+        };
+      })
     );
   } catch {
     return Response.json([]);

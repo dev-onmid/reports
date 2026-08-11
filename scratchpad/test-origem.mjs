@@ -8,7 +8,7 @@
 
 import assert from 'node:assert';
 import { origemIntegravel, normalizarOrigem, resumirOrigens, dedupLote, ORIGENS_INTEGRAVEIS,
-  idExterno, chaveTelefone }
+  idExterno, chaveTelefone, sinaisDoStatus }
   from './build/importacao-origem.mjs';
 let n=0; const eq=(a,b,m)=>{assert.deepStrictEqual(a,b,m);n++;}; const ok=(c,m)=>{assert.ok(c,m);n++;};
 
@@ -104,6 +104,43 @@ eq(dedupLote([{id:1},{id:2}], l => String(l.id)).duplicadas, 0, 'sem duplicata')
   eq(chaveTelefone('123'), null, 'curto demais nao e telefone');
   eq(chaveTelefone(''), null, 'vazio nao e telefone');
   eq(chaveTelefone('-'), null, 'marcador nao e telefone');
+}
+
+
+// ---- traducao de status -> sinais do funil (os 12 valores REAIS da planilha)
+// O funil de performance le os booleanos `compareceu`/`fechou`, nao o texto.
+// Sem esta traducao, "Avaliacao Agendada" e "Avaliacao Realizada" davam
+// Agendamentos=0 e Comparecimentos=0 mesmo com o CRM mostrando tudo certo.
+{
+  const casos = [
+    ['Nao Contactado',      false, false, false],
+    ['Avaliação Realizada', true,  true,  false],
+    ['Em Atendimento',      false, false, false],
+    ['Avaliação Agendada',  true,  false, false],
+    ['Avaliação Com Falta', true,  false, false],
+    ['Avaliação Efetivada', true,  true,  true ],
+    ['Não Atende',          false, false, false],
+    ['Sem  Interesse',      false, false, false],
+    ['WhatsApp',            false, false, false],
+    ['Pessoa Errada',       false, false, false],
+    ['Desligado',           false, false, false],
+    ['Ligar Depois',        false, false, false],
+  ];
+  for (const [texto, agendou, compareceu, fechou] of casos) {
+    const r = sinaisDoStatus(texto);
+    eq(r.agendou, agendou, `"${texto}" agendou`);
+    eq(r.compareceu, compareceu, `"${texto}" compareceu`);
+    eq(r.fechou, fechou, `"${texto}" fechou`);
+  }
+  // Coerencia: quem fechou compareceu, quem compareceu agendou.
+  for (const [t] of casos) {
+    const r = sinaisDoStatus(t);
+    ok(!r.fechou || r.compareceu, `${t}: fechou implica compareceu`);
+    ok(!r.compareceu || r.agendou, `${t}: compareceu implica agendou`);
+  }
+  // "Com Falta" agendou mas NAO compareceu — a distincao que o funil precisa.
+  const falta = sinaisDoStatus('Avaliação Com Falta');
+  ok(falta.agendou && !falta.compareceu, 'faltou: conta agendamento, nao comparecimento');
 }
 
 console.log(`✓ ${n} asserts de origem/dedupe passaram`);

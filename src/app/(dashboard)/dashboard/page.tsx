@@ -76,7 +76,7 @@ import { MetaAdsMark, GoogleAdsMark } from '@/components/platform-logos';
 
 type Period = 'yesterday' | 'last_7d' | 'last_14d' | 'last_30d' | 'this_month' | 'last_month' | 'custom';
 type FunnelEntry = { date: string; stage: string; amount?: number };
-type ClientSheetsSummary = { entries: FunnelEntry[]; stages: string[] };
+type ClientSheetsSummary = { entries: FunnelEntry[]; stages: string[]; leads?: number };
 type ApiMetrics = {
   meta: { spend: number; reach?: number; impressions: number; clicks: number; leads: number; formLeads?: number; siteLeads?: number; conversations?: number; cpl: number } | null;
   google: { cost: number; impressions: number; clicks: number; cpc: number; conversions: number; cpa: number;
@@ -5260,10 +5260,10 @@ export default function GeneralDashboard() {
     const { from, to } = periodToDateRange(period, customDateFrom, customDateTo);
     const params = new URLSearchParams({ from: from.toISOString().split('T')[0], to: to.toISOString().split('T')[0] });
     fetch(`/api/crm/summary?${params}`)
-      .then(r => r.ok ? r.json() as Promise<{ clientId: string; entries: FunnelEntry[]; stages: string[] }[]> : [])
+      .then(r => r.ok ? r.json() as Promise<{ clientId: string; entries: FunnelEntry[]; stages: string[]; leads?: number }[]> : [])
       .then(data => {
         const map: Record<string, ClientSheetsSummary> = {};
-        for (const item of data) map[item.clientId] = { entries: item.entries, stages: item.stages };
+        for (const item of data) map[item.clientId] = { entries: item.entries, stages: item.stages, leads: item.leads };
         setCrmSummary(map);
       })
       .catch(() => setCrmSummary({}));
@@ -5751,7 +5751,18 @@ export default function GeneralDashboard() {
     pf.forEach((v, i) => { plannedFunnelAgg[i] = (plannedFunnelAgg[i] ?? 0) + v; });
   }
   // Actual volumes per stage index (maps to planning stage order)
-  const actualFunnelVolumes = [totalLeads, qualified, appointments, showUps, conversions];
+  // Topo do funil = leads do CRM, não `totalLeads` (que é metaLeads+googleConv,
+  // métrica de ANÚNCIO). Comparar 247.999 impressões/cliques com 251
+  // atendimentos dava "conversão de 0,13%" e etapas com mais de 100% — os dois
+  // números nem falavam da mesma coisa. `totalLeads` segue intocado no CPL, no
+  // share por canal e nas séries, onde ele é o número certo.
+  const crmLeadsTotal = [...selectedIds].reduce((sum, id) => sum + (crmSummary[id]?.leads ?? 0), 0);
+  const funnelTopo = crmLeadsTotal || totalLeads;
+  // Taxa do FUNIL = fechamentos sobre o topo DELE. A `conversionRate` global usa
+  // `funnelVisitors` (impressões + cliques), o que dava "0,13%" ao lado de um
+  // funil que começa em contatos — dois números sem relação na mesma caixa.
+  const funnelTaxa = funnelTopo > 0 ? (conversions / funnelTopo) * 100 : 0;
+  const actualFunnelVolumes = [funnelTopo, qualified, appointments, showUps, conversions];
   const funnelStepsNew = firstPlanningForFunnel.stages.map((stage, i) => ({
     label: cleanFunnelLabel(stage.name),
     actual: actualFunnelVolumes[i] ?? 0,
@@ -5902,7 +5913,7 @@ export default function GeneralDashboard() {
             </PremiumPanel>
 
             <div className="grid gap-4 xl:grid-cols-[1.08fr_0.92fr]">
-              <SimpleFunnel steps={funnelStepsNew} totalRate={conversionRate > 0 ? premiumValue(conversionRate, 'percent') : '—'} />
+              <SimpleFunnel steps={funnelStepsNew} totalRate={funnelTaxa > 0 ? premiumValue(funnelTaxa, 'percent') : '—'} />
               <ChannelSummaryTable rows={channelRows} />
             </div>
 
