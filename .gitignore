@@ -39,3 +39,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# artefatos de compilacao dos testes de scratchpad
+scratchpad/build/
