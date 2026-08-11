@@ -1,4 +1,5 @@
 import type { makeServerPool } from '@/lib/server-db';
+import { origemIntegravel } from '@/lib/anotaai-import';
 import type { PedidoComDesconto } from '@/lib/cardapioweb-recorrencia';
 
 type Pool = ReturnType<typeof makeServerPool>;
@@ -24,6 +25,19 @@ export type ProvedorDelivery = 'cardapioweb' | 'anotaai';
 export type PedidoDelivery = PedidoComDesconto & {
   provedor: ProvedorDelivery;
   order_id: string;
+  /** Só no Anota AI — o Cardápio Web não expõe "como nos conheceu". */
+  como_conheceu?: string | null;
+};
+
+/**
+ * O que ficou de fora por origem. Vai pra tela de propósito: um total que
+ * exclui parte da base sem dizer parece o faturamento inteiro da loja.
+ */
+export type OrigemExcluida = {
+  pedidos: number;
+  receita: number;
+  /** As origens descartadas mais frequentes, pra conferir se o corte faz sentido. */
+  origens: { origem: string; pedidos: number }[];
 };
 
 export type FonteDelivery = {
@@ -42,7 +56,7 @@ export type FonteDelivery = {
  */
 export async function lerPedidosDelivery(
   pool: Pool, clientId: string,
-): Promise<{ pedidos: PedidoDelivery[]; fontes: FonteDelivery[] }> {
+): Promise<{ pedidos: PedidoDelivery[]; fontes: FonteDelivery[]; origemExcluida: OrigemExcluida }> {
   const [cw, aa] = await Promise.all([
     pool.query<PedidoDelivery>(
       `SELECT order_id::text, customer_id, customer_name, customer_phone,
@@ -57,13 +71,24 @@ export async function lerPedidosDelivery(
       // também casa com o CRM.
       `SELECT order_id, NULL::text AS customer_id, customer_name, customer_phone,
               total::float8 AS total, status, sales_channel, created_at, discounts,
-              'anotaai' AS provedor
+              como_conheceu, 'anotaai' AS provedor
          FROM public.anotaai_orders WHERE client_id = $1`,
       [clientId],
     ).catch(() => ({ rows: [] as PedidoDelivery[] })),
   ]);
 
-  const pedidos = [...cw.rows, ...aa.rows];
+  // Corte da allowlist de origem acontece AQUI, na leitura — não na gravação.
+  // O pedido de origem não-atribuível (panfleto, indicação, rádio) continua no
+  // banco, mas fica fora de todo número do painel. Fazer o corte na importação
+  // exigiria reimportar tudo se a lista mudasse, e impediria dizer quanto ficou
+  // de fora.
+  //
+  // ⚠️ Só se aplica ao Anota AI: o Cardápio Web não tem esse campo, e descartar
+  // os pedidos dele por ausência de origem zeraria a integração inteira.
+  const foraDaAllowlist = aa.rows.filter(r => !origemIntegravel(r.como_conheceu));
+  const anotaFiltrados = aa.rows.filter(r => origemIntegravel(r.como_conheceu));
+
+  const pedidos = [...cw.rows, ...anotaFiltrados];
 
   const fonte = (p: ProvedorDelivery, rows: PedidoDelivery[]): FonteDelivery => {
     let desde: string | null = null;
@@ -74,8 +99,28 @@ export async function lerPedidosDelivery(
     return { provedor: p, conectado: rows.length > 0, pedidos: rows.length, desde };
   };
 
+  const porOrigem = new Map<string, number>();
+  let receitaFora = 0;
+  for (const r of foraDaAllowlist) {
+    if (r.status === 'canceled') continue;
+    const k = String(r.como_conheceu ?? '').trim() || '(sem origem declarada)';
+    porOrigem.set(k, (porOrigem.get(k) ?? 0) + 1);
+    receitaFora += Number(r.total) || 0;
+  }
+
   return {
     pedidos,
-    fontes: [fonte('cardapioweb', cw.rows), fonte('anotaai', aa.rows)],
+    // A contagem da fonte usa `anotaFiltrados`, não `aa.rows`: dizer "1.200
+    // pedidos do Anota AI" e mostrar 800 no painel seria contradição na mesma
+    // tela.
+    fontes: [fonte('cardapioweb', cw.rows), fonte('anotaai', anotaFiltrados)],
+    origemExcluida: {
+      pedidos: foraDaAllowlist.length,
+      receita: receitaFora,
+      origens: [...porOrigem.entries()]
+        .map(([origem, pedidos]) => ({ origem, pedidos }))
+        .sort((a, b) => b.pedidos - a.pedidos)
+        .slice(0, 8),
+    },
   };
 }

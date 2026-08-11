@@ -92,6 +92,11 @@ export async function ensureAnotaAiSchema(pool: Pool) {
     // volta pra nós em cada webhook. É a única autenticação disponível nesse
     // caminho — sem ele, qualquer um que descubra a URL injeta pedido falso.
     `ALTER TABLE public.client_anota_ai_stores ADD COLUMN IF NOT EXISTS webhook_token TEXT`,
+    // "Como nos conheceu" declarado pelo cliente na planilha. Nome distinto de
+    // `origem`, que já existe e significa outra coisa: por onde o PEDIDO entrou
+    // (api/webhook/planilha). Confundir os dois embaralharia atribuição com
+    // procedência técnica.
+    `ALTER TABLE public.anotaai_orders ADD COLUMN IF NOT EXISTS como_conheceu TEXT`,
     `CREATE INDEX IF NOT EXISTS anotaai_orders_cliente_data_idx
        ON public.anotaai_orders (client_id, created_at DESC)`,
     // Fila de reconsulta: pedido não-final precisa ser relido até fechar.
