@@ -487,7 +487,7 @@ async function upsertLeadBatch(
        orcamento, pagamento, observacao,
        revenue, valor_rs, fechou, status_category, status, raw)
      VALUES ${placeholders}
-     -- ⚠️ O `WHERE` é OBRIGATÓRIO aqui: o índice único de
+     -- ATENCAO: o WHERE abaixo e OBRIGATORIO. O indice unico de
      -- (client_id, external_id) é PARCIAL (só vale com external_id NOT NULL), e
      -- o Postgres só reconhece um índice parcial se o ON CONFLICT repetir o
      -- mesmo predicado. Sem ele, o erro é
