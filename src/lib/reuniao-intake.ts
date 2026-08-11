@@ -155,6 +155,21 @@ export function identificarCliente(nomesBrutos: string[], nomeReuniao: string): 
   if (apelidos.length === 1) return { cliente_corrigido: apelidos[0], confianca: 90, motivo: 'título é apelido do cliente', alternativas: [] };
   if (apelidos.length > 1) return abster('apelido serve para mais de um cliente', apelidos.slice(0, 3), 0, true);
 
+  // 5b. Apelido com termo genérico no meio: "Londrina Av. Bandeirantes" na
+  //     agenda vs "Sorrifácil Londrina Bandeirantes" no cadastro. O "av" não
+  //     existe no cadastro e derrubava a regra 5 (caso real de 07/08/2026,
+  //     reunião foi pra triagem com 62). Termos de endereço/unidade não
+  //     distinguem cliente nenhum — fora da comparação. Exige ≥2 palavras
+  //     significativas: uma só ("Londrina") é apelido demais e cai na regra 5,
+  //     que já exige candidato único.
+  const GENERICOS = new Set(['av', 'avenida', 'rua', 'r', 'alameda', 'unidade', 'filial', 'loja', 'sala', 'reuniao', 'meet']);
+  const significativos = alvo.filter((t) => !GENERICOS.has(t));
+  if (significativos.length >= 2 && significativos.length < alvo.length) {
+    const parciais = nomes.filter((n) => contem(tokensDe(n), significativos));
+    if (parciais.length === 1) return { cliente_corrigido: parciais[0], confianca: 90, motivo: 'título é parte do nome do cliente (ignorando termos genéricos)', alternativas: [] };
+    if (parciais.length > 1) return abster('título serve para mais de um cliente', parciais.slice(0, 3), 0, true);
+  }
+
   // 6. Nada casou: sugestões por similaridade, só pra ajudar o humano.
   const sugestoes = nomes
     .map((n) => ({ n, score: similarity(alvoNorm, normalizeClientName(n)) }))
@@ -350,7 +365,9 @@ export async function processarReuniao(pool: Pool, input: ReuniaoInput): Promise
         descricao: `⚠️ Atualização sobre o cliente\n\n${input.alertas}`,
         setor: 'social',
         prioridade: 2,
-        status: 'BRIEFING',
+        // 'BRIEFING' morreu em 07/08/2026 quando o Matheus limpou os status do
+        // ClickUp — o 400 "Status not found" derrubava só esta tarefa.
+        status: 'planejamento',
       }, ...input.acoes]
     : input.acoes;
 
@@ -371,7 +388,10 @@ export async function processarReuniao(pool: Pool, input: ReuniaoInput): Promise
       // lista não aparece — mesma convenção que o Make usava.
       name: `[${match.name}] ${acao.titulo.trim()}`,
       description: `${acao.descricao?.trim() ?? ''}${rodape}`.trim() || undefined,
-      status: acao.status?.trim() || undefined,
+      // Sem status, o ClickUp joga a tarefa no PRIMEIRO da lista — que é
+      // "templates", e ninguém olha lá. Regra do Matheus (07/08/2026): ação de
+      // tráfego nasce em "tráfego", o resto nasce em "planejamento".
+      status: acao.status?.trim() || (setor === 'trafego' ? 'tráfego' : 'planejamento'),
       priority: (acao.prioridade ?? null) as CreateTaskInput['priority'],
       // Sem prazo definido na reunião, a tarefa vence HOJE (regra da agência):
       // tarefa sem data some das visões de planejamento do ClickUp.

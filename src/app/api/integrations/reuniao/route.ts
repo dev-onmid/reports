@@ -40,11 +40,17 @@ function normalizarAcoes(raw: unknown): AcaoInput[] {
     // nomes cobrem quem chamar o endpoint direto.
     const titulo = [o.titulo, o.name, o.acao].find((v): v is string => typeof v === 'string' && v.trim().length > 0) ?? '';
     if (!titulo) return [];
-    const descricao = [o.descricao, o.item_original].find((v): v is string => typeof v === 'string' && v.trim().length > 0);
+    // Contexto interpretado (novo, 07/08/2026 — o planejamento reclamava de
+    // tarefa rasa) + trecho original sempre preservado como evidência.
+    const contexto = typeof o.descricao === 'string' && o.descricao.trim() ? o.descricao.trim() : null;
+    const trecho = typeof o.item_original === 'string' && o.item_original.trim() ? o.item_original.trim() : null;
+    const descricao = contexto && trecho && contexto !== trecho
+      ? `${contexto}\n\n📌 Trecho original: ${trecho}`
+      : contexto ?? (trecho ? `📌 Trecho original: ${trecho}` : undefined);
     const prazo = Number(o.prazo_dias);
     return [{
       titulo,
-      descricao: descricao ? (o.item_original === descricao ? `📌 Trecho original: ${descricao}` : descricao) : undefined,
+      descricao,
       setor: typeof o.setor === 'string' ? o.setor : undefined,
       status: typeof o.status === 'string' ? o.status : undefined,
       prazo_dias: Number.isFinite(prazo) ? prazo : null,
