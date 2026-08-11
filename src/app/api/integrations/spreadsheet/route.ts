@@ -566,6 +566,17 @@ export async function POST(req: NextRequest) {
     const resumoOrigem = channelCol
       ? resumirOrigens(rows.map(r => r[channelCol]))
       : { aceitas: rows.length, descartadas: 0, origens: [] as { origem: string; linhas: number }[] };
+
+    // O VALOR descartado, não só a contagem de linhas. Numa planilha real de
+    // clínica, 63% das linhas fora da lista representaram 58% do faturamento
+    // (R$ 604 mil de R$ 1,03 mi) — dizer só "325 linhas" esconderia a ordem de
+    // grandeza do que não vai aparecer no Dashboard.
+    let receitaDescartada = 0;
+    if (channelCol && revenueCol) {
+      for (const r of rows) {
+        if (!origemIntegravel(r[channelCol])) receitaDescartada += parseRevenue(r[revenueCol]);
+      }
+    }
     let duplicadasNoLote = 0;
 
     try {
@@ -693,6 +704,7 @@ export async function POST(req: NextRequest) {
       linhas_lidas: rows.length,
       origem_descartadas: resumoOrigem.descartadas,
       origens_fora: resumoOrigem.origens.slice(0, 10),
+      receita_descartada: receitaDescartada,
       duplicadas_no_lote: duplicadasNoLote,
     });
     } finally {

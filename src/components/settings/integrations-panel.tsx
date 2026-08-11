@@ -1461,6 +1461,7 @@ function SpreadsheetImportPanel() {
     origem_descartadas?: number;
     origens_fora?: { origem: string; linhas: number }[];
     duplicadas_no_lote?: number;
+    receita_descartada?: number;
   } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -1568,7 +1569,7 @@ function SpreadsheetImportPanel() {
         ok?: boolean; results?: Record<string, number>; error?: string;
         arquivos?: { nome: string; linhas: number }[]; linhas_lidas?: number;
         origem_descartadas?: number; origens_fora?: { origem: string; linhas: number }[];
-        duplicadas_no_lote?: number;
+        duplicadas_no_lote?: number; receita_descartada?: number;
       };
       if (!res.ok || data.error) { setError(data.error ?? 'Erro ao importar planilha'); return; }
       setImportResults(data.results ?? {});
@@ -1576,6 +1577,7 @@ function SpreadsheetImportPanel() {
         arquivos: data.arquivos, linhas_lidas: data.linhas_lidas,
         origem_descartadas: data.origem_descartadas, origens_fora: data.origens_fora,
         duplicadas_no_lote: data.duplicadas_no_lote,
+        receita_descartada: data.receita_descartada,
       });
       setStep('done');
     } catch {
@@ -1850,8 +1852,12 @@ function SpreadsheetImportPanel() {
                 {(relatorio.origem_descartadas ?? 0) > 0 && (
                   <>
                     <p className="text-amber-400">
-                      <strong>{relatorio.origem_descartadas}</strong> linha(s) NÃO entraram por
-                      terem origem fora dos canais digitais.
+                      <strong>{relatorio.origem_descartadas}</strong> linha(s)
+                      {(relatorio.receita_descartada ?? 0) > 0 && (
+                        <> — <strong>{relatorio.receita_descartada!.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</strong></>
+                      )}{' '}
+                      NÃO entraram por terem origem fora dos canais digitais. Esse valor não
+                      aparecerá no CRM nem no Dashboard.
                     </p>
                     <p className="text-muted-foreground">
                       {relatorio.origens_fora?.map(o => `${o.origem} (${o.linhas})`).join(' · ')}
