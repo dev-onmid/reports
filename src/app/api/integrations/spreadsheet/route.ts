@@ -3,6 +3,17 @@ import { makeServerPool } from '@/lib/server-db';
 
 import { origemIntegravel, resumirOrigens, dedupLote, idExterno, chaveTelefone } from '@/lib/importacao-origem';
 
+/** Um grupo de arquivos com o MESMO cabeçalho — mesmo mapeamento serve pros dois. */
+export type SpreadsheetFormato = {
+  assinatura: string;
+  arquivos: { nome: string; linhas: number }[];
+  headers: string[];
+  rowCount: number;
+  mapping: SpreadsheetColumnMapping;
+  distinctValues: Record<string, string[]>;
+  preview: Record<string, unknown>[];
+};
+
 export type SpreadsheetAnalysis = {
   headers: string[];
   clinicValues: string[];
@@ -10,6 +21,13 @@ export type SpreadsheetAnalysis = {
   rowCount: number;
   mapping: SpreadsheetColumnMapping;
   preview: Record<string, unknown>[];
+  /**
+   * Todos os formatos detectados no envio. Relatórios diferentes (Leads e
+   * Faturamento, por exemplo) têm colunas diferentes e NÃO podem dividir um
+   * mapeamento — "DATA CADASTRO" e "DATA FATURAMENTO" cairiam no mesmo campo.
+   * Cada um vem aqui com o seu, e a tela importa um por vez.
+   */
+  formatos: SpreadsheetFormato[];
 };
 
 export type SpreadsheetColumnMapping = {
@@ -533,10 +551,12 @@ export async function POST(req: NextRequest) {
     // primeiro é recusada pelo nome, em vez de importada torto: aplicar o
     // mapeamento de um arquivo em outro colocaria data na coluna de valor sem
     // ninguém perceber até o faturamento não fechar.
-    const rows: Record<string, unknown>[] = [];
-    const porArquivo: { nome: string; linhas: number }[] = [];
-    let headers: string[] = [];
-    const divergentes: string[] = [];
+    // Agrupa por ASSINATURA de cabeçalho. Arquivos do mesmo relatório (meses
+    // diferentes) caem no mesmo grupo e compartilham o mapeamento; relatórios
+    // diferentes viram grupos separados, cada um com o seu — sem isso,
+    // "DATA CADASTRO" e "DATA FATURAMENTO" cairiam no mesmo campo e ninguém
+    // perceberia até o Dashboard mostrar data errada.
+    const grupos = new Map<string, { headers: string[]; rows: Record<string, unknown>[]; arquivos: { nome: string; linhas: number }[] }>();
 
     for (const f of arquivos) {
       const buf = Buffer.from(await f.arrayBuffer());
@@ -546,27 +566,55 @@ export async function POST(req: NextRequest) {
       if (r.length === 0) continue;
 
       const h = Object.keys(r[0]);
-      if (headers.length === 0) headers = h;
-      else if (h.join('|') !== headers.join('|')) { divergentes.push(f.name); continue; }
-
-      rows.push(...r);
-      porArquivo.push({ nome: f.name, linhas: r.length });
+      const chave = h.join('|');
+      const g = grupos.get(chave);
+      if (g) { g.rows.push(...r); g.arquivos.push({ nome: f.name, linhas: r.length }); }
+      else grupos.set(chave, { headers: h, rows: r, arquivos: [{ nome: f.name, linhas: r.length }] });
     }
 
-    if (divergentes.length > 0) {
-      return Response.json({
-        error: `Estas planilhas têm colunas diferentes de "${porArquivo[0]?.nome ?? arquivos[0].name}": `
-          + `${divergentes.join(', ')}. Importe cada formato separadamente.`,
-      }, { status: 400 });
-    }
-    if (rows.length === 0) return Response.json({ error: 'Planilha vazia.' }, { status: 400 });
+    if (grupos.size === 0) return Response.json({ error: 'Planilha vazia.' }, { status: 400 });
+
+    // A ETAPA DE IMPORTAÇÃO processa um formato por chamada: a tela envia só os
+    // arquivos daquele grupo. Se vier mais de um aqui, é a análise.
+    const primeiro = [...grupos.values()][0];
+    const rows = primeiro.rows;
+    const porArquivo = primeiro.arquivos;
+    const headers = primeiro.headers;
 
     // ── Step: analyze ──────────────────────────────────────────────────────────
     if (step === 'analyze') {
       if (!apiKey) return Response.json({ error: 'ANTHROPIC_API_KEY não configurada.' }, { status: 500 });
 
-      const mapping = await detectColumnsWithClaude(headers, rows, apiKey);
-      const clinicValues: string[] = [];
+      // Uma detecção por FORMATO. Custa uma chamada de IA por grupo — dois
+      // relatórios diferentes = duas chamadas; vários meses do mesmo = uma só.
+      const formatos: SpreadsheetFormato[] = [];
+      const clinicasDeTodos = new Set<string>();
+
+      for (const [assinatura, g] of grupos) {
+        const m = await detectColumnsWithClaude(g.headers, g.rows, apiKey);
+        const dv: Record<string, string[]> = {};
+        for (const h of g.headers) {
+          const seen = new Set<string>(); const vals: string[] = [];
+          for (const row of g.rows) {
+            const v = String(row[h] ?? '').trim();
+            if (v && !seen.has(v)) { seen.add(v); vals.push(v); }
+            if (vals.length >= 500) break;
+          }
+          dv[h] = vals;
+        }
+        if (m.clinic) for (const row of g.rows) {
+          const v = String(row[m.clinic] ?? '').trim();
+          if (v) clinicasDeTodos.add(v);
+        }
+        formatos.push({
+          assinatura, arquivos: g.arquivos, headers: g.headers,
+          rowCount: g.rows.length, mapping: m, distinctValues: dv,
+          preview: g.rows.slice(0, 3),
+        });
+      }
+
+      const mapping = formatos[0].mapping;
+      const clinicValues: string[] = [...clinicasDeTodos];
       const distinctValues: Record<string, string[]> = {};
       for (const header of headers) {
         const seen = new Set<string>();
@@ -581,20 +629,17 @@ export async function POST(req: NextRequest) {
         }
         distinctValues[header] = values;
       }
-      if (mapping.clinic) {
-        const seen = new Set<string>();
-        for (const row of rows) {
-          const v = String(row[mapping.clinic!] ?? '').trim();
-          if (v && !seen.has(v)) { seen.add(v); clinicValues.push(v); }
-        }
-      }
       return Response.json({
+        // Campos de topo = primeiro formato, pra não quebrar quem já consome.
         headers,
+        // Clínicas somadas de TODOS os formatos: o de-para clínica→cliente é
+        // um só, mesmo quando os relatórios são diferentes.
         clinicValues,
         distinctValues,
         rowCount: rows.length,
         mapping,
         preview: rows.slice(0, 3),
+        formatos,
       } satisfies SpreadsheetAnalysis);
     }
 

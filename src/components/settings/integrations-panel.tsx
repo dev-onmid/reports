@@ -42,7 +42,7 @@ import {
 import { useMetaConnections, type MetaConnection } from '@/lib/meta-connections-store';
 import { useGoogleConnections, type GoogleConnection } from '@/lib/google-connections-store';
 import { useClients } from '@/lib/client-store';
-import type { SpreadsheetAnalysis, SpreadsheetColumnMapping, SpreadsheetMapping } from '@/app/api/integrations/spreadsheet/route';
+import type { SpreadsheetAnalysis, SpreadsheetColumnMapping, SpreadsheetMapping, SpreadsheetFormato } from '@/app/api/integrations/spreadsheet/route';
 
 // ─── Account avatar helpers ───────────────────────────────────────────────────
 
@@ -1454,6 +1454,13 @@ function SpreadsheetImportPanel() {
     stage: '',
     updatedDate: '',
   });
+  /**
+   * Um de-para de colunas POR FORMATO, indexado pela assinatura do cabeçalho.
+   * Relatórios diferentes (Leads e Faturamento) não podem dividir o mesmo:
+   * "DATA CADASTRO" e "DATA FATURAMENTO" cairiam no mesmo campo e ninguém
+   * perceberia até o Dashboard mostrar data errada.
+   */
+  const [porFormato, setPorFormato] = useState<Record<string, Record<SpreadsheetFieldKey, string>>>({});
   const [importResults, setImportResults] = useState<Record<string, number> | null>(null);
   const [relatorio, setRelatorio] = useState<{
     arquivos?: { nome: string; linhas: number }[];
@@ -1511,6 +1518,22 @@ function SpreadsheetImportPanel() {
       const data = await res.json() as SpreadsheetAnalysis & { error?: string };
       if (!res.ok || data.error) { setError(data.error ?? 'Erro ao analisar planilha'); return; }
       setAnalysis(data);
+      if (data.formatos?.length) {
+        const inicial: Record<string, Record<SpreadsheetFieldKey, string>> = {};
+        for (const f of data.formatos) {
+          inicial[f.assinatura] = {
+            clinic: f.mapping.clinic ?? '', revenue: f.mapping.revenue ?? '',
+            date: f.mapping.date ?? '', name: f.mapping.name ?? '',
+            channel: f.mapping.channel ?? '', phone: f.mapping.phone ?? '',
+            budget: f.mapping.budget ?? '', payment: f.mapping.payment ?? '',
+            neighborhood: f.mapping.neighborhood ?? '', notes: f.mapping.notes ?? '',
+            scheduledDate: f.mapping.scheduledDate ?? '', status: f.mapping.status ?? '',
+            dealId: f.mapping.dealId ?? '', stage: f.mapping.stage ?? '',
+            updatedDate: f.mapping.updatedDate ?? '',
+          };
+        }
+        setPorFormato(inicial);
+      }
       setColumnOverrides(prev => ({
         ...prev,
         clinic: data.mapping.clinic ?? '',
@@ -1543,45 +1566,82 @@ function SpreadsheetImportPanel() {
     if (!file || !analysis) return;
     const filled = mappings.filter(m => m.clientId);
     if (filled.length === 0) { setError('Mapeie ao menos uma clínica para um cliente.'); return; }
+
+    // Um envio POR FORMATO. O servidor processa um de cada vez de propósito:
+    // o de-para de um relatório nunca é aplicado no outro, e uma falha num
+    // formato não desfaz o que o outro já importou.
+    const formatos = analysis.formatos?.length ? analysis.formatos : null;
+
     setLoading(true);
     setError('');
     try {
-      const fd = new FormData();
-      for (const f of (files.length ? files : [file])) fd.append('file', f);
-      fd.append('mappings', JSON.stringify(filled));
-      if (columnOverrides.clinic) fd.append('clinicColumn', columnOverrides.clinic);
-      if (columnOverrides.revenue) fd.append('revenueColumn', columnOverrides.revenue);
-      if (columnOverrides.date) fd.append('dateColumn', columnOverrides.date);
-      if (columnOverrides.name) fd.append('nameColumn', columnOverrides.name);
-      if (columnOverrides.channel) fd.append('channelColumn', columnOverrides.channel);
-      if (columnOverrides.phone) fd.append('phoneColumn', columnOverrides.phone);
-      if (columnOverrides.budget) fd.append('budgetColumn', columnOverrides.budget);
-      if (columnOverrides.payment) fd.append('paymentColumn', columnOverrides.payment);
-      if (columnOverrides.neighborhood) fd.append('neighborhoodColumn', columnOverrides.neighborhood);
-      if (columnOverrides.notes) fd.append('notesColumn', columnOverrides.notes);
-      if (columnOverrides.scheduledDate) fd.append('scheduledDateColumn', columnOverrides.scheduledDate);
-      if (columnOverrides.status) fd.append('statusColumn', columnOverrides.status);
-      if (columnOverrides.dealId) fd.append('dealIdColumn', columnOverrides.dealId);
-      if (columnOverrides.stage) fd.append('stageColumn', columnOverrides.stage);
-      if (columnOverrides.updatedDate) fd.append('updatedDateColumn', columnOverrides.updatedDate);
-      const res = await fetch('/api/integrations/spreadsheet?step=import', { method: 'POST', body: fd });
-      const data = await res.json() as {
-        ok?: boolean; results?: Record<string, number>; error?: string;
-        arquivos?: { nome: string; linhas: number }[]; linhas_lidas?: number;
-        origem_descartadas?: number; origens_fora?: { origem: string; linhas: number }[];
-        duplicadas_no_lote?: number; receita_descartada?: number;
+      const somados: Record<string, number> = {};
+      const acc = {
+        arquivos: [] as { nome: string; linhas: number }[], linhas_lidas: 0,
+        origem_descartadas: 0, receita_descartada: 0, duplicadas_no_lote: 0,
+        origens_fora: [] as { origem: string; linhas: number }[],
       };
-      if (!res.ok || data.error) { setError(data.error ?? 'Erro ao importar planilha'); return; }
-      setImportResults(data.results ?? {});
+
+      const lotes = formatos
+        ? formatos.map(f => ({
+            cols: porFormato[f.assinatura] ?? columnOverrides,
+            // Só os arquivos DESTE formato — é o que garante o de-para certo
+            // nas linhas certas.
+            arquivos: (files.length ? files : [file]).filter(x => f.arquivos.some(a => a.nome === x.name)),
+            rotulo: f.arquivos.map(a => a.nome).join(', '),
+          })).filter(l => l.arquivos.length > 0)
+        : [{ cols: columnOverrides, arquivos: files.length ? files : [file], rotulo: file.name }];
+
+      for (const lote of lotes) {
+        const fd = new FormData();
+        for (const f of lote.arquivos) fd.append('file', f);
+        fd.append('mappings', JSON.stringify(filled));
+        const campos: [SpreadsheetFieldKey, string][] = [
+          ['clinic', 'clinicColumn'], ['revenue', 'revenueColumn'], ['date', 'dateColumn'],
+          ['name', 'nameColumn'], ['channel', 'channelColumn'], ['phone', 'phoneColumn'],
+          ['budget', 'budgetColumn'], ['payment', 'paymentColumn'],
+          ['neighborhood', 'neighborhoodColumn'], ['notes', 'notesColumn'],
+          ['scheduledDate', 'scheduledDateColumn'], ['status', 'statusColumn'],
+          ['dealId', 'dealIdColumn'], ['stage', 'stageColumn'], ['updatedDate', 'updatedDateColumn'],
+        ];
+        for (const [chave, campo] of campos) if (lote.cols[chave]) fd.append(campo, lote.cols[chave]);
+
+        const res = await fetch('/api/integrations/spreadsheet?step=import', { method: 'POST', body: fd });
+        const data = await res.json() as {
+          ok?: boolean; results?: Record<string, number>; error?: string;
+          arquivos?: { nome: string; linhas: number }[]; linhas_lidas?: number;
+          origem_descartadas?: number; origens_fora?: { origem: string; linhas: number }[];
+          duplicadas_no_lote?: number; receita_descartada?: number;
+        };
+        if (!res.ok || data.error) {
+          // Diz QUAL arquivo falhou: com dois relatórios no mesmo envio, um erro
+          // genérico não permitiria saber onde corrigir o de-para.
+          setError(`Erro ao importar ${lote.rotulo}: ${data.error ?? 'falha desconhecida'}`);
+          return;
+        }
+        for (const [k, v] of Object.entries(data.results ?? {})) somados[k] = (somados[k] ?? 0) + v;
+        acc.arquivos.push(...(data.arquivos ?? []));
+        acc.linhas_lidas += data.linhas_lidas ?? 0;
+        acc.origem_descartadas += data.origem_descartadas ?? 0;
+        acc.receita_descartada += data.receita_descartada ?? 0;
+        acc.duplicadas_no_lote += data.duplicadas_no_lote ?? 0;
+        acc.origens_fora.push(...(data.origens_fora ?? []));
+      }
+
+      // Junta as origens descartadas dos formatos numa lista só.
+      const fundidas = new Map<string, number>();
+      for (const o of acc.origens_fora) fundidas.set(o.origem, (fundidas.get(o.origem) ?? 0) + o.linhas);
+
+      setImportResults(somados);
       setRelatorio({
-        arquivos: data.arquivos, linhas_lidas: data.linhas_lidas,
-        origem_descartadas: data.origem_descartadas, origens_fora: data.origens_fora,
-        duplicadas_no_lote: data.duplicadas_no_lote,
-        receita_descartada: data.receita_descartada,
+        ...acc,
+        origens_fora: [...fundidas.entries()]
+          .map(([origem, linhas]) => ({ origem, linhas }))
+          .sort((a, b) => b.linhas - a.linhas),
       });
       setStep('done');
     } catch {
-      setError('Erro de conexão ao importar planilha.');
+      setError('Erro ao importar planilha');
     } finally {
       setLoading(false);
     }
@@ -1610,6 +1670,7 @@ function SpreadsheetImportPanel() {
       updatedDate: '',
     });
     setImportResults(null);
+    setPorFormato({});
     setRelatorio(null);
     setFiles([]);
     setError('');
@@ -1698,11 +1759,31 @@ function SpreadsheetImportPanel() {
         {step === 'mapping' && analysis && (
           <div className="space-y-5">
             {/* Column detection summary */}
-            <div className="rounded-lg border border-border bg-muted/10 p-4 space-y-3">
+            {(analysis.formatos?.length ?? 0) > 1 && (
+              <div className="rounded-lg border border-amber-400/30 bg-amber-400/10 p-3 text-xs text-amber-400">
+                <strong>{analysis.formatos!.length} formatos diferentes</strong> neste envio — cada um
+                com o seu de-para abaixo. Colunas de relatórios diferentes não podem ser misturadas:
+                &quot;DATA CADASTRO&quot; e &quot;DATA FATURAMENTO&quot; cairiam no mesmo campo.
+              </div>
+            )}
+
+            {(analysis.formatos?.length ? analysis.formatos : [{
+              assinatura: '__unico__', arquivos: [], headers: analysis.headers,
+              rowCount: analysis.rowCount, mapping: analysis.mapping,
+              distinctValues: analysis.distinctValues, preview: analysis.preview,
+            } satisfies SpreadsheetFormato]).map(fmt => (
+            <div key={fmt.assinatura} className="rounded-lg border border-border bg-muted/10 p-4 space-y-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Mapeamento das colunas da planilha</p>
+                <p className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
+                  Mapeamento das colunas
+                  {fmt.arquivos.length > 0 && (
+                    <span className="ml-1 font-normal normal-case text-muted-foreground/80">
+                      · {fmt.arquivos.map(a => a.nome).join(', ')}
+                    </span>
+                  )}
+                </p>
                 <span className="rounded-full border border-primary/25 bg-primary/10 px-2 py-1 text-[10px] font-bold text-primary">
-                  {analysis.headers.length} coluna{analysis.headers.length === 1 ? '' : 's'} identificada{analysis.headers.length === 1 ? '' : 's'}
+                  {fmt.headers.length} colunas · {fmt.rowCount.toLocaleString('pt-BR')} linhas
                 </span>
               </div>
 
@@ -1717,12 +1798,21 @@ function SpreadsheetImportPanel() {
                           {field.required && <span className="text-[9px] font-bold text-primary">essencial</span>}
                         </div>
                         <select
-                          value={columnOverrides[field.key]}
-                          onChange={(e) => updateColumnOverride(field.key, e.target.value)}
+                          value={(porFormato[fmt.assinatura] ?? columnOverrides)[field.key] ?? ''}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setPorFormato(prev => ({
+                              ...prev,
+                              [fmt.assinatura]: { ...(prev[fmt.assinatura] ?? columnOverrides), [field.key]: v },
+                            }));
+                            // O de-para clínica→cliente é UM só para todos os
+                            // formatos, então continua no estado global.
+                            if (field.key === 'clinic') updateColumnOverride(field.key, v);
+                          }}
                           className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground"
                         >
                           <option value="">— não mapeado —</option>
-                          {analysis.headers.map(h => <option key={h} value={h}>{h}</option>)}
+                          {fmt.headers.map(h => <option key={h} value={h}>{h}</option>)}
                         </select>
                         <p className="truncate text-[9px] text-muted-foreground/70" title={field.hint}>{field.hint}</p>
                       </div>
@@ -1734,10 +1824,10 @@ function SpreadsheetImportPanel() {
               <div className="rounded-lg border border-border/70 bg-background/45 p-3">
                 <div className="mb-2 flex items-center justify-between gap-2">
                   <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Todas as colunas encontradas</p>
-                  <p className="text-[10px] text-muted-foreground">{analysis.rowCount.toLocaleString('pt-BR')} linhas na planilha</p>
+                  <p className="text-[10px] text-muted-foreground">{fmt.rowCount.toLocaleString('pt-BR')} linhas neste formato</p>
                 </div>
                 <div className="flex max-h-24 flex-wrap gap-1.5 overflow-y-auto pr-1">
-                  {analysis.headers.map(header => (
+                  {fmt.headers.map(header => (
                     <span key={header} className="rounded-md border border-border bg-muted/30 px-2 py-1 text-[10px] font-medium text-muted-foreground">
                       {header}
                     </span>
@@ -1745,12 +1835,14 @@ function SpreadsheetImportPanel() {
                 </div>
               </div>
 
-              {analysis.preview.length > 0 && (
+              {/* Amostra DESTE formato. Mostrar as linhas do primeiro em todos
+                  os blocos faria conferir o de-para contra o arquivo errado. */}
+              {fmt.preview.length > 0 && (
                 <div className="overflow-auto rounded-lg border border-border/70">
                   <table className="w-full min-w-[920px] text-left text-[10px]">
                     <thead className="bg-background/70 text-muted-foreground">
                       <tr>
-                        {analysis.headers.map(header => (
+                        {fmt.headers.map(header => (
                           <th key={header} className="max-w-40 truncate border-r border-border/40 px-2 py-2 font-bold uppercase tracking-wider last:border-r-0" title={header}>
                             {header}
                           </th>
@@ -1758,9 +1850,9 @@ function SpreadsheetImportPanel() {
                       </tr>
                     </thead>
                     <tbody>
-                      {analysis.preview.map((row, index) => (
+                      {fmt.preview.map((row, index) => (
                         <tr key={index} className="border-t border-border/40">
-                          {analysis.headers.map(header => (
+                          {fmt.headers.map(header => (
                             <td key={header} className="max-w-40 truncate border-r border-border/30 px-2 py-1.5 text-muted-foreground last:border-r-0" title={String(row[header] ?? '')}>
                               {String(row[header] ?? '') || '—'}
                             </td>
@@ -1772,6 +1864,7 @@ function SpreadsheetImportPanel() {
                 </div>
               )}
             </div>
+            ))}
 
             {/* Clinic → Client mappings */}
             {columnOverrides.clinic && mappings.length > 0 ? (
