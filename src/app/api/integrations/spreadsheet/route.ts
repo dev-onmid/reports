@@ -487,7 +487,14 @@ async function upsertLeadBatch(
        orcamento, pagamento, observacao,
        revenue, valor_rs, fechou, status_category, status, raw)
      VALUES ${placeholders}
-     ON CONFLICT (client_id, external_id) DO UPDATE SET
+     -- ⚠️ O `WHERE` é OBRIGATÓRIO aqui: o índice único de
+     -- (client_id, external_id) é PARCIAL (só vale com external_id NOT NULL), e
+     -- o Postgres só reconhece um índice parcial se o ON CONFLICT repetir o
+     -- mesmo predicado. Sem ele, o erro é
+     -- "there is no unique or exclusion constraint matching the ON CONFLICT
+     -- specification" — e a importação inteira falha. O mesmo tropeço já está
+     -- anotado em webhook/whatsapp/[instanceId] e em webhooks/[token].
+     ON CONFLICT (client_id, external_id) WHERE external_id IS NOT NULL DO UPDATE SET
        upload_id = EXCLUDED.upload_id,
        -- ── IDENTIDADE E ATRIBUIÇÃO: só preenchem se estiverem VAZIAS ────────
        -- A planilha sabe o que ACONTECEU com o lead; ela não sabe de onde ele
