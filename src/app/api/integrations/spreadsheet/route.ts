@@ -1,7 +1,7 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 
-import { origemIntegravel, resumirOrigens, dedupLote } from '@/lib/importacao-origem';
+import { origemIntegravel, resumirOrigens, dedupLote, idExterno, chaveTelefone } from '@/lib/importacao-origem';
 
 export type SpreadsheetAnalysis = {
   headers: string[];
@@ -332,6 +332,92 @@ async function insertLeadBatch(
 // Writes the same duplicate column pairs (lead_date/data, revenue/valor_rs,
 // etc.) as insertLeadBatch, since other code paths (CRM report data, chat)
 // read crm_leads through either naming.
+/**
+ * Upsert pelo TELEFONE, para planilha sem coluna de ID do negócio.
+ *
+ * Faz a ponte que o pedido do Matheus descreve: um lead que chegou pela
+ * integração do WhatsApp já existe no CRM com atribuição completa (campanha,
+ * criativo, ctwa_clid), e a planilha do CRM da clínica traz a informação que só
+ * ela tem — que ele COMPROU. Casar por telefone atualiza aquele lead em vez de
+ * criar um segundo, que apareceria como dois leads e contaria a venda duas
+ * vezes no funil.
+ *
+ * Resolvido em JS e não com ON CONFLICT porque não existe índice único por
+ * telefone em `crm_leads` — e criar um agora quebraria as instalações que já
+ * têm telefone repetido.
+ */
+async function upsertPorTelefone(
+  pool: ReturnType<typeof makeServerPool>,
+  rows: Array<{
+    uploadId: string; clientId: string;
+    leadDate: string | null; leadName: string | null; phone: string | null;
+    channel: string | null; statusRaw: string | null; scheduledDate: string | null;
+    budget: number; payment: string | null; neighborhood: string | null;
+    notes: string | null; revenue: number; closed: boolean; raw: string;
+  }>,
+) {
+  if (rows.length === 0) return;
+  const clientId = rows[0].clientId;
+
+  const fones = rows.map(r => chaveTelefone(r.phone)).filter((f): f is string => Boolean(f));
+  const existentes = new Map<string, string>();
+  if (fones.length > 0) {
+    const { rows: achados } = await pool.query<{ id: string; numero: string | null; phone: string | null }>(
+      `SELECT id::text, numero, phone FROM public.crm_leads WHERE client_id = $1`,
+      [clientId],
+    );
+    for (const a of achados) {
+      // Indexa pelos dois campos: instalações antigas gravaram em `numero`,
+      // as novas em `phone`.
+      for (const v of [a.numero, a.phone]) {
+        const k = chaveTelefone(v);
+        if (k && !existentes.has(k)) existentes.set(k, a.id);
+      }
+    }
+  }
+
+  const novos: typeof rows = [];
+  for (const r of rows) {
+    const k = chaveTelefone(r.phone);
+    const id = k ? existentes.get(k) : undefined;
+    if (!id) { novos.push(r); continue; }
+
+    // Só STATUS. Nome, telefone, canal, origem, campanha e criativo ficam como
+    // estão — quem viu o lead chegar sabe disso melhor que a planilha.
+    await pool.query(
+      `UPDATE public.crm_leads SET
+         status = COALESCE($2, status),
+         status_raw = COALESCE($3, status_raw),
+         status_category = COALESCE($4, status_category),
+         fechou = $5,
+         revenue = $6, valor_rs = $6,
+         orcamento = COALESCE($7, orcamento),
+         pagamento = COALESCE($8, pagamento),
+         data_agendada = COALESCE($9, data_agendada),
+         observacao = COALESCE(NULLIF($10, ''), observacao),
+         upload_id = $11
+       WHERE id = $1::uuid`,
+      [
+        id,
+        r.statusRaw || (r.closed ? 'Fechado' : null),
+        r.statusRaw,
+        r.closed ? 'won' : null,
+        r.closed,
+        r.revenue,
+        r.budget,
+        r.payment,
+        r.scheduledDate,
+        r.notes,
+        r.uploadId,
+      ],
+    );
+  }
+
+  for (let i = 0; i < novos.length; i += 150) {
+    await insertLeadBatch(pool, novos.slice(i, i + 150));
+  }
+}
+
 async function upsertLeadBatch(
   pool: ReturnType<typeof makeServerPool>,
   rows: Array<{
@@ -385,11 +471,23 @@ async function upsertLeadBatch(
      VALUES ${placeholders}
      ON CONFLICT (client_id, external_id) DO UPDATE SET
        upload_id = EXCLUDED.upload_id,
-       lead_date = EXCLUDED.lead_date, data = EXCLUDED.data,
-       lead_name = EXCLUDED.lead_name, nome = EXCLUDED.nome,
-       phone = EXCLUDED.phone, numero = EXCLUDED.numero,
-       source = EXCLUDED.source, canal = EXCLUDED.canal,
-       city = EXCLUDED.city, bairro = EXCLUDED.bairro,
+       -- ── IDENTIDADE E ATRIBUIÇÃO: só preenchem se estiverem VAZIAS ────────
+       -- A planilha sabe o que ACONTECEU com o lead; ela não sabe de onde ele
+       -- VEIO. Um lead que entrou pelo WhatsApp carrega ctwa_clid, campanha e
+       -- criativo — sobrescrever com o "canal" do CRM da clínica apagaria a
+       -- única informação que liga a venda ao anúncio. Mesmo COALESCE que o
+       -- caminho do WhatsApp já usa em crm-conversation-sync.
+       lead_date = COALESCE(public.crm_leads.lead_date, EXCLUDED.lead_date),
+       data      = COALESCE(public.crm_leads.data, EXCLUDED.data),
+       lead_name = COALESCE(NULLIF(public.crm_leads.lead_name, ''), EXCLUDED.lead_name),
+       nome      = COALESCE(NULLIF(public.crm_leads.nome, ''), EXCLUDED.nome),
+       phone     = COALESCE(NULLIF(public.crm_leads.phone, ''), EXCLUDED.phone),
+       numero    = COALESCE(NULLIF(public.crm_leads.numero, ''), EXCLUDED.numero),
+       source    = COALESCE(NULLIF(public.crm_leads.source, ''), EXCLUDED.source),
+       canal     = COALESCE(NULLIF(public.crm_leads.canal, ''), EXCLUDED.canal),
+       city      = COALESCE(NULLIF(public.crm_leads.city, ''), EXCLUDED.city),
+       bairro    = COALESCE(NULLIF(public.crm_leads.bairro, ''), EXCLUDED.bairro),
+       -- ── STATUS: a planilha manda, é pra isso que ela é reimportada ───────
        status_raw = EXCLUDED.status_raw,
        data_agendada = EXCLUDED.data_agendada,
        stage = EXCLUDED.stage,
@@ -661,11 +759,18 @@ export async function POST(req: NextRequest) {
           // Upsert path — preserves deals from earlier imports (different
           // months) and only updates a deal if this row is at least as
           // recent, so it never overwrites a later status with an older one.
-          const externalIdOf = (row: Record<string, unknown>) => String(row[dealIdCol] ?? '').trim();
+          // `idExterno` rejeita marcador de "ainda não tem": numa planilha real,
+          // NUMERO ORCAMENTO vinha "-" em 1.556 de 1.853 linhas, e tratá-lo como
+          // ID fundiria esses 1.556 leads num só.
+          const externalIdOf = (row: Record<string, unknown>) => idExterno(row[dealIdCol]) ?? '';
           const updatedAtOf = (row: Record<string, unknown>) => updatedDateCol ? parseDate(row[updatedDateCol]) : null;
 
           // Dedupe within this single file first — ON CONFLICT can't update
           // the same row twice in one statement.
+          // Linhas SEM id de verdade não podem ser descartadas nem agrupadas —
+          // elas seguem pelo caminho do telefone, que é a identidade real.
+          const semId = groupedRows.filter(r => !externalIdOf(r));
+
           const latestById = new Map<string, Record<string, unknown>>();
           for (const row of groupedRows) {
             const id = externalIdOf(row);
@@ -684,15 +789,25 @@ export async function POST(req: NextRequest) {
             }));
             await upsertLeadBatch(pool, batch);
           }
-        } else {
-          // Legacy path — no deal ID available, so each import fully replaces
-          // this client's spreadsheet-derived data (original behavior).
-          await pool.query(`DELETE FROM public.crm_leads WHERE client_id = $1 AND upload_id <> $2`, [clientId, upload.id]);
-          await pool.query(`DELETE FROM public.crm_uploads WHERE client_id = $1 AND id <> $2`, [clientId, upload.id]);
 
+          // As sem ID vão pelo telefone, em vez de sumirem da importação.
+          for (let i = 0; i < semId.length; i += 150) {
+            await upsertPorTelefone(pool, semId.slice(i, i + 150).map(toRow));
+          }
+        } else {
+          // Sem coluna de ID do negócio, a identidade do lead é o TELEFONE.
+          //
+          // ⚠️ Este caminho APAGAVA todos os leads e todo o histórico de uploads
+          // anteriores do cliente antes de inserir ("cada import substitui
+          // tudo"). Reimportar destruía o passado — inclusive o status já
+          // trabalhado no CRM. Agora casa por telefone e atualiza só o status.
+          //
+          // Numa planilha real, o telefone era único em 1.852 de 1.853 linhas,
+          // enquanto a coluna de orçamento vinha "-" em 84% delas: telefone é a
+          // identidade confiável, número de orçamento não.
           for (let i = 0; i < groupedRows.length; i += 150) {
             const batch = groupedRows.slice(i, i + 150).map(toRow);
-            await insertLeadBatch(pool, batch);
+            await upsertPorTelefone(pool, batch);
           }
         }
       }

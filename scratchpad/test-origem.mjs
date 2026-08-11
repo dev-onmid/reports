@@ -7,7 +7,8 @@
 //   node scratchpad/test-origem.mjs
 
 import assert from 'node:assert';
-import { origemIntegravel, normalizarOrigem, resumirOrigens, dedupLote, ORIGENS_INTEGRAVEIS }
+import { origemIntegravel, normalizarOrigem, resumirOrigens, dedupLote, ORIGENS_INTEGRAVEIS,
+  idExterno, chaveTelefone }
   from './build/importacao-origem.mjs';
 let n=0; const eq=(a,b,m)=>{assert.deepStrictEqual(a,b,m);n++;}; const ok=(c,m)=>{assert.ok(c,m);n++;};
 
@@ -71,6 +72,38 @@ eq(dedupLote([{id:1},{id:2}], l => String(l.id)).duplicadas, 0, 'sem duplicata')
                 'Reavalia\u00e7\u00e3o/J\u00e1 sou Paciente', 'Eventos e Parcerias', 'Conv\u00eanio',
                 'Outdoor', 'Influenciadores', 'M\u00eddia Impressa'];
   for (const o of fora) eq(origemIntegravel(o), false, `planilha real: "${o}" fica de fora`);
+}
+
+
+// ---- identidade: o "-" que quase destruiu 1.556 leads
+{
+  // Marcadores de "ainda nao tem" NAO podem virar chave. Numa planilha real,
+  // NUMERO ORCAMENTO vinha "-" em 1.556 de 1.853 linhas — agrupar por ele
+  // fundiria todos num lead so.
+  for (const v of ['-', '--', '', '  ', '0', 'N/A', 'na', 'null', 'NULO']) {
+    eq(idExterno(v), null, `"${v}" NAO e id valido`);
+  }
+  eq(idExterno('2079742'), '2079742', 'numero de orcamento real e id valido');
+  eq(idExterno('  2079742  '), '2079742', 'espaco em volta e aparado');
+  eq(idExterno(2079742), '2079742', 'numero vira string');
+
+  // Se o "-" passasse, o dedupe colapsaria tudo — este assert prova a protecao.
+  const linhas = Array.from({ length: 5 }, (_, i) => ({ orc: '-', fone: `4899999000${i}` }));
+  const chaves = linhas.map(l => idExterno(l.orc) ?? `fone:${chaveTelefone(l.fone)}`);
+  eq(new Set(chaves).size, 5, '5 leads sem orcamento continuam 5, nao viram 1');
+}
+
+// ---- telefone como identidade (planilha x CRM do WhatsApp)
+{
+  eq(chaveTelefone('(48) 99999-0000'), '48999990000', 'formatado vira digitos');
+  eq(chaveTelefone('5548999990000'), '48999990000', 'DDI 55 removido');
+  eq(chaveTelefone('48999990000'), '48999990000', 'ja limpo passa igual');
+  // o mesmo lead escrito de tres jeitos casa entre planilha e CRM
+  const formas = ['(48) 99999-0000', '5548999990000', '48 99999 0000'];
+  eq(new Set(formas.map(chaveTelefone)).size, 1, 'mesmo lead escrito de 3 jeitos casa');
+  eq(chaveTelefone('123'), null, 'curto demais nao e telefone');
+  eq(chaveTelefone(''), null, 'vazio nao e telefone');
+  eq(chaveTelefone('-'), null, 'marcador nao e telefone');
 }
 
 console.log(`✓ ${n} asserts de origem/dedupe passaram`);

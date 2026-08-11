@@ -122,3 +122,43 @@ export function dedupLote<T>(linhas: T[], chaveDe: (l: T) => string): ResultadoD
 
   return { unicas: [...porChave.values()], duplicadas: linhas.length - porChave.size, exemplos };
 }
+
+// ---------------------------------------------------------------- Identidade
+
+/**
+ * IDs "de mentira" que exports de CRM usam para dizer "ainda não tem".
+ *
+ * ⚠️ Numa planilha real de clínica, `NUMERO ORCAMENTO` vinha `-` em 1.556 de
+ * 1.853 linhas. Tratá-lo como identificador fundiria 1.556 leads distintos num
+ * só — perda silenciosa e irreversível. Qualquer coluna de ID precisa passar
+ * por aqui antes de virar chave.
+ */
+const ID_PLACEHOLDER = new Set(['', '-', '--', '0', 'n/a', 'na', 'null', 'nulo', 'sem', 'sem numero', 'sem número']);
+
+export function idExterno(v: unknown): string | null {
+  const s = String(v ?? '').trim();
+  if (!s || ID_PLACEHOLDER.has(s.toLowerCase())) return null;
+  return s;
+}
+
+/** Só dígitos, sem DDI 55, para casar telefone entre planilha e CRM. */
+export function chaveTelefone(v: unknown): string | null {
+  let d = String(v ?? '').replace(/\D/g, '');
+  if (d.length > 11 && d.startsWith('55')) d = d.slice(2);
+  return d.length >= 10 ? d : null;
+}
+
+/**
+ * Campos que a PLANILHA manda — o que muda ao longo da vida do lead.
+ *
+ * O resto (nome, telefone, canal, campanha, criativo, origem) é identidade e
+ * atribuição: pertence a quem viu o lead CHEGAR, não a quem exportou depois.
+ * Um lead que entrou pelo WhatsApp com `ctwa_clid` sabe de qual anúncio veio;
+ * a planilha do CRM da clínica não sabe, e sobrescrever com o "canal" dela
+ * apagaria a única informação que liga a venda ao criativo.
+ */
+export const CAMPOS_DE_STATUS = [
+  'status', 'status_raw', 'status_category', 'stage', 'fechou',
+  'revenue', 'valor_rs', 'orcamento', 'pagamento',
+  'data_agendada', 'updated_at_external', 'observacao',
+] as const;
