@@ -73,7 +73,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
     const anterior = autoPreviousPeriod(periodo.de, periodo.ate);
 
     // Uma leitura só para as duas plataformas — ver delivery-orders.ts.
-    const { pedidos, fontes, origemExcluida } = await lerPedidosDelivery(pool, clientId);
+    const { pedidos, fontes } = await lerPedidosDelivery(pool, clientId);
 
     const agora = new Date().toISOString();
     // Funil de HOJE é o que orienta ação (quem ligar agora); o do período é o
@@ -114,7 +114,6 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
         id: l.id, nome: l.store_name, storeId: l.store_id, webhookToken: l.webhook_token,
       })),
       fontes,
-      origemExcluida,
       regua,
       reguaSugerida: sugerirRegua(clientesHoje),
       periodo: { ...periodo, chave },

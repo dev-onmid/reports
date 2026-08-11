@@ -7,7 +7,6 @@ import {
   parseDataPlanilha, parseValorBR, statusDaPlanilha, chaveImportacao,
   type LinhaImportada,
 } from '@/lib/anotaai-import';
-import { dedupLote, origemIntegravel } from '@/lib/anotaai-import';
 
 /**
  * Importa pedidos retroativos de planilha.
@@ -42,19 +41,9 @@ export async function POST(req: NextRequest) {
   try {
     await ensureAnotaAiSchema(pool);
 
-    // Dedupe DENTRO do lote antes de tocar o banco. Importar vários arquivos de
-    // uma vez torna isso obrigatório: exports de meses vizinhos se sobrepõem nas
-    // bordas, e sem isso o mesmo pedido entraria duas vezes — dobrando receita e
-    // inventando recorrência pra quem comprou uma vez só.
-    const dedup = dedupLote(linhas, l => {
-      const d = parseDataPlanilha(l.data);
-      return d ? chaveImportacao(l, d) : `sem-data:${JSON.stringify(l)}`;
-    });
-
     let importadas = 0, ignoradas = 0, semData = 0, semTelefone = 0;
-    let jaExistiam = 0, foraDaAllowlist = 0;
 
-    for (const l of dedup.unicas) {
+    for (const l of linhas) {
       const dataIso = parseDataPlanilha(l.data);
       if (!dataIso) { semData++; ignoradas++; continue; }
 
@@ -63,19 +52,12 @@ export async function POST(req: NextRequest) {
       // de recorrência — mas ainda conta como receita, então é importado.
       if (!fone) semTelefone++;
 
-      // A origem é GRAVADA sempre; o corte da allowlist acontece na leitura.
-      // Descartar aqui obrigaria a reimportar tudo se a lista mudasse, e
-      // impediria dizer quanto ficou de fora.
-      const comoConheceu = String(l.como_conheceu ?? '').trim() || null;
-      if (!origemIntegravel(comoConheceu)) foraDaAllowlist++;
-
       try {
-        const r = await pool.query(
+        await pool.query(
           `INSERT INTO public.anotaai_orders
              (client_id, order_id, store_id, customer_name, customer_phone, total,
-              check_code, status, sales_channel, discounts, created_at, final, origem,
-              como_conheceu)
-           VALUES ($1,$2,$3,$4,$5,$6,NULL,$7,$8,'[]'::jsonb,$9,true,'planilha',$10)
+              check_code, status, sales_channel, discounts, created_at, final, origem)
+           VALUES ($1,$2,$3,$4,$5,$6,NULL,$7,$8,'[]'::jsonb,$9,true,'planilha')
            ON CONFLICT (client_id, order_id) DO NOTHING`,
           [
             clientId,
@@ -87,12 +69,9 @@ export async function POST(req: NextRequest) {
             statusDaPlanilha(l.status),
             String(l.canal ?? '').trim() || 'planilha',
             dataIso,
-            comoConheceu,
           ],
         );
-        // rowCount 0 = o pedido JÁ existia de uma importação anterior. Contar
-        // como "importado" faria o usuário achar que trouxe dado novo.
-        if (r.rowCount === 0) jaExistiam++; else importadas++;
+        importadas++;
       } catch {
         ignoradas++;
       }
@@ -108,10 +87,6 @@ export async function POST(req: NextRequest) {
       recebidas: linhas.length,
       importadas,
       ignoradas,
-      duplicadas_no_lote: dedup.duplicadas,
-      ja_existiam: jaExistiam,
-      exemplos_duplicados: dedup.exemplos,
-      fora_da_allowlist: foraDaAllowlist,
       // Reportado para o usuário saber a QUALIDADE do que importou — uma
       // planilha sem telefone importa receita mas não alimenta o funil.
       sem_data: semData,

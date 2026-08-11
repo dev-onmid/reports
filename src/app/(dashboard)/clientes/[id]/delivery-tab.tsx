@@ -48,7 +48,6 @@ type Painel = {
     hoje: FunilEtapas; periodo: FunilEtapas; anterior: FunilEtapas;
   };
   cupons?: ResumoCupons;
-  origemExcluida?: { pedidos: number; receita: number; origens: { origem: string; pedidos: number }[] };
   canais?: { canal: string; marketplace: boolean; receita: number; pedidos: number }[];
   emRisco?: ClienteDelivery[];
   inativos?: ClienteDelivery[];
@@ -505,23 +504,6 @@ export function ClientDeliveryTab({ clientId }: { clientId: string }) {
             ))}
           </ul>
         </Card>
-      )}
-
-      {/* o que ficou de fora por origem */}
-      {(painel?.origemExcluida?.pedidos ?? 0) > 0 && (
-        <div className="flex items-start gap-3 rounded-[var(--radius)] border border-border bg-surface-soft p-3">
-          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-          <div className="min-w-0 text-xs text-muted-foreground">
-            <p>
-              <strong className="text-foreground">{painel!.origemExcluida!.pedidos} pedidos</strong>{' '}
-              ({brl(painel!.origemExcluida!.receita)}) estão fora dos números acima por terem origem
-              não atribuível a canal digital. Eles existem no sistema — só não entram no painel.
-            </p>
-            <p className="mt-1">
-              {painel!.origemExcluida!.origens.map(o => `${o.origem} (${o.pedidos})`).join(' · ')}
-            </p>
-          </div>
-        </div>
       )}
 
       {/* cupons e descontos */}

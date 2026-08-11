@@ -17,8 +17,6 @@ export type LinhaImportada = {
   total?: number | string;
   status?: string;
   canal?: string;
-  /** "Como nos conheceu" declarado pelo cliente — a origem atribuível. */
-  como_conheceu?: string;
 };
 
 /** Aceita ISO, dd/mm/aaaa e dd/mm/aaaa hh:mm — formatos comuns de export BR. */
@@ -75,95 +73,3 @@ export function chaveImportacao(l: LinhaImportada, dataIso: string): string {
   return `imp:${fone}:${dataIso.slice(0, 16)}:${valor}`;
 }
 
-
-// ---------------------------------------------------------------- Origem
-
-/**
- * Origens ("como nos conheceu") que ENTRAM no sistema.
- *
- * É uma allowlist: qualquer valor fora daqui — panfleto, indicação, rádio,
- * "já era cliente" — fica de fora dos números. São canais que a agência não
- * opera, e misturá-los infla o resultado da mídia.
- *
- * ⚠️ O pedido continua sendo GRAVADO com a origem original; o corte acontece na
- * leitura. Importar planilha é trabalho manual, e descartar na entrada
- * significaria reimportar tudo caso esta lista mude — além de impedir dizer
- * quanto ficou de fora.
- */
-export const ORIGENS_INTEGRAVEIS = [
-  'Whatsapp',
-  'Chatwoot - Whatsapp',
-  'Facebook',
-  'Facebook - Whatsapp',
-  'Google',
-  'Google meu Negócio',
-  'Instagram',
-  'Instagram - Whatsapp',
-  'Site',
-] as const;
-
-/**
- * Normaliza para comparação: sem acento, sem caixa, separadores unificados.
- *
- * ⚠️ O range de diacríticos vai ESCAPADO (`̀-ͯ`). Digitá-lo como
- * caractere literal corrompe em copy-paste e encoding — armadilha já registrada
- * no CLAUDE.md a respeito de `normalizeClientName`.
- */
-export function normalizarOrigem(v: unknown): string {
-  return String(v ?? '')
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .toLowerCase()
-    // "Google - Whatsapp", "Google – Whatsapp" e "Google Whatsapp" viram o mesmo.
-    .replace(/[\s\-–—_]+/g, ' ')
-    .trim();
-}
-
-const SET_INTEGRAVEIS = new Set(ORIGENS_INTEGRAVEIS.map(normalizarOrigem));
-
-export function origemIntegravel(v: unknown): boolean {
-  const n = normalizarOrigem(v);
-  if (!n) return false; // sem origem declarada não é atribuível a canal nenhum
-  return SET_INTEGRAVEIS.has(n);
-}
-
-// ---------------------------------------------------------------- Duplicados
-
-export type ResultadoDedup<T> = {
-  unicas: T[];
-  /** Quantas linhas foram descartadas por já existirem no próprio lote. */
-  duplicadas: number;
-  /** As chaves mais repetidas, para o usuário conferir se o corte faz sentido. */
-  exemplos: { chave: string; vezes: number }[];
-};
-
-/**
- * Remove duplicatas DENTRO do lote, preservando a primeira ocorrência.
- *
- * Importar vários arquivos de uma vez torna isso obrigatório: exports de meses
- * vizinhos costumam se sobrepor nas bordas, e sem dedupe o mesmo pedido entraria
- * duas vezes — dobrando receita e inventando recorrência para quem comprou uma
- * vez só.
- *
- * A contagem é devolvida de propósito: silenciar o descarte faria o usuário
- * achar que perdeu linhas na importação.
- */
-export function dedupLote<T>(linhas: T[], chaveDe: (l: T) => string): ResultadoDedup<T> {
-  const vistas = new Map<string, number>();
-  const unicas: T[] = [];
-
-  for (const l of linhas) {
-    const k = chaveDe(l);
-    const n = vistas.get(k) ?? 0;
-    vistas.set(k, n + 1);
-    if (n === 0) unicas.push(l);
-  }
-
-  const exemplos = [...vistas.entries()]
-    .filter(([, v]) => v > 1)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 5)
-    .map(([chave, vezes]) => ({ chave, vezes }));
-
-  return { unicas, duplicadas: linhas.length - unicas.length, exemplos };
-}
