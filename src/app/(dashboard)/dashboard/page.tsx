@@ -73,10 +73,13 @@ import { Input } from '@/components/ui/input';
 import { APP_VERSION } from '@/lib/app-version';
 import { BackButton } from '@/components/layout/back-button';
 import { MetaAdsMark, GoogleAdsMark } from '@/components/platform-logos';
+import {
+  FUNIL_VAZIO, somarFunis, resolverTopoFunil, rotuloFonteTopo, normalizarFonteTopo,
+  type ContagemFunil,
+} from '@/lib/funil-etapas';
 
 type Period = 'yesterday' | 'last_7d' | 'last_14d' | 'last_30d' | 'this_month' | 'last_month' | 'custom';
-type FunnelEntry = { date: string; stage: string; amount?: number };
-type ClientSheetsSummary = { entries: FunnelEntry[]; stages: string[]; leads?: number };
+type ClientSheetsSummary = { leads: number; funil: ContagemFunil; total: number };
 type ApiMetrics = {
   meta: { spend: number; reach?: number; impressions: number; clicks: number; leads: number; formLeads?: number; siteLeads?: number; conversations?: number; cpl: number } | null;
   google: { cost: number; impressions: number; clicks: number; cpc: number; conversions: number; cpa: number;
@@ -230,11 +233,6 @@ function periodToDateRange(
     case 'custom': return { from: customFrom ? new Date(customFrom) : today, to: customTo ? new Date(customTo) : today };
     default: return { from: today, to: today };
   }
-}
-
-function entriesInRange(entries: FunnelEntry[], from: Date, to: Date): FunnelEntry[] {
-  const toEnd = new Date(to); toEnd.setHours(23, 59, 59, 999);
-  return entries.filter(e => { const d = new Date(e.date); return d >= from && d <= toEnd; });
 }
 
 function dateKey(date: Date) {
@@ -4487,9 +4485,11 @@ function IgMark({ className }: { className?: string }) {
 
 const FUNNEL_STEP_COLORS = ['#6cff2f', '#0ea5e9', '#7b2cff', '#f97316', '#ec4899', '#f59e0b', '#84cc16'];
 
-function SimpleFunnel({ steps, totalRate }: {
+function SimpleFunnel({ steps, totalRate, fonteLabel }: {
   steps: Array<{ label: string; actual: number; planned: number; color: string }>;
   totalRate: string;
+  /** De onde vem o topo ("fonte: CRM" / "estimado por anúncios" / mistas). */
+  fonteLabel?: string;
 }) {
   if (!steps.length) return null;
   const SVG_W = 1000;
@@ -4506,7 +4506,10 @@ function SimpleFunnel({ steps, totalRate }: {
   return (
     <PremiumPanel className="p-5">
       <div className="mb-5 flex items-center justify-between">
-        <h3 className="text-sm font-black uppercase tracking-[0.07em] text-[#f4f7f8]">Funil de Performance</h3>
+        <div className="flex items-baseline gap-2">
+          <h3 className="text-sm font-black uppercase tracking-[0.07em] text-[#f4f7f8]">Funil de Performance</h3>
+          {fonteLabel && <span className="text-[10px] text-[#9aa4aa]">· {fonteLabel}</span>}
+        </div>
         <span className="text-xs text-[#9aa4aa]">
           Conversão geral: <span className="font-black text-[#6cff2f]">{totalRate}</span>
         </span>
@@ -4559,6 +4562,118 @@ function SimpleFunnel({ steps, totalRate }: {
           );
         })}
       </div>
+    </PremiumPanel>
+  );
+}
+
+// ── Resumo de delivery (substitui o funil pra cliente de cardápio digital) ──
+// O funil de CRM não descreve o negócio de um delivery: a "recorrência" é o
+// funil deles, e a receita vive nos pedidos (Cardápio Web / Anota AI), não em
+// crm_leads. Mesma fonte da aba Delivery do cliente — /api/clients/[id]/cardapioweb.
+
+const DELIVERY_ETAPAS = ['novo', 'recorrente', 'reconquistado', 'em_risco', 'inativo'] as const;
+const DELIVERY_ETAPA_LABEL: Record<string, string> = {
+  novo: 'Novos', recorrente: 'Recorrentes', reconquistado: 'Reconquistados',
+  em_risco: 'Em risco', inativo: 'Inativos',
+};
+const DELIVERY_ETAPA_COLOR: Record<string, string> = {
+  novo: '#14B8FF', recorrente: '#35E84B', reconquistado: '#9B5CFF',
+  em_risco: '#FF7A00', inativo: '#71717a',
+};
+
+type DeliveryResumo = {
+  conectado: boolean;
+  kpis?: {
+    atual: { receita: number; pedidos: number; ticketMedio: number; clientesUnicos: number; clientesNovos: number };
+    variacao: { receita: number | null; pedidos: number | null; ticketMedio: number | null };
+  };
+  funil?: { periodo: Record<string, number> };
+};
+
+function DeliveryResumoCard({ clientId, from, to }: { clientId: string; from: string; to: string }) {
+  const [data, setData] = useState<DeliveryResumo | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let vivo = true;
+    setLoading(true);
+    fetch(`/api/clients/${clientId}/cardapioweb?from=${from}&to=${to}`)
+      .then(r => r.ok ? r.json() as Promise<DeliveryResumo> : null)
+      .then(d => { if (vivo) setData(d); })
+      .catch(() => { if (vivo) setData(null); })
+      .finally(() => { if (vivo) setLoading(false); });
+    return () => { vivo = false; };
+  }, [clientId, from, to]);
+
+  const varPct = (v: number | null | undefined) => {
+    if (v === null || v === undefined || !isFinite(v)) return null;
+    return v;
+  };
+
+  const kpis = data?.kpis;
+  const funil = data?.funil?.periodo ?? {};
+  const totalFunil = DELIVERY_ETAPAS.reduce((s, e) => s + (funil[e] ?? 0), 0);
+
+  return (
+    <PremiumPanel className="p-5">
+      <div className="mb-4 flex items-center justify-between">
+        <div className="flex items-baseline gap-2">
+          <h3 className="text-sm font-black uppercase tracking-[0.07em] text-[#f4f7f8]">Delivery — Resultado</h3>
+          <span className="text-[10px] text-[#9aa4aa]">· cardápio digital</span>
+        </div>
+        <Link href={`/clientes/${clientId}?tab=delivery`} className="text-[10px] font-black uppercase text-[#6cff2f] hover:underline">
+          Ver painel completo →
+        </Link>
+      </div>
+
+      {loading ? (
+        <p className="py-8 text-center text-xs text-[#9aa4aa]">Carregando pedidos…</p>
+      ) : !data?.conectado || !kpis ? (
+        <p className="py-8 text-center text-xs text-[#9aa4aa]">
+          Sem loja conectada — conecte o Cardápio Web ou Anota AI na aba Delivery do cliente.
+        </p>
+      ) : (
+        <>
+          <div className="grid grid-cols-3 gap-3">
+            {([
+              ['Receita', premiumValue(kpis.atual.receita, 'currency'), varPct(kpis.variacao.receita)],
+              ['Pedidos', premiumValue(kpis.atual.pedidos), varPct(kpis.variacao.pedidos)],
+              ['Ticket médio', premiumValue(kpis.atual.ticketMedio, 'currency'), varPct(kpis.variacao.ticketMedio)],
+            ] as const).map(([label, valor, delta]) => (
+              <div key={label} className="rounded-lg border border-white/5 bg-white/[0.03] p-3">
+                <p className="text-[9px] font-black uppercase tracking-wider text-[#9aa4aa]">{label}</p>
+                <p className="mt-1 font-heading text-lg leading-none text-[#f4f7f8]">{valor}</p>
+                {delta !== null && (
+                  <p className={cn('mt-1 text-[10px] font-black', delta >= 0 ? 'text-[#6cff2f]' : 'text-red-400')}>
+                    {delta >= 0 ? '▲' : '▼'} {Math.abs(delta * 100).toFixed(1)}% vs anterior
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-4">
+            <p className="mb-2 text-[9px] font-black uppercase tracking-wider text-[#9aa4aa]">
+              Recorrência de clientes no período
+            </p>
+            <div className="space-y-1.5">
+              {DELIVERY_ETAPAS.map(etapa => {
+                const v = funil[etapa] ?? 0;
+                const pct = totalFunil > 0 ? (v / totalFunil) * 100 : 0;
+                return (
+                  <div key={etapa} className="flex items-center gap-2">
+                    <span className="w-28 shrink-0 truncate text-[10px] text-[#9aa4aa]">{DELIVERY_ETAPA_LABEL[etapa]}</span>
+                    <div className="h-2 flex-1 overflow-hidden rounded-full bg-white/5">
+                      <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: DELIVERY_ETAPA_COLOR[etapa] }} />
+                    </div>
+                    <span className="w-10 shrink-0 text-right text-[10px] font-black text-[#f4f7f8]">{v.toLocaleString('pt-BR')}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </>
+      )}
     </PremiumPanel>
   );
 }
@@ -4822,6 +4937,16 @@ export default function GeneralDashboard() {
   const [goalsByClient, setGoalsByClient] = useState<Record<string, GoalConfig | null>>({});
   const [planningsByClient, setPlanningsByClient] = useState<Record<string, PlanningConfig>>({});
   const [crmSummary, setCrmSummary] = useState<Record<string, ClientSheetsSummary>>({});
+  // Clientes com loja de delivery conectada (Cardápio Web/Anota AI) — quando o
+  // cliente selecionado é um deles, o Funil de Performance dá lugar ao resumo
+  // de delivery (decisão do Matheus; o funil de CRM não descreve esse negócio).
+  const [deliveryFlags, setDeliveryFlags] = useState<Record<string, true>>({});
+  useEffect(() => {
+    fetch('/api/clients/delivery-flags')
+      .then(r => r.ok ? r.json() as Promise<Record<string, true>> : {})
+      .then(setDeliveryFlags)
+      .catch(() => setDeliveryFlags({}));
+  }, []);
   const [campaigns, setCampaigns] = useState<CampaignPerformance[]>([]);
   const [keywords, setKeywords] = useState<GoogleKeyword[]>([]);
   const [keywordsLoading, setKeywordsLoading] = useState(false);
@@ -5260,10 +5385,10 @@ export default function GeneralDashboard() {
     const { from, to } = periodToDateRange(period, customDateFrom, customDateTo);
     const params = new URLSearchParams({ from: from.toISOString().split('T')[0], to: to.toISOString().split('T')[0] });
     fetch(`/api/crm/summary?${params}`)
-      .then(r => r.ok ? r.json() as Promise<{ clientId: string; entries: FunnelEntry[]; stages: string[]; leads?: number }[]> : [])
+      .then(r => r.ok ? r.json() as Promise<{ clientId: string; leads: number; funil: ContagemFunil; total: number }[]> : [])
       .then(data => {
         const map: Record<string, ClientSheetsSummary> = {};
-        for (const item of data) map[item.clientId] = { entries: item.entries, stages: item.stages, leads: item.leads };
+        for (const item of data) map[item.clientId] = { leads: item.leads, funil: item.funil, total: item.total };
         setCrmSummary(map);
       })
       .catch(() => setCrmSummary({}));
@@ -5511,20 +5636,15 @@ export default function GeneralDashboard() {
   let revenueGoal = 0;
   let plannedRevenue = 0;
   // CRM data (already filtered by period from the server)
-  const summaryRevenue = [...selectedIds].reduce((sum, id) =>
-    sum + (crmSummary[id]?.entries ?? []).reduce((s, e) => s + (e.amount ?? 0), 0), 0);
+  const summaryRevenue = [...selectedIds].reduce((sum, id) => sum + (crmSummary[id]?.total ?? 0), 0);
   const metricsRevenue = [...selectedIds].reduce((sum, id) => sum + (metricsByClient[id]?.crm?.revenue ?? 0), 0);
   const revenue = metricsRevenue > 0 ? metricsRevenue : summaryRevenue;
 
-  const FUNNEL_ORDER = ['Atendimento', 'Agendamento', 'Comparecimento', 'Fechamento'];
-  const funnelCounts: Record<string, number> = {};
-  for (const id of selectedIds) {
-    for (const entry of crmSummary[id]?.entries ?? []) {
-      funnelCounts[entry.stage] = (funnelCounts[entry.stage] ?? 0) + 1;
-    }
-  }
-  const funnelStages = FUNNEL_ORDER.filter(s => funnelCounts[s] !== undefined);
-  const hasFunnelData = funnelStages.length > 0;
+  // Funil CUMULATIVO por etapa semântica, somado sobre os clientes selecionados.
+  // A contagem por rótulo hardcoded (FUNNEL_ORDER/'Atendimento'…) morreu junto
+  // com o getStage antigo — agora /api/crm/summary devolve o funil pronto,
+  // calculado do mapeamento de etapas do PRÓPRIO cliente (funil-etapas.ts).
+  const funilCrm = somarFunis([...selectedIds].map(id => crmSummary[id]?.funil ?? FUNIL_VAZIO));
 
   let plannedSalesTotal = 0;
   for (const id of selectedIds) {
@@ -5585,7 +5705,7 @@ export default function GeneralDashboard() {
     if (planning.tkm > 0) { totalTkm += planning.tkm; tkmCount++; }
   }
   const avgTkm = tkmCount > 0 ? totalTkm / tkmCount : DEFAULT_PLANNING.tkm;
-  const closings = funnelCounts['Fechamento'] ?? 0;
+  const closings = funilCrm.fechamentos;
   const effectiveRevenue = revenue > 0 ? revenue : closings > 0 ? closings * avgTkm : 0;
 
   // Índice de qualidade (ROI / meta 10x) por plataforma
@@ -5723,10 +5843,10 @@ export default function GeneralDashboard() {
     });
   }
 
-  const qualified = funnelCounts['Atendimento'] ?? 0;
-  const appointments = funnelCounts['Agendamento'] ?? 0;
-  const showUps = funnelCounts['Comparecimento'] ?? 0;
-  const conversions = crmSales || funnelCounts['Fechamento'] || googleConv;
+  const qualified = funilCrm.qualificados;
+  const appointments = funilCrm.agendamentos;
+  const showUps = funilCrm.comparecimentos;
+  const conversions = funilCrm.fechamentos || crmSales || googleConv;
   const funnelVisitors = Math.max(metaReach + googleImpressions, totalLeads, conversions);
   const conversionRate = funnelVisitors > 0 ? (conversions / funnelVisitors) * 100 : 0;
   const previousConversionRate = prevTotalLeads > 0 ? ((conversions || totalLeads) / Math.max(prevTotalLeads, 1)) * 100 : null;
@@ -5751,13 +5871,32 @@ export default function GeneralDashboard() {
     pf.forEach((v, i) => { plannedFunnelAgg[i] = (plannedFunnelAgg[i] ?? 0) + v; });
   }
   // Actual volumes per stage index (maps to planning stage order)
-  // Topo do funil = leads do CRM, não `totalLeads` (que é metaLeads+googleConv,
-  // métrica de ANÚNCIO). Comparar 247.999 impressões/cliques com 251
-  // atendimentos dava "conversão de 0,13%" e etapas com mais de 100% — os dois
-  // números nem falavam da mesma coisa. `totalLeads` segue intocado no CPL, no
-  // share por canal e nas séries, onde ele é o número certo.
-  const crmLeadsTotal = [...selectedIds].reduce((sum, id) => sum + (crmSummary[id]?.leads ?? 0), 0);
-  const funnelTopo = crmLeadsTotal || totalLeads;
+  // Topo do funil resolvido POR CLIENTE conforme `funil_fonte_topo` ('auto' =
+  // CRM quando há leads lá, senão anúncios). Nunca em silêncio: a fonte usada
+  // vira rótulo no card ("fonte: CRM" / "estimado por anúncios" / mistas).
+  // `totalLeads` segue intocado no CPL, no share por canal e nas séries, onde
+  // métrica de anúncio é o número certo.
+  const fontesTopo: ('crm' | 'anuncios')[] = [];
+  let funnelTopo = 0;
+  for (const id of selectedIds) {
+    const crmLeads = crmSummary[id]?.leads ?? 0;
+    const m = metricsByClient[id];
+    const adsLeads = (m?.meta?.leads ?? 0) + (m?.google?.conversions ?? 0);
+    const fonte = normalizarFonteTopo(clients.find(c => c.id === id)?.funil_fonte_topo);
+    const r = resolverTopoFunil(fonte, crmLeads, adsLeads);
+    funnelTopo += r.topo;
+    if (crmLeads > 0 || adsLeads > 0) fontesTopo.push(r.fonte);
+  }
+  const fonteTopoLabel = rotuloFonteTopo(fontesTopo);
+  // Cliente ÚNICO de delivery selecionado → swap do funil pelo resumo de
+  // delivery. Seleção múltipla mantém o funil normal (misturar recorrência de
+  // pedidos com funil de leads num agregado não faz sentido).
+  const deliverySoloId = selectedIds.size === 1 && deliveryFlags[[...selectedIds][0]]
+    ? [...selectedIds][0] : null;
+  const deliveryRange = (() => {
+    const { from, to } = periodToDateRange(period, customDateFrom, customDateTo);
+    return { from: from.toISOString().split('T')[0], to: to.toISOString().split('T')[0] };
+  })();
   // Taxa do FUNIL = fechamentos sobre o topo DELE. A `conversionRate` global usa
   // `funnelVisitors` (impressões + cliques), o que dava "0,13%" ao lado de um
   // funil que começa em contatos — dois números sem relação na mesma caixa.
@@ -5913,7 +6052,11 @@ export default function GeneralDashboard() {
             </PremiumPanel>
 
             <div className="grid gap-4 xl:grid-cols-[1.08fr_0.92fr]">
-              <SimpleFunnel steps={funnelStepsNew} totalRate={funnelTaxa > 0 ? premiumValue(funnelTaxa, 'percent') : '—'} />
+              {deliverySoloId ? (
+                <DeliveryResumoCard clientId={deliverySoloId} from={deliveryRange.from} to={deliveryRange.to} />
+              ) : (
+                <SimpleFunnel steps={funnelStepsNew} totalRate={funnelTaxa > 0 ? premiumValue(funnelTaxa, 'percent') : '—'} fonteLabel={fonteTopoLabel} />
+              )}
               <ChannelSummaryTable rows={channelRows} />
             </div>
 
@@ -6382,23 +6525,22 @@ export default function GeneralDashboard() {
               ticket={avgCrmTicket}
             />,
             'general-funnel':
-            (() => {
-              const crmValues = [
-                totalLeads,
-                funnelCounts[FUNNEL_ORDER[0]] ?? 0,
-                funnelCounts[FUNNEL_ORDER[1]] ?? 0,
-                funnelCounts[FUNNEL_ORDER[2]] ?? 0,
-                funnelCounts[FUNNEL_ORDER[3]] ?? 0,
-              ];
-              const labels = ['VISITANTES', 'LEADS', 'QUALIFICADOS', 'AGENDAMENTOS', 'COMPARECIMENTOS'];
-              const values = [
-                Math.max((metaReach || metaImpressions) + googleImpressions, totalLeads),
-                totalLeads,
-                ...crmValues.slice(1),
-              ];
+            // `?? ''` em vez de narrowing: nesta altura do arquivo (7 mil
+            // linhas) o tsc estoura o orçamento de análise de fluxo e nem
+            // `x !== null ? x : y` estreita `string | null` — o build quebra.
+            // O ramo só renderiza com deliverySoloId preenchido, então o ''
+            // nunca chega ao componente.
+            deliverySoloId !== null
+            ? <DeliveryResumoCard clientId={deliverySoloId ?? ''} from={deliveryRange.from} to={deliveryRange.to} />
+            : (() => {
+              // MESMOS números do Funil de Performance principal — antes este
+              // card usava leads de anúncio no topo e ainda dropava Fechamento
+              // (6 valores para 5 labels). Uma fonte só, sem versões da verdade.
+              const labels = ['CONTATOS', 'QUALIFICADOS', 'AGENDAMENTOS', 'COMPARECIMENTOS', 'FECHAMENTOS'];
+              const values = [funnelTopo, qualified, appointments, showUps, conversions];
               const colors = ['#14B8FF', '#9B5CFF', '#F03A9C', '#FF7A00', '#35E84B'];
               const icons = [Users, UserPlus, CheckCircle2, Calendar, Users];
-              const rows = labels.slice(0, 5).map((label, index) => ({
+              const rows = labels.map((label, index) => ({
                 label,
                 value: values[index] ?? 0,
                 color: colors[index],

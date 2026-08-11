@@ -4740,7 +4740,13 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
 
   const isAdmin = getAuthSession()?.role === 'Administrador';
 
-  const [tab, setTab] = useState<Tab>('planejamento');
+  // Deep-link `?tab=` (ex.: o card de delivery do dashboard aponta pra
+  // /clientes/{id}?tab=delivery). Lido uma vez no mount; inválido → default.
+  const [tab, setTab] = useState<Tab>(() => {
+    if (typeof window === 'undefined') return 'planejamento';
+    const t = new URLSearchParams(window.location.search).get('tab');
+    return TABS.includes(t as Tab) ? (t as Tab) : 'planejamento';
+  });
   const [configOpen, setConfigOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const [linkDialogOpen, setLinkDialogOpen] = useState(false);
@@ -4756,6 +4762,7 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
   const [categories, setCategories] = useState<{ id: string; name: string; is_default: boolean }[]>([]);
   const [clientCategoryId, setClientCategoryId] = useState<string>(storedClient?.category_id ?? '');
   const [clientDashType, setClientDashType] = useState<DashboardType>(storedClient?.dashboard_type ?? 'leads');
+  const [clientFonteTopo, setClientFonteTopo] = useState<'auto' | 'crm' | 'anuncios'>(storedClient?.funil_fonte_topo ?? 'auto');
   const [editingName, setEditingName]     = useState(false);
   const [nameDraft, setNameDraft]         = useState('');
   const [nameError, setNameError]         = useState('');
@@ -4772,7 +4779,8 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
   useEffect(() => {
     setClientCategoryId(storedClient?.category_id ?? '');
     setClientDashType(storedClient?.dashboard_type ?? 'leads');
-  }, [storedClient?.category_id, storedClient?.dashboard_type]);
+    setClientFonteTopo(storedClient?.funil_fonte_topo ?? 'auto');
+  }, [storedClient?.category_id, storedClient?.dashboard_type, storedClient?.funil_fonte_topo]);
 
   async function patchClient(patch: Record<string, unknown>) {
     await fetch(`/api/clients?id=${id}`, {
@@ -5116,6 +5124,24 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
             <option value="leads">Leads</option>
             <option value="branding">Branding</option>
             <option value="conversao">Conversão</option>
+          </select>
+        </div>
+        <div className="flex items-center gap-2">
+          <label className="text-xs text-muted-foreground" title="O que conta como Contatos no topo do Funil de Performance do dashboard">
+            Topo do funil:
+          </label>
+          <select
+            value={clientFonteTopo}
+            onChange={e => {
+              const v = e.target.value as 'auto' | 'crm' | 'anuncios';
+              setClientFonteTopo(v);
+              void patchClient({ funil_fonte_topo: v });
+            }}
+            className="h-7 rounded-lg border border-border bg-background px-2 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
+          >
+            <option value="auto">Automático (CRM se houver)</option>
+            <option value="crm">Sempre CRM/planilha</option>
+            <option value="anuncios">Sempre anúncios</option>
           </select>
         </div>
       </div>

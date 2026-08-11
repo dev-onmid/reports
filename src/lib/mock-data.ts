@@ -103,6 +103,8 @@ export type Client = {
   category_name?: string;
   dashboard_type?: DashboardType;
   onboarding_completed?: boolean;
+  /** Fonte do topo do Funil de Performance — ver resolverTopoFunil em funil-etapas.ts. */
+  funil_fonte_topo?: 'auto' | 'crm' | 'anuncios';
 };
 
 export const mockClients: Client[] = [

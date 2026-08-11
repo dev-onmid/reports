@@ -1,18 +1,26 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
+import {
+  contarFunil,
+  type ContagemFunil,
+  type EtapaDeStage,
+  type EtapaFunil,
+  type LeadParaFunil,
+} from '@/lib/funil-etapas';
 
-type FunnelEntry = { date: string; stage: string; amount?: number };
-
-const FUNNEL_STAGES = ['Atendimento', 'Agendamento', 'Comparecimento', 'Fechamento'];
-
-function getStage(row: { status: string | null; compareceu: boolean; fechou: boolean }): string | null {
-  if (row.fechou) return 'Fechamento';
-  if (row.compareceu) return 'Comparecimento';
-  if (row.status === 'Agendado' || row.status === 'Reagendado') return 'Agendamento';
-  if (row.status === 'Em Atendimento' || row.status === 'Não Retorna' || row.status === 'Distante') return 'Atendimento';
-  return null; // Sem Interesse, Desqualificado → excluded
-}
-
+/**
+ * Funil de Performance por cliente — contagens CUMULATIVAS por etapa semântica.
+ *
+ * A tradução status→etapa deixou de ser a lista hardcoded de rótulos padrão
+ * (que zerava Agendamentos/Comparecimentos pra qualquer cliente com etapas
+ * próprias) e passou a vir do mapeamento do PRÓPRIO cliente: cada `crm_stages`
+ * carrega `etapa_funil`, com auto-classificação por regex como default.
+ * Toda a lógica vive em src/lib/funil-etapas.ts — esta rota é só I/O.
+ *
+ * Shape: Array<{ clientId, leads, funil: ContagemFunil, total }>.
+ * `leads` = base inteira (topo do funil); `total` = receita dos fechados
+ * (nome mantido do shape antigo). Consumidores: dashboard e /resultados.
+ */
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
   const from = url.searchParams.get('from');
@@ -31,7 +39,10 @@ export async function GET(req: NextRequest) {
       ALTER TABLE public.crm_leads
         ADD COLUMN IF NOT EXISTS data DATE,
         ADD COLUMN IF NOT EXISTS lead_date DATE,
+        ADD COLUMN IF NOT EXISTS data_agendada DATE,
         ADD COLUMN IF NOT EXISTS status TEXT,
+        ADD COLUMN IF NOT EXISTS funnel_id UUID,
+        ADD COLUMN IF NOT EXISTS agendou BOOLEAN DEFAULT FALSE,
         ADD COLUMN IF NOT EXISTS compareceu BOOLEAN DEFAULT FALSE,
         ADD COLUMN IF NOT EXISTS fechou BOOLEAN DEFAULT FALSE,
         ADD COLUMN IF NOT EXISTS valor_rs NUMERIC,
@@ -42,61 +53,79 @@ export async function GET(req: NextRequest) {
     let dateFilter = '';
     if (from && to) {
       params.push(from, to);
+      // Lead sem data fica DENTRO: planilhas chegam sem a coluna preenchida e
+      // sumir com eles esvaziaria o funil de quem mais precisa dele.
       dateFilter = `AND (COALESCE(lead_date, data) IS NULL OR (COALESCE(lead_date, data) >= $1 AND COALESCE(lead_date, data) <= $2))`;
     }
 
     const { rows } = await pool.query(
       `SELECT client_id,
-              COALESCE(lead_date, data) AS data,
               status,
+              funnel_id,
+              agendou,
+              data_agendada,
               compareceu,
               (fechou OR COALESCE(NULLIF(revenue, 0), valor_rs, 0) > 0) AS fechou,
               COALESCE(NULLIF(revenue, 0), valor_rs, 0) AS valor_rs
          FROM public.crm_leads
-        WHERE TRUE ${dateFilter}
-        ORDER BY client_id, COALESCE(lead_date, data)`,
+        WHERE TRUE ${dateFilter}`,
       params
     );
 
-    const byClient: Record<string, FunnelEntry[]> = {};
-    // Total de leads por cliente, ANTES do filtro de etapa. `entries` só guarda
-    // quem tem etapa reconhecida — numa clínica real, 879 de 1.853 leads eram
-    // "Não Contactado" e ficariam de fora. Usar `entries.length` como topo de
-    // funil subcontaria quase metade da base.
-    const leadsPorCliente: Record<string, number> = {};
-    for (const row of rows) {
-      const cid = row.client_id as string;
-      leadsPorCliente[cid] = (leadsPorCliente[cid] ?? 0) + 1;
+    // Mapeamento etapa→semântica de todos os clientes numa query só (tabela
+    // pequena). Instalação sem a tabela/coluna degrada pra lista vazia — o
+    // contarFunil então classifica pelo texto do status, que já cobre o
+    // vocabulário de planilha.
+    const stagesPorCliente = new Map<string, EtapaDeStage[]>();
+    try {
+      const { rows: stageRows } = await pool.query(
+        `SELECT client_id, funnel_id, label, etapa_funil FROM public.crm_stages`
+      );
+      for (const s of stageRows) {
+        const cid = String(s.client_id);
+        if (!stagesPorCliente.has(cid)) stagesPorCliente.set(cid, []);
+        stagesPorCliente.get(cid)!.push({
+          funnelId: String(s.funnel_id),
+          label: String(s.label ?? ''),
+          etapa: (s.etapa_funil ?? null) as EtapaFunil | null,
+        });
+      }
+    } catch {
+      // sem crm_stages (ou sem a coluna etapa_funil ainda) → auto-classificação pura
     }
+
+    const leadsPorCliente = new Map<string, LeadParaFunil[]>();
     for (const row of rows) {
-      const stage = getStage(row);
-      if (!stage) continue;
-      const clientId = row.client_id as string;
-      if (!byClient[clientId]) byClient[clientId] = [];
-      byClient[clientId].push({
-        date: row.data ? String(row.data).split('T')[0] : new Date().toISOString().split('T')[0],
-        stage,
-        ...(row.fechou && row.valor_rs ? { amount: Number(row.valor_rs) } : {}),
+      const cid = String(row.client_id);
+      if (!leadsPorCliente.has(cid)) leadsPorCliente.set(cid, []);
+      leadsPorCliente.get(cid)!.push({
+        status: row.status ?? null,
+        funnelId: row.funnel_id ? String(row.funnel_id) : null,
+        agendou: row.agendou === true,
+        dataAgendada: row.data_agendada ? String(row.data_agendada) : null,
+        compareceu: row.compareceu === true,
+        fechou: row.fechou === true,
+        receita: Number(row.valor_rs) || 0,
       });
     }
 
-    // Itera sobre TODOS os clientes com lead, não só os que têm etapa: cliente
-    // cujos leads são todos "Não Contactado" some da resposta se partirmos de
-    // `byClient`, e o painel dele fica vazio em vez de mostrar o topo.
     return Response.json(
-      Object.keys(leadsPorCliente).map(clientId => {
-        const entries = byClient[clientId] ?? [];
+      [...leadsPorCliente.entries()].map(([clientId, leads]) => {
+        const funil: ContagemFunil = contarFunil(leads, stagesPorCliente.get(clientId) ?? []);
         return {
           clientId,
-          entries,
-          /** Todos os leads do cliente, com ou sem etapa reconhecida. */
-          leads: leadsPorCliente[clientId],
-          stages: FUNNEL_STAGES.filter(s => entries.some(e => e.stage === s)),
-          total: entries.reduce((sum, e) => sum + (e.amount ?? 0), 0),
+          /** Base inteira do cliente — topo do funil quando a fonte é CRM. */
+          leads: funil.contatos,
+          funil,
+          /** Receita dos fechados (nome herdado do shape antigo). */
+          total: funil.receita,
         };
       })
     );
-  } catch {
+  } catch (err) {
+    // [] mantém os consumidores de pé, mas o silêncio total escondia falha de
+    // banco como "funil zerado" — agora ao menos fica no log.
+    console.error('[crm summary]', err);
     return Response.json([]);
   } finally {
     await pool.end();

@@ -10,8 +10,8 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  const { label, color, position } = await req.json().catch(() => ({})) as {
-    label?: string; color?: string; position?: number;
+  const { label, color, position, etapa_funil } = await req.json().catch(() => ({})) as {
+    label?: string; color?: string; position?: number; etapa_funil?: string;
   };
 
   const pool = makeServerPool();
@@ -29,11 +29,17 @@ export async function PUT(
     if (label !== undefined) { sets.push(`label = $${n++}`); vals.push(label.trim()); }
     if (color !== undefined) { sets.push(`color = $${n++}`); vals.push(color); }
     if (position !== undefined) { sets.push(`position = $${n++}`); vals.push(position); }
+    if (etapa_funil !== undefined) {
+      if (!['contato', 'qualificado', 'agendamento', 'comparecimento', 'fechamento', 'perdido'].includes(etapa_funil)) {
+        return Response.json({ error: 'etapa_funil inválida' }, { status: 400 });
+      }
+      sets.push(`etapa_funil = $${n++}`); vals.push(etapa_funil);
+    }
     if (sets.length === 0) return Response.json({ error: 'nothing to update' }, { status: 400 });
 
     vals.push(id);
     const { rows: [stage] } = await pool.query(
-      `UPDATE public.crm_stages SET ${sets.join(', ')} WHERE id = $${n} RETURNING id, label, color, position`,
+      `UPDATE public.crm_stages SET ${sets.join(', ')} WHERE id = $${n} RETURNING id, label, color, position, etapa_funil`,
       vals,
     );
     if (!stage) return Response.json({ error: 'not found' }, { status: 404 });

@@ -232,6 +232,20 @@ export default function ResultadosPage() {
   const { clients } = useClients();
   const { payments } = useInvestmentPayments();
   const [apiMetricsByClient, setApiMetricsByClient] = useState<Record<string, ApiMetrics>>({});
+  // Funil REALIZADO por cliente, do /api/crm/summary (contagem cumulativa por
+  // etapa semântica) — antes esta coluna vinha de mocks hardcoded em
+  // client-results-store e ficava zerada pra todo cliente real.
+  const [funilByClient, setFunilByClient] = useState<Record<string, ClientFunnel>>({});
+  useEffect(() => {
+    fetch('/api/crm/summary')
+      .then(r => r.ok ? r.json() as Promise<{ clientId: string; funil: ClientFunnel }[]> : [])
+      .then(data => {
+        const map: Record<string, ClientFunnel> = {};
+        for (const item of data) map[item.clientId] = item.funil;
+        setFunilByClient(map);
+      })
+      .catch(() => setFunilByClient({}));
+  }, []);
   const [goalsByClient, setGoalsByClient] = useState<Record<string, GoalConfig | null>>({});
   const [planningByClient, setPlanningByClient] = useState<Record<string, ClientPlanningConfig>>({});
   const [loadingMetrics, setLoadingMetrics] = useState(false);
@@ -309,7 +323,8 @@ export default function ResultadosPage() {
         : hardcoded?.meta ?? 0;
     const metaLeads = (hasPlannedFunil ? plannedFunil.contatos : null) ?? hardcoded?.metaLeads ?? 0;
     const metaCpl = planning.cplMeta || hardcoded?.metaCpl || 0;
-    const funil = hardcoded?.funil ?? ZERO_FUNNEL;
+    // Real primeiro; o mock só sobrevive como fallback dos ids fictícios de demo.
+    const funil = funilByClient[client.id] ?? hardcoded?.funil ?? ZERO_FUNNEL;
     const metaFunil = hasPlannedFunil ? plannedFunil : hardcoded?.metaFunil ?? ZERO_FUNNEL;
     const metaFunnelSales = metaFunil.fechamentos;
     const metaCacFromPlanning = metaLeads > 0 && metaCpl > 0 && metaFunnelSales > 0

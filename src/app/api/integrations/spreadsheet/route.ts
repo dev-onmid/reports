@@ -255,6 +255,7 @@ async function ensureTables(pool: ReturnType<typeof makeServerPool>) {
       ADD COLUMN IF NOT EXISTS numero TEXT,
       ADD COLUMN IF NOT EXISTS canal TEXT,
       ADD COLUMN IF NOT EXISTS compareceu BOOLEAN DEFAULT FALSE,
+      ADD COLUMN IF NOT EXISTS agendou BOOLEAN DEFAULT FALSE,
       ADD COLUMN IF NOT EXISTS observacao TEXT,
       ADD COLUMN IF NOT EXISTS orcamento NUMERIC,
       ADD COLUMN IF NOT EXISTS pagamento TEXT,
@@ -307,7 +308,7 @@ async function insertLeadBatch(
 
   const values: unknown[] = [];
   const placeholders = rows.map((row, index) => {
-    const base = index * 24;
+    const base = index * 25;
     values.push(
       row.uploadId,
       row.clientId,
@@ -332,17 +333,18 @@ async function insertLeadBatch(
       row.closed ? 'won' : null,
       row.statusRaw || (row.closed ? 'Fechado' : null),
       row.raw,
-      // Booleano que o funil de performance lê pra contar Comparecimentos.
+      // Booleanos que o funil de performance lê (Comparecimentos/Agendamentos).
       row.compareceu ?? false,
+      row.agendou ?? false,
     );
-    return `(${Array.from({ length: 24 }, (_, i) => `$${base + i + 1}`).join(',')})`;
+    return `(${Array.from({ length: 25 }, (_, i) => `$${base + i + 1}`).join(',')})`;
   }).join(',');
 
   await pool.query(
     `INSERT INTO public.crm_leads
       (upload_id, client_id, lead_date, lead_name, phone, source, city, status_raw,
        data, nome, numero, canal, observacao, orcamento, pagamento, bairro, data_agendada,
-       revenue, valor_rs, fechou, status_category, status, raw, compareceu)
+       revenue, valor_rs, fechou, status_category, status, raw, compareceu, agendou)
      VALUES ${placeholders}`,
     values,
   );
@@ -413,10 +415,11 @@ async function upsertPorTelefone(
          status = COALESCE($2, status),
          status_raw = COALESCE($3, status_raw),
          status_category = COALESCE($4, status_category),
-         -- fechou e compareceu só AVANÇAM: um export posterior com status
-         -- diferente não desfaz uma venda nem uma presença que já aconteceram.
+         -- fechou, compareceu e agendou só AVANÇAM: um export posterior com
+         -- status diferente não desfaz venda, presença nem agendamento.
          fechou = public.crm_leads.fechou OR $5,
          compareceu = COALESCE(public.crm_leads.compareceu, false) OR $12,
+         agendou = COALESCE(public.crm_leads.agendou, false) OR $13,
          revenue = $6, valor_rs = $6,
          orcamento = COALESCE($7, orcamento),
          pagamento = COALESCE($8, pagamento),
@@ -437,6 +440,7 @@ async function upsertPorTelefone(
         r.notes,
         r.uploadId,
         r.compareceu ?? false,
+        r.agendou ?? false,
       ],
     );
   }
@@ -467,6 +471,7 @@ async function upsertLeadBatch(
     revenue: number;
     closed: boolean;
     compareceu?: boolean;
+    agendou?: boolean;
     raw: string;
   }>,
 ) {
@@ -474,7 +479,7 @@ async function upsertLeadBatch(
 
   const values: unknown[] = [];
   const placeholders = rows.map((row, index) => {
-    const base = index * 27;
+    const base = index * 28;
     values.push(
       row.uploadId, row.clientId, row.externalId,
       row.leadDate, row.leadName, row.phone, row.channel, row.neighborhood, row.statusRaw,
@@ -486,8 +491,9 @@ async function upsertLeadBatch(
       row.statusRaw || (row.closed ? 'Fechado' : null),
       row.raw,
       row.compareceu ?? false,
+      row.agendou ?? false,
     );
-    return `(${Array.from({ length: 27 }, (_, i) => `$${base + i + 1}`).join(',')})`;
+    return `(${Array.from({ length: 28 }, (_, i) => `$${base + i + 1}`).join(',')})`;
   }).join(',');
 
   await pool.query(
@@ -497,7 +503,7 @@ async function upsertLeadBatch(
        data, nome, numero, canal, bairro, data_agendada,
        stage, updated_at_external,
        orcamento, pagamento, observacao,
-       revenue, valor_rs, fechou, status_category, status, raw, compareceu)
+       revenue, valor_rs, fechou, status_category, status, raw, compareceu, agendou)
      VALUES ${placeholders}
      -- ATENCAO: o WHERE abaixo e OBRIGATORIO. O indice unico de
      -- (client_id, external_id) é PARCIAL (só vale com external_id NOT NULL), e
@@ -536,9 +542,10 @@ async function upsertLeadBatch(
        fechou = EXCLUDED.fechou,
        status_category = EXCLUDED.status_category,
        status = EXCLUDED.status,
-       -- compareceu só AVANÇA: quem já compareceu não deixa de ter
-       -- comparecido porque um export posterior veio com status diferente.
+       -- compareceu e agendou só AVANÇAM: quem já compareceu/agendou não deixa
+       -- de ter feito isso porque um export posterior veio com status diferente.
        compareceu = public.crm_leads.compareceu OR EXCLUDED.compareceu,
+       agendou = COALESCE(public.crm_leads.agendou, false) OR EXCLUDED.agendou,
        raw = EXCLUDED.raw
      WHERE public.crm_leads.updated_at_external IS NULL
         OR EXCLUDED.updated_at_external IS NULL

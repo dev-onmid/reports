@@ -28,6 +28,7 @@ import { DictateButton } from '@/components/ui/dictate-button';
 import { cn, formatCurrencyBRL } from '@/lib/utils';
 import type { Client } from '@/lib/mock-data';
 import type { AttendanceAudit } from '@/lib/crm-attendance-audit';
+import { classificarEtapa, ETAPAS_FUNIL, ROTULOS_ETAPA, type EtapaFunil } from '@/lib/funil-etapas';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 
 type CrmLead = {
@@ -71,7 +72,7 @@ type CrmLead = {
 type Draft = Partial<Omit<CrmLead, 'id' | 'client_id' | 'created_at'>>;
 
 type CrmFunnel = { id: string; name: string; created_at: string };
-type CrmStage  = { id: string; label: string; color: string; position: number };
+type CrmStage  = { id: string; label: string; color: string; position: number; etapa_funil?: EtapaFunil | null };
 type LocalStage = CrmStage & { _isNew?: boolean };
 type CrmTab = 'leads' | 'capture' | 'chat' | 'followup' | 'attendance' | 'disparos' | 'ads';
 type DatePreset = 'all' | 'today' | 'yesterday' | 'last7' | 'last14' | 'last30' | 'thisMonth' | 'lastMonth' | 'custom';
@@ -1706,6 +1707,20 @@ function SortableStageRow({
         className="flex-1 min-w-0 bg-transparent text-sm focus:outline-none focus:bg-primary/5 rounded px-1 py-0.5"
       />
 
+      {/* O que esta etapa SIGNIFICA no Funil de Performance — é daqui que o
+          dashboard conta Agendamentos/Comparecimentos/Fechamentos. Sem escolha
+          explícita, vale a auto-classificação pelo nome. */}
+      <select
+        value={stage.etapa_funil ?? classificarEtapa(stage.label)}
+        onChange={e => onChange({ etapa_funil: e.target.value as EtapaFunil })}
+        title="Etapa do Funil de Performance"
+        className="shrink-0 rounded-md border border-border bg-background px-1.5 py-1 text-[10px] text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+      >
+        {[...ETAPAS_FUNIL, 'perdido' as const].map(e => (
+          <option key={e} value={e}>{ROTULOS_ETAPA[e]}</option>
+        ))}
+      </select>
+
       <button type="button" onClick={onDelete}
         className="shrink-0 text-muted-foreground hover:text-red-400 transition-colors p-0.5">
         <Trash2 className="h-3.5 w-3.5" />
@@ -1776,18 +1791,21 @@ function FunnelEditorModal({
       const savedStages: CrmStage[] = [];
       for (let i = 0; i < localStages.length; i++) {
         const s = localStages[i];
+        // Persistir sempre a etapa exibida (explícita ou auto) — assim um
+        // rename futuro não muda o funil por baixo de quem já conferiu.
+        const etapaFunil = s.etapa_funil ?? classificarEtapa(s.label);
         if (s._isNew) {
           const res = await fetch(`/api/crm/funnels/${funnel.id}/stages`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ label: s.label, color: s.color, clientId }),
+            body: JSON.stringify({ label: s.label, color: s.color, clientId, etapa_funil: etapaFunil }),
           });
           if (res.ok) savedStages.push(await res.json() as CrmStage);
         } else {
           const res = await fetch(`/api/crm/stages/${s.id}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ label: s.label, color: s.color, position: i }),
+            body: JSON.stringify({ label: s.label, color: s.color, position: i, etapa_funil: etapaFunil }),
           });
           savedStages.push(res.ok ? await res.json() as CrmStage : { ...s, position: i });
         }

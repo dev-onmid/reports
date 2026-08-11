@@ -25,6 +25,9 @@ async function ensureColumns(pool: ReturnType<typeof makeServerPool>) {
   // Default TRUE so every pre-existing client stays fully accessible — only clients
   // created through the mandatory onboarding wizard (/clientes/novo) get FALSE explicitly.
   await pool.query(`ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS onboarding_completed BOOLEAN NOT NULL DEFAULT true`).catch(() => {});
+  // Fonte do topo do Funil de Performance: 'auto' (CRM se houver, senão anúncios,
+  // com rótulo de fonte na UI) | 'crm' | 'anuncios'. Ver src/lib/funil-etapas.ts.
+  await pool.query(`ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS funil_fonte_topo TEXT NOT NULL DEFAULT 'auto'`).catch(() => {});
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -41,6 +44,7 @@ function rowToJson(r: any) {
     category_name: r.category_name ?? null,
     dashboard_type: r.dashboard_type ?? 'leads',
     onboarding_completed: r.onboarding_completed ?? true,
+    funil_fonte_topo: r.funil_fonte_topo ?? 'auto',
   };
 }
 
@@ -50,7 +54,8 @@ export async function GET() {
     await ensureColumns(pool);
     const { rows } = await pool.query(`
       SELECT c.id, c.name, c.segment, c.status, c.gestor_id, c.ads_billing_mode,
-             c.category_id, c.dashboard_type, c.onboarding_completed, u.name as gestor_name, cat.name as category_name
+             c.category_id, c.dashboard_type, c.onboarding_completed, c.funil_fonte_topo,
+             u.name as gestor_name, cat.name as category_name
       FROM public.clients c
       LEFT JOIN public.users u ON c.gestor_id = u.id
       LEFT JOIN public.client_categories cat ON cat.id = c.category_id
@@ -103,7 +108,7 @@ export async function PATCH(req: NextRequest) {
   const body = await req.json() as Partial<{
     name: string; segment: string; status: string;
     gestor_id: string | null; category_id: string | null; dashboard_type: string;
-    onboarding_completed: boolean;
+    onboarding_completed: boolean; funil_fonte_topo: string;
   }>;
   const pool = makeServerPool();
   try {
@@ -118,6 +123,12 @@ export async function PATCH(req: NextRequest) {
     if (body.category_id    !== undefined) { sets.push(`category_id = $${idx++}`);    vals.push(body.category_id); }
     if (body.dashboard_type !== undefined) { sets.push(`dashboard_type = $${idx++}`); vals.push(body.dashboard_type); }
     if (body.onboarding_completed !== undefined) { sets.push(`onboarding_completed = $${idx++}`); vals.push(body.onboarding_completed); }
+    if (body.funil_fonte_topo !== undefined) {
+      if (!['auto', 'crm', 'anuncios'].includes(body.funil_fonte_topo)) {
+        return Response.json({ error: 'funil_fonte_topo inválido' }, { status: 400 });
+      }
+      sets.push(`funil_fonte_topo = $${idx++}`); vals.push(body.funil_fonte_topo);
+    }
     if (sets.length === 0) return Response.json({ error: 'Nothing to update' }, { status: 400 });
     vals.push(id);
     await pool.query(`UPDATE public.clients SET ${sets.join(', ')} WHERE id = $${idx}`, vals);

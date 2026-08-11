@@ -1,17 +1,9 @@
 import type { Pool } from 'pg';
+import { ETAPAS_PADRAO } from '@/lib/funil-etapas';
 
-export const DEFAULT_CRM_STAGES = [
-  { label: 'Em Atendimento', color: '#0ea5e9', position: 0 },
-  { label: 'Agendado', color: '#3b82f6', position: 1 },
-  { label: 'Reagendado', color: '#7dd3fc', position: 2 },
-  { label: 'Fechado', color: '#10b981', position: 3 },
-  { label: 'Comprou', color: '#34d399', position: 4 },
-  { label: 'Paciente', color: '#a1a1aa', position: 5 },
-  { label: 'Não Retorna', color: '#71717a', position: 6 },
-  { label: 'Distante', color: '#f97316', position: 7 },
-  { label: 'Sem Interesse', color: '#ef4444', position: 8 },
-  { label: 'Desqualificado', color: '#dc2626', position: 9 },
-];
+// Fonte única em funil-etapas.ts (com a etapa semântica do Funil de
+// Performance) — antes esta lista vivia duplicada aqui e em funnels/route.ts.
+export const DEFAULT_CRM_STAGES = ETAPAS_PADRAO;
 
 export function normalizeCrmPhone(raw: unknown) {
   return String(raw ?? '').replace(/\D/g, '');
@@ -82,6 +74,7 @@ export async function ensureCrmConversationSchema(pool: Pool) {
       ON public.crm_leads (client_id, whatsapp_lid) WHERE whatsapp_lid IS NOT NULL;
     CREATE INDEX IF NOT EXISTS crm_funnels_client_id_idx ON public.crm_funnels(client_id);
     CREATE INDEX IF NOT EXISTS crm_stages_funnel_id_idx ON public.crm_stages(funnel_id);
+    ALTER TABLE public.crm_stages ADD COLUMN IF NOT EXISTS etapa_funil TEXT;
   `);
 }
 
@@ -183,9 +176,9 @@ export async function ensureDefaultFunnel(pool: Pool, clientId: string) {
   if ((stageCount[0]?.total ?? 0) === 0) {
     for (const stage of DEFAULT_CRM_STAGES) {
       await pool.query(
-        `INSERT INTO public.crm_stages (funnel_id, client_id, label, color, position)
-         VALUES ($1, $2, $3, $4, $5)`,
-        [funnelId, clientId, stage.label, stage.color, stage.position],
+        `INSERT INTO public.crm_stages (funnel_id, client_id, label, color, position, etapa_funil)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [funnelId, clientId, stage.label, stage.color, stage.position, stage.etapa],
       );
     }
   }

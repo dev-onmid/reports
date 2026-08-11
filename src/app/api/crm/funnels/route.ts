@@ -1,18 +1,10 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
+import { ETAPAS_PADRAO } from '@/lib/funil-etapas';
 
-const DEFAULT_STAGES = [
-  { label: 'Em Atendimento', color: '#0ea5e9', position: 0 },
-  { label: 'Agendado',       color: '#3b82f6', position: 1 },
-  { label: 'Reagendado',     color: '#7dd3fc', position: 2 },
-  { label: 'Fechado',        color: '#10b981', position: 3 },
-  { label: 'Comprou',        color: '#34d399', position: 4 },
-  { label: 'Paciente',       color: '#a1a1aa', position: 5 },
-  { label: 'Não Retorna',    color: '#71717a', position: 6 },
-  { label: 'Distante',       color: '#f97316', position: 7 },
-  { label: 'Sem Interesse',  color: '#ef4444', position: 8 },
-  { label: 'Desqualificado', color: '#dc2626', position: 9 },
-];
+// Fonte única dos seeds (com a etapa semântica do Funil de Performance) —
+// compartilhada com o seed gêmeo de crm-conversation-sync.ts.
+const DEFAULT_STAGES = ETAPAS_PADRAO;
 
 async function ensureSchema(pool: ReturnType<typeof makeServerPool>) {
   await pool.query(`
@@ -32,6 +24,7 @@ async function ensureSchema(pool: ReturnType<typeof makeServerPool>) {
       created_at TIMESTAMPTZ DEFAULT NOW()
     );
     ALTER TABLE public.crm_leads ADD COLUMN IF NOT EXISTS funnel_id UUID REFERENCES public.crm_funnels(id) ON DELETE SET NULL;
+    ALTER TABLE public.crm_stages ADD COLUMN IF NOT EXISTS etapa_funil TEXT;
     CREATE INDEX IF NOT EXISTS crm_funnels_client_id_idx ON public.crm_funnels(client_id);
     CREATE INDEX IF NOT EXISTS crm_stages_funnel_id_idx ON public.crm_stages(funnel_id);
     CREATE INDEX IF NOT EXISTS crm_leads_funnel_id_idx ON public.crm_leads(funnel_id);
@@ -60,8 +53,8 @@ export async function GET(req: NextRequest) {
       );
       for (const s of DEFAULT_STAGES) {
         await pool.query(
-          `INSERT INTO public.crm_stages (funnel_id, client_id, label, color, position) VALUES ($1, $2, $3, $4, $5)`,
-          [funnel.id, clientId, s.label, s.color, s.position],
+          `INSERT INTO public.crm_stages (funnel_id, client_id, label, color, position, etapa_funil) VALUES ($1, $2, $3, $4, $5, $6)`,
+          [funnel.id, clientId, s.label, s.color, s.position, s.etapa],
         );
       }
       await pool.query(
@@ -91,8 +84,8 @@ export async function POST(req: NextRequest) {
     );
     for (const s of DEFAULT_STAGES) {
       await pool.query(
-        `INSERT INTO public.crm_stages (funnel_id, client_id, label, color, position) VALUES ($1, $2, $3, $4, $5)`,
-        [funnel.id, clientId, s.label, s.color, s.position],
+        `INSERT INTO public.crm_stages (funnel_id, client_id, label, color, position, etapa_funil) VALUES ($1, $2, $3, $4, $5, $6)`,
+        [funnel.id, clientId, s.label, s.color, s.position, s.etapa],
       );
     }
     return Response.json(funnel, { status: 201 });
