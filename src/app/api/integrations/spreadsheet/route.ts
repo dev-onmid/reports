@@ -1,6 +1,8 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 
+import { origemIntegravel, resumirOrigens, dedupLote } from '@/lib/importacao-origem';
+
 export type SpreadsheetAnalysis = {
   headers: string[];
   clinicValues: string[];
@@ -415,7 +417,10 @@ export async function POST(req: NextRequest) {
     const apiKey = process.env.ANTHROPIC_API_KEY;
 
     const formData = await req.formData();
-    const file = formData.get('file') as File | null;
+    // `getAll` em vez de `get`: o seletor aceita várias planilhas de uma vez, e
+    // exports de meses diferentes são unificados num lote só.
+    const arquivos = formData.getAll('file').filter((f): f is File => f instanceof File);
+    const file = arquivos[0] ?? null;
 
     if (!file) return Response.json({ error: 'Arquivo obrigatório.' }, { status: 400 });
 
@@ -426,14 +431,37 @@ export async function POST(req: NextRequest) {
       return Response.json({ error: 'Pacote xlsx não instalado. Execute: npm install xlsx' }, { status: 500 });
     }
 
-    const buffer = Buffer.from(await file.arrayBuffer());
-    const workbook = XLSX.read(buffer, { type: 'buffer', raw: file.name.match(/\.csv$/i) ? true : undefined });
-    const sheet = workbook.Sheets[workbook.SheetNames[0]];
-    const rows: Record<string, unknown>[] = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+    // Lê todos os arquivos e concatena. Planilha com cabeçalho DIFERENTE do
+    // primeiro é recusada pelo nome, em vez de importada torto: aplicar o
+    // mapeamento de um arquivo em outro colocaria data na coluna de valor sem
+    // ninguém perceber até o faturamento não fechar.
+    const rows: Record<string, unknown>[] = [];
+    const porArquivo: { nome: string; linhas: number }[] = [];
+    let headers: string[] = [];
+    const divergentes: string[] = [];
 
+    for (const f of arquivos) {
+      const buf = Buffer.from(await f.arrayBuffer());
+      const wb = XLSX.read(buf, { type: 'buffer', raw: f.name.match(/\.csv$/i) ? true : undefined });
+      const sh = wb.Sheets[wb.SheetNames[0]];
+      const r: Record<string, unknown>[] = XLSX.utils.sheet_to_json(sh, { defval: '' });
+      if (r.length === 0) continue;
+
+      const h = Object.keys(r[0]);
+      if (headers.length === 0) headers = h;
+      else if (h.join('|') !== headers.join('|')) { divergentes.push(f.name); continue; }
+
+      rows.push(...r);
+      porArquivo.push({ nome: f.name, linhas: r.length });
+    }
+
+    if (divergentes.length > 0) {
+      return Response.json({
+        error: `Estas planilhas têm colunas diferentes de "${porArquivo[0]?.nome ?? arquivos[0].name}": `
+          + `${divergentes.join(', ')}. Importe cada formato separadamente.`,
+      }, { status: 400 });
+    }
     if (rows.length === 0) return Response.json({ error: 'Planilha vazia.' }, { status: 400 });
-
-    const headers = Object.keys(rows[0]);
 
     // ── Step: analyze ──────────────────────────────────────────────────────────
     if (step === 'analyze') {
@@ -533,6 +561,12 @@ export async function POST(req: NextRequest) {
     await ensureTables(pool);
 
     const results: Record<string, number> = {};
+    // Relatório do que foi cortado. Vai pra resposta de propósito: descarte
+    // silencioso faria o usuário achar que a importação perdeu linhas.
+    const resumoOrigem = channelCol
+      ? resumirOrigens(rows.map(r => r[channelCol]))
+      : { aceitas: rows.length, descartadas: 0, origens: [] as { origem: string; linhas: number }[] };
+    let duplicadasNoLote = 0;
 
     try {
       const rowsByClient = new Map<string, Record<string, unknown>[]>();
@@ -540,9 +574,24 @@ export async function POST(req: NextRequest) {
       for (const m of mappings) {
         if (!m.clientId) continue;
 
-        const clientRows = clinicCol
+        let clientRows = clinicCol
           ? rows.filter(r => String(r[clinicCol] ?? '').trim() === m.clinicValue)
           : rows;
+
+        // Corte da allowlist de origem. Acontece AQUI, antes de virar lead:
+        // `crm_leads` é lida por 54 arquivos e 85 consultas, e filtrar em todas
+        // seria inviável — uma esquecida faria o CRM mostrar um total e o
+        // Dashboard outro.
+        if (channelCol) clientRows = clientRows.filter(r => origemIntegravel(r[channelCol]));
+
+        // Dedupe do lote quando há ID do negócio: importar meses diferentes faz
+        // a mesma linha aparecer várias vezes, e vale a versão MAIS RECENTE —
+        // ficar com a primeira congelaria o negócio numa etapa antiga.
+        if (dealIdCol) {
+          const d = dedupLote(clientRows, r => String(r[dealIdCol] ?? '').trim() || JSON.stringify(r));
+          duplicadasNoLote += d.duplicadas;
+          clientRows = d.unicas;
+        }
 
         if (clientRows.length === 0) { results[m.clinicValue] = 0; continue; }
         results[m.clinicValue] = clientRows.length;
@@ -637,7 +686,15 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      return Response.json({ ok: true, results });
+      return Response.json({
+      ok: true,
+      results,
+      arquivos: porArquivo,
+      linhas_lidas: rows.length,
+      origem_descartadas: resumoOrigem.descartadas,
+      origens_fora: resumoOrigem.origens.slice(0, 10),
+      duplicadas_no_lote: duplicadasNoLote,
+    });
     } finally {
       await pool.end();
     }

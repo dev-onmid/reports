@@ -1,0 +1,124 @@
+/**
+ * Régua de origem ("como nos conheceu") e dedupe para importação de planilha.
+ *
+ * Puro: sem banco, sem fetch. É a parte que decide o que entra no CRM e no
+ * Dashboard, então precisa ser testável isoladamente.
+ */
+
+/**
+ * Origens que ENTRAM no sistema.
+ *
+ * Allowlist: qualquer valor fora daqui — panfleto, indicação, fachada, rádio,
+ * "já era cliente" — não vira lead. São canais que a agência não opera, e
+ * misturá-los infla o resultado da mídia.
+ *
+ * ⚠️ O corte acontece na GRAVAÇÃO, não na leitura. A planilha de CRM escreve em
+ * `public.crm_leads`, lida por 54 arquivos e 85 consultas — filtrar em todas
+ * seria inviável, e uma esquecida faria o CRM mostrar um total e o Dashboard
+ * outro. Inconsistência silenciosa entre telas é pior que o dado não existir.
+ * Para recuperar uma linha descartada, reimporta-se a planilha.
+ */
+export const ORIGENS_INTEGRAVEIS = [
+  'Whatsapp',
+  'Chatwoot - Whatsapp',
+  'Facebook',
+  'Facebook - Whatsapp',
+  'Google',
+  'Google meu Negócio',
+  'Instagram',
+  'Instagram - Whatsapp',
+  'Site',
+] as const;
+
+/**
+ * Normaliza para comparação: sem acento, sem caixa, separadores unificados.
+ *
+ * ⚠️ O range de diacríticos vai ESCAPADO (`̀-ͯ`). Digitá-lo como caractere
+ * literal corrompe em copy-paste e encoding — armadilha já registrada no
+ * CLAUDE.md a respeito de `normalizeClientName`.
+ */
+export function normalizarOrigem(v: unknown): string {
+  return String(v ?? '')
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    // "Google - Whatsapp", "Google – Whatsapp" e "Google Whatsapp" viram o mesmo.
+    .replace(/[\s\-–—_/]+/g, ' ')
+    .trim();
+}
+
+const SET_INTEGRAVEIS = new Set(ORIGENS_INTEGRAVEIS.map(normalizarOrigem));
+
+/**
+ * Compara por igualdade EXATA depois de normalizar — nunca por substring.
+ * "Site do concorrente" não é "Site"; "Facebook Ads Agência" não é "Facebook".
+ * Casar por prefixo deixaria entrar exatamente o que a lista existe pra barrar.
+ */
+export function origemIntegravel(v: unknown): boolean {
+  const n = normalizarOrigem(v);
+  if (!n) return false; // sem origem declarada não é atribuível a canal nenhum
+  return SET_INTEGRAVEIS.has(n);
+}
+
+export type ResumoOrigens = {
+  aceitas: number;
+  descartadas: number;
+  /** As origens descartadas, da mais frequente pra menos. */
+  origens: { origem: string; linhas: number }[];
+};
+
+/** Conta o que entrou e o que ficou de fora, para o relatório da importação. */
+export function resumirOrigens(valores: unknown[]): ResumoOrigens {
+  const fora = new Map<string, number>();
+  let aceitas = 0;
+
+  for (const v of valores) {
+    if (origemIntegravel(v)) { aceitas++; continue; }
+    const k = String(v ?? '').trim() || '(sem origem)';
+    fora.set(k, (fora.get(k) ?? 0) + 1);
+  }
+
+  return {
+    aceitas,
+    descartadas: valores.length - aceitas,
+    origens: [...fora.entries()]
+      .map(([origem, linhas]) => ({ origem, linhas }))
+      .sort((a, b) => b.linhas - a.linhas),
+  };
+}
+
+export type ResultadoDedup<T> = {
+  unicas: T[];
+  duplicadas: number;
+  exemplos: { chave: string; vezes: number }[];
+};
+
+/**
+ * Remove duplicatas dentro do lote, preservando a ÚLTIMA ocorrência.
+ *
+ * Última, e não primeira: importando vários arquivos de meses diferentes, a
+ * mesma linha aparece atualizada no export mais recente. Ficar com a primeira
+ * congelaria o negócio no estado antigo — que é justamente o que a coluna
+ * "Última atualização" existe pra resolver.
+ *
+ * A contagem é devolvida de propósito: silenciar o descarte faria o usuário
+ * achar que perdeu linhas na importação.
+ */
+export function dedupLote<T>(linhas: T[], chaveDe: (l: T) => string): ResultadoDedup<T> {
+  const porChave = new Map<string, T>();
+  const vezes = new Map<string, number>();
+
+  for (const l of linhas) {
+    const k = chaveDe(l);
+    porChave.set(k, l); // sobrescreve: fica a última
+    vezes.set(k, (vezes.get(k) ?? 0) + 1);
+  }
+
+  const exemplos = [...vezes.entries()]
+    .filter(([, v]) => v > 1)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([chave, v]) => ({ chave, vezes: v }));
+
+  return { unicas: [...porChave.values()], duplicadas: linhas.length - porChave.size, exemplos };
+}

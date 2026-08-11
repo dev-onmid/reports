@@ -1431,6 +1431,7 @@ function SpreadsheetImportPanel() {
   const { clients } = useClients();
   const [step, setStep] = useState<SheetStep>('upload');
   const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
   const [dragging, setDragging] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -1454,14 +1455,24 @@ function SpreadsheetImportPanel() {
     updatedDate: '',
   });
   const [importResults, setImportResults] = useState<Record<string, number> | null>(null);
+  const [relatorio, setRelatorio] = useState<{
+    arquivos?: { nome: string; linhas: number }[];
+    linhas_lidas?: number;
+    origem_descartadas?: number;
+    origens_fora?: { origem: string; linhas: number }[];
+    duplicadas_no_lote?: number;
+  } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  function handleFile(f: File) {
-    if (!f.name.match(/\.(xlsx|xls|csv)$/i)) {
-      setError('Formato inválido. Use .xlsx, .xls ou .csv');
+  function handleFiles(lista: File[]) {
+    const invalidos = lista.filter(f => !f.name.match(/\.(xlsx|xls|csv)$/i));
+    if (invalidos.length > 0) {
+      setError(`Formato inválido em: ${invalidos.map(f => f.name).join(', ')}. Use .xlsx, .xls ou .csv`);
       return;
     }
-    setFile(f);
+    if (lista.length === 0) return;
+    setFiles(lista);
+    setFile(lista[0]); // mantém o primeiro como referência para o nome do upload
     setError('');
   }
 
@@ -1482,8 +1493,7 @@ function SpreadsheetImportPanel() {
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setDragging(false);
-    const f = e.dataTransfer.files[0];
-    if (f) handleFile(f);
+    handleFiles(Array.from(e.dataTransfer.files));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -1493,7 +1503,9 @@ function SpreadsheetImportPanel() {
     setError('');
     try {
       const fd = new FormData();
-      fd.append('file', file);
+      // Todas as planilhas nas DUAS etapas: a análise precisa ver o lote
+      // inteiro pra detectar coluna, e a importação pra deduplicar entre elas.
+      for (const f of (files.length ? files : [file])) fd.append('file', f);
       const res = await fetch('/api/integrations/spreadsheet?step=analyze', { method: 'POST', body: fd });
       const data = await res.json() as SpreadsheetAnalysis & { error?: string };
       if (!res.ok || data.error) { setError(data.error ?? 'Erro ao analisar planilha'); return; }
@@ -1534,7 +1546,7 @@ function SpreadsheetImportPanel() {
     setError('');
     try {
       const fd = new FormData();
-      fd.append('file', file);
+      for (const f of (files.length ? files : [file])) fd.append('file', f);
       fd.append('mappings', JSON.stringify(filled));
       if (columnOverrides.clinic) fd.append('clinicColumn', columnOverrides.clinic);
       if (columnOverrides.revenue) fd.append('revenueColumn', columnOverrides.revenue);
@@ -1552,9 +1564,19 @@ function SpreadsheetImportPanel() {
       if (columnOverrides.stage) fd.append('stageColumn', columnOverrides.stage);
       if (columnOverrides.updatedDate) fd.append('updatedDateColumn', columnOverrides.updatedDate);
       const res = await fetch('/api/integrations/spreadsheet?step=import', { method: 'POST', body: fd });
-      const data = await res.json() as { ok?: boolean; results?: Record<string, number>; error?: string };
+      const data = await res.json() as {
+        ok?: boolean; results?: Record<string, number>; error?: string;
+        arquivos?: { nome: string; linhas: number }[]; linhas_lidas?: number;
+        origem_descartadas?: number; origens_fora?: { origem: string; linhas: number }[];
+        duplicadas_no_lote?: number;
+      };
       if (!res.ok || data.error) { setError(data.error ?? 'Erro ao importar planilha'); return; }
       setImportResults(data.results ?? {});
+      setRelatorio({
+        arquivos: data.arquivos, linhas_lidas: data.linhas_lidas,
+        origem_descartadas: data.origem_descartadas, origens_fora: data.origens_fora,
+        duplicadas_no_lote: data.duplicadas_no_lote,
+      });
       setStep('done');
     } catch {
       setError('Erro de conexão ao importar planilha.');
@@ -1586,6 +1608,8 @@ function SpreadsheetImportPanel() {
       updatedDate: '',
     });
     setImportResults(null);
+    setRelatorio(null);
+    setFiles([]);
     setError('');
   }
 
@@ -1599,7 +1623,7 @@ function SpreadsheetImportPanel() {
           </div>
           <div>
             <p className="text-sm font-bold">Importar Planilha CRM</p>
-            <p className="text-xs text-muted-foreground">Importe dados de faturamento por clínica de uma planilha Excel/CSV</p>
+            <p className="text-xs text-muted-foreground">Importe faturamento por clínica de uma ou mais planilhas Excel/CSV</p>
           </div>
         </div>
         {step !== 'upload' && (
@@ -1650,12 +1674,18 @@ function SpreadsheetImportPanel() {
             >
               <Upload className={cn('w-8 h-8', dragging ? 'text-primary' : 'text-muted-foreground')} />
               <div className="text-center">
-                <p className="text-sm font-semibold">{file ? file.name : 'Arraste a planilha ou clique para selecionar'}</p>
-                <p className="text-xs text-muted-foreground mt-1">.xlsx, .xls ou .csv — exportação do seu sistema CRM</p>
+                <p className="text-sm font-semibold">{file ? file.name : 'Arraste as planilhas ou clique para selecionar'}</p>
+                <p className="text-xs text-muted-foreground mt-1">.xlsx, .xls ou .csv — pode selecionar várias de uma vez</p>
               </div>
-              {file && <p className="text-xs text-emerald-400">{(file.size / 1024).toFixed(0)} KB selecionado</p>}
+              {files.length > 0 && (
+                <p className="text-xs text-emerald-400">
+                  {files.length === 1
+                    ? `${files[0].name} · ${(files[0].size / 1024).toFixed(0)} KB`
+                    : `${files.length} planilhas · ${(files.reduce((s, f) => s + f.size, 0) / 1024).toFixed(0)} KB`}
+                </p>
+              )}
             </div>
-            <input ref={fileInputRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }} />
+            <input ref={fileInputRef} type="file" accept=".xlsx,.xls,.csv" multiple className="hidden" onChange={(e) => handleFiles(Array.from(e.target.files ?? []))} />
             <Button onClick={handleAnalyze} disabled={!file || loading} className="w-full h-10 font-bold text-sm">
               {loading ? <><RefreshCw className="w-3.5 h-3.5 animate-spin mr-2" />Analisando com IA...</> : 'Analisar planilha'}
             </Button>
@@ -1802,6 +1832,34 @@ function SpreadsheetImportPanel() {
               </div>
               <p className="text-sm font-bold">Importação concluída!</p>
             </div>
+
+            {relatorio && (
+              <div className="rounded-lg border border-border bg-muted/10 p-3 space-y-1.5 text-xs">
+                {(relatorio.arquivos?.length ?? 0) > 1 && (
+                  <p className="text-muted-foreground">
+                    {relatorio.arquivos!.length} planilhas unificadas:{' '}
+                    {relatorio.arquivos!.map(a => `${a.nome} (${a.linhas})`).join(' · ')}
+                  </p>
+                )}
+                {(relatorio.duplicadas_no_lote ?? 0) > 0 && (
+                  <p className="text-muted-foreground">
+                    <strong className="text-foreground">{relatorio.duplicadas_no_lote}</strong>{' '}
+                    linha(s) duplicada(s) entre as planilhas — ficou a versão mais recente de cada.
+                  </p>
+                )}
+                {(relatorio.origem_descartadas ?? 0) > 0 && (
+                  <>
+                    <p className="text-amber-400">
+                      <strong>{relatorio.origem_descartadas}</strong> linha(s) NÃO entraram por
+                      terem origem fora dos canais digitais.
+                    </p>
+                    <p className="text-muted-foreground">
+                      {relatorio.origens_fora?.map(o => `${o.origem} (${o.linhas})`).join(' · ')}
+                    </p>
+                  </>
+                )}
+              </div>
+            )}
             <div className="rounded-lg border border-border divide-y divide-border overflow-hidden">
               {Object.entries(importResults).map(([clinic, count]) => (
                 <div key={clinic} className="flex items-center justify-between px-4 py-2.5 text-xs">
