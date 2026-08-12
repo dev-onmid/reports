@@ -79,6 +79,11 @@ import {
   type ContagemFunil, type EtapaFunil,
 } from '@/lib/funil-etapas';
 import { FunilLeadsModal } from '@/components/funil-leads-modal';
+import { normalizarSegmento, perfilDaSelecao } from '@/lib/dashboard-segmento';
+import {
+  ResultadoNegocioFood, DecomposicaoReceitaCard, FunilUnificadoFood,
+  ClientesRetencaoFood, MixProdutosFood, CampanhasWhatsappFood, useDadosFood,
+} from '@/components/dashboard-food';
 
 type Period = 'yesterday' | 'last_7d' | 'last_14d' | 'last_30d' | 'this_month' | 'last_month' | 'custom';
 type ClientSheetsSummary = { leads: number; funil: ContagemFunil; total: number };
@@ -5925,6 +5930,7 @@ export default function GeneralDashboard() {
   // pedidos com funil de leads num agregado não faz sentido).
   const deliverySoloId = selectedIds.size === 1 && deliveryFlags[[...selectedIds][0]]
     ? [...selectedIds][0] : null;
+
   // Período em ISO — usado pelo resumo de delivery E pelo modal de leads do
   // funil. ⚠️ O modal PRECISA usar exatamente esta janela: é a mesma que
   // alimenta /api/crm/summary (o número do card), então divergir aqui faria a
@@ -5934,6 +5940,25 @@ export default function GeneralDashboard() {
     return { from: from.toISOString().split('T')[0], to: to.toISOString().split('T')[0] };
   })();
   const deliveryRange = periodoISO;
+
+  // ── Modo Food / Delivery ──────────────────────────────────────────────────
+  // O segmento vem de `clients.dashboard_type` (coluna que já existia). O perfil
+  // decide KPIs, rótulos e blocos — a tela é a MESMA, só troca de configuração.
+  // Seleção mista (food + lead-gen) cai em lead-gen de propósito: ver
+  // `perfilDaSelecao` em src/lib/dashboard-segmento.ts.
+  const perfilAtivo = perfilDaSelecao(selectedClients.map(c => normalizarSegmento(c.dashboard_type)));
+  const modoFood = perfilAtivo.segmento === 'food';
+  // Cliente único é a condição para os blocos de food: somar recorrência e mix
+  // de produtos de estabelecimentos diferentes produz um agregado sem sentido.
+  const foodSoloId = modoFood && selectedIds.size === 1 ? [...selectedIds][0] : null;
+  const dadosFood = useDadosFood(
+    foodSoloId,
+    periodoISO.from,
+    periodoISO.to,
+    metaImpressions + googleImpressions,
+    metaClicks + googleClicks,
+    totalSpend,
+  );
   // Taxa do FUNIL = fechamentos sobre o topo DELE. A `conversionRate` global usa
   // `funnelVisitors` (impressões + cliques), o que dava "0,13%" ao lado de um
   // funil que começa em contatos — dois números sem relação na mesma caixa.
@@ -5994,6 +6019,12 @@ export default function GeneralDashboard() {
               </button>
             ))}
           </div>
+          {/* Bloco 1 da seção 6: header mantido, só ganha o badge do segmento ativo. */}
+          {modoFood && (
+            <span className="inline-flex items-center gap-1.5 rounded-[10px] border border-[#6cff2f]/30 bg-[#6cff2f]/10 px-3 py-2 text-xs font-bold text-[#6cff2f]">
+              Modo {perfilAtivo.rotuloSegmento}
+            </span>
+          )}
           <span className="ml-auto inline-flex items-center gap-2 rounded-[10px] border border-white/[0.08] bg-[#0b1216] px-3 py-2 text-xs font-semibold text-[#dce4e8]">
             <span className="h-2 w-2 rounded-full bg-[#6cff2f]" /> Ao vivo
           </span>
@@ -6088,14 +6119,38 @@ export default function GeneralDashboard() {
               </div>
             </PremiumPanel>
 
-            <div className="grid gap-4 xl:grid-cols-[1.08fr_0.92fr]">
-              {deliverySoloId ? (
-                <DeliveryResumoCard clientId={deliverySoloId} from={deliveryRange.from} to={deliveryRange.to} />
-              ) : (
-                <SimpleFunnel steps={funnelStepsNew} totalRate={funnelTaxa > 0 ? premiumValue(funnelTaxa, 'percent') : '—'} fonteLabel={fonteTopoLabel} onStageClick={setFunilStageIdx} />
-              )}
-              <ChannelSummaryTable rows={channelRows} />
-            </div>
+            {/* ── MODO FOOD: blocos da seção 6 do briefing, na ordem do perfil ──
+                Substitui o funil de leads (conceito sem equivalente em delivery)
+                pela cadeia mídia → catálogo → pedido → receita. */}
+            {modoFood && dadosFood ? (
+              <>
+                <ResultadoNegocioFood dados={dadosFood.resultado} />
+                <div className="grid gap-4 xl:grid-cols-2">
+                  <DecomposicaoReceitaCard valores={dadosFood.decomposicao} />
+                  <ClientesRetencaoFood
+                    baldes={dadosFood.baldes}
+                    pedidos={dadosFood.resultado.pedidos}
+                    clientesUnicos={dadosFood.clientesUnicos}
+                    clientesComDoisOuMais={dadosFood.clientesComDoisOuMais}
+                  />
+                </div>
+                <FunilUnificadoFood funil={dadosFood.funil} investimento={dadosFood.investimento} />
+                <div className="grid gap-4 xl:grid-cols-2">
+                  <MixProdutosFood />
+                  <CampanhasWhatsappFood />
+                </div>
+                <ChannelSummaryTable rows={channelRows} />
+              </>
+            ) : (
+              <div className="grid gap-4 xl:grid-cols-[1.08fr_0.92fr]">
+                {deliverySoloId ? (
+                  <DeliveryResumoCard clientId={deliverySoloId} from={deliveryRange.from} to={deliveryRange.to} />
+                ) : (
+                  <SimpleFunnel steps={funnelStepsNew} totalRate={funnelTaxa > 0 ? premiumValue(funnelTaxa, 'percent') : '—'} fonteLabel={fonteTopoLabel} onStageClick={setFunilStageIdx} />
+                )}
+                <ChannelSummaryTable rows={channelRows} />
+              </div>
+            )}
 
             {/* ── Instagram — logo abaixo do funil ── */}
             {(() => {
