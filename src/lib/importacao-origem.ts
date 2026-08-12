@@ -190,6 +190,45 @@ export type SinaisDeEtapa = {
   agendou: boolean;
 };
 
+/**
+ * Dedupe por TELEFONE dentro do lote de importação.
+ *
+ * ⚠️ A produção tem uma unique (client_id, numero) criada FORA do repo
+ * (`crm_leads_client_numero_unique` — vista em erro real de 2026-08-11): o
+ * mesmo lead aparecendo em dois exports importados juntos virava dois INSERTs
+ * do mesmo número e derrubava o lote inteiro.
+ *
+ * Fica a linha MAIS AVANÇADA no funil (fechou > compareceu > agendou — a
+ * régua do "só avança"); empate → a última do lote. Booleans e valor se
+ * ACUMULAM entre as duplicatas: nenhuma linha pode fazer o lead regredir.
+ * Linha sem telefone deduplicável fica de fora do dedupe (numero NULL não
+ * conflita no banco).
+ */
+export function dedupPorTelefone<T extends {
+  phone: string | null; closed: boolean; revenue: number;
+  compareceu?: boolean; agendou?: boolean;
+}>(rows: T[]): T[] {
+  const posto = (r: T) => (r.closed ? 3 : r.compareceu ? 2 : r.agendou ? 1 : 0);
+  const porChave = new Map<string, T>();
+  const semChave: T[] = [];
+  for (const r of rows) {
+    const k = chaveTelefone(r.phone) ?? (r.phone?.trim() || null);
+    if (!k) { semChave.push(r); continue; }
+    const ant = porChave.get(k);
+    if (!ant) { porChave.set(k, r); continue; }
+    const vence = posto(r) >= posto(ant) ? r : ant;
+    const perde = vence === r ? ant : r;
+    porChave.set(k, {
+      ...vence,
+      compareceu: (vence.compareceu ?? false) || (perde.compareceu ?? false),
+      agendou: (vence.agendou ?? false) || (perde.agendou ?? false),
+      closed: vence.closed || perde.closed,
+      revenue: vence.revenue || perde.revenue,
+    });
+  }
+  return [...porChave.values(), ...semChave];
+}
+
 export function sinaisDoStatus(status: unknown): SinaisDeEtapa {
   const s = normalizarOrigem(status); // reaproveita: sem acento, sem caixa
 

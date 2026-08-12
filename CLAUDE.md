@@ -1,5 +1,14 @@
 @AGENTS.md
 
+## Importar Planilha CRM — "duplicate key crm_leads_client_numero_unique" (2026-08-11)
+
+Depois do fix do gzip, a importação real do Matheus (DetalhamentoLeads 11 + 12 juntos) morreu com `duplicate key value violates unique constraint "crm_leads_client_numero_unique"`. **⚠️ Essa unique (client_id, numero) NÃO existe no repo nem no histórico do git — foi criada DIRETO no banco de produção**, e o código da importação foi escrito assumindo que ela não existia (o comentário antigo de `upsertPorTelefone` dizia isso explicitamente). Gatilho: o mesmo lead aparece nos dois exports; quando ainda não está no banco, viram dois INSERTs do mesmo número no mesmo lote → constraint estoura → importação inteira falha.
+
+- **`dedupPorTelefone`** (nova em `importacao-origem.ts`, pura): dedupe do lote por `chaveTelefone` com fallback pro texto cru (telefone-lixo idêntico tipo "-" também não pode duplicar). Vence a linha **MAIS AVANÇADA no funil** (fechou > compareceu > agendou — os arquivos chegam em ordem imprevisível, "(12)" antes de "(11)", então "última vence" pegaria o export velho); booleans e valor ACUMULAM entre as duplicatas. Sem telefone → fica fora do dedupe (numero NULL não conflita). Chamada no início de `upsertPorTelefone`.
+- **`insertLeadBatch` ganhou `ON CONFLICT DO NOTHING` SEM alvo** — sem alvo de propósito: cobre QUALQUER constraint (inclusive a de produção que o repo não conhece) e não quebra instalação que não tem nenhuma. Colisão residual é pulada em vez de derrubar o lote de 150.
+- **`upsertLeadBatch` (caminho por ID do negócio) ganhou fallback**: `.catch` no INSERT — erro `23505` com "numero" no constraint/mensagem → o lote cai pro `upsertPorTelefone` (dois negócios com o mesmo telefone não podem coexistir sob a unique de produção de qualquer forma; degradação documentada: esses caem sem external_id).
+- ✅ Verificado: **146 asserts** em test-origem.mjs (9 novos de `dedupPorTelefone`: com/sem DDI viram um, fechou vence agendou vindo antes, sinais acumulam, placeholder "-" deduplica, sem telefone não deduplica); tsc + build limpos. ⚠️ Só produção valida: reimportar as 2 planilhas juntas. Se um dia a importação "pular" linhas silenciosamente, investigar a unique de produção — considerar removê-la OU trazê-la pro repo como decisão oficial.
+
 ## Importar Planilha CRM — "Erro de conexão" era o teto de 4,5 MB da Vercel (2026-08-11)
 
 Matheus com 2 planilhas somando 5.725 KB: "Erro de conexão ao analisar planilha". Causa: a Vercel corta corpo de request acima de **4,5 MB ANTES da rota rodar** — o fetch estoura como erro de rede e a mensagem genérica não dizia nada. Correção: **gzip no navegador** antes do envio (CSV cai ~96%: 5,9 MB → 0,21 MB medido) + descompressão na rota.

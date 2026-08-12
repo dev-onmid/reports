@@ -1,7 +1,7 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 
-import { origemIntegravel, resumirOrigens, dedupLote, idExterno, chaveTelefone, sinaisDoStatus } from '@/lib/importacao-origem';
+import { origemIntegravel, resumirOrigens, dedupLote, dedupPorTelefone, idExterno, chaveTelefone, sinaisDoStatus } from '@/lib/importacao-origem';
 
 /** Um grupo de arquivos com o MESMO cabeçalho — mesmo mapeamento serve pros dois. */
 export type SpreadsheetFormato = {
@@ -345,7 +345,12 @@ async function insertLeadBatch(
       (upload_id, client_id, lead_date, lead_name, phone, source, city, status_raw,
        data, nome, numero, canal, observacao, orcamento, pagamento, bairro, data_agendada,
        revenue, valor_rs, fechou, status_category, status, raw, compareceu, agendou)
-     VALUES ${placeholders}`,
+     VALUES ${placeholders}
+     -- SEM alvo de propósito: a producao tem uma unique (client_id, numero)
+     -- criada FORA do repo; com alvo explicito, instalacao sem a constraint
+     -- quebraria. Colisao residual (raro: numero igual cru que a chave
+     -- normalizada nao casou) e pulada em vez de derrubar o lote de 150.
+     ON CONFLICT DO NOTHING`,
     values,
   );
 }
@@ -367,9 +372,12 @@ async function insertLeadBatch(
  * criar um segundo, que apareceria como dois leads e contaria a venda duas
  * vezes no funil.
  *
- * Resolvido em JS e não com ON CONFLICT porque não existe índice único por
- * telefone em `crm_leads` — e criar um agora quebraria as instalações que já
- * têm telefone repetido.
+ * Resolvido em JS e não com ON CONFLICT porque o CÓDIGO não cria índice único
+ * por telefone em `crm_leads`. ⚠️ MAS a PRODUÇÃO tem um, criado fora do repo
+ * (`crm_leads_client_numero_unique`, visto em erro real de 2026-08-11) — por
+ * isso o lote é deduplicado por telefone antes do INSERT e o insertLeadBatch
+ * usa ON CONFLICT DO NOTHING sem alvo (vale pra qualquer constraint, e não
+ * quebra instalação que não tem nenhuma).
  */
 async function upsertPorTelefone(
   pool: ReturnType<typeof makeServerPool>,
@@ -384,6 +392,12 @@ async function upsertPorTelefone(
 ) {
   if (rows.length === 0) return;
   const clientId = rows[0].clientId;
+
+  // Dedupe DENTRO do lote: o mesmo lead aparece em exports de meses
+  // diferentes importados juntos, e duas linhas novas com o mesmo número num
+  // só INSERT estouram a unique de produção — derrubando a importação
+  // inteira. Regras em dedupPorTelefone (importacao-origem.ts).
+  rows = dedupPorTelefone(rows);
 
   const fones = rows.map(r => chaveTelefone(r.phone)).filter((f): f is string => Boolean(f));
   const existentes = new Map<string, string>();
@@ -551,7 +565,18 @@ async function upsertLeadBatch(
         OR EXCLUDED.updated_at_external IS NULL
         OR EXCLUDED.updated_at_external >= public.crm_leads.updated_at_external`,
     values,
-  );
+  ).catch(async (err: unknown) => {
+    // ⚠️ A produção tem uma unique (client_id, numero) criada FORA do repo
+    // (crm_leads_client_numero_unique). O ON CONFLICT acima só cobre o índice
+    // de external_id — dois negócios com o MESMO telefone (ou telefone já
+    // existente noutro lead) estouram a de numero e matariam o lote inteiro.
+    // Fallback: esse lote cai pro casamento por TELEFONE, que atualiza em vez
+    // de duplicar (e cujo insert já tolera conflito).
+    const e = err as { code?: string; constraint?: string; message?: string };
+    const eDeNumero = e?.code === '23505' && `${e?.constraint ?? ''}${e?.message ?? ''}`.includes('numero');
+    if (!eDeNumero) throw err;
+    await upsertPorTelefone(pool, rows);
+  });
 }
 
 // POST ?step=analyze — parse file and detect columns

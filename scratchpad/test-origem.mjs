@@ -7,7 +7,7 @@
 //   node scratchpad/test-origem.mjs
 
 import assert from 'node:assert';
-import { origemIntegravel, normalizarOrigem, resumirOrigens, dedupLote, ORIGENS_INTEGRAVEIS,
+import { origemIntegravel, normalizarOrigem, resumirOrigens, dedupLote, dedupPorTelefone, ORIGENS_INTEGRAVEIS,
   idExterno, chaveTelefone, sinaisDoStatus }
   from './build/importacao-origem.mjs';
 let n=0; const eq=(a,b,m)=>{assert.deepStrictEqual(a,b,m);n++;}; const ok=(c,m)=>{assert.ok(c,m);n++;};
@@ -141,6 +141,46 @@ eq(dedupLote([{id:1},{id:2}], l => String(l.id)).duplicadas, 0, 'sem duplicata')
   // "Com Falta" agendou mas NAO compareceu — a distincao que o funil precisa.
   const falta = sinaisDoStatus('Avaliação Com Falta');
   ok(falta.agendou && !falta.compareceu, 'faltou: conta agendamento, nao comparecimento');
+}
+
+// ------------------------------------------------- dedupPorTelefone
+// (a unique de producao crm_leads_client_numero_unique derrubava o lote
+// quando o mesmo lead vinha em dois exports importados juntos)
+{
+  const r = (phone, over = {}) => ({ phone, closed: false, revenue: 0, compareceu: false, agendou: false, ...over });
+
+  // mesmo numero em dois exports: fica UMA linha
+  eq(dedupPorTelefone([r('+5511912345678'), r('11912345678')]).length, 1, 'com e sem DDI viram um');
+
+  // vence a mais avancada no funil, nao a ultima
+  {
+    const [u] = dedupPorTelefone([
+      r('11912345678', { closed: true, revenue: 500 }),
+      r('11912345678', { agendou: true }),
+    ]);
+    ok(u.closed, 'fechou vence agendou mesmo vindo antes');
+    eq(u.revenue, 500, 'valor da vencedora fica');
+    ok(u.agendou, 'boolean da perdedora acumula');
+  }
+
+  // empate de posto: ultima vence, booleans acumulam
+  {
+    const [u] = dedupPorTelefone([
+      r('11912345678', { agendou: true, notes: 'a' }),
+      r('11912345678', { agendou: true, compareceu: true, notes: 'b' }),
+    ]);
+    eq(u.notes, 'b', 'mais avancada vence');
+    ok(u.compareceu && u.agendou, 'sinais acumulados');
+  }
+
+  // telefone-lixo identico ("-") tambem nao pode duplicar (a unique e no CRU)
+  eq(dedupPorTelefone([r('-'), r('-')]).length, 1, 'placeholder igual deduplica');
+
+  // sem telefone nenhum: linhas ficam (numero NULL nao conflita)
+  eq(dedupPorTelefone([r(null), r(null), r('')]).length, 3, 'sem telefone nao deduplica');
+
+  // numeros diferentes nao se tocam
+  eq(dedupPorTelefone([r('11911112222'), r('11933334444')]).length, 2, 'numeros distintos ficam');
 }
 
 console.log(`✓ ${n} asserts de origem/dedupe passaram`);
