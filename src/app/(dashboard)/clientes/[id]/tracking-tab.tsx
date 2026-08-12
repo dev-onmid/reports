@@ -4,10 +4,11 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import {
   Copy, Check, Trash2, Plus, RefreshCw, Eye, EyeOff,
   Settings2, MessageCircle, ShoppingCart, X, TrendingUp, Wifi, WifiOff, QrCode,
-  HelpCircle, Zap, AlertCircle, Globe, BarChart3, Search,
+  HelpCircle, Zap, AlertCircle, Globe, BarChart3, Search, Webhook,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ConversaoTile, GuideStepModal } from './conversao-guias';
+import { DatalyticsCard } from './datalytics-card';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -209,7 +210,7 @@ function SectionHeader({ icon: Icon, title, subtitle, color = 'text-muted-foregr
 export function ClientTrackingTab({ clientId }: { clientId: string }) {
 
   // ── Sub-tab ────────────────────────────────────────────────────────────
-  const [activeTab, setActiveTab] = useState<'whatsapp' | 'conversoes' | 'log'>('whatsapp');
+  const [activeTab, setActiveTab] = useState<'whatsapp' | 'conversoes' | 'datalytics' | 'log'>('whatsapp');
 
   // ── Legacy tracking ────────────────────────────────────────────────────
   const [config, setConfig] = useState<TrackingConfig>({
@@ -551,6 +552,7 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
         {([
           { id: 'whatsapp'  as const, label: 'WhatsApp',   icon: Wifi },
           { id: 'conversoes' as const, label: 'Conversões', icon: Zap },
+          { id: 'datalytics' as const, label: 'Datalytics', icon: Webhook },
           { id: 'log'       as const, label: 'Log',         icon: BarChart3 },
         ]).map(({ id, label, icon: Icon }) => (
           <button key={id} onClick={() => setActiveTab(id)} className={cn(
@@ -1062,6 +1064,9 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
 
         </div>
       )}
+
+      {/* ══════════ TAB: Datalytics ══════════ */}
+      {activeTab === 'datalytics' && <DatalyticsCard clientId={clientId} />}
 
       {/* ══════════ TAB: Log ══════════ */}
       {activeTab === 'log' && (

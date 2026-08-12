@@ -42,6 +42,9 @@ const PUBLIC_PREFIXES = [
   '/api/meta/webhook',
   '/api/webhooks/',
   '/api/automations/multi/trigger/',
+  // Datalytics: token de 48 hex POR CLIENTE na URL é a credencial (mesma
+  // classe de exposição de /api/webhooks/).
+  '/api/integrations/datalytics/',
 
   // Pixel e clique de e-mail: abertos pelo cliente de e-mail do destinatário.
   '/api/email/track/open',
