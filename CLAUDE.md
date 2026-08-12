@@ -1,5 +1,14 @@
 @AGENTS.md
 
+## Importar Planilha CRM — "Erro de conexão" era o teto de 4,5 MB da Vercel (2026-08-11)
+
+Matheus com 2 planilhas somando 5.725 KB: "Erro de conexão ao analisar planilha". Causa: a Vercel corta corpo de request acima de **4,5 MB ANTES da rota rodar** — o fetch estoura como erro de rede e a mensagem genérica não dizia nada. Correção: **gzip no navegador** antes do envio (CSV cai ~96%: 5,9 MB → 0,21 MB medido) + descompressão na rota.
+
+- **`comprimirParaEnvio`** (integrations-panel, nas DUAS etapas analyze/import): `CompressionStream('gzip')` + `new Response(stream).blob()`, arquivo vira `nome.csv.gz`; guard `blob.size >= f.size` deixa xlsx (já é zip) passar intacto; navegador sem suporte → original. Guarda pós-compressão: total > 4,2 MB → mensagem explicando o limite e sugerindo menos arquivos por vez (o catch de rede também explica agora).
+- **Rota** (`spreadsheet/route.ts`): detecção por **magic bytes** (0x1f 0x8b), não pelo nome — `gunzipSync` e strip do `.gz`. ⚠️ Os nomes devolvidos nos grupos usam o nome SEM `.gz` — a tela casa esses nomes com os `File` originais pra montar os lotes da importação; usar `f.name` quebraria o casamento.
+- ✅ Verificado: paridade total comprimido×cru no parse (60 mil linhas, acentos com BOM — `scratchpad/test-gzip-roundtrip.mjs`); ponta a ponta na ROTA REAL (next start + cookie de sessão forjado): CSV de 5 MB gzipado (153 KB no fio) atravessa multipart→gunzip→parse e para exatamente no erro de API key ausente (dev sem ANTHROPIC_API_KEY — prova que o parse funcionou), caminho sem gzip idêntico, gzip corrompido → erro JSON gracioso; `CompressionStream` no browser: 4,97 MB → 153 KB com magic bytes certos. ⚠️ Nota: CSV SEM BOM parseia como latin-1 no xlsx (comportamento PRÉ-existente, igual nos dois caminhos; exports reais de CRM vêm com BOM).
+- ⚠️ Limite residual: planilha que MESMO comprimida passa de 4,2 MB (xlsx gigante) é bloqueada com a mensagem clara — a saída é enviar menos arquivos por vez (import é idempotente e deduplica entre envios).
+
 ## CRM — um ganho só (Fechado absorve Comprou) + saneamento dos Kanbans (2026-08-11)
 
 Pedido do Matheus (print do board com "Fechado 0" e "Comprou 0" lado a lado): "deixa apenas 1 ganho entre Fechado e Comprou" em todos os Kanbans, mantendo o que contabiliza. **"Fechado" fica** — é o rótulo que o PRÓPRIO sistema grava (importação de planilha e webhook usam 'Fechado' como status de venda); manter "Comprou" deixaria fechamentos futuros numa coluna e antigos em outra. Nenhuma contagem muda: `fechou`/`valor_rs` intactos e ambos os rótulos já classificam 'fechamento' no funil.

@@ -1484,6 +1484,33 @@ function SpreadsheetImportPanel() {
     setError('');
   }
 
+  /** Teto de corpo de request da Vercel é 4,5 MB — margem de segurança. */
+  const LIMITE_ENVIO_BYTES = 4_200_000;
+
+  /**
+   * Comprime pro envio (gzip via CompressionStream) — CSV cai ~90%, e era
+   * exatamente o CSV grande que estourava o teto de 4,5 MB da Vercel e virava
+   * "Erro de conexão" (a plataforma corta ANTES da rota rodar). O servidor
+   * detecta o gzip por magic bytes e descomprime. xlsx já é comprimido, então
+   * o guard `>= size` o deixa passar intacto. Sem suporte do navegador →
+   * arquivo original (o limite continua valendo, mas nada quebra).
+   */
+  async function comprimirParaEnvio(f: File): Promise<File> {
+    if (typeof CompressionStream === 'undefined') return f;
+    try {
+      const blob = await new Response(f.stream().pipeThrough(new CompressionStream('gzip'))).blob();
+      if (blob.size >= f.size) return f;
+      return new File([blob], `${f.name}.gz`, { type: 'application/gzip' });
+    } catch {
+      return f;
+    }
+  }
+
+  function erroDeTamanho(totalBytes: number): string {
+    const mb = (totalBytes / 1_000_000).toFixed(1);
+    return `O envio ficou com ${mb} MB mesmo comprimido — acima do limite de 4,5 MB por requisição. Importe menos planilhas por vez (uma a uma funciona; o sistema unifica e deduplica entre importações).`;
+  }
+
   function updateColumnOverride(field: SpreadsheetFieldKey, value: string) {
     setColumnOverrides(prev => ({ ...prev, [field]: value }));
     if (field === 'clinic' && analysis) {
@@ -1513,7 +1540,13 @@ function SpreadsheetImportPanel() {
       const fd = new FormData();
       // Todas as planilhas nas DUAS etapas: a análise precisa ver o lote
       // inteiro pra detectar coluna, e a importação pra deduplicar entre elas.
-      for (const f of (files.length ? files : [file])) fd.append('file', f);
+      let totalBytes = 0;
+      for (const f of (files.length ? files : [file])) {
+        const enviado = await comprimirParaEnvio(f);
+        totalBytes += enviado.size;
+        fd.append('file', enviado);
+      }
+      if (totalBytes > LIMITE_ENVIO_BYTES) { setError(erroDeTamanho(totalBytes)); return; }
       const res = await fetch('/api/integrations/spreadsheet?step=analyze', { method: 'POST', body: fd });
       const data = await res.json() as SpreadsheetAnalysis & { error?: string };
       if (!res.ok || data.error) { setError(data.error ?? 'Erro ao analisar planilha'); return; }
@@ -1556,7 +1589,7 @@ function SpreadsheetImportPanel() {
       setMappings(initialMappings);
       setStep('mapping');
     } catch {
-      setError('Erro de conexão ao analisar planilha.');
+      setError('Erro de conexão ao analisar planilha. Se as planilhas somam vários MB, o limite de 4,5 MB por requisição pode ter cortado o envio — tente importar menos arquivos por vez.');
     } finally {
       setLoading(false);
     }
@@ -1594,7 +1627,13 @@ function SpreadsheetImportPanel() {
 
       for (const lote of lotes) {
         const fd = new FormData();
-        for (const f of lote.arquivos) fd.append('file', f);
+        let totalBytes = 0;
+        for (const f of lote.arquivos) {
+          const enviado = await comprimirParaEnvio(f);
+          totalBytes += enviado.size;
+          fd.append('file', enviado);
+        }
+        if (totalBytes > LIMITE_ENVIO_BYTES) { setError(erroDeTamanho(totalBytes)); return; }
         fd.append('mappings', JSON.stringify(filled));
         const campos: [SpreadsheetFieldKey, string][] = [
           ['clinic', 'clinicColumn'], ['revenue', 'revenueColumn'], ['date', 'dateColumn'],

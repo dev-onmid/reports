@@ -588,8 +588,18 @@ export async function POST(req: NextRequest) {
     const grupos = new Map<string, { headers: string[]; rows: Record<string, unknown>[]; arquivos: { nome: string; linhas: number }[] }>();
 
     for (const f of arquivos) {
-      const buf = Buffer.from(await f.arrayBuffer());
-      const wb = XLSX.read(buf, { type: 'buffer', raw: f.name.match(/\.csv$/i) ? true : undefined });
+      let buf = Buffer.from(await f.arrayBuffer());
+      let nome = f.name;
+      // O navegador comprime antes de enviar (gzip) pra caber no teto de
+      // 4,5 MB de corpo da Vercel — 5,7 MB de CSV cru derrubava a conexão
+      // ANTES da rota rodar ("Erro de conexão"). Detecção por magic bytes,
+      // não pelo nome: cobre qualquer origem do gzip.
+      if (buf.length >= 2 && buf[0] === 0x1f && buf[1] === 0x8b) {
+        const { gunzipSync } = await import('node:zlib');
+        buf = gunzipSync(buf);
+        nome = nome.replace(/\.gz$/i, '');
+      }
+      const wb = XLSX.read(buf, { type: 'buffer', raw: nome.match(/\.csv$/i) ? true : undefined });
       const sh = wb.Sheets[wb.SheetNames[0]];
       const r: Record<string, unknown>[] = XLSX.utils.sheet_to_json(sh, { defval: '' });
       if (r.length === 0) continue;
@@ -597,8 +607,10 @@ export async function POST(req: NextRequest) {
       const h = Object.keys(r[0]);
       const chave = h.join('|');
       const g = grupos.get(chave);
-      if (g) { g.rows.push(...r); g.arquivos.push({ nome: f.name, linhas: r.length }); }
-      else grupos.set(chave, { headers: h, rows: r, arquivos: [{ nome: f.name, linhas: r.length }] });
+      // `nome` (sem .gz), nunca `f.name`: a tela casa esses nomes com os
+      // arquivos originais dela pra montar os lotes da importação.
+      if (g) { g.rows.push(...r); g.arquivos.push({ nome, linhas: r.length }); }
+      else grupos.set(chave, { headers: h, rows: r, arquivos: [{ nome, linhas: r.length }] });
     }
 
     if (grupos.size === 0) return Response.json({ error: 'Planilha vazia.' }, { status: 400 });
