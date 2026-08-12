@@ -279,15 +279,19 @@ export function rotuloFonteTopo(fontes: ('crm' | 'anuncios')[]): string {
  * Etapas padrão do CRM com a classificação explícita — fonte única dos DOIS
  * seeds que antes viviam duplicados (funnels/route.ts e crm-conversation-sync).
  */
+// "Comprou" saiu do seed (2026-08-11, decisão do Matheus): dois ganhos viravam
+// duas colunas competindo — "Fechado" fica porque é o rótulo que o sistema
+// grava (importação/webhook). Funis existentes são fundidos pelo saneamento
+// (crm-saneamento.ts); o regex de classificarEtapa segue reconhecendo
+// "Comprou" em dado legado.
 export const ETAPAS_PADRAO: { label: string; color: string; position: number; etapa: EtapaFunil }[] = [
   { label: 'Em Atendimento', color: '#0ea5e9', position: 0, etapa: 'qualificado' },
   { label: 'Agendado',       color: '#3b82f6', position: 1, etapa: 'agendamento' },
   { label: 'Reagendado',     color: '#7dd3fc', position: 2, etapa: 'agendamento' },
   { label: 'Fechado',        color: '#10b981', position: 3, etapa: 'fechamento' },
-  { label: 'Comprou',        color: '#34d399', position: 4, etapa: 'fechamento' },
-  { label: 'Paciente',       color: '#a1a1aa', position: 5, etapa: 'fechamento' },
-  { label: 'Não Retorna',    color: '#71717a', position: 6, etapa: 'qualificado' },
-  { label: 'Distante',       color: '#f97316', position: 7, etapa: 'qualificado' },
-  { label: 'Sem Interesse',  color: '#ef4444', position: 8, etapa: 'perdido' },
-  { label: 'Desqualificado', color: '#dc2626', position: 9, etapa: 'perdido' },
+  { label: 'Paciente',       color: '#a1a1aa', position: 4, etapa: 'fechamento' },
+  { label: 'Não Retorna',    color: '#71717a', position: 5, etapa: 'qualificado' },
+  { label: 'Distante',       color: '#f97316', position: 6, etapa: 'qualificado' },
+  { label: 'Sem Interesse',  color: '#ef4444', position: 7, etapa: 'perdido' },
+  { label: 'Desqualificado', color: '#dc2626', position: 8, etapa: 'perdido' },
 ];

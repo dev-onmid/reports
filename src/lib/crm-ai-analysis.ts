@@ -41,7 +41,9 @@ const STATUS_MAP: Record<string, string> = {
   negociacao: 'Negociação',
   negociação: 'Negociação',
   fechado: 'Fechado',
-  comprou: 'Comprou',
+  // "Comprou" foi fundido em "Fechado" (um ganho só) — a IA dizendo "comprou"
+  // cai na coluna que existe. findStatus ainda valida contra o funil real.
+  comprou: 'Fechado',
   paciente: 'Paciente',
   nao_retorna: 'Não Retorna',
   não_retorna: 'Não Retorna',
@@ -400,8 +402,8 @@ Regras importantes de status:
 - "Quero agendar", "tenho interesse em agendar" ou "pode marcar" ainda NÃO é agendamento confirmado se não houver data/horário combinado ou confirmação objetiva.
 - Use "Agendado" somente quando houver data e/ou horário definido e o cliente confirmar ou aceitar explicitamente aquele agendamento.
 - Se cliente pediu novo horário após um agendamento, use "Reagendado" quando existir.
-- Se cliente comprou, pagou ou confirmou fechamento, use "Fechado" ou "Comprou", dando preferência ao rótulo existente no funil.
-- "Fechado", "Comprou" e "Paciente" não são status congelados. Se um lead que já comprou iniciar novo atendimento, pedir novo orçamento ou combinar novo agendamento, mude para o status adequado da nova conversa.
+- Se cliente comprou, pagou ou confirmou fechamento, use "Fechado" (ou o rótulo de fechamento existente no funil).
+- "Fechado" e "Paciente" não são status congelados. Se um lead que já comprou iniciar novo atendimento, pedir novo orçamento ou combinar novo agendamento, mude para o status adequado da nova conversa.
 - Não mova leads em "Agendado" ou "Reagendado" para "Não Retorna" só por falta de resposta no chat.
 - Use "Não Retorna" somente quando houver pelo menos 4 tentativas de contato enviadas pelo atendente sem resposta posterior do cliente E isso já durar pelo menos 2 dias.
 - Se não houver mudança clara de etapa, mantenha o status atual e retorne status_deve_mudar=false.

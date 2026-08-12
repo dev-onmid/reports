@@ -179,7 +179,9 @@ eq(normalizarFonteTopo('qualquer'), 'auto', 'fonte invalida vira auto');
 eq(normalizarFonteTopo(null), 'auto', 'null vira auto');
 
 // ------------------------------------------------------------ seeds padrao
-eq(ETAPAS_PADRAO.length, 10, '10 etapas padrao');
+eq(ETAPAS_PADRAO.length, 9, '9 etapas padrao (Comprou fundido em Fechado)');
+ok(!ETAPAS_PADRAO.some(e => e.label === 'Comprou'), 'Comprou fora do seed');
+ok(ETAPAS_PADRAO.some(e => e.label === 'Fechado' && e.etapa === 'fechamento'), 'Fechado segue como ganho');
 // Coerencia forte: a classificacao explicita dos seeds bate com a automatica
 for (const e of ETAPAS_PADRAO) {
   eq(classificarEtapa(e.label), e.etapa, `seed "${e.label}" auto-classifica igual ao explicito`);

@@ -1,5 +1,14 @@
 @AGENTS.md
 
+## CRM — um ganho só (Fechado absorve Comprou) + saneamento dos Kanbans (2026-08-11)
+
+Pedido do Matheus (print do board com "Fechado 0" e "Comprou 0" lado a lado): "deixa apenas 1 ganho entre Fechado e Comprou" em todos os Kanbans, mantendo o que contabiliza. **"Fechado" fica** — é o rótulo que o PRÓPRIO sistema grava (importação de planilha e webhook usam 'Fechado' como status de venda); manter "Comprou" deixaria fechamentos futuros numa coluna e antigos em outra. Nenhuma contagem muda: `fechou`/`valor_rs` intactos e ambos os rótulos já classificam 'fechamento' no funil.
+
+- **`src/lib/crm-saneamento.ts`**: `planejarSaneamento(stages)` (PURO, testável) decide migrações/exclusões; `sanearFunisDoCliente` executa. Duas regras: (1) funil com Fechado E Comprou → leads de Comprou migram, coluna some, e **gatilhos por status seguem o lead** (`client_conversion_eventos_custom` + `crm_followup_regras`/`mensagens` realinhados best-effort, só se o destino não tem gatilho igual); funil que só tem UM dos dois **não é tocado** (é o único ganho dele). (2) **Colunas gêmeas** (mesmo rótulo normalizado no mesmo funil — o Kanban agrupa por rótulo, uma fica eternamente vazia) → fica a de menor posição, variação de grafia migra os leads.
+- **Auto-cura**: `GET /api/crm/funnels` chama o saneamento (best-effort) — abrir o board de qualquer cliente já conserta aquele cliente. **Varredura única**: `GET /api/crm/sanear-kanban?secret=<REPORTS_CRON_SECRET>` (CRON_PREFIXES, maxDuration 300, orçamento 280s com resposta `parcial`, idempotente) sanea todos de uma vez e devolve relatório por cliente.
+- **Seeds com 9 etapas** (`ETAPAS_PADRAO` sem Comprou, posições renumeradas); "Comprou" saiu das 3 listas fallback de STATUS_OPTIONS (crm/page, chat-view, crm-tab); mapa da IA (`crm-ai-analysis`) agora traduz "comprou"→'Fechado' e o prompt não oferece mais "Comprou". Checks tolerantes a dado legado (`l.status === 'Comprou'`, regex de `classificarEtapa`) ficaram de propósito.
+- ✅ Verificado: **17 asserts** (`scratchpad/test-saneamento.mjs`: merge padrão, só-Fechado/só-Comprou intocados, caixa/acento, gêmeas com variação de grafia, dedupe+merge juntos, idempotência) + funil-etapas atualizado (85); tsc + `next build` limpos (rota registrada). ⚠️ Só produção valida: rodar a varredura (`curl .../api/crm/sanear-kanban?secret=...`) e conferir um board — ou simplesmente abrir o CRM de cada cliente, que a auto-cura resolve.
+
 ## Integração Datalytics — receber leads e etapas do CRM externo (2026-08-11)
 
 Pedido do Matheus: tudo que acontece no Datalytics (CRM externo de alguns clientes, api.datalitics.com.br) deve entrar no Reports — lead criado e mudança de etapa — configurável por cliente. Decisões dele: **só receber** (empurrar atribuição de volta via API deles fica pra 2ª rodada) e **espelhar etapas** (etapa que só existe lá, ex. "Follow 2", cria a coluna no funil do cliente automaticamente — lead nunca some do Kanban).

@@ -1,6 +1,7 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { ETAPAS_PADRAO } from '@/lib/funil-etapas';
+import { sanearFunisDoCliente } from '@/lib/crm-saneamento';
 
 // Fonte única dos seeds (com a etapa semântica do Funil de Performance) —
 // compartilhada com o seed gêmeo de crm-conversation-sync.ts.
@@ -63,6 +64,12 @@ export async function GET(req: NextRequest) {
       );
       funnels.push(funnel);
     }
+
+    // Auto-cura ao abrir o board: funde Fechado+Comprou num ganho só e remove
+    // colunas gêmeas (ver crm-saneamento.ts). Best-effort — nunca derruba o
+    // carregamento do Kanban.
+    await sanearFunisDoCliente(pool, clientId).catch(err =>
+      console.error('[crm funnels] saneamento', err));
 
     return Response.json(funnels);
   } finally {

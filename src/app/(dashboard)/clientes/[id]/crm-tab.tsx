@@ -64,7 +64,7 @@ const STATUS_STYLES: Record<string, string> = {
   'Desqualificado': 'bg-red-500/20 text-red-300 border-red-400/30',
 };
 
-const STATUS_OPTIONS = ['Em Atendimento', 'Agendado', 'Reagendado', 'Fechado', 'Comprou', 'Paciente', 'Não Retorna', 'Distante', 'Sem Interesse', 'Desqualificado'];
+const STATUS_OPTIONS = ['Em Atendimento', 'Agendado', 'Reagendado', 'Fechado', 'Paciente', 'Não Retorna', 'Distante', 'Sem Interesse', 'Desqualificado'];
 
 function canalStyle(canal: string | null) {
   return CANAL_STYLES[canal ?? ''] ?? 'bg-muted/40 text-muted-foreground border-border/50';

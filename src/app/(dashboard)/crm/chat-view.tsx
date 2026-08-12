@@ -49,7 +49,7 @@ type CrmMessage = {
 
 type MediaType = 'imagem' | 'audio' | 'video' | 'documento' | 'localizacao';
 
-const DEFAULT_STATUS_OPTIONS = ['Em Atendimento', 'Agendado', 'Reagendado', 'Fechado', 'Comprou', 'Paciente', 'Não Retorna', 'Distante', 'Sem Interesse', 'Desqualificado'];
+const DEFAULT_STATUS_OPTIONS = ['Em Atendimento', 'Agendado', 'Reagendado', 'Fechado', 'Paciente', 'Não Retorna', 'Distante', 'Sem Interesse', 'Desqualificado'];
 
 type InstanceStatus = 'checking' | 'connected' | 'disconnected' | 'no_instance' | 'unknown';
 type InstanceInfo = { id: string; nome: string; provider: string; status: string };
