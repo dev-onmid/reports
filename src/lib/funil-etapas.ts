@@ -135,7 +135,13 @@ export const FUNIL_VAZIO: ContagemFunil = {
  * (lead com funnel_id NULL / legado). Status órfão → classifica o TEXTO cru —
  * é o que cobre o vocabulário de planilha sem stage cadastrado.
  */
-export function contarFunil(leads: LeadParaFunil[], stages: EtapaDeStage[]): ContagemFunil {
+/** Índice status→etapa de um cliente, pré-construído para não refazer por lead. */
+export type MapaEtapas = {
+  porFunil: Map<string, EtapaFunil>;
+  porLabel: Map<string, EtapaFunil>;
+};
+
+export function construirMapaEtapas(stages: EtapaDeStage[]): MapaEtapas {
   const porFunil = new Map<string, EtapaFunil>();
   const porLabel = new Map<string, EtapaFunil>();
   for (const s of stages) {
@@ -146,23 +152,51 @@ export function contarFunil(leads: LeadParaFunil[], stages: EtapaDeStage[]): Con
     // Primeiro funil vence no fallback — determinístico pela ordem de entrada.
     if (!porLabel.has(label)) porLabel.set(label, etapa);
   }
+  return { porFunil, porLabel };
+}
+
+export type PostoDoLead = {
+  /** Etapa que o STATUS do lead representa (antes dos overrides dos booleanos). */
+  etapaStatus: EtapaFunil;
+  /** Degrau mais avançado que o lead alcançou (0..4). */
+  posto: number;
+  /** Contagem paralela: desqualificado segue contando nas etapas que alcançou. */
+  perdido: boolean;
+};
+
+/**
+ * Classifica UM lead — extraído de `contarFunil` para que a listagem por etapa
+ * (modal do funil) e a contagem do card usem exatamente a mesma régua. Se estas
+ * duas lógicas divergirem, o modal mostra um total diferente do número clicado.
+ */
+export function etapaDoLead(lead: LeadParaFunil, mapa: MapaEtapas): PostoDoLead {
+  const label = normalizarEtiqueta(lead.status);
+  const etapaStatus = (lead.funnelId ? mapa.porFunil.get(`${lead.funnelId}:${label}`) : undefined)
+    ?? mapa.porLabel.get(label)
+    ?? classificarEtapa(lead.status);
+
+  let posto = postoDaEtapa(etapaStatus); // perdido → -1: não sobe degrau por si só
+  if (lead.fechou) posto = Math.max(posto, 4);
+  else if (lead.compareceu) posto = Math.max(posto, 3);
+  else if (lead.agendou || lead.dataAgendada != null) posto = Math.max(posto, 2);
+  // (else if de propósito: fechou já implica os anteriores pela cumulatividade)
+
+  // Piso em 0: TODO lead é um contato (contarFunil incrementa `contatos` sem
+  // condição). Sem o piso, um perdido que nunca avançou ficaria em -1 e sumiria
+  // da listagem de "Contatos", divergindo do número do card.
+  // Não muda contagem alguma: -1 e 0 falham igual nos testes `posto >= 1`.
+  return { etapaStatus, posto: Math.max(0, posto), perdido: etapaStatus === 'perdido' };
+}
+
+export function contarFunil(leads: LeadParaFunil[], stages: EtapaDeStage[]): ContagemFunil {
+  const mapa = construirMapaEtapas(stages);
 
   const c: ContagemFunil = { ...FUNIL_VAZIO };
   for (const lead of leads) {
     c.contatos++;
 
-    const label = normalizarEtiqueta(lead.status);
-    const daEtapa = (lead.funnelId ? porFunil.get(`${lead.funnelId}:${label}`) : undefined)
-      ?? porLabel.get(label)
-      ?? classificarEtapa(lead.status);
-
-    if (daEtapa === 'perdido') c.perdidos++;
-
-    let posto = postoDaEtapa(daEtapa); // perdido → -1: não sobe degrau por si só
-    if (lead.fechou) posto = Math.max(posto, 4);
-    else if (lead.compareceu) posto = Math.max(posto, 3);
-    else if (lead.agendou || lead.dataAgendada != null) posto = Math.max(posto, 2);
-    // (else if de propósito: fechou já implica os anteriores pela cumulatividade abaixo)
+    const { posto, perdido } = etapaDoLead(lead, mapa);
+    if (perdido) c.perdidos++;
 
     if (posto >= 1) c.qualificados++;
     if (posto >= 2) c.agendamentos++;
@@ -173,6 +207,24 @@ export function contarFunil(leads: LeadParaFunil[], stages: EtapaDeStage[]): Con
     }
   }
   return c;
+}
+
+/**
+ * O lead entra na listagem daquela etapa?
+ *
+ * `alcancou` (cumulativo) é o conjunto que o CARD conta — clicar em
+ * "Agendamentos: 19" e ver 19 linhas. `atual` é o subconjunto que ainda está
+ * parado ali (posto exatamente igual ao degrau), que é a lista de trabalho.
+ *
+ * `contato` no modo `atual` = quem não passou de contato. `perdido` ignora a
+ * escada nos dois modos: é contagem paralela, não degrau.
+ */
+export function leadNaEtapa(
+  p: PostoDoLead, etapa: EtapaFunil, modo: 'alcancou' | 'atual',
+): boolean {
+  if (etapa === 'perdido') return p.perdido;
+  const alvo = postoDaEtapa(etapa);
+  return modo === 'atual' ? p.posto === alvo : p.posto >= alvo;
 }
 
 export function somarFunis(funis: ContagemFunil[]): ContagemFunil {

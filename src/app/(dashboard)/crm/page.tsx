@@ -2104,10 +2104,14 @@ export default function CrmPage({ lockedClientId, embedded = false }: CrmPagePro
   const { clients } = useClients();
   const activeClients = useMemo(() => clients.filter(c => c.status === 'Ativo'), [clients]);
 
+  // Deep-link `?clientId=&lead=` — é como o modal do Funil de Performance (e
+  // qualquer outra tela) manda abrir a conversa de um lead específico. A URL
+  // vence o último cliente usado; sem param, nada muda.
   const [clientId, setClientId] = useState<string>(() => {
     if (lockedClientId) return lockedClientId;
     if (typeof window === 'undefined') return '';
-    return localStorage.getItem('crm:last-client') ?? '';
+    const doLink = new URLSearchParams(window.location.search).get('clientId');
+    return doLink || localStorage.getItem('crm:last-client') || '';
   });
   const [clientSearch, setClientSearch] = useState('');
   const [segmentChoice, setSegmentChoice] = useState('');
@@ -2147,12 +2151,18 @@ export default function CrmPage({ lockedClientId, embedded = false }: CrmPagePro
   const [menuId, setMenuId]         = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const dateMenuRef = useRef<HTMLDivElement>(null);
-  const [chatFocusLeadId, setChatFocusLeadId] = useState<string | null>(null);
+  const [chatFocusLeadId, setChatFocusLeadId] = useState<string | null>(() => {
+    if (typeof window === 'undefined') return null;
+    return new URLSearchParams(window.location.search).get('lead');
+  });
   // Kanban é SEMPRE a visão padrão ao entrar no CRM (pedido do Matheus) —
   // o toggle pra lista vale só durante a sessão, sem persistir.
   const [viewMode, setViewMode] = useState<'list' | 'kanban'>('kanban');
   const [crmView, setCrmView] = useState<CrmTab>(() => {
     if (typeof window === 'undefined') return 'leads';
+    // Chegou por deep-link de lead → abre direto na conversa, senão a aba
+    // salva venceria e o lead pedido não apareceria em lugar nenhum.
+    if (new URLSearchParams(window.location.search).get('lead')) return 'chat';
     const v = localStorage.getItem('crm:tab');
     return (v === 'leads' || v === 'capture' || v === 'chat' || v === 'followup' || v === 'attendance' || v === 'disparos') ? v : 'leads';
   });

@@ -75,8 +75,10 @@ import { BackButton } from '@/components/layout/back-button';
 import { MetaAdsMark, GoogleAdsMark } from '@/components/platform-logos';
 import {
   FUNIL_VAZIO, somarFunis, resolverTopoFunil, rotuloFonteTopo, normalizarFonteTopo,
-  type ContagemFunil,
+  ETAPAS_FUNIL,
+  type ContagemFunil, type EtapaFunil,
 } from '@/lib/funil-etapas';
+import { FunilLeadsModal } from '@/components/funil-leads-modal';
 
 type Period = 'yesterday' | 'last_7d' | 'last_14d' | 'last_30d' | 'this_month' | 'last_month' | 'custom';
 type ClientSheetsSummary = { leads: number; funil: ContagemFunil; total: number };
@@ -4485,11 +4487,13 @@ function IgMark({ className }: { className?: string }) {
 
 const FUNNEL_STEP_COLORS = ['#6cff2f', '#0ea5e9', '#7b2cff', '#f97316', '#ec4899', '#f59e0b', '#84cc16'];
 
-function SimpleFunnel({ steps, totalRate, fonteLabel }: {
+function SimpleFunnel({ steps, totalRate, fonteLabel, onStageClick }: {
   steps: Array<{ label: string; actual: number; planned: number; color: string }>;
   totalRate: string;
   /** De onde vem o topo ("fonte: CRM" / "estimado por anúncios" / mistas). */
   fonteLabel?: string;
+  /** Abre a lista de leads do degrau. Índice mapeia em ETAPAS_FUNIL (0=contato…4=fechamento). */
+  onStageClick?: (index: number) => void;
 }) {
   if (!steps.length) return null;
   const SVG_W = 1000;
@@ -4531,7 +4535,16 @@ function SimpleFunnel({ steps, totalRate, fonteLabel }: {
           const h1 = getFixedH(i, steps.length);
           const h2 = getFixedH(i + 1, steps.length);
           const d = `M ${x1} ${centerY - h1 / 2} L ${x2} ${centerY - h2 / 2} L ${x2} ${centerY + h2 / 2} L ${x1} ${centerY + h1 / 2} Z`;
-          return <path key={step.label} d={d} fill={`url(#fg${i})`} />;
+          const clicavel = !!onStageClick && !!ETAPAS_FUNIL[i];
+          return (
+            <path
+              key={step.label}
+              d={d}
+              fill={`url(#fg${i})`}
+              onClick={clicavel ? () => onStageClick!(i) : undefined}
+              className={clicavel ? 'cursor-pointer hover:opacity-80' : undefined}
+            />
+          );
         })}
       </svg>
 
@@ -4542,11 +4555,28 @@ function SimpleFunnel({ steps, totalRate, fonteLabel }: {
           const actualPct = i === 0 ? null : prev && prev.actual > 0 ? (step.actual / prev.actual) * 100 : 0;
           const plannedPct = i === 0 ? null : prev && prev.planned > 0 ? (step.planned / prev.planned) * 100 : 0;
           const isBottleneck = actualPct !== null && plannedPct !== null && actualPct < plannedPct * 0.85;
+          const clicavel = !!onStageClick && !!ETAPAS_FUNIL[i];
           return (
-            <div key={step.label} className="px-1 text-center">
+            <div
+              key={step.label}
+              onClick={clicavel ? () => onStageClick!(i) : undefined}
+              role={clicavel ? 'button' : undefined}
+              tabIndex={clicavel ? 0 : undefined}
+              onKeyDown={clicavel ? (e) => {
+                if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onStageClick!(i); }
+              } : undefined}
+              title={clicavel ? `Ver os leads de ${step.label.toLowerCase()}` : undefined}
+              className={cn(
+                'rounded-lg px-1 py-1 text-center',
+                clicavel && 'cursor-pointer transition-colors hover:bg-white/[0.06] focus:outline-none focus-visible:ring-1 focus-visible:ring-[#6cff2f]',
+              )}
+            >
               <div className="mx-auto mb-2 h-0.5 w-6 rounded-full" style={{ backgroundColor: step.color }} />
               <p className="truncate text-[9px] font-black uppercase tracking-wider text-[#9aa4aa]">{step.label}</p>
-              <p className="mt-1 font-heading text-lg leading-none text-[#f4f7f8]">{step.actual.toLocaleString('pt-BR')}</p>
+              <p className={cn(
+                'mt-1 font-heading text-lg leading-none text-[#f4f7f8]',
+                clicavel && 'underline decoration-white/20 decoration-dotted underline-offset-4',
+              )}>{step.actual.toLocaleString('pt-BR')}</p>
               {actualPct !== null && (
                 <div className="mt-1">
                   <span className={cn('text-[10px] font-black', isBottleneck ? 'text-red-400' : 'text-[#6cff2f]')}>
@@ -4955,6 +4985,8 @@ export default function GeneralDashboard() {
   const [balances, setBalances] = useState<AdAccountBalance[]>([]);
   const [clientLinks, setClientLinks] = useState<ClientAccountLink[]>([]);
   const [previewCreative, setPreviewCreative] = useState<TopCreative | null>(null);
+  /** Degrau do Funil de Performance aberto no modal de leads (índice em ETAPAS_FUNIL). */
+  const [funilStageIdx, setFunilStageIdx] = useState<number | null>(null);
   const [campaignSortBy, setCampaignSortBy] = useState<SortKey>('spend');
   const [sortBy, setSortBy] = useState<SortKey>('spend');
   const [metricsLoading, setMetricsLoading] = useState(false);
@@ -5893,10 +5925,15 @@ export default function GeneralDashboard() {
   // pedidos com funil de leads num agregado não faz sentido).
   const deliverySoloId = selectedIds.size === 1 && deliveryFlags[[...selectedIds][0]]
     ? [...selectedIds][0] : null;
-  const deliveryRange = (() => {
+  // Período em ISO — usado pelo resumo de delivery E pelo modal de leads do
+  // funil. ⚠️ O modal PRECISA usar exatamente esta janela: é a mesma que
+  // alimenta /api/crm/summary (o número do card), então divergir aqui faria a
+  // lista abrir com um total diferente do que foi clicado.
+  const periodoISO = (() => {
     const { from, to } = periodToDateRange(period, customDateFrom, customDateTo);
     return { from: from.toISOString().split('T')[0], to: to.toISOString().split('T')[0] };
   })();
+  const deliveryRange = periodoISO;
   // Taxa do FUNIL = fechamentos sobre o topo DELE. A `conversionRate` global usa
   // `funnelVisitors` (impressões + cliques), o que dava "0,13%" ao lado de um
   // funil que começa em contatos — dois números sem relação na mesma caixa.
@@ -6055,7 +6092,7 @@ export default function GeneralDashboard() {
               {deliverySoloId ? (
                 <DeliveryResumoCard clientId={deliverySoloId} from={deliveryRange.from} to={deliveryRange.to} />
               ) : (
-                <SimpleFunnel steps={funnelStepsNew} totalRate={funnelTaxa > 0 ? premiumValue(funnelTaxa, 'percent') : '—'} fonteLabel={fonteTopoLabel} />
+                <SimpleFunnel steps={funnelStepsNew} totalRate={funnelTaxa > 0 ? premiumValue(funnelTaxa, 'percent') : '—'} fonteLabel={fonteTopoLabel} onStageClick={setFunilStageIdx} />
               )}
               <ChannelSummaryTable rows={channelRows} />
             </div>
@@ -6201,6 +6238,21 @@ export default function GeneralDashboard() {
       </div>
 
       <CreativePreviewOverlay creative={previewCreative} onClose={() => setPreviewCreative(null)} />
+
+      {funilStageIdx !== null && ETAPAS_FUNIL[funilStageIdx] && (
+        <FunilLeadsModal
+          etapa={ETAPAS_FUNIL[funilStageIdx] as EtapaFunil}
+          tituloEtapa={funnelStepsNew[funilStageIdx]?.label ?? ''}
+          totalNoCard={funnelStepsNew[funilStageIdx]?.actual ?? 0}
+          clientIds={[...selectedIds]}
+          from={periodoISO.from}
+          to={periodoISO.to}
+          // Sem NENHUM cliente com topo vindo do CRM, o número de contatos é
+          // estimativa de anúncio — não existe lista de leads por trás dele.
+          topoDeAnuncios={fontesTopo.length > 0 && !fontesTopo.includes('crm')}
+          onClose={() => setFunilStageIdx(null)}
+        />
+      )}
     </div>
   );
 
