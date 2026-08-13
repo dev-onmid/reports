@@ -39,7 +39,7 @@ import {
   LayoutDashboard, LayoutTemplate, Play, RefreshCw, Search, Sparkles, Check, X,
   Pause, CircleDot, Pencil, Settings2, Users, Copy,
   Bell, DollarSign, Tag, TrendingUp, Calendar, BarChart3, Zap, Target, Briefcase,
-  Wallet, MousePointerClick, CreditCard, PiggyBank, Clock, Info, Lightbulb, UserPlus, CheckCircle2,
+  Wallet, MousePointerClick, CreditCard, PiggyBank, Clock, Info, Lightbulb, UserPlus, CheckCircle2, Receipt,
   Eye, Heart, Monitor, ExternalLink, Bookmark, MessageCircle,
 } from 'lucide-react';
 import { getAuthSession } from '@/lib/auth-store';
@@ -83,7 +83,11 @@ import { normalizarSegmento, perfilDaSelecao } from '@/lib/dashboard-segmento';
 import {
   ResultadoNegocioFood, DecomposicaoReceitaCard, FunilUnificadoFood,
   ClientesRetencaoFood, MixProdutosFood, CampanhasWhatsappFood, useDadosFood,
+  conversaoDoCatalogo,
 } from '@/components/dashboard-food';
+import {
+  formatarMetrica, custoPorPedido, roas as roasFood, cac as cacFood,
+} from '@/lib/metricas-food';
 
 type Period = 'yesterday' | 'last_7d' | 'last_14d' | 'last_30d' | 'this_month' | 'last_month' | 'custom';
 type ClientSheetsSummary = { leads: number; funil: ContagemFunil; total: number };
@@ -5959,6 +5963,19 @@ export default function GeneralDashboard() {
     metaClicks + googleClicks,
     totalSpend,
   );
+
+  // Faixa de KPIs no VOCABULÁRIO do food (seção 6: "o que sai ou vira
+  // condicional"). Agendamentos some (não existe em delivery), CPL vira custo
+  // por pedido, conversão geral vira conversão do catálogo. Sem esta troca a
+  // tela fica híbrida: badge de food com métricas de lead-gen embaixo.
+  const quickMetricsFood = dadosFood ? [
+    { title: 'Investimento Total', value: premiumValue(totalSpend, 'currency'), change: pctChange(totalSpend, prevTotalSpend), icon: CreditCard },
+    { title: 'Custo por pedido', value: formatarMetrica(custoPorPedido(totalSpend, dadosFood.resultado.pedidos), 'moeda'), change: null, icon: Tag, inverseChange: true },
+    { title: 'ROAS', value: formatarMetrica(roasFood(dadosFood.resultado.faturamento, totalSpend), 'multiplicador'), change: null, icon: TrendingUp },
+    { title: 'CAC', value: formatarMetrica(cacFood(totalSpend, dadosFood.baldes.novo ?? 0), 'moeda'), change: null, icon: Users, inverseChange: true },
+    { title: 'Conversão do catálogo', value: formatarMetrica(conversaoDoCatalogo(dadosFood.funil), 'percentual'), change: null, icon: Target },
+    { title: 'Ticket médio', value: formatarMetrica(dadosFood.resultado.ticketMedio || null, 'moeda'), change: dadosFood.resultado.varTicket, icon: Receipt },
+  ] : [];
   // Taxa do FUNIL = fechamentos sobre o topo DELE. A `conversionRate` global usa
   // `funnelVisitors` (impressões + cliques), o que dava "0,13%" ao lado de um
   // funil que começa em contatos — dois números sem relação na mesma caixa.
@@ -6084,13 +6101,20 @@ export default function GeneralDashboard() {
               </div>
             )}
 
-            <div className="grid gap-4 xl:grid-cols-2">
-              <GoalProgressCard title="Faturamento" icon={DollarSign} target={plannedRevenue} partial={effectiveRevenueGoal} value={revenue} format="currency" />
-              <GoalProgressCard title="Leads" icon={Users} target={leadsGoal} partial={effectiveLeadsGoal} value={totalLeads} />
-            </div>
+            {/* Bloco 2 da seção 6: em food, "Faturamento/Leads" dá lugar a
+                Faturamento · Pedidos · Ticket médio. Lead nem existe como
+                conceito em delivery — o evento de sucesso é o pedido pago. */}
+            {modoFood && dadosFood ? (
+              <ResultadoNegocioFood dados={dadosFood.resultado} />
+            ) : (
+              <div className="grid gap-4 xl:grid-cols-2">
+                <GoalProgressCard title="Faturamento" icon={DollarSign} target={plannedRevenue} partial={effectiveRevenueGoal} value={revenue} format="currency" />
+                <GoalProgressCard title="Leads" icon={Users} target={leadsGoal} partial={effectiveLeadsGoal} value={totalLeads} />
+              </div>
+            )}
 
             <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
-              {quickMetrics.map((metric) => <QuickMetricCard key={metric.title} {...metric} />)}
+              {(modoFood && dadosFood ? quickMetricsFood : quickMetrics).map((metric) => <QuickMetricCard key={metric.title} {...metric} />)}
             </div>
 
             <PremiumPanel className="p-4">
@@ -6102,8 +6126,12 @@ export default function GeneralDashboard() {
                     <MiniPlatformMetric label="Saldo Meta Ads" value={metaBalance > 0 ? premiumValue(metaBalance, 'currency') : '—'} logo={<MetaAdsMark className="h-4 w-4 text-[#168BFF]" />} sub="Saldo disponível" />
                     <MiniPlatformMetric label="Alcance" value={metaReach > 0 ? premiumValue(metaReach) : '—'} icon={Users} change={pct(metaReach, prevMetaReach)} />
                     <MiniPlatformMetric label="CTR" value={metaCtr > 0 ? premiumValue(metaCtr, 'percent') : '—'} icon={MousePointerClick} change={pct(metaCtr, prevMetaCtr)} />
-                    <MiniPlatformMetric label="Leads" value={premiumValue(metaLeads)} icon={UserPlus} change={pct(metaLeads, prevMetaLeads)} />
-                    <MiniPlatformMetric label="CPL" value={avgCpl > 0 ? premiumValue(avgCpl, 'currency') : '—'} icon={Tag} change={avgCpl > 0 && prevAvgCpl > 0 ? pct(avgCpl, prevAvgCpl) : null} inverseChange />
+                    {/* Em food o Meta ainda reporta "resultado" (conversa/lead do
+                        anúncio), não pedido pago — atribuir pedido por plataforma
+                        exige a UTM do catálogo, que ainda não temos. Então o rótulo
+                        vira "Resultados", que é a verdade, em vez de "Pedidos". */}
+                    <MiniPlatformMetric label={modoFood ? 'Resultados' : 'Leads'} value={premiumValue(metaLeads)} icon={UserPlus} change={pct(metaLeads, prevMetaLeads)} />
+                    <MiniPlatformMetric label={modoFood ? 'Custo por resultado' : 'CPL'} value={avgCpl > 0 ? premiumValue(avgCpl, 'currency') : '—'} icon={Tag} change={avgCpl > 0 && prevAvgCpl > 0 ? pct(avgCpl, prevAvgCpl) : null} inverseChange />
                   </div>
                 </div>
                 <div className="rounded-[12px] border border-white/[0.08] bg-[#071014] p-3">
@@ -6124,7 +6152,6 @@ export default function GeneralDashboard() {
                 pela cadeia mídia → catálogo → pedido → receita. */}
             {modoFood && dadosFood ? (
               <>
-                <ResultadoNegocioFood dados={dadosFood.resultado} />
                 <div className="grid gap-4 xl:grid-cols-2">
                   <DecomposicaoReceitaCard valores={dadosFood.decomposicao} />
                   <ClientesRetencaoFood
