@@ -89,7 +89,9 @@ export const mockPermissions: Record<string, Permission> = {
 
 export type ClientStatus = 'Ativo' | 'Alerta' | 'Arquivado' | 'Inativo';
 
-export type DashboardType = 'leads' | 'branding' | 'conversao';
+// 'food' = restaurante/delivery. Troca o perfil do dashboard (KPIs, rótulos e
+// blocos) via src/lib/dashboard-segmento.ts — não é uma tela nova.
+export type DashboardType = 'leads' | 'branding' | 'conversao' | 'food';
 
 export type Client = {
   id: string;

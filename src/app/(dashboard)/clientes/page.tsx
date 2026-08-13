@@ -637,6 +637,7 @@ export default function ClientesPage() {
                             <option value="leads">Leads</option>
                             <option value="branding">Branding</option>
                             <option value="conversao">Conversão</option>
+                            <option value="food">Food / Delivery</option>
                           </select>
                         ) : (
                           <button
@@ -1072,6 +1073,7 @@ export default function ClientesPage() {
                 <option value="leads">Leads</option>
                 <option value="branding">Branding</option>
                 <option value="conversao">Conversão</option>
+                <option value="food">Food / Delivery</option>
               </select>
               <button
                 onClick={bulkSetDashType}

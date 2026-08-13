@@ -5124,6 +5124,7 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
             <option value="leads">Leads</option>
             <option value="branding">Branding</option>
             <option value="conversao">Conversão</option>
+                <option value="food">Food / Delivery</option>
           </select>
         </div>
         <div className="flex items-center gap-2">

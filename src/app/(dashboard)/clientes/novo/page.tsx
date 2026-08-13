@@ -321,6 +321,7 @@ function NovoClienteWizard() {
               <option value="leads">Leads</option>
               <option value="branding">Branding</option>
               <option value="conversao">Conversão</option>
+                <option value="food">Food / Delivery</option>
             </select>
           </div>
           <div className="space-y-1.5">
