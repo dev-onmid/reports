@@ -1,0 +1,22 @@
+# Fora da imagem: peso morto e, principalmente, SEGREDO.
+#
+# ⚠️ `.env*` está aqui de propósito. As credenciais entram como variáveis do
+# Coolify/VPS na hora de rodar — nunca assadas dentro da imagem, que pode ser
+# copiada, enviada para um registro ou inspecionada camada a camada.
+
+.env
+.env.*
+!.env.example
+
+node_modules
+.next
+.git
+.github
+.vercel
+
+scratchpad
+docs
+*.md
+
+npm-debug.log*
+.DS_Store
