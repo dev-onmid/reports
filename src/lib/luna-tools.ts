@@ -13,6 +13,7 @@ import { countMetaResults } from '@/lib/meta-results';
 import { ensureOptimizerClientConfigTable } from '@/lib/optimizer';
 import { executeOptimizerAction } from '@/lib/optimizer-execucao';
 import { dispararEventosPorStatus } from '@/lib/conversions';
+import { sanitizeGoogleKeywords, parsePartialFailure, type PartialFailureResult } from '@/lib/google-campaign-utils';
 import type { OptimizerAcaoTipo, OptimizerObjetoTipo } from '@/lib/optimizer';
 
 // ─── Agendamento (luna_tasks) ────────────────────────────────────────────────
@@ -243,6 +244,32 @@ async function lunaGoogleMutate(
   return { resourceNames: names };
 }
 
+// Mutate com partialFailure:true — operação válida ENTRA e a inválida volta com o erro
+// individual (índice + mensagem real do Google). Sem isso o mutate é ATÔMICO: uma única
+// keyword recusada (duplicada, >80 chars, política) derrubava o lote inteiro e a campanha
+// nascia sem NENHUMA palavra-chave.
+async function lunaGoogleMutatePartial(
+  customerId: string, token: string, login: string | null,
+  resource: string, operations: Record<string, unknown>[],
+): Promise<PartialFailureResult | { error: string }> {
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${token}`, 'developer-token': GOOGLE_DEV_TOKEN, 'Content-Type': 'application/json',
+  };
+  if (login) headers['login-customer-id'] = login;
+  const r = await fetch(`https://googleads.googleapis.com/v24/customers/${customerId}/${resource}:mutate`, {
+    method: 'POST', headers, body: JSON.stringify({ operations, partialFailure: true }),
+  }).catch(() => null);
+  if (!r) return { error: 'sem resposta da Google Ads API' };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const body = await r.json().catch(() => ({})) as any;
+  if (!r.ok) {
+    const msg = body?.error?.details?.[0]?.errors?.[0]?.message
+      ?? body?.error?.message ?? `HTTP ${r.status}`;
+    return { error: String(msg) };
+  }
+  return parsePartialFailure(body, operations.length);
+}
+
 export const DEFAULT_INSTRUCTIONS = `Você é Luna, assistente inteligente da Onmid Marketing.`;
 
 // --- DB helpers ---
@@ -329,6 +356,21 @@ export const systemTools: Anthropic.Tool[] = [
       properties: {
         client_id: { type: 'string', description: 'ID do cliente' },
         period: { type: 'string', description: 'Período: this_month, last_7d, last_30d, last_month, custom (padrão: this_month). Use custom com date_from/date_to para qualquer intervalo de datas.' },
+        date_from: { type: 'string', description: 'Data inicial YYYY-MM-DD (obrigatória se period=custom)' },
+        date_to: { type: 'string', description: 'Data final YYYY-MM-DD (obrigatória se period=custom)' },
+      },
+      required: ['client_id'],
+    },
+  },
+  {
+    name: 'get_google_structure',
+    description: 'Estrutura detalhada do GOOGLE ADS de um cliente (irmã do get_meta_structure): GRUPOS DE ANÚNCIOS e PALAVRAS-CHAVE de cada campanha, com status, correspondência, métricas do período (gasto/cliques/conversões) e as negativas da campanha. Use para conferir campanha recém-criada, achar keyword cara ou sem tráfego, ou responder "quais palavras-chave estão ativas". Inclui grupos/keywords pausados e sem tráfego (a listagem é estrutural, não depende de gasto).',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        client_id: { type: 'string', description: 'ID do cliente' },
+        campaign_id: { type: 'string', description: 'Opcional: ID numérico de UMA campanha para detalhar só ela (recomendado quando a conta tem muitas)' },
+        period: { type: 'string', description: 'Período das métricas: this_month, last_7d, last_30d, last_month, custom (padrão: this_month)' },
         date_from: { type: 'string', description: 'Data inicial YYYY-MM-DD (obrigatória se period=custom)' },
         date_to: { type: 'string', description: 'Data final YYYY-MM-DD (obrigatória se period=custom)' },
       },
@@ -643,12 +685,12 @@ A ferramenta busca automaticamente os IDs de cidades e interesses na API Meta, v
   },
   {
     name: 'create_google_campaign',
-    description: `Cria uma campanha COMPLETA de Pesquisa (Search) no Google Ads: orçamento + campanha + grupo de anúncios + palavras-chave + anúncio responsivo (RSA) + extensões (sitelinks, frases de destaque, snippets).
-A campanha nasce PAUSADA — o gestor revisa no painel e ativa. Lances: Maximizar cliques (sem histórico de conversão ainda).
+    description: `Cria uma campanha COMPLETA de Pesquisa (Search) no Google Ads: orçamento + campanha + grupo(s) de anúncios + palavras-chave (com negativas) + anúncio responsivo (RSA) por grupo + extensões (sitelinks, frases de destaque, snippets).
+A campanha nasce PAUSADA — o gestor revisa no painel e ativa.
 IMPORTANTE — capriche pra o anúncio nascer forte (Google prioriza anúncios completos):
-- keywords: 8-15, focadas na intenção de busca do segmento.
-- headlines: gere de 10 a 15 títulos (máx 30 caracteres CADA) — quanto mais, melhor o desempenho.
-- descriptions: gere 4 descrições (máx 90 caracteres cada).
+- ad_groups: prefira 2-4 grupos TEMÁTICOS (cada tema de busca com suas keywords + copy própria) em vez de um grupo único genérico. Cada grupo: 5-15 keywords, 10-15 títulos (máx 30 caracteres CADA), 4 descrições (máx 90 cada).
+- negative_keywords: SEMPRE gere 5-15 negativas do segmento (ex: "grátis", "curso", "vaga", "emprego", "como fazer") — evitam desperdício desde o 1º dia.
+- bidding: 'maximize_clicks' (padrão, conta sem histórico de conversão), 'maximize_conversions' (conta COM acompanhamento de conversões ativo) ou 'target_cpa' (com CPA-alvo em target_cpa). Lance por conversão sem conversão configurada na conta NÃO otimiza — se não souber se a conta tem, use maximize_clicks.
 - cities: SEMPRE defina a localização real do cliente. NUNCA deixe vazio (vazio = Brasil inteiro, quase sempre errado). Se não souber a cidade, PERGUNTE ao usuário antes de criar.
 - sitelinks (4-6), callouts (4-6) e snippets deixam o anúncio muito mais completo — sempre gere.
 Sempre descreva a estrutura ao usuário e espere confirmação antes de criar.`,
@@ -658,10 +700,28 @@ Sempre descreva a estrutura ao usuário e espere confirmação antes de criar.`,
         client_id: { type: 'string', description: 'ID do cliente' },
         name: { type: 'string', description: 'Nome da campanha (ex: [ON] Londrigifts - Agro - Pesquisa - Jul/26)' },
         daily_budget: { type: 'number', description: 'Orçamento diário em reais (ex: 30.00)' },
-        keywords: { type: 'array', items: { type: 'string' }, description: 'Palavras-chave de pesquisa (8-15). NÃO use aspas/colchetes — o tipo de correspondência é o campo match_type.' },
+        bidding: { type: 'string', enum: ['maximize_clicks', 'maximize_conversions', 'target_cpa'], description: 'Estratégia de lances (padrão: maximize_clicks). maximize_conversions/target_cpa só se a conta tem acompanhamento de conversões ativo.' },
+        target_cpa: { type: 'number', description: 'CPA-alvo em reais (só com bidding=target_cpa, ex: 25.00)' },
+        ad_groups: {
+          type: 'array',
+          description: 'Grupos de anúncios temáticos (2-4 recomendado). Quando presente, IGNORA keywords/headlines/descriptions do nível de cima.',
+          items: {
+            type: 'object',
+            properties: {
+              name: { type: 'string', description: 'Nome do grupo (ex: "Implantes")' },
+              keywords: { type: 'array', items: { type: 'string' }, description: '5-15 keywords do tema. SEM aspas/colchetes.' },
+              headlines: { type: 'array', items: { type: 'string' }, description: '10-15 títulos, ATÉ 30 caracteres cada, falando do tema do grupo' },
+              descriptions: { type: 'array', items: { type: 'string' }, description: '4 descrições, ATÉ 90 caracteres cada' },
+              final_url: { type: 'string', description: 'URL específica do tema (opcional — padrão: final_url da campanha)' },
+            },
+            required: ['name', 'keywords', 'headlines', 'descriptions'],
+          },
+        },
+        keywords: { type: 'array', items: { type: 'string' }, description: 'Palavras-chave (8-15) quando NÃO usar ad_groups. NÃO use aspas/colchetes — o tipo de correspondência é o campo match_type.' },
+        negative_keywords: { type: 'array', items: { type: 'string' }, description: 'Palavras-chave NEGATIVAS da campanha (5-15): termos que NÃO devem acionar o anúncio (ex: grátis, curso, emprego). Sempre gere.' },
         match_type: { type: 'string', enum: ['broad', 'phrase', 'exact'], description: 'Correspondência das palavras-chave (padrão: phrase)' },
-        headlines: { type: 'array', items: { type: 'string' }, description: 'Títulos do anúncio RSA: 10-15 títulos, ATÉ 30 CARACTERES cada' },
-        descriptions: { type: 'array', items: { type: 'string' }, description: 'Descrições do RSA: 4 descrições, ATÉ 90 CARACTERES cada' },
+        headlines: { type: 'array', items: { type: 'string' }, description: 'Títulos do RSA (10-15, ATÉ 30 caracteres cada) quando NÃO usar ad_groups' },
+        descriptions: { type: 'array', items: { type: 'string' }, description: 'Descrições do RSA (4, ATÉ 90 caracteres cada) quando NÃO usar ad_groups' },
         final_url: { type: 'string', description: 'URL de destino do anúncio (site/LP do cliente)' },
         cities: { type: 'array', items: { type: 'string' }, description: 'OBRIGATÓRIO na prática: cidades alvo por nome (ex: ["Florianópolis"]). Vazio = Brasil inteiro (evite). Se não souber, pergunte ao usuário.' },
         sitelinks: {
@@ -682,7 +742,7 @@ Sempre descreva a estrutura ao usuário e espere confirmação antes de criar.`,
         snippet_header: { type: 'string', description: 'Cabeçalho do snippet estruturado (ex: "Serviços", "Tipos"). Um dos valores válidos do Google.' },
         snippet_values: { type: 'array', items: { type: 'string' }, description: 'Valores do snippet (mínimo 3), até 25 caracteres cada (ex: ["Implantes", "Ortodontia", "Clareamento"])' },
       },
-      required: ['client_id', 'name', 'daily_budget', 'keywords', 'headlines', 'descriptions', 'final_url'],
+      required: ['client_id', 'name', 'daily_budget', 'final_url'],
     },
   },
   {
@@ -1353,6 +1413,123 @@ export async function execSystemTool(
           : 'Nenhuma campanha Google com gasto nesse período.';
       }
       return JSON.stringify(campaigns.slice(0, 30));
+    }
+
+    if (name === 'get_google_structure') {
+      const clientId = input.client_id as string;
+      const period = (input.period as string) || 'this_month';
+      const gaqlPeriod = resolveGaqlPeriod(period, (input.date_from as string) ?? '', (input.date_to as string) ?? '');
+      const campFilter = String(input.campaign_id ?? '').replace(/\D/g, '');
+      const campCond = campFilter ? ` AND campaign.id = ${campFilter}` : '';
+
+      const { rows: links } = await pool.query(
+        "SELECT account_id FROM public.client_account_links WHERE client_id = $1 AND platform IN ('google_ads','google')",
+        [clientId]
+      );
+      if (links.length === 0) return 'Nenhuma conta Google Ads vinculada a esse cliente.';
+      const accountIds = [...new Set(links.map((l) => l.account_id.replace(/\D/g, '')).filter(Boolean))];
+
+      type KwOut = { texto: string; match: string; status: string; gasto: number; cliques: number; conversoes: number };
+      type GrupoOut = { id: string; nome: string; status: string; gasto: number; cliques: number; conversoes: number; keywords: KwOut[] };
+      type CampOut = { id: string; nome: string; status: string; negativas: Array<{ texto: string; match: string }>; grupos: GrupoOut[] };
+      const contas: Array<{ accountId: string; campanhas: CampOut[] }> = [];
+      const failures: string[] = [];
+
+      await Promise.allSettled(accountIds.map(async (accountId) => {
+        // 1) Estrutura de grupos SEM filtro de data — campanha recém-criada (pausada,
+        // zero tráfego) tem que aparecer; query com segments.date omitiria essas linhas.
+        const estrutura = await lunaGoogleSearch(accountId,
+          `SELECT campaign.id, campaign.name, campaign.status, ad_group.id, ad_group.name, ad_group.status
+             FROM ad_group
+            WHERE campaign.status IN ('ENABLED', 'PAUSED') AND ad_group.status IN ('ENABLED', 'PAUSED')${campCond}
+            ORDER BY campaign.id LIMIT 200`);
+        if (!estrutura) { failures.push(accountId); return; }
+
+        const campanhas = new Map<string, CampOut>();
+        const grupos = new Map<string, GrupoOut>();
+        for (const row of estrutura.results) {
+          const campId = String(row.campaign?.id ?? '');
+          const agId = String(row.adGroup?.id ?? '');
+          if (!campId || !agId) continue;
+          if (!campanhas.has(campId)) {
+            campanhas.set(campId, { id: campId, nome: String(row.campaign?.name ?? ''), status: String(row.campaign?.status ?? ''), negativas: [], grupos: [] });
+          }
+          const grupo: GrupoOut = { id: agId, nome: String(row.adGroup?.name ?? ''), status: String(row.adGroup?.status ?? ''), gasto: 0, cliques: 0, conversoes: 0, keywords: [] };
+          grupos.set(agId, grupo);
+          campanhas.get(campId)!.grupos.push(grupo);
+        }
+        if (campanhas.size === 0) { contas.push({ accountId, campanhas: [] }); return; }
+
+        // 2) Keywords (estrutural — inclui pausada e sem tráfego)
+        const kws = await lunaGoogleSearch(accountId,
+          `SELECT ad_group.id, ad_group_criterion.criterion_id, ad_group_criterion.keyword.text,
+                  ad_group_criterion.keyword.match_type, ad_group_criterion.status, ad_group_criterion.negative
+             FROM ad_group_criterion
+            WHERE ad_group_criterion.type = 'KEYWORD' AND ad_group_criterion.status IN ('ENABLED', 'PAUSED')
+              AND campaign.status IN ('ENABLED', 'PAUSED')${campCond}
+            LIMIT 800`);
+        const kwPorChave = new Map<string, KwOut>();
+        for (const row of kws?.results ?? []) {
+          const agId = String(row.adGroup?.id ?? '');
+          const crit = row.adGroupCriterion ?? {};
+          const grupo = grupos.get(agId);
+          if (!grupo || crit.negative === true) continue; // negativa de grupo fica fora da lista principal
+          const kw: KwOut = {
+            texto: String(crit.keyword?.text ?? ''), match: String(crit.keyword?.matchType ?? ''),
+            status: String(crit.status ?? ''), gasto: 0, cliques: 0, conversoes: 0,
+          };
+          grupo.keywords.push(kw);
+          kwPorChave.set(`${agId}:${String(crit.criterionId ?? '')}`, kw);
+        }
+
+        // 3) Negativas de campanha
+        const negs = await lunaGoogleSearch(accountId,
+          `SELECT campaign.id, campaign_criterion.keyword.text, campaign_criterion.keyword.match_type
+             FROM campaign_criterion
+            WHERE campaign_criterion.type = 'KEYWORD' AND campaign_criterion.negative = TRUE
+              AND campaign.status IN ('ENABLED', 'PAUSED')${campCond}
+            LIMIT 300`);
+        for (const row of negs?.results ?? []) {
+          const camp = campanhas.get(String(row.campaign?.id ?? ''));
+          const kwd = row.campaignCriterion?.keyword;
+          if (camp && kwd?.text) camp.negativas.push({ texto: String(kwd.text), match: String(kwd.matchType ?? '') });
+        }
+
+        // 4-5) Métricas do período (grupo + keyword) — best-effort; sem tráfego fica em 0
+        const mGrupos = await lunaGoogleSearch(accountId,
+          `SELECT ad_group.id, metrics.cost_micros, metrics.clicks, metrics.conversions
+             FROM ad_group WHERE ${gaqlPeriod}${campCond} LIMIT 400`);
+        for (const row of mGrupos?.results ?? []) {
+          const grupo = grupos.get(String(row.adGroup?.id ?? ''));
+          if (!grupo) continue;
+          grupo.gasto += Number(row.metrics?.costMicros ?? 0) / 1_000_000;
+          grupo.cliques += Number(row.metrics?.clicks ?? 0);
+          grupo.conversoes += Number(row.metrics?.conversions ?? 0);
+        }
+        const mKws = await lunaGoogleSearch(accountId,
+          `SELECT ad_group.id, ad_group_criterion.criterion_id, metrics.cost_micros, metrics.clicks, metrics.conversions
+             FROM keyword_view WHERE ${gaqlPeriod}${campCond} LIMIT 800`);
+        for (const row of mKws?.results ?? []) {
+          const kw = kwPorChave.get(`${String(row.adGroup?.id ?? '')}:${String(row.adGroupCriterion?.criterionId ?? '')}`);
+          if (!kw) continue;
+          kw.gasto += Number(row.metrics?.costMicros ?? 0) / 1_000_000;
+          kw.cliques += Number(row.metrics?.clicks ?? 0);
+          kw.conversoes += Number(row.metrics?.conversions ?? 0);
+        }
+
+        contas.push({ accountId, campanhas: [...campanhas.values()] });
+      }));
+
+      if (contas.length === 0) {
+        return failures.length > 0
+          ? `Não consegui acessar a(s) conta(s) Google ${failures.join(', ')} (token/permissão MCC). Verifique a conexão Google em Integrações.`
+          : 'Nenhuma conta Google acessível para esse cliente.';
+      }
+      const totalCampanhas = contas.reduce((s, c) => s + c.campanhas.length, 0);
+      if (totalCampanhas === 0) return campFilter
+        ? `Nenhuma campanha ${campFilter} encontrada (ativa ou pausada) nessa conta.`
+        : 'Nenhuma campanha ativa ou pausada nessa conta Google.';
+      return JSON.stringify({ periodo: period, contas, avisos: failures.length ? [`Conta(s) inacessível(is): ${failures.join(', ')}`] : [] });
     }
 
     if (name === 'get_monthly_history') {
@@ -2585,24 +2762,59 @@ export async function execSystemTool(
       const clientId = input.client_id as string;
       const nome = String(input.name ?? '').trim();
       const budget = Number(input.daily_budget);
-      const finalUrl = String(input.final_url ?? '').trim();
-      if (!nome || !budget || budget <= 0 || !finalUrl) return 'Informe name, daily_budget e final_url.';
-
-      // Valida a copy do RSA ANTES de criar qualquer coisa (limites reais do Google).
-      const headlines = (Array.isArray(input.headlines) ? input.headlines : [])
-        .map((h: unknown) => String(h).trim()).filter(Boolean).map((h: string) => h.slice(0, 30)).slice(0, 15);
-      const descriptions = (Array.isArray(input.descriptions) ? input.descriptions : [])
-        .map((d: unknown) => String(d).trim()).filter(Boolean).map((d: string) => d.slice(0, 90)).slice(0, 4);
-      // O texto da keyword na API NÃO aceita aspas/colchetes/til — esses caracteres são a
-      // notação do PAINEL pra indicar frase/exata (["kw"] / "kw"), mas a API usa o campo
-      // matchType separado. Sem essa limpeza a Google Ads API recusa por KEYWORD_HAS_INVALID_CHARS
-      // e a Luna (sem o motivo real) tende a inventar uma explicação ("restrição de política").
-      const keywords = (Array.isArray(input.keywords) ? input.keywords : [])
-        .map((k: unknown) => String(k).replace(/["[\]~]/g, '').trim()).filter(Boolean).slice(0, 20);
-      if (headlines.length < 3) return 'O anúncio RSA exige no mínimo 3 títulos (até 30 caracteres cada). Gere os títulos e chame de novo.';
-      if (descriptions.length < 2) return 'O anúncio RSA exige no mínimo 2 descrições (até 90 caracteres cada). Gere as descrições e chame de novo.';
-      if (keywords.length === 0) return 'Informe as palavras-chave da campanha de Pesquisa.';
+      const finalUrlPadrao = String(input.final_url ?? '').trim();
+      if (!nome || !budget || budget <= 0 || !finalUrlPadrao) return 'Informe name, daily_budget e final_url.';
       const matchType = ({ broad: 'BROAD', phrase: 'PHRASE', exact: 'EXACT' } as Record<string, string>)[String(input.match_type ?? 'phrase')] ?? 'PHRASE';
+
+      // Grupos: ad_groups (temáticos) ou os campos flat de sempre como grupo único.
+      // TUDO validado ANTES de criar qualquer coisa (limites reais do Google) — a
+      // sanitização de keyword (aspas/colchetes, 80 chars, 10 palavras, duplicata)
+      // acontece aqui porque qualquer uma dessas recusas, no mutate atômico antigo,
+      // derrubava o lote INTEIRO e a campanha nascia sem nenhuma palavra-chave.
+      type GrupoPlano = {
+        nome: string; keywords: string[]; descartadas: { kw: string; motivo: string }[];
+        headlines: string[]; descriptions: string[]; finalUrl: string;
+      };
+      const gruposIn: Record<string, unknown>[] = Array.isArray(input.ad_groups) && input.ad_groups.length > 0
+        ? (input.ad_groups as Record<string, unknown>[])
+        : [{ name: `Grupo 1 — ${nome}`, keywords: input.keywords, headlines: input.headlines, descriptions: input.descriptions }];
+      const grupos: GrupoPlano[] = [];
+      for (let i = 0; i < Math.min(gruposIn.length, 10); i++) {
+        const g = gruposIn[i] ?? {};
+        const gNome = String(g.name ?? '').trim() || `Grupo ${i + 1}`;
+        const heads = (Array.isArray(g.headlines) ? g.headlines : [])
+          .map((h: unknown) => String(h).trim()).filter(Boolean).map((h: string) => h.slice(0, 30)).slice(0, 15);
+        const descs = (Array.isArray(g.descriptions) ? g.descriptions : [])
+          .map((d: unknown) => String(d).trim()).filter(Boolean).map((d: string) => d.slice(0, 90)).slice(0, 4);
+        const { validas, descartadas } = sanitizeGoogleKeywords(g.keywords);
+        if (heads.length < 3) return `O grupo "${gNome}" precisa de no mínimo 3 títulos (até 30 caracteres cada). Gere os títulos e chame de novo.`;
+        if (descs.length < 2) return `O grupo "${gNome}" precisa de no mínimo 2 descrições (até 90 caracteres cada). Gere as descrições e chame de novo.`;
+        if (validas.length === 0) return `O grupo "${gNome}" ficou sem palavra-chave válida. Informe as palavras-chave (sem aspas/colchetes, até 80 caracteres e 10 palavras cada).`;
+        grupos.push({
+          nome: gNome, keywords: validas, descartadas, headlines: heads, descriptions: descs,
+          finalUrl: String(g.final_url ?? '').trim() || finalUrlPadrao,
+        });
+      }
+
+      // Negativas (nível campanha) — best-effort, nunca derrubam a criação.
+      const negativas = sanitizeGoogleKeywords(input.negative_keywords, 50).validas;
+
+      // Estratégia de lances. Conversão sem tracking ativo na conta não otimiza — o
+      // relatório avisa em vez de bloquear (o gestor revisa antes de ativar mesmo).
+      const biddingKey = String(input.bidding ?? 'maximize_clicks');
+      const targetCpa = Number(input.target_cpa ?? 0);
+      let biddingFields: Record<string, unknown> = { targetSpend: {} };
+      let biddingLabel = 'Maximizar cliques';
+      let biddingWarn = '';
+      if (biddingKey === 'target_cpa' && targetCpa > 0) {
+        biddingFields = { maximizeConversions: { targetCpaMicros: String(Math.round(targetCpa * 1_000_000)) } };
+        biddingLabel = `Maximizar conversões (CPA-alvo R$ ${targetCpa.toFixed(2)})`;
+        biddingWarn = '⚠️ Lance por conversão só otimiza se a conta tem acompanhamento de conversões ATIVO — confira em Metas → Conversões antes de ativar.';
+      } else if (biddingKey === 'maximize_conversions' || biddingKey === 'target_cpa') {
+        biddingFields = { maximizeConversions: {} };
+        biddingLabel = 'Maximizar conversões';
+        biddingWarn = '⚠️ Lance por conversão só otimiza se a conta tem acompanhamento de conversões ATIVO — confira em Metas → Conversões antes de ativar.';
+      }
 
       const { rows: links } = await pool.query(
         "SELECT account_id FROM public.client_account_links WHERE client_id = $1 AND platform IN ('google_ads','google') LIMIT 1",
@@ -2672,7 +2884,7 @@ export async function execSystemTool(
           status: 'PAUSED',
           advertisingChannelType: 'SEARCH',
           campaignBudget: budgetRn,
-          targetSpend: {}, // Maximizar cliques
+          ...biddingFields,
           containsEuPoliticalAdvertising: 'DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING',
           networkSettings: {
             targetGoogleSearch: true,
@@ -2688,7 +2900,8 @@ export async function execSystemTool(
       report.push('✅ Campanha criada (PAUSADA — revise e ative no painel)');
       report.push(`   Nome: ${nome}`);
       report.push(`   Tipo: Pesquisa (só Google Search)`);
-      report.push(`   Orçamento diário: R$ ${budget.toFixed(2)} · Lances: Maximizar cliques`);
+      report.push(`   Orçamento diário: R$ ${budget.toFixed(2)} · Lances: ${biddingLabel}`);
+      if (biddingWarn) report.push(`   ${biddingWarn}`);
       report.push(`   ID: ${campId}`);
       report.push('');
 
@@ -2704,44 +2917,73 @@ export async function execSystemTool(
         if (geoWarn) report.push(`   ${geoWarn}`);
       }
 
-      // 4) Grupo de anúncios
-      const agRes = await lunaGoogleMutate(customerId, token, login, 'adGroups', [{
-        create: { name: `Grupo 1 — ${nome}`, campaign: campRn, type: 'SEARCH_STANDARD', status: 'ENABLED' },
-      }]);
-      if ('error' in agRes) return [...report, `⚠️ Grupo de anúncios: FALHA — ${agRes.error}`, `   Campanha criada (ID ${campId}) — finalize grupo/anúncio no painel.`].join('\n');
-      const agRn = agRes.resourceNames[0];
-      report.push(`✅ Grupo de anúncios criado`);
-
-      // 5) Palavras-chave
-      const kwRes = await lunaGoogleMutate(customerId, token, login, 'adGroupCriteria',
-        keywords.map((kw: string) => ({ create: { adGroup: agRn, status: 'ENABLED', keyword: { text: kw, matchType } } })));
-      if ('error' in kwRes) {
-        // Linha própria (em vez de parêntese na mesma linha) — o texto exato do erro do
-        // Google não pode ser omitido/resumido; sem ele a IA tende a inventar um motivo.
-        report.push(`⚠️ Palavras-chave: FALHA`);
-        report.push(`   Motivo (Google Ads API): ${kwRes.error}`);
-        report.push(`   Adicione manualmente no grupo de anúncios.`);
-      } else {
-        report.push(`✅ ${keywords.length} palavra(s)-chave [${matchType}]: ${keywords.slice(0, 8).join(', ')}${keywords.length > 8 ? '…' : ''}`);
+      // 3.5) Palavras-chave NEGATIVAS (nível campanha, partialFailure — best-effort)
+      if (negativas.length > 0) {
+        const negRes = await lunaGoogleMutatePartial(customerId, token, login, 'campaignCriteria',
+          negativas.map((kw: string) => ({ create: { campaign: campRn, negative: true, keyword: { text: kw, matchType: 'PHRASE' } } })));
+        if ('error' in negRes) {
+          report.push(`⚠️ Negativas: FALHA — ${negRes.error}`);
+        } else {
+          report.push(`✅ ${negRes.okIndexes.length} palavra(s)-chave negativa(s): ${negativas.slice(0, 8).join(', ')}${negativas.length > 8 ? '…' : ''}`);
+          for (const f of negRes.failed) {
+            report.push(`   ⚠️ negativa recusada: "${f.index >= 0 ? negativas[f.index] : '?'}" — ${f.message}`);
+          }
+        }
       }
+      report.push('');
 
-      // 6) Anúncio responsivo de pesquisa
-      const adRes = await lunaGoogleMutate(customerId, token, login, 'adGroupAds', [{
-        create: {
-          adGroup: agRn,
-          status: 'ENABLED',
-          ad: {
-            finalUrls: [finalUrl],
-            responsiveSearchAd: {
-              headlines: headlines.map((t: string) => ({ text: t })),
-              descriptions: descriptions.map((t: string) => ({ text: t })),
+      // 4-6) Grupos de anúncios: cada um com suas keywords e seu RSA.
+      // Keywords com partialFailure: as válidas ENTRAM e cada recusada volta com o
+      // motivo literal do Google (antes o mutate atômico derrubava o lote inteiro).
+      for (const g of grupos) {
+        const agRes = await lunaGoogleMutate(customerId, token, login, 'adGroups', [{
+          create: { name: g.nome, campaign: campRn, type: 'SEARCH_STANDARD', status: 'ENABLED' },
+        }]);
+        if ('error' in agRes) {
+          report.push(`⚠️ Grupo "${g.nome}": FALHA — ${agRes.error}`);
+          report.push(`   Finalize esse grupo no painel.`);
+          continue;
+        }
+        const agRn = agRes.resourceNames[0];
+        report.push(`✅ Grupo "${g.nome}"`);
+
+        const kwRes = await lunaGoogleMutatePartial(customerId, token, login, 'adGroupCriteria',
+          g.keywords.map((kw: string) => ({ create: { adGroup: agRn, status: 'ENABLED', keyword: { text: kw, matchType } } })));
+        if ('error' in kwRes) {
+          // O texto exato do erro do Google não pode ser omitido/resumido; sem ele a IA
+          // tende a inventar um motivo.
+          report.push(`   ⚠️ Palavras-chave: FALHA`);
+          report.push(`   Motivo (Google Ads API): ${kwRes.error}`);
+          report.push(`   Adicione manualmente no grupo de anúncios.`);
+        } else {
+          const criadas = kwRes.okIndexes.length;
+          report.push(`   ✅ ${criadas} de ${g.keywords.length} palavra(s)-chave [${matchType}]: ${g.keywords.slice(0, 8).join(', ')}${g.keywords.length > 8 ? '…' : ''}`);
+          for (const f of kwRes.failed) {
+            report.push(`   ⚠️ recusada: "${f.index >= 0 ? g.keywords[f.index] : '?'}" — ${f.message}`);
+          }
+          if (criadas === 0) report.push(`   ⚠️ NENHUMA keyword entrou — adicione manualmente no painel.`);
+        }
+        for (const d of g.descartadas) {
+          report.push(`   ℹ️ descartada antes do envio: "${d.kw}" (${d.motivo})`);
+        }
+
+        const adRes = await lunaGoogleMutate(customerId, token, login, 'adGroupAds', [{
+          create: {
+            adGroup: agRn,
+            status: 'ENABLED',
+            ad: {
+              finalUrls: [g.finalUrl],
+              responsiveSearchAd: {
+                headlines: g.headlines.map((t: string) => ({ text: t })),
+                descriptions: g.descriptions.map((t: string) => ({ text: t })),
+              },
             },
           },
-        },
-      }]);
-      report.push('error' in adRes
-        ? `⚠️ Anúncio RSA: FALHA (${adRes.error}) — crie o anúncio no painel`
-        : `✅ Anúncio RSA criado (${headlines.length} títulos · ${descriptions.length} descrições → ${finalUrl})`);
+        }]);
+        report.push('error' in adRes
+          ? `   ⚠️ Anúncio RSA: FALHA (${adRes.error}) — crie o anúncio no painel`
+          : `   ✅ Anúncio RSA (${g.headlines.length} títulos · ${g.descriptions.length} descrições → ${g.finalUrl})`);
+      }
 
       // 7) Extensões (sitelinks, frases de destaque, snippet) — best-effort, cada bloco
       // isolado (falha de extensão nunca derruba a campanha). Deixam o anúncio bem mais
