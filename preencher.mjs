@@ -60,12 +60,27 @@ const CAMPOS = [
     onde: 'é só digitar o e-mail que deve receber o aviso' },
 ];
 
+/**
+ * Põe aspas quando o valor tem caractere que o leitor de .env interpretaria.
+ *
+ * ⚠️ Pego na prática: uma senha do Supabase começando com `#` era lida como
+ * VAZIA — em arquivo .env, `#` inicia comentário. O sistema subiria sem senha
+ * de banco e o erro ("client password must be a string") não diria a causa.
+ * Espaço e aspas dão problemas parecidos. Só aspeamos quando precisa: valor
+ * simples fica limpo, do jeito que a maioria dos painéis espera.
+ */
+function escapar(valor) {
+  if (!/[#\s"'`$]/.test(valor)) return valor;
+  return `"${valor.replace(/(["\\$`])/g, '\\$1')}"`;
+}
+
 /** Troca só a linha da chave, preservando o resto do arquivo (comentários inclusive). */
 function gravar(texto, chave, valor) {
+  const linha = `${chave}=${escapar(valor)}`;
   const linhas = texto.split('\n');
   const i = linhas.findIndex(l => l.startsWith(`${chave}=`));
-  if (i === -1) return `${texto.replace(/\n?$/, '\n')}${chave}=${valor}\n`;
-  linhas[i] = `${chave}=${valor}`;
+  if (i === -1) return `${texto.replace(/\n?$/, '\n')}${linha}\n`;
+  linhas[i] = linha;
   return linhas.join('\n');
 }
 
