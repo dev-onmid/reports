@@ -292,6 +292,55 @@ async function resolveGoogleAccountIds(
 const SEM_CONTA_GOOGLE =
   'Nenhuma conta Google Ads vinculada a esse cliente. Confira o client_id: use o ID INTERNO do cliente no sistema (o mesmo que list_clients devolve) — NÃO o número da conta Google.';
 
+// Cria keywords num grupo com partialFailure + retry de ISENÇÃO de política.
+// Recusa exemptible (termo de saúde tipo "implante dentário") é reenviada UMA vez
+// com exemptPolicyViolationKeys — o mesmo pedido que o painel do Google faz sozinho;
+// sem isso, 8 de 9 keywords do grupo de implantes da Cost Odonto foram recusadas.
+// Devolve linhas de relatório prontas (linhas[0] é o resumo) — usada pela criação
+// de campanha E pelo manage_google_keywords.
+async function criarKeywordsGoogle(
+  customerId: string, token: string, login: string | null,
+  agRn: string, keywords: string[], matchType: string,
+): Promise<{ criadas: number; linhas: string[]; erroTotal: boolean }> {
+  const kwRes = await lunaGoogleMutatePartial(customerId, token, login, 'adGroupCriteria',
+    keywords.map((kw) => ({ create: { adGroup: agRn, status: 'ENABLED', keyword: { text: kw, matchType } } })));
+  if ('error' in kwRes) {
+    // O texto exato do erro do Google não pode ser omitido/resumido; sem ele a IA
+    // tende a inventar um motivo.
+    return { criadas: 0, erroTotal: true, linhas: [
+      `   ⚠️ Palavras-chave: FALHA`,
+      `   Motivo (Google Ads API): ${kwRes.error}`,
+      `   Adicione manualmente no grupo de anúncios.`,
+    ] };
+  }
+  let criadas = kwRes.okIndexes.length;
+  const linhas: string[] = [];
+  const isentaveis = kwRes.failed.filter(f => f.exemptKey && f.index >= 0);
+  const outras = kwRes.failed.filter(f => !(f.exemptKey && f.index >= 0));
+  if (isentaveis.length > 0) {
+    const retry = await lunaGoogleMutatePartial(customerId, token, login, 'adGroupCriteria',
+      isentaveis.map(f => ({
+        create: { adGroup: agRn, status: 'ENABLED', keyword: { text: keywords[f.index], matchType } },
+        exemptPolicyViolationKeys: [f.exemptKey],
+      })));
+    if ('error' in retry) {
+      isentaveis.forEach(f => linhas.push(`   ⚠️ recusada (política): "${keywords[f.index]}" — ${f.message}`));
+    } else {
+      criadas += retry.okIndexes.length;
+      if (retry.okIndexes.length > 0) {
+        linhas.push(`   ✅ ${retry.okIndexes.length} keyword(s) de saúde aprovada(s) com pedido de isenção de política (mesmo pedido que o painel faz): ${retry.okIndexes.map(i => `"${keywords[isentaveis[i]?.index ?? -1] ?? '?'}"`).join(', ')}`);
+      }
+      retry.failed.forEach(rf => {
+        const orig = rf.index >= 0 ? isentaveis[rf.index] : undefined;
+        linhas.push(`   ⚠️ recusada mesmo com pedido de isenção: "${orig ? keywords[orig.index] : '?'}" — ${rf.message}`);
+      });
+    }
+  }
+  outras.forEach(f => linhas.push(`   ⚠️ recusada: "${f.index >= 0 ? keywords[f.index] : '?'}" — ${f.message}`));
+  linhas.unshift(`   ✅ ${criadas} de ${keywords.length} palavra(s)-chave [${matchType}]: ${keywords.slice(0, 8).join(', ')}${keywords.length > 8 ? '…' : ''}`);
+  return { criadas, linhas, erroTotal: false };
+}
+
 export const DEFAULT_INSTRUCTIONS = `Você é Luna, assistente inteligente da Onmid Marketing.`;
 
 // --- DB helpers ---
@@ -781,6 +830,58 @@ Sempre descreva a estrutura ao usuário e espere confirmação antes de criar.`,
         cities: { type: 'array', items: { type: 'string' }, description: 'Cidades alvo por nome (ex: ["Florianópolis"]). Obrigatório — não deixe vazio.' },
       },
       required: ['client_id', 'campaign_id', 'cities'],
+    },
+  },
+  {
+    name: 'get_google_search_terms',
+    description: 'TERMOS DE PESQUISA REAIS que acionaram os anúncios Google de um cliente (o que as pessoas de fato digitaram), com impressões/cliques/custo/conversões, ordenado por custo. Use para achar desperdício (termo irrelevante gastando) e alimentar negativas via manage_google_keywords, ou para descobrir termos bons que merecem virar keyword própria.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        client_id: { type: 'string', description: 'ID interno do cliente (de list_clients)' },
+        campaign_id: { type: 'string', description: 'Opcional: restringir a UMA campanha' },
+        period: { type: 'string', description: 'Período: this_month, last_7d, last_30d, last_month, custom (padrão: last_30d)' },
+        date_from: { type: 'string', description: 'YYYY-MM-DD (se period=custom)' },
+        date_to: { type: 'string', description: 'YYYY-MM-DD (se period=custom)' },
+        limit: { type: 'number', description: 'Máximo de termos (padrão 50, teto 200)' },
+      },
+      required: ['client_id'],
+    },
+  },
+  {
+    name: 'manage_google_keywords',
+    description: `Gerencia palavras-chave de uma campanha Google JÁ EXISTENTE — a ferramenta de otimização contínua. Ações:
+- add_keywords: adiciona keywords a um grupo (exige ad_group_id; sanitiza, partialFailure e pedido de isenção de política automáticos)
+- pause_keywords / enable_keywords / remove_keywords: pausa/reativa/remove keywords existentes, casadas pelo TEXTO (caixa-insensível)
+- add_negatives / remove_negatives: negativas no nível da CAMPANHA (fluxo clássico: viu termo ruim no get_google_search_terms → negativa aqui)
+Sempre confirme com o usuário antes de remover; pausar é reversível, remover não.`,
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        client_id: { type: 'string', description: 'ID interno do cliente (de list_clients)' },
+        campaign_id: { type: 'string', description: 'ID numérico da campanha' },
+        action: { type: 'string', enum: ['add_keywords', 'pause_keywords', 'enable_keywords', 'remove_keywords', 'add_negatives', 'remove_negatives'], description: 'O que fazer' },
+        keywords: { type: 'array', items: { type: 'string' }, description: 'Textos das keywords (sem aspas/colchetes)' },
+        match_type: { type: 'string', enum: ['broad', 'phrase', 'exact'], description: 'Só para add_keywords/add_negatives (padrão: phrase)' },
+        ad_group_id: { type: 'string', description: 'ID do grupo de anúncios — OBRIGATÓRIO em add_keywords; opcional como filtro nas demais ações de keyword (veja os grupos em get_google_structure)' },
+      },
+      required: ['client_id', 'campaign_id', 'action', 'keywords'],
+    },
+  },
+  {
+    name: 'update_google_rsa',
+    description: `Edita um anúncio responsivo (RSA) JÁ EXISTENTE de uma campanha Google: substitui títulos e/ou descrições e/ou URL final. Os textos enviados SUBSTITUEM os atuais por completo (envie a lista inteira desejada, não só os novos). Limites reais: título ≤30 caracteres, descrição ≤90 — acima disso a ferramenta recusa listando o que estourou. A edição reenvia o anúncio para revisão do Google. Use get_google_structure antes para ver os grupos.`,
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        client_id: { type: 'string', description: 'ID interno do cliente (de list_clients)' },
+        campaign_id: { type: 'string', description: 'ID numérico da campanha' },
+        ad_group_id: { type: 'string', description: 'ID do grupo — obrigatório se a campanha tem mais de um grupo' },
+        headlines: { type: 'array', items: { type: 'string' }, description: 'NOVA lista completa de títulos (3-15, ≤30 caracteres cada). Omita para manter os atuais.' },
+        descriptions: { type: 'array', items: { type: 'string' }, description: 'NOVA lista completa de descrições (2-4, ≤90 caracteres cada). Omita para manter as atuais.' },
+        final_url: { type: 'string', description: 'Nova URL de destino. Omita para manter a atual.' },
+      },
+      required: ['client_id', 'campaign_id'],
     },
   },
   // ── Pacote A: execução Meta + Google ──────────────────────────────────────
@@ -2989,47 +3090,9 @@ export async function execSystemTool(
         const agRn = agRes.resourceNames[0];
         report.push(`✅ Grupo "${g.nome}"`);
 
-        const kwRes = await lunaGoogleMutatePartial(customerId, token, login, 'adGroupCriteria',
-          g.keywords.map((kw: string) => ({ create: { adGroup: agRn, status: 'ENABLED', keyword: { text: kw, matchType } } })));
-        if ('error' in kwRes) {
-          // O texto exato do erro do Google não pode ser omitido/resumido; sem ele a IA
-          // tende a inventar um motivo.
-          report.push(`   ⚠️ Palavras-chave: FALHA`);
-          report.push(`   Motivo (Google Ads API): ${kwRes.error}`);
-          report.push(`   Adicione manualmente no grupo de anúncios.`);
-        } else {
-          let criadas = kwRes.okIndexes.length;
-          const linhas: string[] = [];
-          // Recusa de política EXEMPTIBLE (termo de saúde tipo "implante dentário"):
-          // reenvia UMA vez com exemptPolicyViolationKeys — o mesmo pedido de isenção
-          // que o painel do Google faz sozinho. Sem isso, 8 de 9 keywords do grupo de
-          // implantes da Cost Odonto foram recusadas num grupo que o painel aceitaria.
-          const isentaveis = kwRes.failed.filter(f => f.exemptKey && f.index >= 0);
-          const outras = kwRes.failed.filter(f => !(f.exemptKey && f.index >= 0));
-          if (isentaveis.length > 0) {
-            const retry = await lunaGoogleMutatePartial(customerId, token, login, 'adGroupCriteria',
-              isentaveis.map(f => ({
-                create: { adGroup: agRn, status: 'ENABLED', keyword: { text: g.keywords[f.index], matchType } },
-                exemptPolicyViolationKeys: [f.exemptKey],
-              })));
-            if ('error' in retry) {
-              isentaveis.forEach(f => linhas.push(`   ⚠️ recusada (política): "${g.keywords[f.index]}" — ${f.message}`));
-            } else {
-              criadas += retry.okIndexes.length;
-              if (retry.okIndexes.length > 0) {
-                linhas.push(`   ✅ ${retry.okIndexes.length} keyword(s) de saúde aprovada(s) com pedido de isenção de política (mesmo pedido que o painel faz): ${retry.okIndexes.map(i => `"${g.keywords[isentaveis[i]?.index ?? -1] ?? '?'}"`).join(', ')}`);
-              }
-              retry.failed.forEach(rf => {
-                const orig = rf.index >= 0 ? isentaveis[rf.index] : undefined;
-                linhas.push(`   ⚠️ recusada mesmo com pedido de isenção: "${orig ? g.keywords[orig.index] : '?'}" — ${rf.message}`);
-              });
-            }
-          }
-          outras.forEach(f => linhas.push(`   ⚠️ recusada: "${f.index >= 0 ? g.keywords[f.index] : '?'}" — ${f.message}`));
-          report.push(`   ✅ ${criadas} de ${g.keywords.length} palavra(s)-chave [${matchType}]: ${g.keywords.slice(0, 8).join(', ')}${g.keywords.length > 8 ? '…' : ''}`);
-          linhas.forEach(l => report.push(l));
-          if (criadas === 0) report.push(`   ⚠️ NENHUMA keyword entrou — adicione manualmente no painel.`);
-        }
+        const kw = await criarKeywordsGoogle(customerId, token, login, agRn, g.keywords, matchType);
+        kw.linhas.forEach(l => report.push(l));
+        if (kw.criadas === 0 && !kw.erroTotal) report.push(`   ⚠️ NENHUMA keyword entrou — adicione manualmente no painel.`);
         for (const d of g.descartadas) {
           report.push(`   ℹ️ descartada antes do envio: "${d.kw}" (${d.motivo})`);
         }
@@ -3201,6 +3264,183 @@ export async function execSystemTool(
       if (removeRns.length) out += `\n   ${removeRns.length} localização(ões) anterior(es) removida(s) — inclusive o "Brasil inteiro", se havia.`;
       if (naoAchadas.length) out += `\n   ⚠️ Não encontrada(s) (ficaram de fora): ${naoAchadas.join(', ')}.`;
       return out;
+    }
+
+    if (name === 'get_google_search_terms') {
+      const clientId = input.client_id as string;
+      const period = (input.period as string) || 'last_30d';
+      const gaqlPeriod = resolveGaqlPeriod(period, (input.date_from as string) ?? '', (input.date_to as string) ?? '');
+      const campFilter = String(input.campaign_id ?? '').replace(/\D/g, '');
+      const campCond = campFilter ? ` AND campaign.id = ${campFilter}` : '';
+      const limit = Math.min(Math.max(Number(input.limit) || 50, 1), 200);
+
+      const [customerId] = await resolveGoogleAccountIds(pool, clientId);
+      if (!customerId) return SEM_CONTA_GOOGLE;
+
+      const found = await lunaGoogleSearch(customerId,
+        `SELECT campaign.id, campaign.name, ad_group.id, ad_group.name,
+                search_term_view.search_term, search_term_view.status,
+                metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.conversions
+           FROM search_term_view
+          WHERE ${gaqlPeriod}${campCond}
+          ORDER BY metrics.cost_micros DESC LIMIT ${limit}`);
+      if (!found) return '❌ Não consegui acessar essa conta Google (token/permissão MCC). Verifique a conexão em Integrações.';
+      if (!found.results.length) return campFilter
+        ? `Nenhum termo de pesquisa registrado nessa campanha no período (${period}).`
+        : `Nenhum termo de pesquisa registrado no período (${period}).`;
+
+      const termos = found.results.map((r) => ({
+        termo: String(r.searchTermView?.searchTerm ?? ''),
+        // ADDED_EXCLUDED/EXCLUDED = já é keyword ou já está negativado — a Luna não
+        // deve sugerir negativar de novo.
+        situacao: String(r.searchTermView?.status ?? ''),
+        campanha: String(r.campaign?.name ?? ''),
+        campaign_id: String(r.campaign?.id ?? ''),
+        grupo: String(r.adGroup?.name ?? ''),
+        ad_group_id: String(r.adGroup?.id ?? ''),
+        impressoes: Number(r.metrics?.impressions ?? 0),
+        cliques: Number(r.metrics?.clicks ?? 0),
+        gasto: Number(r.metrics?.costMicros ?? 0) / 1_000_000,
+        conversoes: Number(r.metrics?.conversions ?? 0),
+      }));
+      return JSON.stringify({ periodo: period, termos, dica: 'Termo ruim gastando → manage_google_keywords action=add_negatives. Termo bom sem keyword → add_keywords no grupo certo.' });
+    }
+
+    if (name === 'manage_google_keywords') {
+      const clientId = input.client_id as string;
+      const campaignId = String(input.campaign_id ?? '').replace(/\D/g, '');
+      const action = String(input.action ?? '');
+      const adGroupId = String(input.ad_group_id ?? '').replace(/\D/g, '');
+      const matchType = ({ broad: 'BROAD', phrase: 'PHRASE', exact: 'EXACT' } as Record<string, string>)[String(input.match_type ?? 'phrase')] ?? 'PHRASE';
+      if (!campaignId) return 'Informe o campaign_id.';
+      const { validas: kwsIn, descartadas } = sanitizeGoogleKeywords(input.keywords, 100);
+      if (kwsIn.length === 0) return 'Informe as keywords (sem aspas/colchetes, até 80 caracteres e 10 palavras cada).';
+
+      const [customerId] = await resolveGoogleAccountIds(pool, clientId);
+      if (!customerId) return SEM_CONTA_GOOGLE;
+      const probe = await lunaGoogleSearch(customerId, `SELECT campaign.id, campaign.name FROM campaign WHERE campaign.id = ${campaignId} LIMIT 1`);
+      if (!probe) return '❌ Não consegui acessar essa conta Google (token/permissão MCC). Verifique a conexão em Integrações.';
+      if (!probe.results?.length) return `❌ Campanha ${campaignId} não encontrada nessa conta Google.`;
+      const { token, login } = probe;
+      const campName = String(probe.results[0]?.campaign?.name ?? campaignId);
+      const report: string[] = [`Campanha "${campName}" (ID ${campaignId}):`];
+      descartadas.forEach(d => report.push(`   ℹ️ descartada antes do envio: "${d.kw}" (${d.motivo})`));
+      const norm = (s: string) => s.toLowerCase().replace(/\s+/g, ' ').trim();
+
+      if (action === 'add_keywords') {
+        if (!adGroupId) return 'add_keywords exige ad_group_id — veja os grupos da campanha em get_google_structure.';
+        const agRn = `customers/${customerId}/adGroups/${adGroupId}`;
+        const kw = await criarKeywordsGoogle(customerId, token, login, agRn, kwsIn, matchType);
+        return [...report, ...kw.linhas].join('\n');
+      }
+
+      if (action === 'add_negatives') {
+        const campRn = `customers/${customerId}/campaigns/${campaignId}`;
+        const res = await lunaGoogleMutatePartial(customerId, token, login, 'campaignCriteria',
+          kwsIn.map(kw => ({ create: { campaign: campRn, negative: true, keyword: { text: kw, matchType } } })));
+        if ('error' in res) return [...report, `❌ Negativas: FALHA — ${res.error}`].join('\n');
+        report.push(`✅ ${res.okIndexes.length} negativa(s) [${matchType}] adicionada(s) à campanha: ${kwsIn.slice(0, 10).join(', ')}${kwsIn.length > 10 ? '…' : ''}`);
+        res.failed.forEach(f => report.push(`   ⚠️ recusada: "${f.index >= 0 ? kwsIn[f.index] : '?'}" — ${f.message}`));
+        return report.join('\n');
+      }
+
+      if (action === 'remove_negatives') {
+        const negs = await lunaGoogleSearch(customerId,
+          `SELECT campaign_criterion.resource_name, campaign_criterion.keyword.text
+             FROM campaign_criterion
+            WHERE campaign.id = ${campaignId} AND campaign_criterion.type = 'KEYWORD' AND campaign_criterion.negative = TRUE LIMIT 1000`);
+        const alvo = new Map((negs?.results ?? []).map((r) => [norm(String(r.campaignCriterion?.keyword?.text ?? '')), String(r.campaignCriterion?.resourceName ?? '')]));
+        const remover = kwsIn.map(k => ({ k, rn: alvo.get(norm(k)) })).filter(x => x.rn);
+        const naoAchadas = kwsIn.filter(k => !alvo.get(norm(k)));
+        if (remover.length === 0) return [...report, `Nenhuma das negativas informadas existe na campanha. Existentes: ${[...alvo.keys()].slice(0, 20).join(', ') || '(nenhuma)'}`].join('\n');
+        const res = await lunaGoogleMutate(customerId, token, login, 'campaignCriteria', remover.map(x => ({ remove: x.rn })));
+        if ('error' in res) return [...report, `❌ Falha ao remover negativas: ${res.error}`].join('\n');
+        report.push(`✅ ${remover.length} negativa(s) removida(s): ${remover.map(x => x.k).join(', ')}`);
+        if (naoAchadas.length) report.push(`   ⚠️ Não encontrada(s) na campanha: ${naoAchadas.join(', ')}`);
+        return report.join('\n');
+      }
+
+      if (action === 'pause_keywords' || action === 'enable_keywords' || action === 'remove_keywords') {
+        const existentes = await lunaGoogleSearch(customerId,
+          `SELECT ad_group_criterion.resource_name, ad_group_criterion.keyword.text, ad_group_criterion.status, ad_group.id, ad_group.name
+             FROM ad_group_criterion
+            WHERE campaign.id = ${campaignId} AND ad_group_criterion.type = 'KEYWORD' AND ad_group_criterion.negative = FALSE
+              AND ad_group_criterion.status IN ('ENABLED', 'PAUSED')${adGroupId ? ` AND ad_group.id = ${adGroupId}` : ''} LIMIT 2000`);
+        // A MESMA keyword pode existir em vários grupos — sem filtro de grupo, a ação
+        // vale para todas as ocorrências (comportamento anunciado no relatório).
+        const ocorrencias = (existentes?.results ?? []).map((r) => ({
+          rn: String(r.adGroupCriterion?.resourceName ?? ''),
+          texto: String(r.adGroupCriterion?.keyword?.text ?? ''),
+          grupo: String(r.adGroup?.name ?? ''),
+        }));
+        const alvos = ocorrencias.filter(o => kwsIn.some(k => norm(k) === norm(o.texto)));
+        const naoAchadas = kwsIn.filter(k => !ocorrencias.some(o => norm(o.texto) === norm(k)));
+        if (alvos.length === 0) return [...report, `Nenhuma das keywords informadas existe na campanha${adGroupId ? ' (nesse grupo)' : ''}. Confira em get_google_structure.`].join('\n');
+        const ops = action === 'remove_keywords'
+          ? alvos.map(a => ({ remove: a.rn }))
+          : alvos.map(a => ({ update: { resourceName: a.rn, status: action === 'pause_keywords' ? 'PAUSED' : 'ENABLED' }, updateMask: 'status' }));
+        const res = await lunaGoogleMutate(customerId, token, login, 'adGroupCriteria', ops);
+        if ('error' in res) return [...report, `❌ Falha: ${res.error}`].join('\n');
+        const verbo = action === 'remove_keywords' ? 'removida(s)' : action === 'pause_keywords' ? 'pausada(s)' : 'reativada(s)';
+        report.push(`✅ ${alvos.length} ocorrência(s) ${verbo}: ${alvos.map(a => `"${a.texto}" (${a.grupo})`).join(', ')}`);
+        if (naoAchadas.length) report.push(`   ⚠️ Não encontrada(s): ${naoAchadas.join(', ')}`);
+        return report.join('\n');
+      }
+
+      return `Ação desconhecida: ${action}. Use add_keywords, pause_keywords, enable_keywords, remove_keywords, add_negatives ou remove_negatives.`;
+    }
+
+    if (name === 'update_google_rsa') {
+      const clientId = input.client_id as string;
+      const campaignId = String(input.campaign_id ?? '').replace(/\D/g, '');
+      const adGroupId = String(input.ad_group_id ?? '').replace(/\D/g, '');
+      if (!campaignId) return 'Informe o campaign_id.';
+      const headlines = (Array.isArray(input.headlines) ? input.headlines : []).map((h: unknown) => String(h).trim()).filter(Boolean).slice(0, 15);
+      const descriptions = (Array.isArray(input.descriptions) ? input.descriptions : []).map((d: unknown) => String(d).trim()).filter(Boolean).slice(0, 4);
+      const finalUrl = String(input.final_url ?? '').trim();
+      if (!headlines.length && !descriptions.length && !finalUrl) return 'Nada a alterar — envie headlines e/ou descriptions e/ou final_url.';
+      // Mesma regra da criação: NUNCA truncar copy em silêncio.
+      const headsLongos = headlines.filter((h: string) => h.length > 30);
+      if (headsLongos.length) return `Título(s) ACIMA de 30 caracteres — reescreva e chame de novo:\n${headsLongos.map((h: string) => `- "${h}" (${h.length} caracteres)`).join('\n')}`;
+      const descsLongas = descriptions.filter((d: string) => d.length > 90);
+      if (descsLongas.length) return `Descrição(ões) ACIMA de 90 caracteres — reescreva e chame de novo:\n${descsLongas.map((d: string) => `- "${d}" (${d.length} caracteres)`).join('\n')}`;
+      if (headlines.length > 0 && headlines.length < 3) return 'O RSA exige no mínimo 3 títulos — envie a lista COMPLETA desejada (ela substitui a atual).';
+      if (descriptions.length > 0 && descriptions.length < 2) return 'O RSA exige no mínimo 2 descrições — envie a lista COMPLETA desejada (ela substitui a atual).';
+
+      const [customerId] = await resolveGoogleAccountIds(pool, clientId);
+      if (!customerId) return SEM_CONTA_GOOGLE;
+      const probe = await lunaGoogleSearch(customerId,
+        `SELECT ad_group_ad.ad.id, ad_group.id, ad_group.name, ad_group_ad.status
+           FROM ad_group_ad
+          WHERE campaign.id = ${campaignId} AND ad_group_ad.ad.type = 'RESPONSIVE_SEARCH_AD'
+            AND ad_group_ad.status IN ('ENABLED', 'PAUSED')${adGroupId ? ` AND ad_group.id = ${adGroupId}` : ''} LIMIT 10`);
+      if (!probe) return '❌ Não consegui acessar essa conta Google (token/permissão MCC). Verifique a conexão em Integrações.';
+      const anuncios = probe.results ?? [];
+      if (anuncios.length === 0) return `❌ Nenhum anúncio RSA ativo/pausado encontrado na campanha ${campaignId}${adGroupId ? ` (grupo ${adGroupId})` : ''}.`;
+      const gruposDistintos = new Set(anuncios.map((r) => String(r.adGroup?.id ?? '')));
+      if (gruposDistintos.size > 1 && !adGroupId) {
+        return `A campanha tem RSA em ${gruposDistintos.size} grupos — informe ad_group_id para eu saber qual editar:\n${anuncios.map((r) => `- grupo ${r.adGroup?.id} (${r.adGroup?.name})`).join('\n')}`;
+      }
+      const alvo = anuncios[0];
+      const adId = String(alvo.ad?.id ?? alvo.adGroupAd?.ad?.id ?? '');
+      const adRn = `customers/${customerId}/ads/${adId}`;
+      const { token, login } = probe;
+
+      const update: Record<string, unknown> = { resourceName: adRn };
+      const masks: string[] = [];
+      const rsa: Record<string, unknown> = {};
+      if (headlines.length) { rsa.headlines = headlines.map((t: string) => ({ text: t })); masks.push('responsiveSearchAd.headlines'); }
+      if (descriptions.length) { rsa.descriptions = descriptions.map((t: string) => ({ text: t })); masks.push('responsiveSearchAd.descriptions'); }
+      if (Object.keys(rsa).length) update.responsiveSearchAd = rsa;
+      if (finalUrl) { update.finalUrls = [finalUrl]; masks.push('finalUrls'); }
+
+      const res = await lunaGoogleMutate(customerId, token, login, 'ads', [{ update, updateMask: masks.join(',') }]);
+      if ('error' in res) return `❌ Falha ao editar o anúncio ${adId}: ${res.error}`;
+      const partes: string[] = [];
+      if (headlines.length) partes.push(`${headlines.length} títulos`);
+      if (descriptions.length) partes.push(`${descriptions.length} descrições`);
+      if (finalUrl) partes.push(`URL → ${finalUrl}`);
+      return `✅ Anúncio RSA ${adId} (grupo "${alvo.adGroup?.name ?? adGroupId}") atualizado: ${partes.join(' · ')}.\n   ⚠️ A edição reenvia o anúncio para revisão do Google (algumas horas fora do ar até aprovar).`;
     }
 
     if (name === 'get_optimizer_analysis') {
