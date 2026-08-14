@@ -364,7 +364,7 @@ export const systemTools: Anthropic.Tool[] = [
   },
   {
     name: 'get_google_structure',
-    description: 'Estrutura detalhada do GOOGLE ADS de um cliente (irmã do get_meta_structure): GRUPOS DE ANÚNCIOS e PALAVRAS-CHAVE de cada campanha, com status, correspondência, métricas do período (gasto/cliques/conversões) e as negativas da campanha. Use para conferir campanha recém-criada, achar keyword cara ou sem tráfego, ou responder "quais palavras-chave estão ativas". Inclui grupos/keywords pausados e sem tráfego (a listagem é estrutural, não depende de gasto).',
+    description: 'Estrutura detalhada do GOOGLE ADS de um cliente (irmã do get_meta_structure): GRUPOS DE ANÚNCIOS e PALAVRAS-CHAVE de cada campanha, com status, correspondência, métricas do período (gasto/cliques/conversões) e as negativas da campanha. Use para conferir campanha recém-criada, achar keyword cara ou sem tráfego, ou responder "quais palavras-chave estão ativas". A listagem é estrutural (não depende de gasto), mas SEM campaign_id as keywords detalhadas vêm só das campanhas ATIVAS (conta antiga tem milhares de keywords pausadas) — para keywords de campanha PAUSADA, chame com o campaign_id dela.',
     input_schema: {
       type: 'object' as const,
       properties: {
@@ -1421,6 +1421,11 @@ export async function execSystemTool(
       const gaqlPeriod = resolveGaqlPeriod(period, (input.date_from as string) ?? '', (input.date_to as string) ?? '');
       const campFilter = String(input.campaign_id ?? '').replace(/\D/g, '');
       const campCond = campFilter ? ` AND campaign.id = ${campFilter}` : '';
+      // ⚠️ Keywords SEM campaign_id ficam restritas às campanhas ATIVAS de propósito:
+      // conta com anos de histórico tem milhares de keywords em campanha pausada, o
+      // LIMIT estourava e o GAQL devolvia linhas ARBITRÁRIAS — na Cost Odonto (800+
+      // keywords em 17 pausadas) a campanha ATIVA ficava de fora da resposta.
+      const kwScopeCond = campFilter ? campCond : " AND campaign.status = 'ENABLED'";
 
       const { rows: links } = await pool.query(
         "SELECT account_id FROM public.client_account_links WHERE client_id = $1 AND platform IN ('google_ads','google')",
@@ -1430,7 +1435,7 @@ export async function execSystemTool(
       const accountIds = [...new Set(links.map((l) => l.account_id.replace(/\D/g, '')).filter(Boolean))];
 
       type KwOut = { texto: string; match: string; status: string; gasto: number; cliques: number; conversoes: number };
-      type GrupoOut = { id: string; nome: string; status: string; gasto: number; cliques: number; conversoes: number; keywords: KwOut[] };
+      type GrupoOut = { id: string; nome: string; status: string; gasto: number; cliques: number; conversoes: number; keywords: KwOut[]; keywords_omitidas?: number };
       type CampOut = { id: string; nome: string; status: string; negativas: Array<{ texto: string; match: string }>; grupos: GrupoOut[] };
       const contas: Array<{ accountId: string; campanhas: CampOut[] }> = [];
       const failures: string[] = [];
@@ -1442,7 +1447,7 @@ export async function execSystemTool(
           `SELECT campaign.id, campaign.name, campaign.status, ad_group.id, ad_group.name, ad_group.status
              FROM ad_group
             WHERE campaign.status IN ('ENABLED', 'PAUSED') AND ad_group.status IN ('ENABLED', 'PAUSED')${campCond}
-            ORDER BY campaign.id LIMIT 200`);
+            ORDER BY campaign.id DESC LIMIT 200`);
         if (!estrutura) { failures.push(accountId); return; }
 
         const campanhas = new Map<string, CampOut>();
@@ -1460,14 +1465,13 @@ export async function execSystemTool(
         }
         if (campanhas.size === 0) { contas.push({ accountId, campanhas: [] }); return; }
 
-        // 2) Keywords (estrutural — inclui pausada e sem tráfego)
+        // 2) Keywords (estrutural — inclui pausada e sem tráfego; escopo em kwScopeCond)
         const kws = await lunaGoogleSearch(accountId,
           `SELECT ad_group.id, ad_group_criterion.criterion_id, ad_group_criterion.keyword.text,
                   ad_group_criterion.keyword.match_type, ad_group_criterion.status, ad_group_criterion.negative
              FROM ad_group_criterion
-            WHERE ad_group_criterion.type = 'KEYWORD' AND ad_group_criterion.status IN ('ENABLED', 'PAUSED')
-              AND campaign.status IN ('ENABLED', 'PAUSED')${campCond}
-            LIMIT 800`);
+            WHERE ad_group_criterion.type = 'KEYWORD' AND ad_group_criterion.status IN ('ENABLED', 'PAUSED')${kwScopeCond}
+            LIMIT 5000`);
         const kwPorChave = new Map<string, KwOut>();
         for (const row of kws?.results ?? []) {
           const agId = String(row.adGroup?.id ?? '');
@@ -1508,7 +1512,7 @@ export async function execSystemTool(
         }
         const mKws = await lunaGoogleSearch(accountId,
           `SELECT ad_group.id, ad_group_criterion.criterion_id, metrics.cost_micros, metrics.clicks, metrics.conversions
-             FROM keyword_view WHERE ${gaqlPeriod}${campCond} LIMIT 800`);
+             FROM keyword_view WHERE ${gaqlPeriod}${kwScopeCond} LIMIT 5000`);
         for (const row of mKws?.results ?? []) {
           const kw = kwPorChave.get(`${String(row.adGroup?.id ?? '')}:${String(row.adGroupCriterion?.criterionId ?? '')}`);
           if (!kw) continue;
@@ -1517,6 +1521,14 @@ export async function execSystemTool(
           kw.conversoes += Number(row.metrics?.conversions ?? 0);
         }
 
+        // Cap de serialização: grupo com centenas de keywords não pode explodir o
+        // resultado da ferramenta — corta em 100 e sinaliza quantas ficaram de fora.
+        for (const g of grupos.values()) {
+          if (g.keywords.length > 100) {
+            g.keywords_omitidas = g.keywords.length - 100;
+            g.keywords = g.keywords.slice(0, 100);
+          }
+        }
         contas.push({ accountId, campanhas: [...campanhas.values()] });
       }));
 
@@ -1529,7 +1541,10 @@ export async function execSystemTool(
       if (totalCampanhas === 0) return campFilter
         ? `Nenhuma campanha ${campFilter} encontrada (ativa ou pausada) nessa conta.`
         : 'Nenhuma campanha ativa ou pausada nessa conta Google.';
-      return JSON.stringify({ periodo: period, contas, avisos: failures.length ? [`Conta(s) inacessível(is): ${failures.join(', ')}`] : [] });
+      const avisos: string[] = [];
+      if (!campFilter) avisos.push('Keywords detalhadas apenas das campanhas ATIVAS. Para ver as keywords de uma campanha pausada, chame de novo com o campaign_id dela.');
+      if (failures.length) avisos.push(`Conta(s) inacessível(is): ${failures.join(', ')}`);
+      return JSON.stringify({ periodo: period, contas, avisos });
     }
 
     if (name === 'get_monthly_history') {
