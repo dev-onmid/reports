@@ -12,9 +12,14 @@ name: Disparos Worker
 # Secret necessário no GitHub: DISPAROS_WORKER_URL
 #   = https://reports.onmid.app/api/disparos/worker?secret=<valor de REPORTS_CRON_SECRET>
 
+# ⚠️ AGENDAMENTO DESLIGADO (2026-08-13). A crontab da VPS chama o worker a cada
+# 1 MINUTO — cadência melhor que a deste workflow, que só desce a 5 min e por
+# isso precisava do laço de 8 chamadas abaixo. Era a maior duplicata das três:
+# até 8 execuções por rodada em cima de um motor que já rodava de minuto em
+# minuto. Continua disparável na mão. Para religar, descomente o schedule.
 on:
-  schedule:
-    - cron: '*/5 * * * *'
+  # schedule:
+  #   - cron: '*/5 * * * *'
   workflow_dispatch: {}
 
 jobs:
