@@ -28,6 +28,11 @@ async function ensureColumns(pool: ReturnType<typeof makeServerPool>) {
   // Fonte do topo do Funil de Performance: 'auto' (CRM se houver, senão anúncios,
   // com rótulo de fonte na UI) | 'crm' | 'anuncios'. Ver src/lib/funil-etapas.ts.
   await pool.query(`ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS funil_fonte_topo TEXT NOT NULL DEFAULT 'auto'`).catch(() => {});
+  // Fidelidade (campanhas de recompra) é OPT-IN: DEFAULT false vale para os
+  // clientes que já existem e para os novos. Muitos cardápios digitais já têm
+  // campanha própria por dentro, e ligar isso sem querer significaria falar com
+  // a base do cliente pelo WhatsApp DELE. Ver src/lib/fidelidade.ts.
+  await pool.query(`ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS fidelidade_ativa BOOLEAN NOT NULL DEFAULT false`).catch(() => {});
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -45,6 +50,7 @@ function rowToJson(r: any) {
     dashboard_type: r.dashboard_type ?? 'leads',
     onboarding_completed: r.onboarding_completed ?? true,
     funil_fonte_topo: r.funil_fonte_topo ?? 'auto',
+    fidelidade_ativa: r.fidelidade_ativa === true,
   };
 }
 
@@ -55,6 +61,7 @@ export async function GET() {
     const { rows } = await pool.query(`
       SELECT c.id, c.name, c.segment, c.status, c.gestor_id, c.ads_billing_mode,
              c.category_id, c.dashboard_type, c.onboarding_completed, c.funil_fonte_topo,
+             c.fidelidade_ativa,
              u.name as gestor_name, cat.name as category_name
       FROM public.clients c
       LEFT JOIN public.users u ON c.gestor_id = u.id
@@ -108,7 +115,7 @@ export async function PATCH(req: NextRequest) {
   const body = await req.json() as Partial<{
     name: string; segment: string; status: string;
     gestor_id: string | null; category_id: string | null; dashboard_type: string;
-    onboarding_completed: boolean; funil_fonte_topo: string;
+    onboarding_completed: boolean; funil_fonte_topo: string; fidelidade_ativa: boolean;
   }>;
   const pool = makeServerPool();
   try {
@@ -128,6 +135,9 @@ export async function PATCH(req: NextRequest) {
         return Response.json({ error: 'funil_fonte_topo inválido' }, { status: 400 });
       }
       sets.push(`funil_fonte_topo = $${idx++}`); vals.push(body.funil_fonte_topo);
+    }
+    if (body.fidelidade_ativa !== undefined) {
+      sets.push(`fidelidade_ativa = $${idx++}`); vals.push(body.fidelidade_ativa === true);
     }
     if (sets.length === 0) return Response.json({ error: 'Nothing to update' }, { status: 400 });
     vals.push(id);

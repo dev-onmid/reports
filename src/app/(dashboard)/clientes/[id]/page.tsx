@@ -4766,6 +4766,9 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
   const [clientCategoryId, setClientCategoryId] = useState<string>(storedClient?.category_id ?? '');
   const [clientDashType, setClientDashType] = useState<DashboardType>(storedClient?.dashboard_type ?? 'leads');
   const [clientFonteTopo, setClientFonteTopo] = useState<'auto' | 'crm' | 'anuncios'>(storedClient?.funil_fonte_topo ?? 'auto');
+  // Opt-in: ausente = desligada. A aba Fidelidade só existe na barra quando
+  // ligada, e o servidor confere de novo (esconder aqui é só apresentação).
+  const [clientFidelidade, setClientFidelidade] = useState<boolean>(storedClient?.fidelidade_ativa === true);
   const [editingName, setEditingName]     = useState(false);
   const [nameDraft, setNameDraft]         = useState('');
   const [nameError, setNameError]         = useState('');
@@ -4783,7 +4786,13 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
     setClientCategoryId(storedClient?.category_id ?? '');
     setClientDashType(storedClient?.dashboard_type ?? 'leads');
     setClientFonteTopo(storedClient?.funil_fonte_topo ?? 'auto');
-  }, [storedClient?.category_id, storedClient?.dashboard_type, storedClient?.funil_fonte_topo]);
+    setClientFidelidade(storedClient?.fidelidade_ativa === true);
+  }, [storedClient?.category_id, storedClient?.dashboard_type, storedClient?.funil_fonte_topo,
+      storedClient?.fidelidade_ativa]);
+
+  // A aba Fidelidade só entra no menu "Mais" quando o cliente está ligado —
+  // cliente cujo cardápio já faz campanha por dentro não vê a aba existir.
+  const moreTabs = MORE_TABS.filter(t => t !== 'fidelidade' || clientFidelidade);
 
   async function patchClient(patch: Record<string, unknown>) {
     await fetch(`/api/clients?id=${id}`, {
@@ -5149,6 +5158,32 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
             <option value="anuncios">Sempre anúncios</option>
           </select>
         </div>
+        <div className="flex items-center gap-2">
+          <label
+            className="text-xs text-muted-foreground"
+            title="Campanhas automáticas de recompra pelo WhatsApp do cliente. Deixe desativada quando o cardápio digital dele já faz isso por dentro."
+          >
+            Fidelidade:
+          </label>
+          <button
+            onClick={() => {
+              const v = !clientFidelidade;
+              setClientFidelidade(v);
+              void patchClient({ fidelidade_ativa: v });
+              // Desligar com a aba aberta deixaria a tela pendurada num cliente
+              // que não tem mais Fidelidade — volta pro planejamento.
+              if (!v && tab === 'fidelidade') setTab('planejamento');
+            }}
+            className={cn(
+              'h-7 rounded-lg border px-2 text-xs font-bold uppercase tracking-wider transition-colors',
+              clientFidelidade
+                ? 'border-primary bg-primary/15 text-primary'
+                : 'border-border text-muted-foreground hover:text-foreground',
+            )}
+          >
+            {clientFidelidade ? 'Ativa' : 'Desativada'}
+          </button>
+        </div>
       </div>
 
       {/* Tabs nav */}
@@ -5171,18 +5206,18 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
             onClick={() => setMoreOpen(o => !o)}
             className={cn(
               'flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-colors',
-              MORE_TABS.includes(tab)
+              moreTabs.includes(tab)
                 ? 'bg-primary/20 text-primary shadow-[0_0_10px_rgba(85,245,47,0.15)]'
                 : 'text-muted-foreground hover:text-foreground'
             )}>
-            {MORE_TABS.includes(tab) ? tabLabel[tab] : 'Mais'}
+            {moreTabs.includes(tab) ? tabLabel[tab] : 'Mais'}
             <ChevronDown className={cn('w-3.5 h-3.5 transition-transform', moreOpen && 'rotate-180')} />
           </button>
           {moreOpen && (
             <>
               <div className="fixed inset-0 z-40" onClick={() => setMoreOpen(false)} />
               <div className="absolute left-0 top-full z-50 mt-1 w-48 rounded-xl border border-border bg-card p-1 shadow-xl">
-                {MORE_TABS.map((t) => (
+                {moreTabs.map((t) => (
                   <button key={t} onClick={() => { setTab(t); setMoreOpen(false); }}
                     className={cn(
                       'w-full text-left px-3 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-colors',

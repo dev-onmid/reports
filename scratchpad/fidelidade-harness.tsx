@@ -24,7 +24,12 @@ const PESSOAS = (n: number, base: number) =>
     ultimaCompra: '2026-07-01T12:00:00.000Z',
   }));
 
+// `?desativada=1` simula o cliente com o interruptor desligado (a resposta que
+// a rota devolve quando `clients.fidelidade_ativa` é false).
+const DESATIVADA = new URLSearchParams(location.search).has('desativada');
+
 const RESPOSTA = {
+  ativo: true,
   conectado: true,
   loja: 'Tokio Maki',
   regua: { janelaDias: 30, inatividadeDias: 60 },
@@ -83,7 +88,8 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const body = init?.body ? JSON.parse(String(init.body)) : null;
     chamadas.push({ url: `${init?.method ?? 'GET'} ${url}`, body });
     await new Promise(r => setTimeout(r, 120));
-    return new Response(JSON.stringify(RESPOSTA), { headers: { 'Content-Type': 'application/json' } });
+    const corpo = DESATIVADA ? { ativo: false, conectado: false } : RESPOSTA;
+    return new Response(JSON.stringify(corpo), { headers: { 'Content-Type': 'application/json' } });
   }
   return original(input as RequestInfo, init);
 }) as typeof window.fetch;
