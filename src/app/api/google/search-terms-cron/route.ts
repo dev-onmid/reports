@@ -43,6 +43,12 @@ type ResultadoCliente = {
   recusadas?: number;
   erro?: string;
   pulado?: string;
+  /** Só em ?dry=1: o QUE seria feito. Dry-run sem isso não dá pra aprovar. */
+  plano?: {
+    negativar: Array<{ termo: string; motivo: string }>;
+    promover: Array<{ termo: string; motivo: string }>;
+    recusadas: Array<{ termo: string; decisao: string; motivo: string }>;
+  };
 };
 
 export async function GET(req: NextRequest) {
@@ -186,6 +192,13 @@ export async function GET(req: NextRequest) {
         }
         res.negativadas = dry ? plano.negativar.length : negativadas;
         res.promovidas = dry ? plano.promover.length : promovidas;
+        if (dry) {
+          res.plano = {
+            negativar: plano.negativar.map((x) => ({ termo: x.termo, motivo: x.motivo })),
+            promover: plano.promover.map((x) => ({ termo: x.termo, motivo: x.motivo })),
+            recusadas: plano.recusadas,
+          };
+        }
 
         // Histórico do cliente: trilha pro próximo gestor. Só grava quando houve
         // ação de verdade (rodada muda nada não polui a timeline).
