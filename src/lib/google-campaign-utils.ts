@@ -29,9 +29,25 @@ export function sanitizeGoogleKeywords(
   return { validas, descartadas };
 }
 
+// Nomes de cidade no geo_target_constant do Google vêm SEM acento ("Florianopolis",
+// "Sao Paulo") — busca exata com o nome acentuado devolve vazio e a campanha caía no
+// fallback "Brasil inteiro" (visto ao vivo na Cost Odonto). Gera as variantes.
+export function cityNameVariants(nome: string): string[] {
+  const limpo = nome.replace(/\s+/g, ' ').trim();
+  const semAcento = limpo.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  return [...new Set([limpo, semAcento])].filter(Boolean);
+}
+
 export type PartialFailureResult = {
   okIndexes: number[];
-  failed: Array<{ index: number; message: string }>;
+  failed: Array<{
+    index: number;
+    message: string;
+    // Presente quando a recusa é de POLÍTICA e o Google aceita pedido de isenção
+    // (isExemptible) — termos de saúde tipo "implante dentário". Reenviar a operação
+    // com exemptPolicyViolationKeys=[key] é o mesmo pedido que o painel faz sozinho.
+    exemptKey?: { policyName: string; violatingText: string };
+  }>;
 };
 
 // Lê a resposta de um mutate com partialFailure:true. `results` vem com o MESMO tamanho
@@ -47,6 +63,12 @@ export function parsePartialFailure(body: unknown, totalOperations: number): Par
         errors?: Array<{
           message?: string;
           location?: { fieldPathElements?: Array<{ fieldName?: string; index?: number }> };
+          details?: {
+            policyViolationDetails?: {
+              isExemptible?: boolean;
+              key?: { policyName?: string; violatingText?: string };
+            };
+          };
         }>;
       }>;
     };
@@ -55,13 +77,17 @@ export function parsePartialFailure(body: unknown, totalOperations: number): Par
   (Array.isArray(b?.results) ? b.results : []).forEach((x, i) => {
     if (x && typeof x.resourceName === 'string' && x.resourceName) okIndexes.push(i);
   });
-  const failed: Array<{ index: number; message: string }> = [];
+  const failed: PartialFailureResult['failed'] = [];
   for (const d of b?.partialFailureError?.details ?? []) {
     for (const e of d?.errors ?? []) {
       const op = (e?.location?.fieldPathElements ?? []).find(p => p?.fieldName === 'operations');
+      const pol = e?.details?.policyViolationDetails;
       failed.push({
         index: typeof op?.index === 'number' ? op.index : -1,
         message: String(e?.message ?? 'erro desconhecido'),
+        ...(pol?.isExemptible && pol.key?.policyName
+          ? { exemptKey: { policyName: String(pol.key.policyName), violatingText: String(pol.key.violatingText ?? '') } }
+          : {}),
       });
     }
   }

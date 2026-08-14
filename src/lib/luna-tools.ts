@@ -13,7 +13,7 @@ import { countMetaResults } from '@/lib/meta-results';
 import { ensureOptimizerClientConfigTable } from '@/lib/optimizer';
 import { executeOptimizerAction } from '@/lib/optimizer-execucao';
 import { dispararEventosPorStatus } from '@/lib/conversions';
-import { sanitizeGoogleKeywords, parsePartialFailure, type PartialFailureResult } from '@/lib/google-campaign-utils';
+import { sanitizeGoogleKeywords, parsePartialFailure, cityNameVariants, type PartialFailureResult } from '@/lib/google-campaign-utils';
 import type { OptimizerAcaoTipo, OptimizerObjetoTipo } from '@/lib/optimizer';
 
 // ─── Agendamento (luna_tasks) ────────────────────────────────────────────────
@@ -707,7 +707,9 @@ A ferramenta busca automaticamente os IDs de cidades e interesses na API Meta, v
   },
   {
     name: 'create_google_campaign',
-    description: `Cria uma campanha COMPLETA de Pesquisa (Search) no Google Ads: orçamento + campanha + grupo(s) de anúncios + palavras-chave (com negativas) + anúncio responsivo (RSA) por grupo + extensões (sitelinks, frases de destaque, snippets).
+    description: `Cria uma campanha COMPLETA de Pesquisa (Search) no Google Ads: orçamento + campanha + grupo(s) de anúncios + palavras-chave (com negativas) + anúncio responsivo (RSA) por grupo + extensões (sitelinks, frases de destaque, snippets) + nome da empresa (business_name — sempre preencha).
+Títulos/descrições ACIMA do limite (30/90 caracteres) são RECUSADOS com a lista do que estourou — conte os caracteres de verdade antes de chamar; a ferramenta não corta sozinha.
+Keyword de saúde recusada por política é reenviada automaticamente com pedido de isenção (igual o painel faz).
 A campanha nasce PAUSADA — o gestor revisa no painel e ativa.
 IMPORTANTE — capriche pra o anúncio nascer forte (Google prioriza anúncios completos):
 - ad_groups: prefira 2-4 grupos TEMÁTICOS (cada tema de busca com suas keywords + copy própria) em vez de um grupo único genérico. Cada grupo: 5-15 keywords, 10-15 títulos (máx 30 caracteres CADA), 4 descrições (máx 90 cada).
@@ -763,6 +765,7 @@ Sempre descreva a estrutura ao usuário e espere confirmação antes de criar.`,
         callouts: { type: 'array', items: { type: 'string' }, description: 'Frases de destaque (4-6), até 25 caracteres cada (ex: "Atendimento humanizado", "Estacionamento próprio")' },
         snippet_header: { type: 'string', description: 'Cabeçalho do snippet estruturado (ex: "Serviços", "Tipos"). Um dos valores válidos do Google.' },
         snippet_values: { type: 'array', items: { type: 'string' }, description: 'Valores do snippet (mínimo 3), até 25 caracteres cada (ex: ["Implantes", "Ortodontia", "Clareamento"])' },
+        business_name: { type: 'string', description: 'Nome da empresa exibido no anúncio (até 25 caracteres) — SEMPRE preencha com o nome do cliente. Precisa corresponder ao anunciante verificado ou à URL (o Google aprova/reprova depois).' },
       },
       required: ['client_id', 'name', 'daily_budget', 'final_url'],
     },
@@ -2811,9 +2814,21 @@ export async function execSystemTool(
         const g = gruposIn[i] ?? {};
         const gNome = String(g.name ?? '').trim() || `Grupo ${i + 1}`;
         const heads = (Array.isArray(g.headlines) ? g.headlines : [])
-          .map((h: unknown) => String(h).trim()).filter(Boolean).map((h: string) => h.slice(0, 30)).slice(0, 15);
+          .map((h: unknown) => String(h).trim()).filter(Boolean).slice(0, 15);
         const descs = (Array.isArray(g.descriptions) ? g.descriptions : [])
-          .map((d: unknown) => String(d).trim()).filter(Boolean).map((d: string) => d.slice(0, 90)).slice(0, 4);
+          .map((d: unknown) => String(d).trim()).filter(Boolean).slice(0, 4);
+        // ⚠️ NUNCA truncar copy em silêncio: o slice(0,90) antigo cortava no meio da
+        // palavra e o anúncio ia pro ar com "…gratuita na Co" (visto em produção — a IA
+        // conta caracteres errado). Estourou o limite → devolve QUAL texto e o tamanho,
+        // pra IA reescrever antes de criar qualquer coisa.
+        const headsLongos = heads.filter((h: string) => h.length > 30);
+        if (headsLongos.length) {
+          return `O grupo "${gNome}" tem título(s) ACIMA de 30 caracteres — reescreva mais curto e chame de novo (NÃO corto sozinho, cortaria no meio da palavra):\n${headsLongos.map((h: string) => `- "${h}" (${h.length} caracteres)`).join('\n')}`;
+        }
+        const descsLongas = descs.filter((d: string) => d.length > 90);
+        if (descsLongas.length) {
+          return `O grupo "${gNome}" tem descrição(ões) ACIMA de 90 caracteres — reescreva mais curto e chame de novo (NÃO corto sozinho, cortaria no meio da palavra):\n${descsLongas.map((d: string) => `- "${d}" (${d.length} caracteres)`).join('\n')}`;
+        }
         const { validas, descartadas } = sanitizeGoogleKeywords(g.keywords);
         if (heads.length < 3) return `O grupo "${gNome}" precisa de no mínimo 3 títulos (até 30 caracteres cada). Gere os títulos e chame de novo.`;
         if (descs.length < 2) return `O grupo "${gNome}" precisa de no mínimo 2 descrições (até 90 caracteres cada). Gere as descrições e chame de novo.`;
@@ -2866,10 +2881,13 @@ export async function execSystemTool(
       const cidadesNaoAchadas: string[] = [];
       const cidades = (Array.isArray(input.cities) ? input.cities : []).map((c: unknown) => String(c).trim()).filter(Boolean);
       for (const cidade of cidades.slice(0, 10)) {
+        // Variantes com/sem acento: o geo_target_constant guarda "Florianopolis" — a
+        // busca exata com "Florianópolis" voltava vazia e caía no Brasil inteiro.
+        const nomes = cityNameVariants(cidade).map(n => `'${n.replace(/'/g, "\\'")}'`).join(', ');
         const geo = await lunaGoogleSearch(customerId,
           `SELECT geo_target_constant.resource_name, geo_target_constant.canonical_name
              FROM geo_target_constant
-            WHERE geo_target_constant.name = '${cidade.replace(/'/g, "\\'")}'
+            WHERE geo_target_constant.name IN (${nomes})
               AND geo_target_constant.country_code = 'BR'
               AND geo_target_constant.target_type = 'City'
               AND geo_target_constant.status = 'ENABLED' LIMIT 1`);
@@ -2980,11 +2998,36 @@ export async function execSystemTool(
           report.push(`   Motivo (Google Ads API): ${kwRes.error}`);
           report.push(`   Adicione manualmente no grupo de anúncios.`);
         } else {
-          const criadas = kwRes.okIndexes.length;
-          report.push(`   ✅ ${criadas} de ${g.keywords.length} palavra(s)-chave [${matchType}]: ${g.keywords.slice(0, 8).join(', ')}${g.keywords.length > 8 ? '…' : ''}`);
-          for (const f of kwRes.failed) {
-            report.push(`   ⚠️ recusada: "${f.index >= 0 ? g.keywords[f.index] : '?'}" — ${f.message}`);
+          let criadas = kwRes.okIndexes.length;
+          const linhas: string[] = [];
+          // Recusa de política EXEMPTIBLE (termo de saúde tipo "implante dentário"):
+          // reenvia UMA vez com exemptPolicyViolationKeys — o mesmo pedido de isenção
+          // que o painel do Google faz sozinho. Sem isso, 8 de 9 keywords do grupo de
+          // implantes da Cost Odonto foram recusadas num grupo que o painel aceitaria.
+          const isentaveis = kwRes.failed.filter(f => f.exemptKey && f.index >= 0);
+          const outras = kwRes.failed.filter(f => !(f.exemptKey && f.index >= 0));
+          if (isentaveis.length > 0) {
+            const retry = await lunaGoogleMutatePartial(customerId, token, login, 'adGroupCriteria',
+              isentaveis.map(f => ({
+                create: { adGroup: agRn, status: 'ENABLED', keyword: { text: g.keywords[f.index], matchType } },
+                exemptPolicyViolationKeys: [f.exemptKey],
+              })));
+            if ('error' in retry) {
+              isentaveis.forEach(f => linhas.push(`   ⚠️ recusada (política): "${g.keywords[f.index]}" — ${f.message}`));
+            } else {
+              criadas += retry.okIndexes.length;
+              if (retry.okIndexes.length > 0) {
+                linhas.push(`   ✅ ${retry.okIndexes.length} keyword(s) de saúde aprovada(s) com pedido de isenção de política (mesmo pedido que o painel faz): ${retry.okIndexes.map(i => `"${g.keywords[isentaveis[i]?.index ?? -1] ?? '?'}"`).join(', ')}`);
+              }
+              retry.failed.forEach(rf => {
+                const orig = rf.index >= 0 ? isentaveis[rf.index] : undefined;
+                linhas.push(`   ⚠️ recusada mesmo com pedido de isenção: "${orig ? g.keywords[orig.index] : '?'}" — ${rf.message}`);
+              });
+            }
           }
+          outras.forEach(f => linhas.push(`   ⚠️ recusada: "${f.index >= 0 ? g.keywords[f.index] : '?'}" — ${f.message}`));
+          report.push(`   ✅ ${criadas} de ${g.keywords.length} palavra(s)-chave [${matchType}]: ${g.keywords.slice(0, 8).join(', ')}${g.keywords.length > 8 ? '…' : ''}`);
+          linhas.forEach(l => report.push(l));
           if (criadas === 0) report.push(`   ⚠️ NENHUMA keyword entrou — adicione manualmente no painel.`);
         }
         for (const d of g.descartadas) {
@@ -3074,17 +3117,32 @@ export async function execSystemTool(
         }
       }
 
+      // Nome da empresa (asset de texto vinculado à campanha como BUSINESS_NAME) —
+      // sem ele o anúncio sai com um placeholder derivado da URL. O Google ainda
+      // valida contra o anunciante verificado (aprovação assíncrona).
+      const businessName = String(input.business_name ?? '').trim().slice(0, 25);
+      if (businessName) {
+        const a = await lunaGoogleMutate(customerId, token, login, 'assets',
+          [{ create: { textAsset: { text: businessName } } }]);
+        if ('error' in a) extResumo.push(`⚠️ Nome da empresa: FALHA — ${a.error}`);
+        else {
+          const l = await linkAssets(a.resourceNames, 'BUSINESS_NAME');
+          extResumo.push('error' in l
+            ? `⚠️ Nome da empresa criado mas não vinculado — ${l.error}`
+            : `✅ Nome da empresa: "${businessName}" (sujeito à aprovação do Google — precisa casar com o anunciante verificado)`);
+        }
+      }
+
       if (extResumo.length) {
         report.push('');
         report.push('Extensões:');
         extResumo.forEach(e => report.push(`   ${e}`));
       }
 
-      // Logo, imagens do anúncio e nome da empresa exigem ARQUIVO de imagem (upload) e/ou
-      // vínculo com o Perfil da Empresa — a Luna não tem esses arquivos. Avisa como pendência
-      // manual em vez de fingir que ficou completo.
+      // Logo e imagens do anúncio exigem ARQUIVO de imagem (upload) — a Luna não tem
+      // esses arquivos. Avisa como pendência manual em vez de fingir que ficou completo.
       report.push('');
-      report.push('ℹ️ Adicione manualmente no painel (exigem imagem/Perfil da Empresa): logotipo, imagens do anúncio e nome da empresa.');
+      report.push(`ℹ️ Adicione manualmente no painel (exigem imagem): logotipo e imagens do anúncio.${businessName ? '' : ' Nome da empresa também ficou vazio — informe business_name na próxima.'}`);
       report.push('▶️ Próximo passo: revisar no painel do Google Ads e ATIVAR a campanha (está pausada de propósito).');
       return report.join('\n');
     }
@@ -3110,9 +3168,10 @@ export async function execSystemTool(
       const achadas: string[] = [];
       const naoAchadas: string[] = [];
       for (const cidade of cidades.slice(0, 10)) {
+        const nomes = cityNameVariants(cidade).map(n => `'${n.replace(/'/g, "\\'")}'`).join(', ');
         const geo = await lunaGoogleSearch(customerId,
           `SELECT geo_target_constant.resource_name FROM geo_target_constant
-            WHERE geo_target_constant.name = '${cidade.replace(/'/g, "\\'")}'
+            WHERE geo_target_constant.name IN (${nomes})
               AND geo_target_constant.country_code = 'BR'
               AND geo_target_constant.target_type = 'City'
               AND geo_target_constant.status = 'ENABLED' LIMIT 1`);
