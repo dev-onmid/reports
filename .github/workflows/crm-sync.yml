@@ -6,9 +6,12 @@ name: CRM Sync
 # Secret necessário no GitHub: CRM_SYNC_URL
 #   = https://reports.onmid.app/api/crm/sync-cron?secret=<valor de REPORTS_CRON_SECRET>
 
+# ⚠️ AGENDAMENTO DESLIGADO (2026-08-13). A crontab da VPS já chama esta rota a
+# cada 10 min — este workflow era DUPLICATA. Continua disparável na mão pelo
+# botão "Run workflow". Para religar, descomente as 2 linhas do schedule.
 on:
-  schedule:
-    - cron: '*/10 * * * *'
+  # schedule:
+  #   - cron: '*/10 * * * *'
   workflow_dispatch: {}
 
 jobs:

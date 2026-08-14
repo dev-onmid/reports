@@ -4,9 +4,13 @@ name: Luna Scheduler
 # Secret necessário no GitHub: LUNA_SCHEDULER_URL
 #   = https://reports.onmid.app/api/agent/scheduler?secret=<valor de REPORTS_CRON_SECRET>
 
+# ⚠️ AGENDAMENTO DESLIGADO (2026-08-13). A crontab da VPS já chama esta rota a
+# cada 15 min, de forma confiável — este workflow era DUPLICATA, cobrando duas
+# vezes pela mesma tarefa. Continua disparável na mão pelo botão "Run workflow"
+# se a VPS estiver fora. Para religar, descomente as 2 linhas do schedule.
 on:
-  schedule:
-    - cron: '*/15 * * * *'
+  # schedule:
+  #   - cron: '*/15 * * * *'
   workflow_dispatch: {}
 
 jobs:

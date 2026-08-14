@@ -1,0 +1,44 @@
+name: Build da imagem (Coolify/VPS)
+
+# Constrói a imagem Docker de produção FORA da VPS — os 2 núcleos de lá são
+# compartilhados com a Evolution (WhatsApp de todos os clientes), então build
+# na VPS está proibido por decisão de projeto (ver CLAUDE.md, saída da Vercel).
+#
+# O resultado sobe como ARTEFATO (.tar.gz) — sem registry, sem credencial nova.
+# Quem publica baixa o artefato e faz `docker load` na VPS via SSH.
+#
+# ⚠️ Os valores NEXT_PUBLIC_* abaixo estão em claro DE PROPÓSITO: são assados no
+# JavaScript do NAVEGADOR de qualquer forma (público por desenho — o painel do
+# Supabase marca a publishable key como "safe to share publicly"). Segredo de
+# servidor (senha de banco, chaves de API) NUNCA entra aqui — vai como variável
+# de ambiente na hora de RODAR, no Coolify/VPS.
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Construir a imagem
+        run: |
+          docker build \
+            --build-arg NEXT_PUBLIC_SUPABASE_URL=https://iremmorsgwiqrorzoihx.supabase.co \
+            --build-arg NEXT_PUBLIC_SUPABASE_ANON_KEY=sb_publishable_2HGMnVTG4ZeBupx8l73U5w_k_Z3kauw \
+            --build-arg NEXT_PUBLIC_APP_URL=https://reports.onmid.app \
+            --build-arg NEXT_PUBLIC_BASE_URL=https://reports.onmid.app \
+            -t onmid-reports:${GITHUB_SHA::8} .
+
+      - name: Empacotar
+        run: docker save onmid-reports:${GITHUB_SHA::8} | gzip > onmid-reports-image.tar.gz && ls -lh onmid-reports-image.tar.gz
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: onmid-reports-image
+          path: onmid-reports-image.tar.gz
+          retention-days: 7

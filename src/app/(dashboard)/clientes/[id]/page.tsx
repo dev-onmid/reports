@@ -55,6 +55,7 @@ import { LandingPagesTab } from './landing-pages-tab';
 import { ClientDemandasTab } from './demandas-tab';
 import { ClientReunioesTab } from './reunioes-tab';
 import { ClientDeliveryTab } from './delivery-tab';
+import { ClientFidelidadeTab } from './fidelidade-tab';
 
 // ── Funnel types & logic ───────────────────────────────────────────────────────
 type FunnelStage = { id: string; name: string; conversion: number };
@@ -4667,14 +4668,16 @@ function SheetsResultsTab({ clientId }: { clientId: string }) {
 }
 
 // ── Page ───────────────────────────────────────────────────────────────────────
-const TABS = ['planejamento', 'demandas', 'reunioes', 'crm', 'rastreio', 'pagamentos', 'delivery', 'lps', 'dna', 'historico', 'mapa'] as const;
+const TABS = ['planejamento', 'demandas', 'reunioes', 'crm', 'rastreio', 'pagamentos', 'delivery', 'fidelidade', 'lps', 'dna', 'historico', 'mapa'] as const;
 type Tab = typeof TABS[number];
 // Abas operacionais sempre visíveis na barra; o resto (referência) vai pro menu "Mais".
 const PRIMARY_TABS: Tab[] = ['planejamento', 'demandas', 'reunioes', 'crm', 'rastreio', 'pagamentos'];
 // `delivery` fica no overflow porque só interessa a cliente de cardápio digital.
 // A aba aparece para todos de propósito: é por ela que se CONECTA uma loja nova
 // (sem conexão, ela mostra o formulário em vez do painel).
-const MORE_TABS: Tab[] = ['delivery', 'lps', 'dna', 'historico', 'mapa'];
+// `fidelidade` acompanha `delivery`: as duas só fazem sentido para cliente com
+// cardápio digital, e a de fidelidade lê exatamente a base que a outra conecta.
+const MORE_TABS: Tab[] = ['delivery', 'fidelidade', 'lps', 'dna', 'historico', 'mapa'];
 
 function readSavedDashboardBlocks(clientId: string): ClientDashboardWidget[] {
   if (typeof window === 'undefined') return [];
@@ -4948,6 +4951,7 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
     dna:          'DNA do Cliente',
     crm:          'CRM',
     delivery:     'Delivery',
+    fidelidade:   'Fidelidade',
   };
 
   if (onboardingPending) {
@@ -5206,6 +5210,7 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
       {tab === 'demandas' && <ClientDemandasTab clientId={id} />}
       {tab === 'reunioes' && <ClientReunioesTab clientId={id} />}
       {tab === 'delivery' && <ClientDeliveryTab clientId={id} />}
+      {tab === 'fidelidade' && <ClientFidelidadeTab clientId={id} />}
 
       {tab === 'mapa' && <ClientMindMapTab clientId={id} clientName={client.name} />}
 
