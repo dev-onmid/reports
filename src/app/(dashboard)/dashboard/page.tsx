@@ -40,7 +40,7 @@ import {
   Pause, CircleDot, Pencil, Settings2, Users, Copy,
   Bell, DollarSign, Tag, TrendingUp, Calendar, BarChart3, Zap, Target, Briefcase,
   Wallet, MousePointerClick, CreditCard, PiggyBank, Clock, Info, Lightbulb, UserPlus, CheckCircle2, Receipt,
-  Eye, Heart, Monitor, ExternalLink, Bookmark, MessageCircle,
+  Eye, Heart, Monitor, ExternalLink, Bookmark, MessageCircle, Repeat,
 } from 'lucide-react';
 import { getAuthSession } from '@/lib/auth-store';
 import type { AiInsight } from '@/app/api/ai/insights/route';
@@ -80,13 +80,10 @@ import {
 } from '@/lib/funil-etapas';
 import { FunilLeadsModal } from '@/components/funil-leads-modal';
 import { normalizarSegmento, perfilDaSelecao } from '@/lib/dashboard-segmento';
+import { DeliveryView } from '@/components/dashboard/delivery-view';
+import { useDadosDelivery } from '@/components/dashboard/use-dados-delivery';
 import {
-  ResultadoNegocioFood, DecomposicaoReceitaCard, FunilUnificadoFood,
-  ClientesRetencaoFood, MixProdutosFood, CampanhasWhatsappFood, useDadosFood,
-  conversaoDoCatalogo,
-} from '@/components/dashboard-food';
-import {
-  formatarMetrica, custoPorPedido, roas as roasFood, cac as cacFood,
+  formatarMetrica, custoPorPedido, roas as roasFood,
 } from '@/lib/metricas-food';
 
 type Period = 'yesterday' | 'last_7d' | 'last_14d' | 'last_30d' | 'this_month' | 'last_month' | 'custom';
@@ -4423,6 +4420,38 @@ function GoalProgressCard({
   );
 }
 
+// Hero grande sem meta — o par do GoalProgressCard para métrica que não é alvo
+// (ex.: Ticket médio no food). Mesma moldura premium; mostra valor + variação.
+function HeroStatCard({ title, icon: Icon, value, change, sub }: {
+  title: string;
+  icon: React.ElementType;
+  value: string;
+  change?: number | null;
+  sub?: string;
+}) {
+  const hasChange = change !== null && change !== undefined && Number.isFinite(change);
+  const positive = !hasChange || change >= 0;
+  return (
+    <PremiumPanel className="relative overflow-hidden p-5">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_8%_0%,rgba(108,255,47,0.16),transparent_32%),linear-gradient(135deg,rgba(108,255,47,0.05),rgba(22,139,255,0.02))]" />
+      <div className="relative flex items-start gap-4">
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[#6cff2f]/18 bg-[#6cff2f]/10 text-[#6cff2f]">
+          <Icon className="h-5 w-5" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <h2 className="text-sm font-black uppercase tracking-[0.07em] text-[#f4f7f8]">{title}</h2>
+          <p className="mt-5 font-heading text-4xl leading-none text-[#f4f7f8]">{value}</p>
+          <p className={cn('mt-3 text-sm font-bold', positive ? 'text-[#6cff2f]' : 'text-red-400')}>
+            {hasChange ? `${change >= 0 ? '+' : ''}${change.toFixed(1).replace('.', ',')}%` : '—'}{' '}
+            <span className="font-medium text-[#a7b0b6]">vs período anterior</span>
+          </p>
+          {sub && <p className="mt-1.5 text-xs text-[#a7b0b6]">{sub}</p>}
+        </div>
+      </div>
+    </PremiumPanel>
+  );
+}
+
 function QuickMetricCard({ title, value, change, icon: Icon, inverseChange }: {
   title: string;
   value: string;
@@ -5955,27 +5984,56 @@ export default function GeneralDashboard() {
   // Cliente único é a condição para os blocos de food: somar recorrência e mix
   // de produtos de estabelecimentos diferentes produz um agregado sem sentido.
   const foodSoloId = modoFood && selectedIds.size === 1 ? [...selectedIds][0] : null;
-  const dadosFood = useDadosFood(
-    foodSoloId,
-    periodoISO.from,
-    periodoISO.to,
-    metaImpressions + googleImpressions,
-    metaClicks + googleClicks,
-    totalSpend,
-  );
+  // Instagram orgânico agregado — mesma fonte do painel de Instagram, computado
+  // aqui porque o adaptador de delivery roda antes do bloco que monta aquele
+  // painel. `null` quando não há conta vinculada (a DeliveryView mostra "—").
+  const igFood = (() => {
+    const cur = pageInsights.filter(p => p.instagram).map(p => p.instagram!);
+    if (cur.length === 0) return null;
+    const s = (k: 'followers' | 'reach' | 'totalInteractions' | 'saves' | 'profileViews') =>
+      cur.reduce((acc, d) => acc + (d[k] ?? 0), 0);
+    const alcance = s('reach');
+    const interacoes = s('totalInteractions');
+    return {
+      seguidores: s('followers') || null,
+      novosSeguidores: null,
+      alcance: alcance || null,
+      interacoes: interacoes || null,
+      salvamentos: s('saves') || null,
+      visitasPerfil: s('profileViews') || null,
+      engajamento: alcance > 0 ? interacoes / alcance : null,
+    };
+  })();
+  const dadosFood = useDadosDelivery(foodSoloId, periodoISO.from, periodoISO.to, {
+    metaSpend, metaImpressions, metaClicks,
+    googleCost, googleImpressions, googleClicks,
+    metaSaldo: metaBalance > 0 ? metaBalance : null,
+    googleSaldo: googleBalance > 0 ? googleBalance : null,
+    instagram: igFood ?? {
+      seguidores: null, novosSeguidores: null, alcance: null, interacoes: null,
+      salvamentos: null, visitasPerfil: null, engajamento: null,
+    },
+  });
 
-  // Faixa de KPIs no VOCABULÁRIO do food (seção 6: "o que sai ou vira
-  // condicional"). Agendamentos some (não existe em delivery), CPL vira custo
-  // por pedido, conversão geral vira conversão do catálogo. Sem esta troca a
-  // tela fica híbrida: badge de food com métricas de lead-gen embaixo.
-  const quickMetricsFood = dadosFood ? [
-    { title: 'Investimento Total', value: premiumValue(totalSpend, 'currency'), change: pctChange(totalSpend, prevTotalSpend), icon: CreditCard },
-    { title: 'Custo por pedido', value: formatarMetrica(custoPorPedido(totalSpend, dadosFood.resultado.pedidos), 'moeda'), change: null, icon: Tag, inverseChange: true },
-    { title: 'ROAS', value: formatarMetrica(roasFood(dadosFood.resultado.faturamento, totalSpend), 'multiplicador'), change: null, icon: TrendingUp },
-    { title: 'CAC', value: formatarMetrica(cacFood(totalSpend, dadosFood.baldes.novo ?? 0), 'moeda'), change: null, icon: Users, inverseChange: true },
-    { title: 'Conversão do catálogo', value: formatarMetrica(conversaoDoCatalogo(dadosFood.funil), 'percentual'), change: null, icon: Target },
-    { title: 'Ticket médio', value: formatarMetrica(dadosFood.resultado.ticketMedio || null, 'moeda'), change: dadosFood.resultado.varTicket, icon: Receipt },
-  ] : [];
+  // Faixa de eficiência do food. Fica no topo porque responde "o anúncio está
+  // pagando?", que a DeliveryView (focada em vendas e base) não responde.
+  // Agendamentos e CPL somem: não existem em delivery.
+  const quickMetricsFood = dadosFood ? (() => {
+    // Comparativos que dão pra fechar com o período anterior: custo por pedido
+    // (investimento ÷ pedidos) e ROAS (receita ÷ investimento). `null` quando
+    // não há base anterior — nunca "+∞%".
+    const cppAtual = custoPorPedido(totalSpend, dadosFood.vendas.pedidos);
+    const cppPrev = dadosFood.anterior ? custoPorPedido(prevTotalSpend, dadosFood.anterior.pedidos) : null;
+    const roasAtual = roasFood(dadosFood.vendas.receita, totalSpend);
+    const roasPrev = dadosFood.anterior ? roasFood(dadosFood.anterior.receita, prevTotalSpend) : null;
+    return [
+      { title: 'Investimento Total', value: premiumValue(totalSpend, 'currency'), change: pctChange(totalSpend, prevTotalSpend), icon: CreditCard },
+      { title: 'Custo por pedido', value: formatarMetrica(cppAtual, 'moeda'), change: cppAtual !== null && cppPrev !== null && cppPrev > 0 ? pctChange(cppAtual, cppPrev) : null, icon: Tag, inverseChange: true },
+      { title: 'ROAS', value: formatarMetrica(roasAtual, 'multiplicador'), change: roasAtual !== null && roasPrev !== null && roasPrev > 0 ? pctChange(roasAtual, roasPrev) : null, icon: TrendingUp },
+      { title: 'Ticket médio', value: formatarMetrica(dadosFood.vendas.ticket, 'moeda'), change: dadosFood.variacao.ticket, icon: Receipt },
+      { title: 'Recorrência', value: formatarMetrica(dadosFood.clientes.taxaRecorrencia, 'percentual'), change: null, icon: Repeat },
+    ];
+  })() : [];
   // Taxa do FUNIL = fechamentos sobre o topo DELE. A `conversionRate` global usa
   // `funnelVisitors` (impressões + cliques), o que dava "0,13%" ao lado de um
   // funil que começa em contatos — dois números sem relação na mesma caixa.
@@ -6101,11 +6159,14 @@ export default function GeneralDashboard() {
               </div>
             )}
 
-            {/* Bloco 2 da seção 6: em food, "Faturamento/Leads" dá lugar a
-                Faturamento · Pedidos · Ticket médio. Lead nem existe como
-                conceito em delivery — o evento de sucesso é o pedido pago. */}
+            {/* Hero do topo. Em food, "Leads" não existe (o evento de sucesso é o
+                pedido pago): o par vira Faturamento (dos pedidos) + Ticket médio.
+                O Faturamento continua sendo meta-progresso; o Ticket, valor+Δ. */}
             {modoFood && dadosFood ? (
-              <ResultadoNegocioFood dados={dadosFood.resultado} />
+              <div className="grid gap-4 xl:grid-cols-2">
+                <GoalProgressCard title="Faturamento" icon={DollarSign} target={plannedRevenue} partial={effectiveRevenueGoal} value={dadosFood.vendas.receita} format="currency" />
+                <HeroStatCard title="Ticket médio" icon={Receipt} value={formatarMetrica(dadosFood.vendas.ticket, 'moeda')} change={dadosFood.variacao.ticket} sub="valor médio por pedido no período" />
+              </div>
             ) : (
               <div className="grid gap-4 xl:grid-cols-2">
                 <GoalProgressCard title="Faturamento" icon={DollarSign} target={plannedRevenue} partial={effectiveRevenueGoal} value={revenue} format="currency" />
@@ -6151,23 +6212,7 @@ export default function GeneralDashboard() {
                 Substitui o funil de leads (conceito sem equivalente em delivery)
                 pela cadeia mídia → catálogo → pedido → receita. */}
             {modoFood && dadosFood ? (
-              <>
-                <div className="grid gap-4 xl:grid-cols-2">
-                  <DecomposicaoReceitaCard valores={dadosFood.decomposicao} />
-                  <ClientesRetencaoFood
-                    baldes={dadosFood.baldes}
-                    pedidos={dadosFood.resultado.pedidos}
-                    clientesUnicos={dadosFood.clientesUnicos}
-                    clientesComDoisOuMais={dadosFood.clientesComDoisOuMais}
-                  />
-                </div>
-                <FunilUnificadoFood funil={dadosFood.funil} investimento={dadosFood.investimento} />
-                <div className="grid gap-4 xl:grid-cols-2">
-                  <MixProdutosFood />
-                  <CampanhasWhatsappFood />
-                </div>
-                <ChannelSummaryTable rows={channelRows} />
-              </>
+              <DeliveryView dados={dadosFood} />
             ) : (
               <div className="grid gap-4 xl:grid-cols-[1.08fr_0.92fr]">
                 {deliverySoloId ? (
@@ -6181,6 +6226,9 @@ export default function GeneralDashboard() {
 
             {/* ── Instagram — logo abaixo do funil ── */}
             {(() => {
+              // Em food, o Instagram já aparece dentro da DeliveryView (capítulo
+              // Tráfego) — este painel duplicaria. Some no modo food.
+              if (modoFood && dadosFood) return null;
               const allIg = pageInsights.filter(p => p.instagram).map(p => p.instagram!);
               const prevIg = prevPageInsights.filter(p => p.instagram).map(p => p.instagram!);
               if (allIg.length === 0 && !pageInsightsLoading) return null;

@@ -488,3 +488,97 @@ export function agregarCupons(pedidos: PedidoComDesconto[], p: Periodo): ResumoC
     semDadoDeDesconto: semDado,
   };
 }
+
+// ---------------------------------------------------------------- Série / Heatmap / Frequência
+
+/**
+ * Parte local (BRT, UTC-3 fixo — sem horário de verão desde 2019) de um instante.
+ *
+ * Reusa a mesma convenção de `limitesBRT`: deslocar o instante UTC em -3h e ler
+ * as partes UTC devolve o relógio de parede de Brasília. Sem isso, pedido às 22h
+ * de 31/jul cairia no dia seguinte no relatório.
+ */
+function parteBRT(createdAt: string | Date): { data: string; dow: number; hora: number } | null {
+  const iso = paraIso(createdAt);
+  if (!iso) return null;
+  const t = new Date(iso).getTime();
+  if (!Number.isFinite(t)) return null;
+  const brt = new Date(t - 3 * 3_600_000);
+  return { data: brt.toISOString().slice(0, 10), dow: brt.getUTCDay(), hora: brt.getUTCHours() };
+}
+
+export type PontoSerieDia = { data: string; receita: number; pedidos: number };
+
+/**
+ * Receita e pedidos por dia BRT dentro do período. Só dias COM pedido entram —
+ * plotar dia sem venda como zero puxaria a linha pra baixo e sugeriria operação
+ * parada (mesma convenção de "null = sem fonte" do resto do painel).
+ */
+export function serieDiaria(pedidos: PedidoLite[], p: Periodo): PontoSerieDia[] {
+  const porDia = new Map<string, { receita: number; pedidos: number }>();
+  for (const o of pedidos) {
+    if (!pedidoValido(o) || !noPeriodo(o.created_at, p)) continue;
+    const parte = parteBRT(o.created_at);
+    if (!parte) continue;
+    const cur = porDia.get(parte.data) ?? { receita: 0, pedidos: 0 };
+    cur.receita += Number(o.total) || 0;
+    cur.pedidos += 1;
+    porDia.set(parte.data, cur);
+  }
+  return [...porDia.entries()]
+    .map(([data, v]) => ({ data, receita: v.receita, pedidos: v.pedidos }))
+    .sort((a, b) => a.data.localeCompare(b.data));
+}
+
+/** Faixas de horário do mapa de calor — recorte de delivery (almoço 10–14, jantar 18–22). */
+export const FAIXAS_HEATMAP = [
+  { label: '00–06h', min: 0, max: 5 },
+  { label: '06–10h', min: 6, max: 9 },
+  { label: '10–14h', min: 10, max: 13 },
+  { label: '14–18h', min: 14, max: 17 },
+  { label: '18–22h', min: 18, max: 21 },
+  { label: '22–24h', min: 22, max: 23 },
+] as const;
+
+export type HeatmapPedidos = { faixas: string[]; matriz: number[][]; max: number };
+
+/**
+ * Pedidos por dia da semana × faixa de horário, em BRT. `matriz[faixa][dow]`,
+ * dow 0=domingo (convenção de `Date.getDay()`, casada com `DIAS_SEMANA` da UI).
+ */
+export function heatmapPedidos(pedidos: PedidoLite[], p: Periodo): HeatmapPedidos {
+  const matriz = FAIXAS_HEATMAP.map(() => new Array<number>(7).fill(0));
+  let max = 0;
+  for (const o of pedidos) {
+    if (!pedidoValido(o) || !noPeriodo(o.created_at, p)) continue;
+    const parte = parteBRT(o.created_at);
+    if (!parte) continue;
+    const fi = FAIXAS_HEATMAP.findIndex(f => parte.hora >= f.min && parte.hora <= f.max);
+    if (fi < 0) continue;
+    const v = (matriz[fi][parte.dow] += 1);
+    if (v > max) max = v;
+  }
+  return { faixas: FAIXAS_HEATMAP.map(f => f.label), matriz, max };
+}
+
+export type FaixaFrequencia = { chave: '1' | '2-4' | '5-9' | '10+'; nome: string; clientes: number };
+
+const FAIXAS_FREQ: Array<{ chave: FaixaFrequencia['chave']; nome: string; min: number; max: number }> = [
+  { chave: '1', nome: '1 pedido', min: 1, max: 1 },
+  { chave: '2-4', nome: '2 a 4 pedidos', min: 2, max: 4 },
+  { chave: '5-9', nome: '5 a 9 pedidos', min: 5, max: 9 },
+  { chave: '10+', nome: '10+ pedidos', min: 10, max: Number.POSITIVE_INFINITY },
+];
+
+/**
+ * Distribuição da base por número de pedidos na vida (1x, 2–4, 5–9, 10+) — o
+ * argumento comercial da retenção. Recebe os clientes já agrupados
+ * (`agruparPorCliente`), cada um com sua contagem de pedidos.
+ */
+export function distribuicaoFrequencia(clientes: Array<{ pedidos: number }>): FaixaFrequencia[] {
+  return FAIXAS_FREQ.map(f => ({
+    chave: f.chave,
+    nome: f.nome,
+    clientes: clientes.filter(c => c.pedidos >= f.min && c.pedidos <= f.max).length,
+  }));
+}
