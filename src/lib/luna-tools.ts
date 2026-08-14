@@ -270,6 +270,28 @@ async function lunaGoogleMutatePartial(
   return parsePartialFailure(body, operations.length);
 }
 
+// Resolve as contas Google Ads de um client_id. ⚠️ A IA às vezes passa o Nº DA
+// CONTA GOOGLE (10 dígitos, ex: 7730917727) no lugar do client_id interno — visto
+// em produção na Cost Odonto: as leituras funcionavam e a criação respondia "sem
+// conta vinculada". Fallback: valor com cara de customer id é usado direto (o
+// probe/chamada seguinte valida o acesso de verdade).
+async function resolveGoogleAccountIds(
+  pool: ReturnType<typeof makeServerPool>, clientId: string,
+): Promise<string[]> {
+  const { rows } = await pool.query(
+    "SELECT account_id FROM public.client_account_links WHERE client_id = $1 AND platform IN ('google_ads','google')",
+    [clientId],
+  );
+  const ids = [...new Set(rows.map((l: { account_id: string }) => String(l.account_id).replace(/\D/g, '')).filter(Boolean))];
+  if (ids.length > 0) return ids as string[];
+  const digits = clientId.replace(/\D/g, '');
+  if (digits.length === 10 && digits === clientId.replace(/[-\s.]/g, '')) return [digits];
+  return [];
+}
+
+const SEM_CONTA_GOOGLE =
+  'Nenhuma conta Google Ads vinculada a esse cliente. Confira o client_id: use o ID INTERNO do cliente no sistema (o mesmo que list_clients devolve) — NÃO o número da conta Google.';
+
 export const DEFAULT_INSTRUCTIONS = `Você é Luna, assistente inteligente da Onmid Marketing.`;
 
 // --- DB helpers ---
@@ -1370,13 +1392,8 @@ export async function execSystemTool(
       const period = (input.period as string) || 'this_month';
       const gaqlPeriod = resolveGaqlPeriod(period, (input.date_from as string) ?? '', (input.date_to as string) ?? '');
 
-      const { rows: links } = await pool.query(
-        "SELECT account_id FROM public.client_account_links WHERE client_id = $1 AND platform IN ('google_ads','google')",
-        [clientId]
-      );
-      if (links.length === 0) return 'Nenhuma conta Google Ads vinculada a esse cliente.';
-
-      const accountIds = [...new Set(links.map((l) => l.account_id.replace(/\D/g, '')).filter(Boolean))];
+      const accountIds = await resolveGoogleAccountIds(pool, clientId);
+      if (accountIds.length === 0) return SEM_CONTA_GOOGLE;
       const campaigns: Record<string, unknown>[] = [];
       const failures: string[] = [];
 
@@ -1427,14 +1444,10 @@ export async function execSystemTool(
       // keywords em 17 pausadas) a campanha ATIVA ficava de fora da resposta.
       const kwScopeCond = campFilter ? campCond : " AND campaign.status = 'ENABLED'";
 
-      const { rows: links } = await pool.query(
-        "SELECT account_id FROM public.client_account_links WHERE client_id = $1 AND platform IN ('google_ads','google')",
-        [clientId]
-      );
-      if (links.length === 0) return 'Nenhuma conta Google Ads vinculada a esse cliente.';
-      const accountIds = [...new Set(links.map((l) => l.account_id.replace(/\D/g, '')).filter(Boolean))];
+      const accountIds = await resolveGoogleAccountIds(pool, clientId);
+      if (accountIds.length === 0) return SEM_CONTA_GOOGLE;
 
-      type KwOut = { texto: string; match: string; status: string; gasto: number; cliques: number; conversoes: number };
+      type KwOut ={ texto: string; match: string; status: string; gasto: number; cliques: number; conversoes: number };
       type GrupoOut = { id: string; nome: string; status: string; gasto: number; cliques: number; conversoes: number; keywords: KwOut[]; keywords_omitidas?: number };
       type CampOut = { id: string; nome: string; status: string; negativas: Array<{ texto: string; match: string }>; grupos: GrupoOut[] };
       const contas: Array<{ accountId: string; campanhas: CampOut[] }> = [];
@@ -2831,12 +2844,8 @@ export async function execSystemTool(
         biddingWarn = '⚠️ Lance por conversão só otimiza se a conta tem acompanhamento de conversões ATIVO — confira em Metas → Conversões antes de ativar.';
       }
 
-      const { rows: links } = await pool.query(
-        "SELECT account_id FROM public.client_account_links WHERE client_id = $1 AND platform IN ('google_ads','google') LIMIT 1",
-        [clientId],
-      );
-      const customerId = String(links[0]?.account_id ?? '').replace(/\D/g, '');
-      if (!customerId) return 'Nenhuma conta Google Ads vinculada a esse cliente.';
+      const [customerId] = await resolveGoogleAccountIds(pool, clientId);
+      if (!customerId) return SEM_CONTA_GOOGLE;
 
       // Probe: resolve token + login-customer-id que funcionam (mesmo caminho das leituras).
       const probe = await lunaGoogleSearch(customerId, 'SELECT customer.id FROM customer LIMIT 1');
@@ -3087,12 +3096,8 @@ export async function execSystemTool(
       if (!campaignId) return 'Informe o campaign_id da campanha a ajustar.';
       if (cidades.length === 0) return 'Informe ao menos uma cidade — não dá pra ajustar a localização sem destino.';
 
-      const { rows: links } = await pool.query(
-        "SELECT account_id FROM public.client_account_links WHERE client_id = $1 AND platform IN ('google_ads','google') LIMIT 1",
-        [clientId],
-      );
-      const customerId = String(links[0]?.account_id ?? '').replace(/\D/g, '');
-      if (!customerId) return 'Nenhuma conta Google Ads vinculada a esse cliente.';
+      const [customerId] = await resolveGoogleAccountIds(pool, clientId);
+      if (!customerId) return SEM_CONTA_GOOGLE;
 
       const probe = await lunaGoogleSearch(customerId, `SELECT campaign.id, campaign.name FROM campaign WHERE campaign.id = ${campaignId} LIMIT 1`);
       if (!probe) return '❌ Não consegui acessar essa conta Google (token/permissão MCC). Verifique a conexão em Integrações.';
