@@ -161,7 +161,7 @@ export async function GET(req: NextRequest) {
         }).catch(() => {});
 
         const texto = msg.content.filter((c) => c.type === 'text').map((c) => (c as { text: string }).text).join('\n');
-        const plano = planejarAplicacao(parseDecisoesIa(texto), analisar, keywordsAtivas);
+        const plano = planejarAplicacao(parseDecisoesIa(texto), analisar, keywordsAtivas, { nomeCliente: cliente.name ?? '' });
         res.recusadas = plano.recusadas.length;
 
         let negativadas = 0;

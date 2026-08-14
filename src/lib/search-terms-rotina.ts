@@ -117,11 +117,24 @@ export function filtrarTermosParaAnalise(
  * conflita com keyword ativa, é promoção sem sinal de resultado, ou passa dos
  * tetos da rodada. NUNCA confia na decisão da IA sem passar por aqui.
  */
+/**
+ * Termo contém a MARCA do cliente? Busca por marca ("sorrifacil telefone") é
+ * gente que já conhece a clínica — negativar isso é decisão de gestor, não de
+ * robô, então a rotina autônoma nunca faz sozinha. Ignora palavras curtas do
+ * nome (de, da, e) pra não casar por acidente.
+ */
+export function termoTemMarca(termo: string, nomeCliente: string): boolean {
+  const tokensMarca = palavras(nomeCliente).filter((p) => p.length >= 4);
+  if (tokensMarca.length === 0) return false;
+  const alvo = palavras(termo);
+  return tokensMarca.some((m) => alvo.includes(m));
+}
+
 export function planejarAplicacao(
   decisoes: DecisaoIa[],
   analisados: TermoBruto[],
   keywordsAtivas: string[],
-  opts: { maxNegativas?: number; maxKeywords?: number; cliquesMinimos?: number } = {},
+  opts: { maxNegativas?: number; maxKeywords?: number; cliquesMinimos?: number; nomeCliente?: string } = {},
 ): PlanoAplicacao {
   const maxNeg = opts.maxNegativas ?? MAX_NEGATIVAS_RODADA;
   const maxKw = opts.maxKeywords ?? MAX_KEYWORDS_RODADA;
@@ -148,6 +161,10 @@ export function planejarAplicacao(
 
     if (d.decisao === 'negativar') {
       if (ativas.has(chave)) { recusadas.push({ termo: chave, decisao: d.decisao, motivo: 'é uma palavra-chave ATIVA da conta' }); continue; }
+      if (opts.nomeCliente && termoTemMarca(chave, opts.nomeCliente)) {
+        recusadas.push({ termo: chave, decisao: d.decisao, motivo: 'busca pela MARCA do cliente — negativar marca é decisão do gestor, não da rotina' });
+        continue;
+      }
       if (negativaConflitaComKeyword(chave, keywordsAtivas)) {
         recusadas.push({ termo: chave, decisao: d.decisao, motivo: 'negativa em frase bloquearia keyword ativa da conta' });
         continue;
@@ -233,7 +250,8 @@ REGRAS DURAS:
 1. Só responda sobre os termos que EU enviei. Nunca invente termo.
 2. NUNCA negative um termo que descreve o produto/serviço principal do cliente, mesmo com custo alto — custo alto em termo relevante é problema de lance, não de relevância.
 3. Cidade/bairro dentro da área de atendimento informada NÃO é motivo de negativa. Cidade fora dela é.
-4. Motivo em UMA frase curta, factual, em português.
+4. NUNCA negative busca pela MARCA do cliente (nome da clinica/empresa, ainda que com "telefone", "endereco", "avaliacoes") — quem busca a marca ja conhece o cliente.
+5. Motivo em UMA frase curta, factual, em português.
 
 Responda APENAS um array JSON, sem texto em volta:
 [{"termo":"...","decisao":"negativar|promover|ignorar","motivo":"..."}]`;
