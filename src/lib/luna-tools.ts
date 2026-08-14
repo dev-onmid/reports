@@ -2544,6 +2544,10 @@ export async function execSystemTool(
         geo_locations: geoLocations,
         age_min: Number(age_min),
         age_max: Number(age_max),
+        // A Meta EXIGE a flag explícita (erro "defina público_advantage como 1 ou 0")
+        // desde ~2026. 0 = respeitar a segmentação manual montada aqui; 1 deixaria o
+        // Advantage+ expandir o público por cima das cidades/idades escolhidas.
+        targeting_automation: { advantage_audience: 0 },
       };
       if (genders === 'male')   targeting.genders = [1];
       if (genders === 'female') targeting.genders = [2];
