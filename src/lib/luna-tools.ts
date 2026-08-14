@@ -705,6 +705,9 @@ export const systemTools: Anthropic.Tool[] = [
     name: 'create_meta_campaign',
     description: `Cria uma campanha COMPLETA no Meta Ads: campanha + conjunto de anúncios + anúncio com criativo.
 IMPORTANTE: SEMPRE preencha ad_body (texto principal), ad_headline (título) e ad_cta antes de chamar. Gere a copy com base no segmento/objetivo do cliente.
+- image_url: SEMPRE pergunte ao usuário se tem a URL de uma imagem para o criativo (pode ser link direto de imagem do site/drive/Instagram). Sem ela o anúncio nasce com um quadrado PRETO de placeholder que o gestor precisa trocar — avise isso ao usuário.
+- Conversa no WhatsApp (CTWA — o formato mais usado da agência): objective=OUTCOME_ENGAGEMENT + destination='whatsapp'. Exige que a Página do cliente tenha WhatsApp vinculado; o CTA vira WHATSAPP_MESSAGE automaticamente.
+- Vendas (OUTCOME_SALES): o conjunto otimiza por conversões do PIXEL — a ferramenta acha o pixel da conta sozinha e usa conversion_event (padrão LEAD). Conta sem pixel → a ferramenta recusa ANTES de criar e sugere OUTCOME_LEADS ou conversa WhatsApp.
 Antes de chamar, analise o negócio/segmento do cliente e preencha os campos de targeting adequados (cidade, interesses, placements, faixa etária).
 A ferramenta busca automaticamente os IDs de cidades e interesses na API Meta, você só precisa fornecer os nomes.`,
     input_schema: {
@@ -747,7 +750,10 @@ A ferramenta busca automaticamente os IDs de cidades e interesses na API Meta, v
           enum: ['LEARN_MORE', 'SIGN_UP', 'GET_QUOTE', 'CONTACT_US', 'SUBSCRIBE', 'APPLY_NOW', 'BOOK_TRAVEL', 'DOWNLOAD', 'WATCH_MORE', 'SHOP_NOW', 'ORDER_NOW', 'CALL_NOW', 'MESSAGE_PAGE', 'WHATSAPP_MESSAGE'],
           description: 'Botão de CTA. Para leads: SIGN_UP, GET_QUOTE ou LEARN_MORE. Para vendas/tráfego: SHOP_NOW, LEARN_MORE.',
         },
-        destination_url: { type: 'string', description: 'URL de destino do anúncio (site, LP, WhatsApp). Padrão: onmid.com.br' },
+        destination_url: { type: 'string', description: 'URL de destino do anúncio (site, LP). Ignorada quando destination=whatsapp. Padrão: onmid.com.br' },
+        destination: { type: 'string', enum: ['website', 'whatsapp'], description: "'whatsapp' = campanha de CONVERSA (CTWA): conjunto com destino WhatsApp e otimização por conversas iniciadas — use com objective=OUTCOME_ENGAGEMENT. Exige a Página do cliente com WhatsApp vinculado. Padrão: website." },
+        image_url: { type: 'string', description: 'URL pública da imagem do criativo (JPG/PNG, ideal 1080×1080). A ferramenta baixa e sobe na conta. SEM isso o anúncio nasce com placeholder PRETO — sempre pergunte ao usuário.' },
+        conversion_event: { type: 'string', enum: ['LEAD', 'PURCHASE', 'COMPLETE_REGISTRATION', 'CONTACT'], description: 'Só para OUTCOME_SALES: evento do pixel que o conjunto otimiza (padrão LEAD).' },
         page_name: { type: 'string', description: 'Nome da Página do Facebook do cliente (para o promoted_object de leads). Se omitido, a ferramenta resolve pelo vínculo do sistema ou pelo nome do cliente — informe quando o usuário indicar a página ou quando a criação falhar por Termos de Geração de Cadastros com a página errada.' },
         audience_notes: { type: 'string', description: 'Análise de público-alvo gerada pela Luna (incluída no relatório)' },
       },
@@ -2339,8 +2345,9 @@ export async function execSystemTool(
         adset_name, age_min = 18, age_max = 65,
         genders = 'all', cities = [], countries = ['BR'],
         interests = [], placements = 'all',
-        ad_body, ad_headline, ad_description, ad_cta = 'LEARN_MORE',
+        ad_body, ad_headline, ad_description,
         destination_url = 'https://onmid.com.br', audience_notes,
+        destination = 'website', image_url = '', conversion_event = 'LEAD',
       } = input as {
         client_id: string; name: string; objective: string; daily_budget: number;
         adset_name?: string; age_min?: number; age_max?: number;
@@ -2349,7 +2356,11 @@ export async function execSystemTool(
         interests?: string[]; placements?: string;
         ad_body?: string; ad_headline?: string; ad_description?: string;
         ad_cta?: string; destination_url?: string; audience_notes?: string;
+        destination?: 'website' | 'whatsapp'; image_url?: string; conversion_event?: string;
       };
+      const isWhatsapp = destination === 'whatsapp';
+      // CTWA: o CTA correto é WHATSAPP_MESSAGE, qualquer outro quebra o destino.
+      const ad_cta = isWhatsapp ? 'WHATSAPP_MESSAGE' : String((input as { ad_cta?: string }).ad_cta ?? 'LEARN_MORE');
 
       // Resolve ad account + token
       const { rows: links } = await pool.query(
@@ -2361,6 +2372,21 @@ export async function execSystemTool(
       if (!connRows[0]) return '❌ Conexão Meta não encontrada. Verifique as integrações do cliente.';
       const token = await getFreshMetaToken(connRows[0]);
       const acctNode = String(links[0].account_id).startsWith('act_') ? links[0].account_id : `act_${links[0].account_id}`;
+
+      // OUTCOME_SALES otimiza por conversões do PIXEL — promoted_object com page_id
+      // (o que o código antigo mandava) está ERRADO e o conjunto não otimiza nada.
+      // Sem pixel na conta, recusa ANTES de criar qualquer coisa, com alternativa.
+      let salesPixelId = '';
+      if (objective === 'OUTCOME_SALES' && !isWhatsapp) {
+        try {
+          const pr = await fetch(`https://graph.facebook.com/v21.0/${acctNode}/adspixels?fields=id,name&access_token=${token}`);
+          const pd = await pr.json() as { data?: Array<{ id: string; name: string }> };
+          salesPixelId = pd.data?.[0]?.id ?? '';
+        } catch { /* trata abaixo */ }
+        if (!salesPixelId) {
+          return `❌ OUTCOME_SALES exige um PIXEL na conta ${acctNode} e não encontrei nenhum. Alternativas: (1) crie como OUTCOME_LEADS, (2) campanha de conversa no WhatsApp (objective=OUTCOME_ENGAGEMENT + destination=whatsapp), ou (3) configure o pixel no Gerenciador de Eventos e repita.`;
+        }
+      }
 
       // Resolve a Página do Facebook (promoted_object de LEADS/SALES). Página ERRADA aqui
       // é o clássico "Termos de Geração de Cadastros" sem fim: o gestor aceita na página
@@ -2564,8 +2590,11 @@ export async function execSystemTool(
         OUTCOME_SALES:   'WEBSITE',
         OUTCOME_TRAFFIC: 'WEBSITE',
       };
-      const optimizationGoal  = OBJECTIVE_TO_GOAL[objective] ?? 'REACH';
-      const billingEvent      = OBJECTIVE_TO_BILLING[objective] ?? 'IMPRESSIONS';
+      // Conversa no WhatsApp (CTWA) sobrepõe o mapa por objetivo: destino WHATSAPP +
+      // otimização por CONVERSAS. É o formato nº 1 da agência — o rastreio do CRM
+      // inteiro (ctwa_clid → lead → venda) nasce desse tipo de campanha.
+      const optimizationGoal  = isWhatsapp ? 'CONVERSATIONS' : (OBJECTIVE_TO_GOAL[objective] ?? 'REACH');
+      const billingEvent      = isWhatsapp ? 'IMPRESSIONS' : (OBJECTIVE_TO_BILLING[objective] ?? 'IMPRESSIONS');
       const resolvedAdsetName = adset_name ?? `Conjunto 1 — ${campName}`;
 
       const adsetPayload: Record<string, unknown> = {
@@ -2578,14 +2607,16 @@ export async function execSystemTool(
         start_time: new Date().toISOString(),
         access_token: token,
       };
-      const destType = OBJECTIVE_TO_DEST[objective];
+      const destType = isWhatsapp ? 'WHATSAPP' : OBJECTIVE_TO_DEST[objective];
       if (destType) adsetPayload.destination_type = destType;
 
-      // promoted_object is required for LEADS (page) and SALES (pixel)
-      if (objective === 'OUTCOME_LEADS' && fbPageId) {
+      // promoted_object: LEADS/WhatsApp = página; SALES = pixel + evento (validado acima).
+      if (isWhatsapp && fbPageId) {
         adsetPayload.promoted_object = { page_id: fbPageId };
-      } else if (objective === 'OUTCOME_SALES' && fbPageId) {
+      } else if (objective === 'OUTCOME_LEADS' && fbPageId) {
         adsetPayload.promoted_object = { page_id: fbPageId };
+      } else if (objective === 'OUTCOME_SALES' && salesPixelId) {
+        adsetPayload.promoted_object = { pixel_id: salesPixelId, custom_event_type: conversion_event };
       }
 
       const adsetRes = await fetch(`https://graph.facebook.com/v21.0/${acctNode}/adsets`, {
@@ -2601,6 +2632,10 @@ export async function execSystemTool(
         report.push(`   Motivo: ${err}`);
         // Falha de Termos de Geração de Cadastros: diagnostica QUAL página foi usada e se
         // os termos constam aceitos nela (o aceite é POR PÁGINA — página errada = loop infinito).
+        if (isWhatsapp && /whatsapp/i.test(err)) {
+          report.push(`   Página usada: ${fbPageName} (${fbPageId}) — ${fbPageSource}`);
+          report.push(`   Campanha de conversa exige a Página com WhatsApp VINCULADO (Configurações da Página → WhatsApp). Vincule o número do cliente e repita — ou informe outra página em page_name.`);
+        }
         if (fbPageId && /cadastr|leadgen|lead ads|termos/i.test(err)) {
           let tosInfo = '';
           try {
@@ -2637,24 +2672,50 @@ export async function execSystemTool(
         report.push(`   ID: ${adsetId}`);
         report.push('');
 
-        // ── STEP 3b: Upload placeholder image ─────────────
+        // ── STEP 3b: Imagem do criativo ───────────────────
+        // Com image_url: baixa e sobe a imagem REAL. Sem ela: placeholder preto
+        // (compat) com aviso — o anúncio nasce pausado de qualquer forma.
+        let usouImagemReal = false;
+        let avisoImagem = '';
         try {
-          const pngBuf = createBlackPng(1080, 1080);
+          let imgBuf: Buffer | null = null;
+          let imgNome = 'placeholder.png';
+          let imgTipo = 'image/png';
+          if (image_url && /^https?:\/\//.test(image_url)) {
+            try {
+              const dl = await fetch(image_url, { redirect: 'follow' });
+              const ct = dl.headers.get('content-type') ?? '';
+              const ab = dl.ok ? await dl.arrayBuffer() : null;
+              if (ab && /image\/(jpe?g|png|webp)/.test(ct) && ab.byteLength > 1024 && ab.byteLength <= 8 * 1024 * 1024) {
+                imgBuf = Buffer.from(ab);
+                imgNome = /png/.test(ct) ? 'criativo.png' : /webp/.test(ct) ? 'criativo.webp' : 'criativo.jpg';
+                imgTipo = ct.split(';')[0];
+                usouImagemReal = true;
+              } else {
+                avisoImagem = `a URL da imagem não devolveu um JPG/PNG válido (content-type: ${ct || '?'}, ${ab ? Math.round(ab.byteLength / 1024) + 'KB' : `HTTP ${dl.status}`}) — usei o placeholder`;
+              }
+            } catch (e) {
+              avisoImagem = `falha ao baixar a imagem (${String(e).slice(0, 80)}) — usei o placeholder`;
+            }
+          }
+          if (!imgBuf) imgBuf = createBlackPng(1080, 1080);
           const imgForm = new FormData();
-          const pngArrayBuf = pngBuf.buffer.slice(pngBuf.byteOffset, pngBuf.byteOffset + pngBuf.byteLength) as ArrayBuffer;
-          imgForm.append('filename', new Blob([pngArrayBuf], { type: 'image/png' }), 'placeholder.png');
+          const imgArrayBuf = imgBuf.buffer.slice(imgBuf.byteOffset, imgBuf.byteOffset + imgBuf.byteLength) as ArrayBuffer;
+          imgForm.append('filename', new Blob([imgArrayBuf], { type: imgTipo }), imgNome);
           imgForm.append('access_token', token);
           const imgRes = await fetch(`https://graph.facebook.com/v21.0/${acctNode}/adimages`, {
             method: 'POST', body: imgForm,
           });
           const imgData = await imgRes.json() as { images?: Record<string, { hash: string }> };
-          const imageHash = imgData.images?.['placeholder.png']?.hash;
+          const imageHash = Object.values(imgData.images ?? {})[0]?.hash;
 
           if (imageHash && fbPageId) {
             // ── STEP 4: AdCreative ──────────────────────────
+            // CTWA: o link do criativo é o gancho do WhatsApp — a Meta resolve o número
+            // vinculado à Página; destination_url é ignorada de propósito.
             const linkData: Record<string, unknown> = {
               image_hash: imageHash,
-              link: destination_url,
+              link: isWhatsapp ? 'https://api.whatsapp.com/send' : destination_url,
               call_to_action: { type: ad_cta },
             };
             if (ad_body)        linkData.message     = ad_body;
@@ -2689,7 +2750,11 @@ export async function execSystemTool(
               if (adData.id) {
                 report.push(`✅ Anúncio criado (PAUSADO)`);
                 report.push(`   ID: ${adData.id}`);
-                report.push(`   Criativo: imagem preta placeholder — troque pelo criativo definitivo`);
+                if (isWhatsapp) report.push(`   Destino: conversa no WhatsApp da Página ${fbPageName}`);
+                report.push(usouImagemReal
+                  ? `   Criativo: imagem enviada a partir da URL informada ✅`
+                  : `   Criativo: imagem preta placeholder — troque pelo criativo definitivo`);
+                if (avisoImagem) report.push(`   ⚠️ ${avisoImagem}`);
               } else {
                 const adErr = adData.error?.error_user_msg ?? adData.error?.message ?? 'erro desconhecido';
                 report.push(`⚠️ Anúncio: FALHA — ${adErr}`);
@@ -2712,9 +2777,9 @@ export async function execSystemTool(
       report.push('   Não veicula até você ativar um conjunto no Gerenciador.');
       report.push('');
       report.push('📋 Próximos passos:');
-      report.push('   1. Troque a imagem preta pelo criativo definitivo no Gerenciador');
-      report.push('   2. Edite texto, headline e CTA do anúncio');
-      report.push('   3. Ative o conjunto quando o criativo estiver pronto');
+      report.push('   1. Confira o criativo no Gerenciador (se saiu com placeholder preto, troque pela arte definitiva)');
+      report.push('   2. Revise texto, headline e CTA do anúncio');
+      report.push('   3. Ative o conjunto quando estiver tudo certo');
 
       if (audience_notes) {
         report.push('');
