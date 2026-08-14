@@ -128,7 +128,12 @@ export async function PATCH(req: NextRequest) {
     if (body.status         !== undefined) { sets.push(`status = $${idx++}`);         vals.push(body.status); }
     if (body.gestor_id      !== undefined) { sets.push(`gestor_id = $${idx++}`);      vals.push(body.gestor_id); }
     if (body.category_id    !== undefined) { sets.push(`category_id = $${idx++}`);    vals.push(body.category_id); }
-    if (body.dashboard_type !== undefined) { sets.push(`dashboard_type = $${idx++}`); vals.push(body.dashboard_type); }
+    if (body.dashboard_type !== undefined) {
+      if (!['leads', 'branding', 'conversao', 'food'].includes(body.dashboard_type)) {
+        return Response.json({ error: 'dashboard_type inválido' }, { status: 400 });
+      }
+      sets.push(`dashboard_type = $${idx++}`); vals.push(body.dashboard_type);
+    }
     if (body.onboarding_completed !== undefined) { sets.push(`onboarding_completed = $${idx++}`); vals.push(body.onboarding_completed); }
     if (body.funil_fonte_topo !== undefined) {
       if (!['auto', 'crm', 'anuncios'].includes(body.funil_fonte_topo)) {

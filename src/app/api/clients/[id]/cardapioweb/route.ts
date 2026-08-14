@@ -10,6 +10,7 @@ import type { OptimizerPeriodKey } from '@/lib/optimizer';
 import {
   agruparPorCliente, agregarFunil, sugerirRegua, normalizarRegua, normalizarTelefoneBR,
   resumoPeriodo, agregarCupons, variacao, funilEm, limitesBRT, noPeriodo,
+  serieDiaria, heatmapPedidos, distribuicaoFrequencia,
   type ClienteDelivery, type Periodo,
 } from '@/lib/cardapioweb-recorrencia';
 
@@ -136,6 +137,13 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
         },
       },
       funil: { hoje: funilHoje, periodo: funilPeriodo, anterior: funilAnterior },
+      // Séries derivadas dos pedidos do período (sparkline + mapa de horários) e
+      // distribuição da base por frequência (retenção). Tudo BRT, calculado nas
+      // funções puras de cardapioweb-recorrencia.
+      serie: serieDiaria(pedidos, periodo),
+      heatmap: heatmapPedidos(pedidos, periodo),
+      // Frequência é sobre o estado de HOJE (base inteira), como o funil de ação.
+      frequencia: distribuicaoFrequencia(clientesHoje),
       cupons: agregarCupons(pedidos, periodo),
       canais: canais.map(c => ({
         canal: c.sales_channel ?? 'desconhecido',
