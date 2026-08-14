@@ -221,7 +221,7 @@ export async function lunaGoogleSearch(customerId: string, query: string): Promi
 
 // Mutate cru na Google Ads API (mesmos headers/login do lunaGoogleSearch). Retorna os
 // resourceNames criados ou {error} com a mensagem real do Google.
-async function lunaGoogleMutate(
+export async function lunaGoogleMutate(
   customerId: string, token: string, login: string | null,
   resource: string, operations: Record<string, unknown>[],
 ): Promise<{ resourceNames: string[] } | { error: string }> {
@@ -248,7 +248,7 @@ async function lunaGoogleMutate(
 // individual (índice + mensagem real do Google). Sem isso o mutate é ATÔMICO: uma única
 // keyword recusada (duplicada, >80 chars, política) derrubava o lote inteiro e a campanha
 // nascia sem NENHUMA palavra-chave.
-async function lunaGoogleMutatePartial(
+export async function lunaGoogleMutatePartial(
   customerId: string, token: string, login: string | null,
   resource: string, operations: Record<string, unknown>[],
 ): Promise<PartialFailureResult | { error: string }> {
@@ -275,7 +275,7 @@ async function lunaGoogleMutatePartial(
 // em produção na Cost Odonto: as leituras funcionavam e a criação respondia "sem
 // conta vinculada". Fallback: valor com cara de customer id é usado direto (o
 // probe/chamada seguinte valida o acesso de verdade).
-async function resolveGoogleAccountIds(
+export async function resolveGoogleAccountIds(
   pool: ReturnType<typeof makeServerPool>, clientId: string,
 ): Promise<string[]> {
   const { rows } = await pool.query(
@@ -298,7 +298,7 @@ const SEM_CONTA_GOOGLE =
 // sem isso, 8 de 9 keywords do grupo de implantes da Cost Odonto foram recusadas.
 // Devolve linhas de relatório prontas (linhas[0] é o resumo) — usada pela criação
 // de campanha E pelo manage_google_keywords.
-async function criarKeywordsGoogle(
+export async function criarKeywordsGoogle(
   customerId: string, token: string, login: string | null,
   agRn: string, keywords: string[], matchType: string,
 ): Promise<{ criadas: number; linhas: string[]; erroTotal: boolean }> {
