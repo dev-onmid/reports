@@ -752,7 +752,7 @@ A ferramenta busca automaticamente os IDs de cidades e interesses na API Meta, v
         },
         destination_url: { type: 'string', description: 'URL de destino do anúncio (site, LP). Ignorada quando destination=whatsapp. Padrão: onmid.com.br' },
         destination: { type: 'string', enum: ['website', 'whatsapp'], description: "'whatsapp' = campanha de CONVERSA (CTWA): conjunto com destino WhatsApp e otimização por conversas iniciadas — use com objective=OUTCOME_ENGAGEMENT. Exige a Página do cliente com WhatsApp vinculado. Padrão: website." },
-        image_url: { type: 'string', description: 'URL pública da imagem do criativo (JPG/PNG, ideal 1080×1080). A ferramenta baixa e sobe na conta. SEM isso o anúncio nasce com placeholder PRETO — sempre pergunte ao usuário.' },
+        image_url: { type: 'string', description: 'URL pública da imagem do criativo (JPG/PNG, ideal 1080×1080). Aceita link de imagem direto E link de compartilhar do Google Drive/Dropbox (no Drive o arquivo precisa estar como "qualquer pessoa com o link"). A ferramenta baixa e sobe na conta. SEM isso o anúncio nasce com placeholder PRETO — sempre pergunte ao usuário.' },
         conversion_event: { type: 'string', enum: ['LEAD', 'PURCHASE', 'COMPLETE_REGISTRATION', 'CONTACT'], description: 'Só para OUTCOME_SALES: evento do pixel que o conjunto otimiza (padrão LEAD).' },
         page_name: { type: 'string', description: 'Nome da Página do Facebook do cliente (para o promoted_object de leads). Se omitido, a ferramenta resolve pelo vínculo do sistema ou pelo nome do cliente — informe quando o usuário indicar a página ou quando a criação falhar por Termos de Geração de Cadastros com a página errada.' },
         audience_notes: { type: 'string', description: 'Análise de público-alvo gerada pela Luna (incluída no relatório)' },
@@ -2686,8 +2686,17 @@ export async function execSystemTool(
           let imgNome = 'placeholder.png';
           let imgTipo = 'image/png';
           if (image_url && /^https?:\/\//.test(image_url)) {
+            // Link de COMPARTILHAR do Drive/Dropbox devolve página HTML, não a imagem —
+            // converte pro formato de download direto (o arquivo precisa estar como
+            // "qualquer pessoa com o link" no Drive).
+            let urlFinal = image_url;
+            const drive = image_url.match(/drive\.google\.com\/(?:file\/d\/([\w-]+)|open\?id=([\w-]+)|uc\?.*id=([\w-]+))/);
+            if (drive) urlFinal = `https://drive.google.com/uc?export=download&id=${drive[1] ?? drive[2] ?? drive[3]}`;
+            else if (/dropbox\.com/.test(image_url)) {
+              try { const u = new URL(image_url); u.searchParams.set('dl', '1'); urlFinal = u.toString(); } catch { /* usa como veio */ }
+            }
             try {
-              const dl = await fetch(image_url, { redirect: 'follow' });
+              const dl = await fetch(urlFinal, { redirect: 'follow' });
               const ct = dl.headers.get('content-type') ?? '';
               const ab = dl.ok ? await dl.arrayBuffer() : null;
               if (ab && /image\/(jpe?g|png|webp)/.test(ct) && ab.byteLength > 1024 && ab.byteLength <= 8 * 1024 * 1024) {
