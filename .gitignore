@@ -42,3 +42,7 @@ next-env.d.ts
 
 # artefatos de compilacao dos testes de scratchpad
 scratchpad/build/
+
+# Artefato de build da imagem Docker — baixado do GitHub Actions para deploy
+# manual na VPS. Nunca versionar (dezenas de MB).
+onmid-reports-image.tar.gz

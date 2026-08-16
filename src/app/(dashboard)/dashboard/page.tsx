@@ -80,6 +80,7 @@ import {
 } from '@/lib/funil-etapas';
 import { FunilLeadsModal } from '@/components/funil-leads-modal';
 import { normalizarSegmento, perfilDaSelecao } from '@/lib/dashboard-segmento';
+import { Chapter } from '@/components/dashboard';
 import { DeliveryView } from '@/components/dashboard/delivery-view';
 import { useDadosDelivery } from '@/components/dashboard/use-dados-delivery';
 import {
@@ -6174,6 +6175,16 @@ export default function GeneralDashboard() {
               </div>
             )}
 
+            {/* No modo food a faixa de eficiência ganha cabeçalho próprio, no
+                mesmo padrão dos capítulos da DeliveryView (Vendas, Clientes) —
+                sem ele a tela abria com números soltos, sem título. */}
+            {modoFood && dadosFood && (
+              <Chapter
+                icon={LayoutDashboard}
+                titulo="Resumo"
+                sub={`${periodoISO.from.split('-').reverse().join('/')} a ${periodoISO.to.split('-').reverse().join('/')} · ${dadosFood.vendas.dias} dias`}
+              />
+            )}
             <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
               {(modoFood && dadosFood ? quickMetricsFood : quickMetrics).map((metric) => <QuickMetricCard key={metric.title} {...metric} />)}
             </div>
