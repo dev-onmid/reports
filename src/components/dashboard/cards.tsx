@@ -2,7 +2,7 @@
 // Todos presentational e sem estado: recebem props tipadas e renderizam.
 
 import type { LucideIcon } from 'lucide-react';
-import { Card, Delta, IconTile, Label, Spark } from './primitives';
+import { InnerCard, Delta, IconTile, Label, Spark } from './primitives';
 import { CLASSE_TEXTO, type TomGrafico } from '@/types/dashboard';
 import { cn } from '@/lib/utils';
 
@@ -22,7 +22,7 @@ export type KpiCardProps = {
 /** KPI principal: valor grande e sparkline dividindo a linha. */
 export function KpiCard({ icon, tom = 'primary', label, valor, delta, menorMelhor, spark, sub }: KpiCardProps) {
   return (
-    <Card>
+    <InnerCard>
       <div className="flex items-start gap-3">
         <IconTile icon={icon} tom={tom} size={32} />
         <div className="min-w-0 flex-1">
@@ -36,10 +36,10 @@ export function KpiCard({ icon, tom = 'primary', label, valor, delta, menorMelho
               <div className="min-w-0 flex-1"><Spark dados={spark} tom={tom} altura={26} /></div>
             )}
           </div>
-          {sub && <p className="mt-1.5 text-[11px] text-muted-foreground">{sub}</p>}
+          {sub && <p className="mt-1.5 text-[11px] text-[#9aa4aa]">{sub}</p>}
         </div>
       </div>
-    </Card>
+    </InnerCard>
   );
 }
 
@@ -58,7 +58,7 @@ export function Mini({ label, valor, sub, icon, tom = 'primary', grande, classNa
   return (
     <div
       className={cn(
-        'flex items-center gap-2.5 rounded-[var(--radius)] bg-surface-elevated',
+        'flex items-center gap-2.5 rounded-[12px] border border-white/[0.08] bg-[#071014]',
         grande ? 'p-4' : 'p-2.5',
         className,
       )}
@@ -67,7 +67,7 @@ export function Mini({ label, valor, sub, icon, tom = 'primary', grande, classNa
       <div className="min-w-0">
         <Label>{label}</Label>
         <p className={cn('font-heading leading-none text-foreground', grande ? 'text-3xl' : 'text-lg')}>{valor}</p>
-        {sub && <p className="mt-0.5 truncate text-[10px] text-muted-foreground">{sub}</p>}
+        {sub && <p className="mt-0.5 truncate text-[10px] text-[#9aa4aa]">{sub}</p>}
       </div>
     </div>
   );
@@ -88,10 +88,10 @@ export function Tile({ icon: Icon, tom = 'primary', label, valor, delta, menorMe
   const temDelta = delta !== undefined && delta !== null;
   const bom = temDelta && (menorMelhor ? delta <= 0 : delta >= 0);
   return (
-    <div className="min-w-0 rounded-[var(--radius)] border border-border bg-surface-elevated p-2.5">
+    <div className="min-w-0 rounded-[12px] border border-white/[0.08] bg-[#071014] p-2.5">
       <div className="flex items-center gap-1.5">
         <Icon className={cn('h-3 w-3 shrink-0', CLASSE_TEXTO[tom])} />
-        <span className="truncate text-[9px] font-bold uppercase tracking-widest text-muted-foreground">{label}</span>
+        <span className="truncate text-[9px] font-black uppercase tracking-[0.07em] text-[#9aa4aa]">{label}</span>
       </div>
       <p className="mt-1.5 font-heading text-2xl leading-none text-foreground">{valor}</p>
       {temDelta && (
@@ -121,16 +121,22 @@ export function Chapter({ icon, titulo, sub, tom = 'primary', right, nivel = 'ca
     <div
       className={cn(
         'flex flex-wrap items-end justify-between gap-4',
-        capitulo ? 'mb-4 border-b border-border pb-3' : 'mb-3',
+        capitulo ? 'mb-4 border-b border-white/[0.08] pb-3' : 'mb-3',
       )}
     >
       <div className="flex items-center gap-3">
-        <IconTile icon={icon} tom={tom} size={capitulo ? 36 : 28} />
+        <IconTile icon={icon} tom={tom} size={capitulo ? 40 : 32} />
         <div>
-          <h2 className={cn('font-heading leading-none text-foreground', capitulo ? 'text-3xl' : 'text-lg')}>
-            {titulo}
-          </h2>
-          {sub && <p className="mt-0.5 text-[11px] text-muted-foreground">{sub}</p>}
+          {/* ⚠️ Título de SEÇÃO segue o card de Faturamento — Inter pequena,
+              black, caixa alta e tracking largo. Antes usava Bebas text-lg, o
+              que fazia "VENDAS" e "FATURAMENTO" parecerem de sistemas
+              diferentes lado a lado. Capítulo mantém Bebas grande (RESUMO). */}
+          {capitulo ? (
+            <h2 className="font-heading text-3xl leading-none text-foreground">{titulo}</h2>
+          ) : (
+            <h3 className="text-sm font-black uppercase tracking-[0.07em] text-[#f4f7f8]">{titulo}</h3>
+          )}
+          {sub && <p className="mt-1 text-[11px] text-[#9aa4aa]">{sub}</p>}
         </div>
       </div>
       {right}

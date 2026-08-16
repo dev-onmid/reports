@@ -35,33 +35,60 @@ export const fmt = {
 
 export function Label({ children, className }: { children: React.ReactNode; className?: string }) {
   return (
-    <p className={cn('text-[10px] font-bold uppercase tracking-widest text-muted-foreground', className)}>
+    <p className={cn('text-[10px] font-black uppercase tracking-[0.07em] text-[#9aa4aa]', className)}>
       {children}
     </p>
   );
 }
 
-export function Card({ children, className }: { children: React.ReactNode; className?: string }) {
+/**
+ * Superfície INTERNA (card dentro de um bloco). Mesma do dashboard premium:
+ * cantos 12px sobre o painel de 14px, fundo mais escuro que a superfície do
+ * bloco. Usar o `Card` aqui daria painel dentro de painel.
+ */
+export function InnerCard({ children, className }: { children: React.ReactNode; className?: string }) {
   return (
-    <div className={cn('relative rounded-[var(--radius)] border border-border bg-card p-4', className)}>
+    <div className={cn('rounded-[12px] border border-white/[0.08] bg-[#071014] p-4', className)}>
       {children}
     </div>
   );
 }
 
-/** Quadrado com ícone. A cor vem de um tom do design system, não de hex. */
-export function IconTile({ icon: Icon, tom = 'primary', size = 32 }: {
+/**
+ * Superfície de bloco.
+ *
+ * ⚠️ Alinhada ao card de Faturamento do dashboard premium, que é o PADRÃO REAL
+ * da tela (decisão do Matheus). Isso diverge do DESIGN_SYSTEM.md, que prescreve
+ * `--radius` (2px) e `--card` (#1a1a1a) — o documento está desatualizado para o
+ * dashboard. Antes daqui, Vendas e Faturamento tinham cantos, fundo e sombra
+ * diferentes lado a lado na mesma tela.
+ */
+export function Card({ children, className }: { children: React.ReactNode; className?: string }) {
+  return (
+    <section
+      className={cn(
+        'relative rounded-[14px] border border-white/[0.08] bg-[#0d1519]/92 p-5 shadow-[0_18px_60px_rgba(0,0,0,0.28)]',
+        className,
+      )}
+    >
+      {children}
+    </section>
+  );
+}
+
+/** Ícone em círculo — mesmo formato do card de Faturamento (era quadrado). */
+export function IconTile({ icon: Icon, tom = 'primary', size = 40 }: {
   icon: LucideIcon; tom?: TomGrafico; size?: number;
 }) {
   return (
     <div
       className={cn(
-        'flex shrink-0 items-center justify-center rounded-[var(--radius)] border bg-current/10 border-current/25',
+        'flex shrink-0 items-center justify-center rounded-full border bg-current/10 border-current/20',
         CLASSE_TEXTO[tom],
       )}
       style={{ width: size, height: size }}
     >
-      <Icon style={{ width: size * 0.45, height: size * 0.45 }} />
+      <Icon style={{ width: size * 0.5, height: size * 0.5 }} />
     </div>
   );
 }
