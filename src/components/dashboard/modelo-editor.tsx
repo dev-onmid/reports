@@ -31,11 +31,13 @@ const ROW_H = 56;
 
 /** Carrega o modelo do segmento. Erro de rede cai no padrão — a tela nunca fica em branco. */
 export function useModelo(segmento: SegmentoDashboard) {
-  const [modelo, setModelo] = useState<ModeloDashboard | null>(null);
+  // ⚠️ Começa no PADRÃO, nunca em null. Com null, a tela caía no layout de
+  // lead-gen enquanto o modelo carregava (e para sempre, se a rota falhasse) —
+  // dava a impressão de que o modo food e o editor não existiam.
+  const [modelo, setModelo] = useState<ModeloDashboard>(() => modeloPadrao(segmento));
 
   useEffect(() => {
     let vivo = true;
-    setModelo(null);
     fetch(`/api/dashboard/modelo?segmento=${segmento}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((j) => { if (vivo) setModelo(j?.modelo ?? modeloPadrao(segmento)); })
