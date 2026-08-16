@@ -6310,7 +6310,12 @@ export default function GeneralDashboard() {
               </div>
             </PremiumPanel>
 
-            {/* ── Google Ads: campanhas expansíveis + palavras-chave ── */}
+            {/* ── Google Ads: campanhas expansíveis + palavras-chave ──
+                Fora do modo food: cliente de delivery concentra verba em Meta e
+                WhatsApp, então esta lâmina vivia vazia ocupando uma seção
+                inteira (o print 09 do briefing). O investimento em Google, se
+                houver, aparece no capítulo Tráfego da DeliveryView. */}
+            {!modoFood && (
             <PremiumPanel className="border-[#4285F4]/24 shadow-[0_0_40px_rgba(66,133,244,0.10)]">
               <div className="flex items-center px-4 pt-4 pb-3">
                 <h3 className="flex items-center gap-2 text-sm font-black uppercase tracking-[0.07em] text-[#f4f7f8]">
@@ -6342,6 +6347,7 @@ export default function GeneralDashboard() {
                 </div>
               </div>
             </PremiumPanel>
+            )}
 
 
             {selectedClients.length > 1 && (

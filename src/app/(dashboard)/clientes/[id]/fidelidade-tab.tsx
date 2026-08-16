@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  AlertTriangle, ChevronDown, Clock, Info, Loader2, Save, ShieldCheck, Users,
+  AlertTriangle, ChevronDown, Clock, Info, Loader2, PowerOff, Save, ShieldCheck, Users,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
@@ -40,6 +40,8 @@ type Campanha = {
 };
 
 type Painel = {
+  /** Interruptor por cliente (`clients.fidelidade_ativa`). Ausente = desligada. */
+  ativo?: boolean;
   conectado: boolean;
   error?: string;
   loja?: string | null;
@@ -155,6 +157,27 @@ export function ClientFidelidadeTab({ clientId }: { clientId: string }) {
       <div className="flex items-center gap-2 py-12 text-sm text-muted-foreground">
         <Loader2 className="h-4 w-4 animate-spin" /> Calculando os segmentos…
       </div>
+    );
+  }
+
+  // Desligada tem de aparecer como desligada mesmo aqui dentro: a aba some da
+  // barra, mas link direto e aba já aberta continuam alcançando esta tela.
+  if (painel && painel.ativo === false) {
+    return (
+      <Card className="mt-4">
+        <div className="flex items-start gap-3">
+          <PowerOff className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
+          <div className="space-y-1">
+            <h3 className="font-heading text-lg uppercase leading-none">Fidelidade desativada</h3>
+            <p className="text-sm text-muted-foreground">
+              Este cliente está fora das campanhas de recompra — nenhum segmento é calculado
+              e nada pode ser configurado. Para ligar, use o botão
+              <strong className="text-foreground"> Fidelidade</strong> na faixa
+              <strong className="text-foreground"> Configurações do cliente</strong>, no topo da página.
+            </p>
+          </div>
+        </div>
+      </Card>
     );
   }
 

@@ -30,6 +30,27 @@ function ehModelo(v: unknown): v is ModeloId {
   return typeof v === 'string' && (MODELOS as readonly string[]).includes(v);
 }
 
+/**
+ * A Fidelidade é OPT-IN por cliente (`clients.fidelidade_ativa`, DEFAULT false).
+ *
+ * ⚠️ Este é o portão de verdade — esconder a aba é só apresentação, e link
+ * direto, aba antiga aberta ou chamada por fora passariam por cima dela. Todo
+ * caminho novo (inclusive o worker da Fase 2) tem de perguntar aqui antes de
+ * ler público ou, principalmente, de enviar qualquer coisa: o remetente é o
+ * WhatsApp do próprio cliente.
+ *
+ * Coluna ausente (instalação que ainda não rodou o ALTER) é tratada como
+ * DESLIGADA — falha fechada, nunca aberta.
+ */
+async function fidelidadeAtiva(
+  pool: ReturnType<typeof makeServerPool>, clientId: string,
+): Promise<boolean> {
+  const { rows } = await pool.query<{ fidelidade_ativa: boolean | null }>(
+    `SELECT fidelidade_ativa FROM public.clients WHERE id = $1`, [clientId],
+  ).catch(() => ({ rows: [] as { fidelidade_ativa: boolean | null }[] }));
+  return rows[0]?.fidelidade_ativa === true;
+}
+
 export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   if (!getSession(req)) return unauthorized();
   const { id: clientId } = await ctx.params;
@@ -39,13 +60,19 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
     await Promise.all([
       ensureCardapioWebSchema(pool), ensureAnotaAiSchema(pool), ensureFidelidadeSchema(pool),
     ]);
+
+    // Antes de qualquer leitura: desligada não calcula segmento nenhum.
+    if (!await fidelidadeAtiva(pool, clientId)) {
+      return Response.json({ ativo: false, conectado: false });
+    }
+
     const [conn, lojasAnota] = await Promise.all([
       getConnection(pool, clientId),
       listarLojas(pool, clientId),
     ]);
     // Sem nenhuma plataforma de delivery não existe base de consumo — e o
     // público destas campanhas é, por decisão, só quem já pediu.
-    if (!conn && lojasAnota.length === 0) return Response.json({ conectado: false });
+    if (!conn && lojasAnota.length === 0) return Response.json({ ativo: true, conectado: false });
 
     const regua = normalizarRegua({
       janelaDias: conn?.janela_dias, inatividadeDias: conn?.inatividade_dias,
@@ -84,6 +111,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
     });
 
     return Response.json({
+      ativo: true,
       conectado: true,
       loja: conn?.merchant_name ?? lojasAnota[0]?.store_name ?? null,
       regua,
@@ -113,6 +141,12 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
   const pool = makeServerPool();
   try {
     await ensureFidelidadeSchema(pool);
+
+    // Desligada não grava nada: aba aberta antes de alguém desativar não pode
+    // continuar configurando campanha por trás.
+    if (!await fidelidadeAtiva(pool, clientId)) {
+      return Response.json({ error: 'Fidelidade desativada para este cliente' }, { status: 403 });
+    }
 
     if (body.travas !== undefined) {
       return Response.json({ travas: await salvarTravas(pool, clientId, body.travas) });

@@ -107,6 +107,12 @@ export type Client = {
   onboarding_completed?: boolean;
   /** Fonte do topo do Funil de Performance — ver resolverTopoFunil em funil-etapas.ts. */
   funil_fonte_topo?: 'auto' | 'crm' | 'anuncios';
+  /**
+   * Aba Fidelidade ligada para este cliente. OPT-IN: ausente/false = desligada,
+   * inclusive para cliente novo. Cardápio digital que já tem campanha própria
+   * por dentro fica de fora sem ninguém precisar desligar nada.
+   */
+  fidelidade_ativa?: boolean;
 };
 
 export const mockClients: Client[] = [

@@ -9,12 +9,10 @@
 // exportação — duas barras na mesma tela seria ruído.
 
 import {
-  BarChart3, Users, Filter, Megaphone, Wallet, ShoppingBag, Receipt,
-  UserPlus, Repeat, Clock, Target, MousePointerClick, Eye, Heart, Bookmark,
+  BarChart3, Users, Wallet, ShoppingBag, Receipt, UserPlus, Repeat, Clock, Target,
 } from 'lucide-react';
 import {
-  Chapter, KpiCard, Mini, Tile, Gauge, Ring, Funnel, Heatmap, Card, Label,
-  BlocoVazio, fmt,
+  Chapter, KpiCard, Mini, Gauge, Ring, Heatmap, Card, BlocoVazio, fmt,
 } from '@/components/dashboard';
 import { CLASSE_FUNDO, type DadosDelivery } from '@/types/dashboard';
 import { cn } from '@/lib/utils';
@@ -25,7 +23,7 @@ const ROTULO_CANAL: Record<string, string> = {
 };
 
 export function DeliveryView({ dados }: { dados: DadosDelivery }) {
-  const { vendas, variacao, serie, funil, heatmap, clientes, canais, criativos, instagram, saldos } = dados;
+  const { vendas, variacao, serie, heatmap, clientes, canais, criativos, instagram, saldos } = dados;
 
   if (dados.fonte.status === 'sem_integracao') {
     return (
@@ -113,20 +111,22 @@ export function DeliveryView({ dados }: { dados: DadosDelivery }) {
             {totalRecorrencia === 0 ? (
               <BlocoVazio oQueFalta="Sem histórico suficiente para distribuir a base por número de pedidos." />
             ) : (
-              <div className="space-y-2.5">
+              <div className="space-y-4">
                 {clientes.recorrencia.map((f) => {
                   const p = f.clientes / totalRecorrencia;
                   return (
-                    <div key={f.nome} className="flex items-center gap-3">
-                      <Ring proporcao={p} tom={f.tom} size={40}>
-                        <span className="font-heading text-[11px] text-foreground">{fmt.pct(p)}</span>
+                    <div key={f.nome} className="flex items-center gap-4">
+                      {/* Anel maior (72px): a leitura principal deste bloco é a
+                          proporção, não a contagem — vale o espaço. */}
+                      <Ring proporcao={p} tom={f.tom} size={72}>
+                        <span className="font-heading text-base leading-none text-foreground">{fmt.pct(p)}</span>
                       </Ring>
                       <div className="min-w-0 flex-1">
                         <div className="flex items-baseline justify-between gap-2">
-                          <span className="truncate text-[13px] text-foreground">{f.nome}</span>
-                          <span className="font-heading text-lg leading-none text-foreground">{fmt.int(f.clientes)}</span>
+                          <span className="truncate text-sm text-foreground">{f.nome}</span>
+                          <span className="font-heading text-2xl leading-none text-foreground">{fmt.int(f.clientes)}</span>
                         </div>
-                        <div className="mt-1 h-1 w-full overflow-hidden rounded-full bg-border">
+                        <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-border">
                           <div className={cn('h-full rounded-full', CLASSE_FUNDO[f.tom])}
                             style={{ width: `${Math.max(p * 100, 2)}%` }} />
                         </div>
@@ -140,88 +140,18 @@ export function DeliveryView({ dados }: { dados: DadosDelivery }) {
         </div>
       </section>
 
-      {/* ─────────────────────────────── FUNIL ──────────────────────────────── */}
-      <section id="funil">
-        <Chapter icon={Filter} titulo="Funil" sub="Do acesso ao catálogo até o pedido" />
-        <Card>
-          <Funnel funil={funil} />
-        </Card>
-      </section>
+      {/* O capítulo "Funil do catálogo" foi REMOVIDO a pedido do Matheus: com
+          acessos/carrinho/checkout sem instrumentação, sobrava um degrau só
+          (pedidos) e quatro tracejados — ocupava meia tela sem informar nada.
+          Volta quando o catálogo for instrumentado. O componente Funnel e o
+          tipo FunilCatalogo seguem no repo, prontos para isso. */}
 
-      {/* ────────────────────────────── TRÁFEGO ─────────────────────────────── */}
-      <section id="trafego">
-        <Chapter icon={Megaphone} titulo="Tráfego" sub="Investimento e presença" />
-
-        {canais.length === 0 ? (
-          <BlocoVazio oQueFalta="Nenhum canal com investimento no período." />
-        ) : (
-          <div className="space-y-3">
-            {canais.map((c) => (
-              <Card key={c.canal}>
-                <Chapter icon={Megaphone} titulo={ROTULO_CANAL[c.canal] ?? c.canal} nivel="secao"
-                  tom={c.canal === 'google' ? 'blue' : c.canal === 'instagram' ? 'secondary' : 'primary'} />
-                <div className="grid gap-2 sm:grid-cols-3 xl:grid-cols-5">
-                  <Tile icon={Wallet} label="Investimento" valor={fmt.brl(c.investimento)} />
-                  <Tile icon={Eye} tom="blue" label="Impressões" valor={fmt.compacto(c.impressoes)} />
-                  <Tile icon={MousePointerClick} tom="blue" label="Cliques" valor={fmt.compacto(c.cliques)} />
-                  <Tile icon={Target} tom="orange" label="CTR" valor={fmt.pct(c.ctr)} />
-                  <Tile icon={Receipt} label="CPC" valor={fmt.brl(c.cpc)} menorMelhor />
-                </div>
-              </Card>
-            ))}
-          </div>
-        )}
-
-        <div className="mt-3 grid gap-3 xl:grid-cols-2">
-          <Card>
-            <Chapter icon={Heart} titulo="Instagram" nivel="secao" tom="secondary" />
-            {instagram.alcance === null && instagram.seguidores === null ? (
-              <BlocoVazio oQueFalta="Sem conta do Instagram vinculada a este cliente."
-                comoLigar="Vincule em Cliente → Configurar → Conexões." />
-            ) : (
-              <div className="grid gap-2 sm:grid-cols-3">
-                <Mini label="Seguidores" icon={Users} tom="secondary" valor={fmt.compacto(instagram.seguidores)}
-                  sub={instagram.novosSeguidores === null ? undefined : `${instagram.novosSeguidores >= 0 ? '+' : ''}${fmt.int(instagram.novosSeguidores)} no período`} />
-                <Mini label="Alcance" icon={Eye} tom="secondary" valor={fmt.compacto(instagram.alcance)} />
-                <Mini label="Engajamento" icon={Heart} tom="secondary" valor={fmt.pct(instagram.engajamento)} />
-                <Mini label="Interações" icon={Heart} tom="secondary" valor={fmt.compacto(instagram.interacoes)} />
-                <Mini label="Salvamentos" icon={Bookmark} tom="secondary" valor={fmt.compacto(instagram.salvamentos)} />
-                <Mini label="Visitas ao perfil" icon={Users} tom="secondary" valor={fmt.compacto(instagram.visitasPerfil)} />
-              </div>
-            )}
-          </Card>
-
-          <Card>
-            <Chapter icon={MousePointerClick} titulo="Criativos" nivel="secao" sub="Anúncios com melhor resultado" />
-            {criativos.length === 0 ? (
-              <BlocoVazio oQueFalta="Nenhum criativo com resultado atribuído no período." />
-            ) : (
-              <div className="space-y-2">
-                {criativos.slice(0, 5).map((c) => (
-                  <div key={c.id} className="flex items-center gap-3 rounded-[var(--radius)] bg-surface-elevated p-2.5">
-                    {c.thumbnailUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={c.thumbnailUrl} alt="" className="h-11 w-11 shrink-0 rounded-[var(--radius)] border border-border object-cover" />
-                    ) : (
-                      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[var(--radius)] border border-border bg-card">
-                        <MousePointerClick className="h-4 w-4 text-muted-foreground/50" />
-                      </div>
-                    )}
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-[13px] font-semibold text-foreground">{c.nome}</p>
-                      <Label>{c.formato}</Label>
-                    </div>
-                    <div className="shrink-0 text-right">
-                      <p className="font-heading text-lg leading-none text-foreground">{fmt.int(c.pedidos)}</p>
-                      <Label>pedidos</Label>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </Card>
-        </div>
-      </section>
+      {/* O capítulo "Tráfego" foi REMOVIDO a pedido do Matheus: a faixa do Meta
+          Ads repetia o "Resumo de Tráfego" que já existe acima na mesma tela, e
+          Instagram e Criativos são presença/mídia, não venda — não pertencem a
+          um painel de delivery. Os tipos (CanalTrafego, Criativo,
+          PresencaInstagram) seguem no contrato, caso voltem.
+          A dashboard de food fica em dois capítulos: Vendas e Clientes. */}
     </div>
   );
 }
