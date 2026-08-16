@@ -13,6 +13,9 @@ import {
 } from 'lucide-react';
 import { Chapter, KpiCard, Mini, Gauge, Ring, Heatmap, Card, BlocoVazio, fmt } from '@/components/dashboard';
 import type { BlocoId } from '@/lib/dashboard-modelo';
+import {
+  estiloDe, elementoVisivel, type EstilosPorElemento,
+} from '@/lib/dashboard-elementos';
 import { CLASSE_FUNDO, type DadosDelivery } from '@/types/dashboard';
 import { cn } from '@/lib/utils';
 
@@ -27,7 +30,12 @@ export type TitulosBlocos = Partial<Record<BlocoId, string>>;
 export function blocosDelivery(
   dados: DadosDelivery,
   titulos: TitulosBlocos = {},
+  estilos: EstilosPorElemento = {},
 ): Partial<Record<BlocoId, React.ReactNode>> {
+  // Atalhos: `e` pega o estilo de um elemento, `vis` diz se ele foi ocultado no
+  // inspetor. Elemento oculto some da tela sem afetar os vizinhos.
+  const e = (id: string) => estiloDe(estilos, id);
+  const vis = (id: string) => elementoVisivel(estilos, id);
   const { vendas, variacao, serie, heatmap, clientes, saldos } = dados;
 
   if (dados.fonte.status === 'sem_integracao') {
@@ -53,25 +61,25 @@ export function blocosDelivery(
       <Card className="h-full">
         <Chapter
           icon={BarChart3}
-          titulo={t('vendas', 'Vendas')}
+          estilo={e('vendas.titulo')} titulo={t('vendas', 'Vendas')}
           nivel="secao"
           sub={`${dados.periodo.de.split('-').reverse().join('/')} a ${dados.periodo.ate.split('-').reverse().join('/')} · ${vendas.dias} dias`}
         />
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-          <KpiCard icon={Wallet} label="Receita" valor={fmt.brl(vendas.receita)}
-            delta={variacao.receita} spark={serieReceita} />
-          <KpiCard icon={ShoppingBag} tom="blue" label="Pedidos" valor={fmt.int(vendas.pedidos)}
-            delta={variacao.pedidos} spark={seriePedidos} />
-          <KpiCard icon={Receipt} tom="orange" label="Ticket médio" valor={fmt.brl(vendas.ticket)}
-            delta={variacao.ticket} />
-          <KpiCard icon={UserPlus} tom="secondary" label="Novos clientes" valor={fmt.int(vendas.novosClientes)} />
+          {vis('vendas.receita') && <KpiCard icon={Wallet} label="Receita" valor={fmt.brl(vendas.receita)}
+            delta={variacao.receita} spark={serieReceita} estilo={e('vendas.receita')} />}
+          {vis('vendas.pedidos') && <KpiCard icon={ShoppingBag} tom="blue" label="Pedidos" valor={fmt.int(vendas.pedidos)}
+            delta={variacao.pedidos} spark={seriePedidos} estilo={e('vendas.pedidos')} />}
+          {vis('vendas.ticket') && <KpiCard icon={Receipt} tom="orange" label="Ticket médio" valor={fmt.brl(vendas.ticket)}
+            delta={variacao.ticket} estilo={e('vendas.ticket')} />}
+          {vis('vendas.novos') && <KpiCard icon={UserPlus} tom="secondary" label="Novos clientes" valor={fmt.int(vendas.novosClientes)} estilo={e('vendas.novos')} />}
         </div>
       </Card>
     ),
 
     quando_vendem: (
       <Card className="h-full">
-        <Chapter icon={Clock} titulo={t('quando_vendem', 'Quando vendem')} nivel="secao"
+        <Chapter icon={Clock} estilo={e('quando_vendem.titulo')} titulo={t('quando_vendem', 'Quando vendem')} nivel="secao"
           sub="Pedidos por dia da semana e faixa de horário" />
         <Heatmap dados={heatmap} />
       </Card>
@@ -79,11 +87,11 @@ export function blocosDelivery(
 
     ritmo: (
       <Card className="h-full">
-        <Chapter icon={Target} titulo={t('ritmo', 'Ritmo')} nivel="secao" sub="Média diária no período" />
+        <Chapter icon={Target} estilo={e('ritmo.titulo')} titulo={t('ritmo', 'Ritmo')} nivel="secao" sub="Média diária no período" />
         <div className="grid gap-2 sm:grid-cols-2">
-          <Mini label="Receita/dia" icon={Wallet}
+          <Mini estilo={e('ritmo.receita_dia')} label="Receita/dia" icon={Wallet}
             valor={fmt.brl(vendas.dias ? vendas.receita / vendas.dias : null)} />
-          <Mini label="Pedidos/dia" icon={ShoppingBag} tom="blue"
+          <Mini estilo={e('ritmo.pedidos_dia')} label="Pedidos/dia" icon={ShoppingBag} tom="blue"
             valor={fmt.int(vendas.dias ? Math.round(vendas.pedidos / vendas.dias) : null)} />
         </div>
         {saldos.length > 0 && (
@@ -100,16 +108,16 @@ export function blocosDelivery(
 
     base_clientes: (
       <Card className="h-full">
-        <Chapter icon={Users} titulo={t('base_clientes', 'Situação da base')} nivel="secao" />
+        <Chapter icon={Users} estilo={e('base_clientes.titulo')} titulo={t('base_clientes', 'Situação da base')} nivel="secao" />
         {baseTotal === 0 ? (
           <BlocoVazio oQueFalta="Ainda não há base de clientes sincronizada no período." />
         ) : (
           <div className="flex items-center gap-4">
             <Gauge valor={clientes.ativos} max={baseTotal} unidade={fmt.compacto(clientes.ativos)} legenda="ATIVOS" />
             <div className="min-w-0 flex-1 space-y-2">
-              <Mini label="Ativos" valor={fmt.int(clientes.ativos)} />
-              <Mini label="Em risco" tom="orange" valor={fmt.int(clientes.emRisco)} sub="sem pedir há 30–60 dias" />
-              <Mini label="Inativos" tom="destructive" valor={fmt.int(clientes.inativos)} sub="há mais de 60 dias" />
+              <Mini estilo={e('base_clientes.ativos')} label="Ativos" valor={fmt.int(clientes.ativos)} />
+              <Mini estilo={e('base_clientes.risco')} label="Em risco" tom="orange" valor={fmt.int(clientes.emRisco)} sub="sem pedir há 30–60 dias" />
+              <Mini estilo={e('base_clientes.inativos')} label="Inativos" tom="destructive" valor={fmt.int(clientes.inativos)} sub="há mais de 60 dias" />
             </div>
           </div>
         )}
@@ -118,7 +126,7 @@ export function blocosDelivery(
 
     recorrencia: (
       <Card className="h-full">
-        <Chapter icon={Repeat} titulo={t('recorrencia', 'Recorrência')} nivel="secao"
+        <Chapter icon={Repeat} estilo={e('recorrencia.titulo')} titulo={t('recorrencia', 'Recorrência')} nivel="secao"
           sub="Distribuição por número de pedidos" />
         {totalRecorrencia === 0 ? (
           <BlocoVazio oQueFalta="Sem histórico suficiente para distribuir a base por número de pedidos." />

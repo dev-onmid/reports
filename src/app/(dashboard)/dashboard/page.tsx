@@ -84,6 +84,7 @@ import { Chapter } from '@/components/dashboard';
 import { blocosDelivery } from '@/components/dashboard/delivery-view';
 import { ModeloEditor, useModelo } from '@/components/dashboard/modelo-editor';
 import { tituloDoBloco, type BlocoId } from '@/lib/dashboard-modelo';
+import { elementoVisivel, estiloDe } from '@/lib/dashboard-elementos';
 import { useDadosDelivery } from '@/components/dashboard/use-dados-delivery';
 import {
   formatarMetrica, custoPorPedido, roas as roasFood,
@@ -6200,11 +6201,17 @@ export default function GeneralDashboard() {
                       editando={editandoModelo}
                       onSair={() => setEditandoModelo(false)}
                       onSalvou={setModeloFood}
-                      render={{
+                      // Função dos estilos, não mapa fixo: é o que faz a cor
+                      // escolhida no inspetor aparecer na hora, sem salvar.
+                      render={(estilos) => ({
                         resultado: (
                           <div className="grid h-full gap-4 xl:grid-cols-2">
-                            <GoalProgressCard title={titulos.resultado ?? 'Faturamento'} icon={DollarSign} target={plannedRevenue} partial={effectiveRevenueGoal} value={dadosFood.vendas.receita} format="currency" />
-                            <HeroStatCard title="Ticket médio" icon={Receipt} value={formatarMetrica(dadosFood.vendas.ticket, 'moeda')} change={dadosFood.variacao.ticket} sub="valor médio por pedido no período" />
+                            {elementoVisivel(estilos, 'resultado.faturamento') && (
+                              <GoalProgressCard title={estiloDe(estilos, 'resultado.faturamento').texto ?? titulos.resultado ?? 'Faturamento'} icon={DollarSign} target={plannedRevenue} partial={effectiveRevenueGoal} value={dadosFood.vendas.receita} format="currency" />
+                            )}
+                            {elementoVisivel(estilos, 'resultado.ticket') && (
+                              <HeroStatCard title={estiloDe(estilos, 'resultado.ticket').texto ?? 'Ticket médio'} icon={Receipt} value={formatarMetrica(dadosFood.vendas.ticket, 'moeda')} change={dadosFood.variacao.ticket} sub="valor médio por pedido no período" />
+                            )}
                           </div>
                         ),
                         kpis: (
@@ -6212,8 +6219,8 @@ export default function GeneralDashboard() {
                             {quickMetricsFood.map((metric) => <QuickMetricCard key={metric.title} {...metric} />)}
                           </div>
                         ),
-                        ...blocosDelivery(dadosFood, titulos),
-                      }}
+                        ...blocosDelivery(dadosFood, titulos, estilos),
+                      })}
                     />
                   );
                 })()}

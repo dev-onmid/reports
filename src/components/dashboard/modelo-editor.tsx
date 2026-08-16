@@ -14,7 +14,9 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import RGL, { WidthProvider, type Layout as RglLayout } from 'react-grid-layout';
-import { Eye, EyeOff, GripVertical, Pencil, RotateCcw, Save, X, Check } from 'lucide-react';
+import { Eye, EyeOff, GripVertical, Pencil, RotateCcw, Save, X, Check, SlidersHorizontal } from 'lucide-react';
+import { Inspector } from './inspector';
+import type { ElementoId, EstiloElemento, EstilosPorElemento } from '@/lib/dashboard-elementos';
 import {
   blocosVisiveis, definicaoBloco, mesclarModelo, modeloPadrao, tituloDoBloco,
   type BlocoId, type BlocoNoModelo, type ModeloDashboard,
@@ -46,8 +48,12 @@ export function useModelo(segmento: SegmentoDashboard) {
 
 type Props = {
   modelo: ModeloDashboard;
-  /** Conteúdo de cada bloco. Bloco sem render aqui simplesmente não aparece. */
-  render: Partial<Record<BlocoId, React.ReactNode>>;
+  /**
+   * Conteúdo de cada bloco, como FUNÇÃO dos estilos — não um mapa pronto.
+   * É o que dá pré-visualização ao vivo: mexer numa cor no inspetor precisa
+   * refletir na hora, e um mapa fixo só mudaria depois de salvar.
+   */
+  render: (estilos: EstilosPorElemento) => Partial<Record<BlocoId, React.ReactNode>>;
   editando: boolean;
   onSair: () => void;
   onSalvou: (m: ModeloDashboard) => void;
@@ -59,6 +65,16 @@ export function ModeloEditor({ modelo, render, editando, onSair, onSalvou }: Pro
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   const [renomeando, setRenomeando] = useState<BlocoId | null>(null);
+  /** Bloco cujo inspetor de elementos está aberto. */
+  const [inspecionando, setInspecionando] = useState<BlocoId | null>(null);
+
+  // Aplica um patch de estilo a UM elemento, sem tocar nos demais — é o que
+  // permite mexer no Faturamento sem alterar o Ticket médio.
+  const mudarEstilo = (id: ElementoId, patch: Partial<EstiloElemento>) =>
+    setRascunho((r) => ({
+      ...r,
+      estilos: { ...(r.estilos ?? {}), [id]: { ...(r.estilos?.[id] ?? {}), ...patch } },
+    }));
 
   // Entrar em edição parte SEMPRE do modelo publicado — não de um rascunho
   // abandonado de uma sessão anterior.
@@ -130,8 +146,11 @@ export function ModeloEditor({ modelo, render, editando, onSair, onSalvou }: Pro
     }
   }
 
+  // Reconstruído a cada mudança do rascunho — é o que faz a cor escolhida no
+  // inspetor aparecer na hora, sem precisar salvar.
+  const mapa = render(atual.estilos ?? {});
   const conteudo = (b: BlocoNoModelo) => {
-    const node = render[b.id];
+    const node = mapa[b.id];
     if (node) return node;
     // Bloco no modelo sem render correspondente: mostra o rótulo em vez de um
     // buraco silencioso, para o erro ser visível a quem edita.
@@ -193,6 +212,19 @@ export function ModeloEditor({ modelo, render, editando, onSair, onSalvou }: Pro
           <div key={b.id} className={cn('relative', editando && !b.visivel && 'opacity-40')}>
             {editando && (
               <div className="absolute -top-2 right-1 z-20 flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setInspecionando(inspecionando === b.id ? null : b.id)}
+                  title="Editar métricas deste bloco"
+                  className={cn(
+                    'rounded-[var(--radius)] border p-1',
+                    inspecionando === b.id
+                      ? 'border-primary bg-primary/15 text-primary'
+                      : 'border-border bg-card text-muted-foreground hover:text-foreground',
+                  )}
+                >
+                  <SlidersHorizontal className="h-3 w-3" />
+                </button>
                 <button type="button" onClick={() => setRenomeando(b.id)} title="Renomear"
                   className="rounded-[var(--radius)] border border-border bg-card p-1 text-muted-foreground hover:text-foreground">
                   <Pencil className="h-3 w-3" />
@@ -236,6 +268,15 @@ export function ModeloEditor({ modelo, render, editando, onSair, onSalvou }: Pro
           </div>
         ))}
       </Grid>
+
+      {editando && inspecionando && (
+        <Inspector
+          bloco={inspecionando}
+          estilos={rascunho.estilos ?? {}}
+          onChange={mudarEstilo}
+          onFechar={() => setInspecionando(null)}
+        />
+      )}
     </div>
   );
 }
