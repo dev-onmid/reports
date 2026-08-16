@@ -44,15 +44,28 @@ export function Label({ children, className, style }: {
 }
 
 /**
- * Superfície INTERNA (card dentro de um bloco). Mesma do dashboard premium:
- * cantos 12px sobre o painel de 14px, fundo mais escuro que a superfície do
- * bloco. Usar o `Card` aqui daria painel dentro de painel.
+ * Superfície de um card.
+ *
+ * `inner` = card DENTRO de um bloco (fundo mais escuro, cantos 12px).
+ * `card`  = card solto sobre o fundo da página, com a mesma cara do painel de
+ *           Faturamento.
+ *
+ * ⚠️ Com a grade por elemento, cada métrica virou um card SOLTO. Mantê-las na
+ * superfície `inner` (#071014, quase igual ao fundo da página) faria a métrica
+ * parecer um buraco em vez de um card — por isso a variante existe.
  */
-export function InnerCard({ children, className, style }: {
-  children: React.ReactNode; className?: string; style?: React.CSSProperties;
+export type Superficie = 'inner' | 'card';
+
+export const CLASSE_SUPERFICIE: Record<Superficie, string> = {
+  inner: 'rounded-[12px] border border-white/[0.08] bg-[#071014]',
+  card: 'rounded-[14px] border border-white/[0.08] bg-[#0d1519]/92 shadow-[0_18px_60px_rgba(0,0,0,0.28)]',
+};
+
+export function InnerCard({ children, className, style, superficie = 'inner' }: {
+  children: React.ReactNode; className?: string; style?: React.CSSProperties; superficie?: Superficie;
 }) {
   return (
-    <div className={cn('rounded-[12px] border border-white/[0.08] bg-[#071014] p-4', className)} style={style}>
+    <div className={cn(CLASSE_SUPERFICIE[superficie], 'p-4', className)} style={style}>
       {children}
     </div>
   );
@@ -67,14 +80,11 @@ export function InnerCard({ children, className, style }: {
  * dashboard. Antes daqui, Vendas e Faturamento tinham cantos, fundo e sombra
  * diferentes lado a lado na mesma tela.
  */
-export function Card({ children, className }: { children: React.ReactNode; className?: string }) {
+export function Card({ children, className, style }: {
+  children: React.ReactNode; className?: string; style?: React.CSSProperties;
+}) {
   return (
-    <section
-      className={cn(
-        'relative rounded-[14px] border border-white/[0.08] bg-[#0d1519]/92 p-5 shadow-[0_18px_60px_rgba(0,0,0,0.28)]',
-        className,
-      )}
-    >
+    <section className={cn('relative', CLASSE_SUPERFICIE.card, 'p-5', className)} style={style}>
       {children}
     </section>
   );

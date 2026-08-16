@@ -1,129 +1,178 @@
-// Testes do modelo editavel do dashboard (dashboard-modelo.ts).
+// Testes do modelo editavel do dashboard, agora por ELEMENTO.
 //
-// O foco e mesclarModelo: e a funcao que decide o que acontece quando o CODIGO
-// muda depois de alguem ja ter salvo um modelo. Errar aqui produz o pior tipo de
-// bug: bloco novo que nunca aparece, ou tela que tenta renderizar bloco morto.
+// O foco e mesclarModelo/normalizarModelo: sao as funcoes que decidem o que
+// acontece quando o CODIGO muda depois de alguem ja ter salvo um modelo. Errar
+// aqui produz o pior tipo de bug: metrica nova que nunca aparece, tela que tenta
+// renderizar elemento morto, ou — o caso desta rodada — modelo salvo no formato
+// antigo (por BLOCO) que apaga as cores ja escolhidas.
 //
-// Compilar antes:
-//   npx tsc src/lib/dashboard-modelo.ts --outDir scratchpad/build-modelo \
-//     --module esnext --target es2022 --moduleResolution bundler --skipLibCheck
-//   mv scratchpad/build-modelo/dashboard-modelo.js scratchpad/build-modelo/dashboard-modelo.mjs
+// Compilar antes. ⚠️ tsc por arquivo NAO serve mais: dashboard-modelo agora
+// importa dashboard-elementos em runtime (ELEMENTOS gera o layout de fabrica), e
+// o alias @/ ficaria sem resolver. O esbuild resolve pelo tsconfig:
+//   npx esbuild scratchpad/entry-dashboard.ts --bundle --format=esm \
+//     --outfile=scratchpad/build-modelo/dashboard-modelo.mjs --tsconfig=tsconfig.json
 //   node scratchpad/test-dashboard-modelo.mjs
 
 import assert from 'node:assert';
 import {
-  MODELO_PADRAO_FOOD, BLOCOS_FOOD, modeloPadrao, definicaoBloco, tituloDoBloco,
-  mesclarModelo, blocosVisiveis, normalizarModelo,
+  MODELO_PADRAO_FOOD, BLOCOS_FOOD, modeloPadrao, definicaoBloco, caminhoDoElemento,
+  mesclarModelo, elementosVisiveis, normalizarModelo,
+} from './build-modelo/dashboard-modelo.mjs';
+import {
+  ELEMENTOS, LIMITE, definicaoElemento, elementosDoBloco, suporta, normalizarEstilos,
+  estiloDe, elementoVisivel, textoDe, styleTexto, styleValor, styleFundo,
 } from './build-modelo/dashboard-modelo.mjs';
 
 let n = 0;
 const eq = (a, b, m) => { assert.deepStrictEqual(a, b, m); n++; };
 const ok = (c, m) => { assert.ok(c, m); n++; };
 
-// ───────────────────────────────── catalogo
-eq(BLOCOS_FOOD.length, MODELO_PADRAO_FOOD.blocos.length, 'catalogo e padrao tem os mesmos blocos');
-for (const b of MODELO_PADRAO_FOOD.blocos) {
-  ok(definicaoBloco(b.id) !== null, `bloco ${b.id} do padrao existe no catalogo`);
-}
-eq(new Set(BLOCOS_FOOD.map(b => b.id)).size, BLOCOS_FOOD.length, 'sem id duplicado no catalogo');
-eq(modeloPadrao('leads').blocos, [], 'lead-gen ainda nao tem editor');
-eq(modeloPadrao('food').blocos.length, 7, 'food tem 7 blocos');
+// ───────────────────────────── catalogo de elementos
+eq(ELEMENTOS.length, MODELO_PADRAO_FOOD.elementos.length, 'catalogo e padrao tem os mesmos elementos');
+ok(ELEMENTOS.length >= 20, 'a granularidade e por metrica, nao por bloco');
 
-// Nenhum bloco do padrao nasce menor que o proprio minimo.
-for (const b of MODELO_PADRAO_FOOD.blocos) {
-  const d = definicaoBloco(b.id);
-  ok(b.w >= d.minW, `${b.id}: largura padrao >= minima`);
-  ok(b.h >= d.minH, `${b.id}: altura padrao >= minima`);
-}
-
-// ───────────────────────────────── titulo
-eq(tituloDoBloco({ id: 'vendas', visivel: true }), 'Vendas', 'sem titulo custom usa o de fabrica');
-eq(tituloDoBloco({ id: 'vendas', titulo: 'Faturamento da loja', visivel: true }), 'Faturamento da loja', 'titulo custom vence');
-eq(tituloDoBloco({ id: 'vendas', titulo: '   ', visivel: true }), 'Vendas', 'titulo so com espaco cai no de fabrica');
-
-// ───────────────────────────────── mesclarModelo
-{
-  // Posicao salva vence o padrao.
-  const salvo = { segmento: 'food', blocos: [{ id: 'vendas', x: 6, y: 20, w: 6, h: 4, visivel: true }] };
-  const m = mesclarModelo(salvo, MODELO_PADRAO_FOOD);
-  const v = m.blocos.find(b => b.id === 'vendas');
-  eq([v.x, v.y, v.w, v.h], [6, 20, 6, 4], 'posicao e tamanho salvos vencem');
-  eq(m.blocos.length, 7, 'os outros blocos continuam presentes');
-}
-{
-  // ⚠️ O caso mais importante: bloco NOVO no codigo, modelo antigo salvo.
-  const antigo = { segmento: 'food', blocos: [{ id: 'vendas', x: 0, y: 0, w: 12, h: 3, visivel: true }] };
-  const m = mesclarModelo(antigo, MODELO_PADRAO_FOOD);
-  eq(m.blocos.length, 7, 'blocos novos do codigo ENTRAM, nao somem');
-  const novo = m.blocos.find(b => b.id === 'recorrencia');
-  ok(novo && novo.visivel, 'bloco novo entra visivel');
-  eq([novo.x, novo.y], [5, 13], 'bloco novo entra na posicao de fabrica');
-}
-{
-  // Bloco que saiu do codigo tem de ser descartado.
-  const comFantasma = {
-    segmento: 'food',
-    blocos: [
-      { id: 'vendas', x: 0, y: 0, w: 12, h: 3, visivel: true },
-      { id: 'bloco_que_nao_existe_mais', x: 0, y: 9, w: 12, h: 4, visivel: true },
-    ],
-  };
-  const m = mesclarModelo(comFantasma, MODELO_PADRAO_FOOD);
-  ok(!m.blocos.some(b => b.id === 'bloco_que_nao_existe_mais'), 'bloco morto e descartado');
-  eq(m.blocos.length, 7, 'e nao encolhe o resto');
-}
-{
-  // Modelo antigo nao pode espremer bloco abaixo do minimo legivel.
-  const espremido = { segmento: 'food', blocos: [{ id: 'quando_vendem', x: 0, y: 0, w: 1, h: 1, visivel: true }] };
-  const m = mesclarModelo(espremido, MODELO_PADRAO_FOOD);
-  const b = m.blocos.find(x => x.id === 'quando_vendem');
-  const d = definicaoBloco('quando_vendem');
-  eq([b.w, b.h], [d.minW, d.minH], 'tamanho salvo e elevado ao minimo do bloco');
-}
-{
-  // Ocultar persiste; e `visivel` ausente conta como visivel (modelo legado).
-  const m = mesclarModelo({ segmento: 'food', blocos: [
-    { id: 'ritmo', x: 0, y: 0, w: 5, h: 5, visivel: false },
-    { id: 'vendas', x: 0, y: 0, w: 12, h: 3 },
-  ] }, MODELO_PADRAO_FOOD);
-  eq(m.blocos.find(b => b.id === 'ritmo').visivel, false, 'oculto persiste');
-  eq(m.blocos.find(b => b.id === 'vendas').visivel, true, 'visivel ausente = visivel');
-}
-eq(mesclarModelo(null, MODELO_PADRAO_FOOD).blocos.length, 7, 'sem nada salvo devolve o padrao inteiro');
-eq(mesclarModelo(undefined, MODELO_PADRAO_FOOD).blocos.length, 7, 'undefined idem');
-
-// ───────────────────────────────── blocosVisiveis
-{
-  const m = mesclarModelo({ segmento: 'food', blocos: [{ id: 'kpis', x: 0, y: 3, w: 12, h: 2, visivel: false }] }, MODELO_PADRAO_FOOD);
-  const vis = blocosVisiveis(m);
-  eq(vis.length, 6, 'oculto sai da renderizacao');
-  ok(!vis.some(b => b.id === 'kpis'), 'e nao e o errado que saiu');
-  // Ordem de leitura: cima->baixo, esquerda->direita.
-  const ys = vis.map(b => b.y);
-  eq(ys, [...ys].sort((a, b) => a - b), 'ordenado por y');
-  eq(vis[0].id, 'resultado', 'primeiro bloco e o hero');
+const vistos = new Set();
+for (const e of ELEMENTOS) {
+  ok(!vistos.has(e.id), `id duplicado no catalogo: ${e.id}`);
+  vistos.add(e.id);
+  ok(e.id.includes('.'), `id do elemento e "bloco.elemento": ${e.id}`);
+  ok(BLOCOS_FOOD.some(b => b.id === e.bloco), `${e.id} aponta para bloco existente`);
+  ok(e.w >= e.minW && e.h >= e.minH, `${e.id} nasce nao menor que o proprio minimo`);
+  ok(e.x >= 0 && e.x + e.w <= 12, `${e.id} cabe nas 12 colunas`);
+  ok(e.suporta.includes('visivel'), `${e.id} pode ser ocultado`);
 }
 
-// ───────────────────────────────── normalizarModelo (entrada do banco/rede)
-eq(normalizarModelo(null, 'food').blocos.length, 7, 'null -> padrao');
-eq(normalizarModelo('texto', 'food').blocos.length, 7, 'string -> padrao');
-eq(normalizarModelo({}, 'food').blocos.length, 7, 'objeto sem blocos -> padrao');
-eq(normalizarModelo({ blocos: 'nao e array' }, 'food').blocos.length, 7, 'blocos invalido -> padrao');
-{
-  const m = normalizarModelo({ blocos: [
-    { id: 'vendas', x: 3, y: 7, w: 9, h: 4, visivel: true },
-    { id: 'invalido', x: 0, y: 0, w: 12, h: 3, visivel: true },
-    null,
-    'lixo',
-  ] }, 'food');
-  eq(m.blocos.length, 7, 'entradas invalidas sao descartadas, padrao completa');
-  const v = m.blocos.find(b => b.id === 'vendas');
-  eq([v.x, v.y, v.w, v.h], [3, 7, 9, 4], 'entrada valida e preservada');
+// Nenhum elemento se sobrepoe a outro no layout de fabrica — sobreposicao faria
+// o RGL empurrar os vizinhos assim que a tela abrisse, e o layout "de fabrica"
+// nunca seria o que esta escrito aqui.
+for (let i = 0; i < ELEMENTOS.length; i++) {
+  for (let j = i + 1; j < ELEMENTOS.length; j++) {
+    const a = ELEMENTOS[i], b = ELEMENTOS[j];
+    const colide = a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+    ok(!colide, `${a.id} e ${b.id} se sobrepoem no layout de fabrica`);
+  }
 }
-{
-  const longo = 'x'.repeat(200);
-  const m = normalizarModelo({ blocos: [{ id: 'vendas', x: 0, y: 0, w: 12, h: 3, visivel: true, titulo: longo }] }, 'food');
-  eq(m.blocos.find(b => b.id === 'vendas').titulo.length, 60, 'titulo e cortado em 60 chars');
-}
+
+eq(definicaoElemento('vendas.receita').rotulo, 'Receita', 'acha elemento por id');
+eq(definicaoElemento('nao.existe'), null, 'id desconhecido devolve null');
+eq(elementosDoBloco('vendas').length, 5, 'vendas tem titulo + 4 metricas');
+eq(suporta('vendas.receita', 'corValor'), true, 'metrica aceita cor de valor');
+eq(suporta('vendas.titulo', 'corValor'), false, 'cabecalho nao tem "valor" para colorir');
+eq(suporta('quando_vendem.mapa', 'texto'), false, 'grafico nao tem rotulo editavel');
+
+// ───────────────────────────── estilos: liberdade total com sanidade
+const bruto = {
+  'vendas.receita': {
+    texto: '  Faturamento bruto  ', corValor: '#ff0000', corTexto: 'vermelho',
+    tamanhoValor: 500, tamanhoTexto: 2, tamanhoIcone: 40, icone: 'Wallet', visivel: false,
+  },
+  'elemento.fantasma': { corValor: '#ff0000' },
+  'vendas.pedidos': 'não é objeto',
+};
+const est = normalizarEstilos(bruto);
+eq(Object.keys(est), ['vendas.receita'], 'elemento fora do catalogo e lixo sao descartados');
+eq(est['vendas.receita'].texto, 'Faturamento bruto', 'texto e aparado');
+eq(est['vendas.receita'].corValor, '#ff0000', 'hex valido passa');
+eq(est['vendas.receita'].corTexto, null, 'cor invalida vira null (herda o padrao), nao quebra a tela');
+eq(est['vendas.receita'].tamanhoValor, LIMITE.valor[1], '500px e capado no teto de sanidade');
+eq(est['vendas.receita'].tamanhoTexto, LIMITE.texto[0], '2px e elevado ao piso legivel');
+eq(est['vendas.receita'].visivel, false, 'visivel:false e respeitado');
+eq(normalizarEstilos(null), {}, 'nulo vira objeto vazio');
+eq(normalizarEstilos('x'), {}, 'string vira objeto vazio');
+
+eq(estiloDe({}, 'vendas.receita'), {}, 'sem estilo devolve objeto vazio, nao undefined');
+eq(elementoVisivel({}, 'vendas.receita'), true, 'ausencia de estilo = visivel');
+eq(elementoVisivel(est, 'vendas.receita'), false, 'oculto continua oculto');
+eq(textoDe(est, 'vendas.receita', 'Receita'), 'Faturamento bruto', 'texto custom vence o de fabrica');
+eq(textoDe({}, 'vendas.receita', 'Receita'), 'Receita', 'sem custom cai no de fabrica');
+eq(textoDe({ 'vendas.receita': { texto: '   ' } }, 'vendas.receita', 'Receita'), 'Receita', 'texto so de espaco nao apaga o rotulo');
+
+eq(styleTexto({}), {}, 'estilo vazio nao injeta CSS nenhum');
+eq(styleValor({ tamanhoValor: 44 }), { fontSize: '44px', lineHeight: 1.05 }, 'valor grande ganha line-height, senao o glifo e cortado');
+eq(styleFundo({ corFundo: '#101010' }), { backgroundColor: '#101010' }, 'fundo custom vira style inline');
+eq(styleFundo({}), {}, 'sem fundo custom nao injeta nada');
+
+// ───────────────────────────── mesclarModelo
+const padrao = modeloPadrao('food');
+eq(mesclarModelo(null, padrao).elementos.length, ELEMENTOS.length, 'sem modelo salvo, tudo de fabrica');
+
+// Elemento NOVO no codigo entra com a posicao de fabrica. Sem isso, metrica nova
+// ficaria invisivel para quem ja salvou um modelo.
+const salvoIncompleto = {
+  segmento: 'food',
+  elementos: [{ id: 'vendas.receita', x: 4, y: 9, w: 5, h: 3, visivel: false }],
+};
+const fundido = mesclarModelo(salvoIncompleto, padrao);
+eq(fundido.elementos.length, ELEMENTOS.length, 'elemento novo do codigo entra na fusao');
+const receita = fundido.elementos.find(e => e.id === 'vendas.receita');
+eq([receita.x, receita.y, receita.w, receita.h], [4, 9, 5, 3], 'posicao salva vence o padrao');
+eq(receita.visivel, false, 'visibilidade salva vence o padrao');
+const novos = fundido.elementos.find(e => e.id === 'vendas.novos');
+const defNovos = definicaoElemento('vendas.novos');
+eq([novos.x, novos.y], [defNovos.x, defNovos.y], 'elemento nao salvo fica na posicao de fabrica');
+
+// Elemento que saiu do codigo e descartado — a tela nunca tenta renderizar algo
+// que nao existe mais.
+const comMorto = mesclarModelo(
+  { segmento: 'food', elementos: [...padrao.elementos, { id: 'bloco.morto', x: 0, y: 0, w: 3, h: 2, visivel: true }] },
+  padrao,
+);
+ok(!comMorto.elementos.some(e => e.id === 'bloco.morto'), 'elemento morto e descartado');
+
+// Tamanho salvo nunca abaixo do minimo legivel do elemento.
+const espremido = mesclarModelo(
+  { segmento: 'food', elementos: [{ id: 'quando_vendem.mapa', x: 0, y: 0, w: 1, h: 1, visivel: true }] },
+  padrao,
+);
+const mapa = espremido.elementos.find(e => e.id === 'quando_vendem.mapa');
+const defMapa = definicaoElemento('quando_vendem.mapa');
+eq([mapa.w, mapa.h], [defMapa.minW, defMapa.minH], 'modelo antigo nao pode espremer o mapa ate ficar ilegivel');
+
+// ───────────────────────────── normalizarModelo
+eq(normalizarModelo(null, 'food').elementos.length, ELEMENTOS.length, 'nulo cai no padrao inteiro');
+eq(normalizarModelo({ elementos: 'nao e array' }, 'food').elementos.length, ELEMENTOS.length, 'lista corrompida cai no padrao');
+eq(normalizarModelo({}, 'leads').elementos, [], 'lead-gen ainda nao tem editor');
+
+// ⚠️ O caso da migracao: modelo salvo no formato ANTIGO (por bloco). As posicoes
+// nao tem como ser aproveitadas, mas as CORES/textos escolhidos sim — perde-los
+// silenciosamente seria a pior forma de "atualizar".
+const formatoAntigo = {
+  segmento: 'food',
+  blocos: [{ id: 'vendas', x: 0, y: 5, w: 12, h: 3, visivel: true, titulo: 'Faturamento' }],
+  estilos: { 'vendas.receita': { corValor: '#00ff00', tamanhoValor: 40 } },
+};
+const migrado = normalizarModelo(formatoAntigo, 'food');
+eq(migrado.elementos.length, ELEMENTOS.length, 'layout volta ao de fabrica');
+eq(migrado.estilos['vendas.receita'].corValor, '#00ff00', 'a cor escolhida sobrevive a migracao');
+eq(migrado.estilos['vendas.receita'].tamanhoValor, 40, 'o tamanho escolhido sobrevive a migracao');
+
+const salvoValido = normalizarModelo(
+  { segmento: 'food', elementos: [{ id: 'vendas.receita', x: 2, y: 7, w: 4, h: 2, visivel: true }], estilos: {} },
+  'food',
+);
+eq(salvoValido.elementos.find(e => e.id === 'vendas.receita').x, 2, 'posicao valida atravessa a normalizacao');
+
+// ───────────────────────────── visiveis e rotulos
+const comOculto = {
+  segmento: 'food',
+  elementos: [
+    { id: 'vendas.receita', x: 0, y: 6, w: 3, h: 2, visivel: false },
+    { id: 'vendas.pedidos', x: 3, y: 6, w: 3, h: 2, visivel: true },
+    { id: 'vendas.titulo', x: 0, y: 5, w: 12, h: 1, visivel: true },
+  ],
+};
+const vis = elementosVisiveis(comOculto);
+eq(vis.map(e => e.id), ['vendas.titulo', 'vendas.pedidos'], 'oculto sai e a ordem e de leitura (cima->baixo)');
+
+eq(definicaoBloco('vendas').rotulo, 'Vendas', 'bloco ainda rotula o agrupamento');
+eq(definicaoBloco('nao_existe'), null, 'bloco desconhecido devolve null');
+eq(caminhoDoElemento('vendas.receita'), 'Vendas › Receita', 'caminho legivel para o editor');
+eq(caminhoDoElemento('nao.existe'), 'nao.existe', 'id desconhecido nao quebra o rotulo');
+
+// O padrao e uma COPIA: mexer no modelo carregado nao pode contaminar a
+// constante do modulo e vazar para o proximo cliente aberto.
+const p1 = modeloPadrao('food');
+p1.elementos[0].x = 99;
+eq(modeloPadrao('food').elementos[0].x, ELEMENTOS[0].x, 'modeloPadrao devolve copia, nao a constante');
 
 console.log(`OK — ${n} asserts`);

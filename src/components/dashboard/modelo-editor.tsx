@@ -1,12 +1,15 @@
 "use client";
 
-// Modo edição do modelo do dashboard — arrastar, redimensionar, ocultar e
-// renomear blocos.
+// Modo edição do modelo do dashboard.
 //
-// Escopo deliberado (decisão do Matheus): LAYOUT e TÍTULO. Cor, fonte e ícone
-// continuam vindo do design system. Liberar estilo por bloco faria cada cliente
-// ter um painel diferente e o "Verde Onmid como única cor de CTA" deixaria de
-// valer — o editor personaliza o ARRANJO, não a identidade.
+// ⚠️ A grade é por ELEMENTO, não por bloco. Enquanto cada bloco era um item do
+// react-grid-layout, arrastar "Vendas" levava junto as 4 métricas de dentro —
+// era impossível mover só o Faturamento. Agora cada métrica, título e gráfico é
+// um item próprio: move, redimensiona e some sozinho.
+//
+// ⚠️ E os controles de estilo vivem NO PRÓPRIO elemento (barra que aparece no
+// hover + popover ancorado), não num inspetor lateral. Pedido do Matheus:
+// "passar o mouse em cima do título e decidir ali o que quero fazer com ele".
 //
 // O modelo é por SEGMENTO: salvar aqui muda o painel de todos os clientes
 // daquele segmento. Por isso o botão de salvar é de administrador e o aviso
@@ -14,12 +17,14 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import RGL, { WidthProvider, type Layout as RglLayout } from 'react-grid-layout';
-import { Eye, EyeOff, GripVertical, Pencil, RotateCcw, Save, X, Check, SlidersHorizontal } from 'lucide-react';
-import { Inspector } from './inspector';
-import type { ElementoId, EstiloElemento, EstilosPorElemento } from '@/lib/dashboard-elementos';
+import { Eye, EyeOff, GripVertical, RotateCcw, Save, X, SlidersHorizontal } from 'lucide-react';
+import { ControlesElemento } from './controles-elemento';
 import {
-  blocosVisiveis, definicaoBloco, mesclarModelo, modeloPadrao, tituloDoBloco,
-  type BlocoId, type BlocoNoModelo, type ModeloDashboard,
+  definicaoElemento, type ElementoId, type EstiloElemento, type EstilosPorElemento,
+} from '@/lib/dashboard-elementos';
+import {
+  caminhoDoElemento, elementosVisiveis, mesclarModelo, modeloPadrao,
+  type ElementoNoModelo, type ModeloDashboard,
 } from '@/lib/dashboard-modelo';
 import type { SegmentoDashboard } from '@/lib/dashboard-segmento';
 import { useIsMobile } from '@/lib/use-is-mobile';
@@ -51,11 +56,11 @@ export function useModelo(segmento: SegmentoDashboard) {
 type Props = {
   modelo: ModeloDashboard;
   /**
-   * Conteúdo de cada bloco, como FUNÇÃO dos estilos — não um mapa pronto.
-   * É o que dá pré-visualização ao vivo: mexer numa cor no inspetor precisa
-   * refletir na hora, e um mapa fixo só mudaria depois de salvar.
+   * Conteúdo de cada elemento, como FUNÇÃO dos estilos — não um mapa pronto.
+   * É o que dá pré-visualização ao vivo: mexer numa cor precisa refletir na
+   * hora, e um mapa fixo só mudaria depois de salvar.
    */
-  render: (estilos: EstilosPorElemento) => Partial<Record<BlocoId, React.ReactNode>>;
+  render: (estilos: EstilosPorElemento) => Partial<Record<ElementoId, React.ReactNode>>;
   editando: boolean;
   onSair: () => void;
   onSalvou: (m: ModeloDashboard) => void;
@@ -66,50 +71,66 @@ export function ModeloEditor({ modelo, render, editando, onSair, onSalvou }: Pro
   const [rascunho, setRascunho] = useState<ModeloDashboard>(modelo);
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
-  const [renomeando, setRenomeando] = useState<BlocoId | null>(null);
-  /** Bloco cujo inspetor de elementos está aberto. */
-  const [inspecionando, setInspecionando] = useState<BlocoId | null>(null);
-
-  // Aplica um patch de estilo a UM elemento, sem tocar nos demais — é o que
-  // permite mexer no Faturamento sem alterar o Ticket médio.
-  const mudarEstilo = (id: ElementoId, patch: Partial<EstiloElemento>) =>
-    setRascunho((r) => ({
-      ...r,
-      estilos: { ...(r.estilos ?? {}), [id]: { ...(r.estilos?.[id] ?? {}), ...patch } },
-    }));
+  /** Elemento com o painel de controles aberto. */
+  const [aberto, setAberto] = useState<ElementoId | null>(null);
 
   // Entrar em edição parte SEMPRE do modelo publicado — não de um rascunho
   // abandonado de uma sessão anterior.
-  useEffect(() => { if (editando) setRascunho(modelo); }, [editando, modelo]);
+  useEffect(() => { if (editando) { setRascunho(modelo); setAberto(null); } }, [editando, modelo]);
+
+  // Aplica um patch de estilo a UM elemento, sem tocar nos demais — é o que
+  // permite mexer no Faturamento sem alterar o Ticket médio.
+  const mudarEstilo = useCallback((id: ElementoId, patch: Partial<EstiloElemento>) =>
+    setRascunho((r) => ({
+      ...r,
+      estilos: { ...(r.estilos ?? {}), [id]: { ...(r.estilos?.[id] ?? {}), ...patch } },
+    })), []);
+
+  const limparEstilo = useCallback((id: ElementoId) =>
+    setRascunho((r) => {
+      const estilos = { ...(r.estilos ?? {}) };
+      delete estilos[id];
+      return { ...r, estilos };
+    }), []);
 
   const atual = editando ? rascunho : modelo;
-  const visiveis = useMemo(() => blocosVisiveis(atual), [atual]);
+  const estilos = useMemo(() => atual.estilos ?? {}, [atual.estilos]);
 
-  // No modo edição TODOS os blocos aparecem (inclusive os ocultos, esmaecidos),
-  // senão não haveria como trazer de volta um bloco escondido.
-  const naGrade = editando ? atual.blocos : visiveis;
+  // Reconstruído a cada mudança do rascunho — é o que faz a cor escolhida
+  // aparecer na hora, sem precisar salvar.
+  const mapa = render(estilos);
 
-  const layout: RglLayout[] = naGrade.map((b) => {
-    const d = definicaoBloco(b.id);
-    return { i: b.id, x: b.x, y: b.y, w: b.w, h: b.h, minW: d?.minW ?? 2, minH: d?.minH ?? 2 };
+  // Fora do modo edição, elemento OCULTO ou SEM CONTEÚDO não entra na grade.
+  // "Sem conteúdo" acontece de verdade: `ritmo.saldos` só existe com conta de
+  // anúncio vinculada, e o medidor da base só com base sincronizada. Deixar a
+  // célula vazia abriria um buraco na tela publicada.
+  // Em edição TODOS aparecem — inclusive os ocultos, esmaecidos —, senão não
+  // haveria como trazer de volta o que foi escondido.
+  const naGrade: ElementoNoModelo[] = editando
+    ? atual.elementos
+    : elementosVisiveis(atual).filter((e) => mapa[e.id]);
+
+  const layout: RglLayout[] = naGrade.map((e) => {
+    const d = definicaoElemento(e.id);
+    return { i: e.id, x: e.x, y: e.y, w: e.w, h: e.h, minW: d?.minW ?? 2, minH: d?.minH ?? 1 };
   });
 
   const aoMudarLayout = useCallback((novo: RglLayout[]) => {
     if (!editando) return;
     setRascunho((r) => ({
       ...r,
-      blocos: r.blocos.map((b) => {
-        const l = novo.find((x) => x.i === b.id);
-        return l ? { ...b, x: l.x, y: l.y, w: l.w, h: l.h } : b;
+      elementos: r.elementos.map((e) => {
+        const l = novo.find((x) => x.i === e.id);
+        return l ? { ...e, x: l.x, y: l.y, w: l.w, h: l.h } : e;
       }),
     }));
   }, [editando]);
 
-  const alternarVisivel = (id: BlocoId) =>
-    setRascunho((r) => ({ ...r, blocos: r.blocos.map((b) => (b.id === id ? { ...b, visivel: !b.visivel } : b)) }));
-
-  const renomear = (id: BlocoId, titulo: string) =>
-    setRascunho((r) => ({ ...r, blocos: r.blocos.map((b) => (b.id === id ? { ...b, titulo: titulo.trim() || null } : b)) }));
+  const alternarVisivel = (id: ElementoId) =>
+    setRascunho((r) => ({
+      ...r,
+      elementos: r.elementos.map((e) => (e.id === id ? { ...e, visivel: !e.visivel } : e)),
+    }));
 
   async function salvar() {
     setSalvando(true);
@@ -141,6 +162,7 @@ export function ModeloEditor({ modelo, render, editando, onSair, onSalvou }: Pro
       const padrao = mesclarModelo(null, modeloPadrao(rascunho.segmento));
       onSalvou(padrao);
       setRascunho(padrao);
+      setAberto(null);
     } catch (e) {
       setErro(e instanceof Error ? e.message : 'Não foi possível restaurar');
     } finally {
@@ -148,17 +170,15 @@ export function ModeloEditor({ modelo, render, editando, onSair, onSalvou }: Pro
     }
   }
 
-  // Reconstruído a cada mudança do rascunho — é o que faz a cor escolhida no
-  // inspetor aparecer na hora, sem precisar salvar.
-  const mapa = render(atual.estilos ?? {});
-  const conteudo = (b: BlocoNoModelo) => {
-    const node = mapa[b.id];
+  const conteudo = (e: ElementoNoModelo) => {
+    const node = mapa[e.id];
     if (node) return node;
-    // Bloco no modelo sem render correspondente: mostra o rótulo em vez de um
-    // buraco silencioso, para o erro ser visível a quem edita.
+    // Só acontece em edição (fora dela o elemento é filtrado): espaço reservado
+    // para o elemento continuar posicionável mesmo sem dado no período.
     return (
-      <div className="flex h-full items-center justify-center rounded-[var(--radius)] border border-dashed border-border text-[11px] text-muted-foreground">
-        {tituloDoBloco(b)} — sem conteúdo
+      <div className="flex h-full items-center justify-center rounded-[12px] border border-dashed border-white/[0.14] px-2 text-center text-[10px] leading-tight text-[#6b7478]">
+        {definicaoElemento(e.id)?.rotulo ?? e.id}
+        <br />sem dado no período
       </div>
     );
   };
@@ -166,19 +186,19 @@ export function ModeloEditor({ modelo, render, editando, onSair, onSalvou }: Pro
   // Fora do modo edição em mobile o RGL empilha; manter o grid ali só
   // atrapalharia, então renderiza a pilha simples.
   if (!editando && isMobile) {
-    return <div className="space-y-4">{visiveis.map((b) => <div key={b.id}>{conteudo(b)}</div>)}</div>;
+    return <div className="space-y-4">{naGrade.map((e) => <div key={e.id}>{conteudo(e)}</div>)}</div>;
   }
 
   return (
     <div>
       {editando && (
-        <div className="sticky top-16 z-30 mb-3 flex flex-wrap items-center gap-2 rounded-[var(--radius)] border border-primary/40 bg-primary/10 px-3 py-2">
+        <div className="sticky top-16 z-[80] mb-3 flex flex-wrap items-center gap-2 rounded-[var(--radius)] border border-primary/40 bg-primary/10 px-3 py-2">
           <GripVertical className="h-4 w-4 text-primary" />
           <span className="text-[12px] font-semibold text-foreground">
             Editando o modelo de <strong>{rascunho.segmento === 'food' ? 'Food / Delivery' : rascunho.segmento}</strong>
           </span>
           <span className="text-[11px] text-muted-foreground">
-            · arraste para mover, puxe o canto para redimensionar · vale para TODOS os clientes deste segmento
+            · passe o mouse sobre qualquer métrica para mover, editar ou ocultar · vale para TODOS os clientes deste segmento
           </span>
           {erro && <span className="text-[11px] font-semibold text-destructive">{erro}</span>}
           <div className="ml-auto flex items-center gap-2">
@@ -210,75 +230,67 @@ export function ModeloEditor({ modelo, render, editando, onSair, onSalvou }: Pro
         onLayoutChange={editando ? aoMudarLayout : undefined}
         compactType="vertical"
       >
-        {naGrade.map((b) => (
-          <div key={b.id} className={cn('relative', editando && !b.visivel && 'opacity-40')}>
-            {editando && (
-              <div className="absolute -top-2 right-1 z-20 flex items-center gap-1">
-                <button
-                  type="button"
-                  onClick={() => setInspecionando(inspecionando === b.id ? null : b.id)}
-                  title="Editar métricas deste bloco"
+        {naGrade.map((e) => {
+          const ativo = aberto === e.id;
+          return (
+            <div
+              key={e.id}
+              // O item que está sendo editado sobe: sem isso o painel de
+              // controles fica ATRÁS dos elementos vizinhos da grade.
+              style={ativo ? { zIndex: 60 } : undefined}
+              className={cn('group relative', editando && !e.visivel && 'opacity-40')}
+            >
+              {editando && (
+                <div
                   className={cn(
-                    'rounded-[var(--radius)] border p-1',
-                    inspecionando === b.id
-                      ? 'border-primary bg-primary/15 text-primary'
-                      : 'border-border bg-card text-muted-foreground hover:text-foreground',
+                    'absolute -top-2.5 right-1 z-[65] flex items-center gap-0.5 rounded-[8px] border border-white/[0.14] bg-[#0d1519] p-0.5 shadow-[0_6px_20px_rgba(0,0,0,0.5)]',
+                    // Some quando não há foco nem hover: a barra em cima de TODOS
+                    // os 25 elementos ao mesmo tempo esconderia a própria tela.
+                    ativo ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 focus-within:opacity-100',
                   )}
                 >
-                  <SlidersHorizontal className="h-3 w-3" />
-                </button>
-                <button type="button" onClick={() => setRenomeando(b.id)} title="Renomear"
-                  className="rounded-[var(--radius)] border border-border bg-card p-1 text-muted-foreground hover:text-foreground">
-                  <Pencil className="h-3 w-3" />
-                </button>
-                <button type="button" onClick={() => alternarVisivel(b.id)}
-                  title={b.visivel ? 'Ocultar bloco' : 'Mostrar bloco'}
-                  className="rounded-[var(--radius)] border border-border bg-card p-1 text-muted-foreground hover:text-foreground">
-                  {b.visivel ? <Eye className="h-3 w-3" /> : <EyeOff className="h-3 w-3" />}
-                </button>
-                <span className="arrastar cursor-move rounded-[var(--radius)] border border-border bg-card p-1 text-muted-foreground">
-                  <GripVertical className="h-3 w-3" />
-                </span>
-              </div>
-            )}
+                  <span
+                    className="arrastar cursor-move rounded p-1 text-[#9aa4aa] hover:text-white"
+                    title={`Mover ${caminhoDoElemento(e.id)}`}
+                  >
+                    <GripVertical className="h-3 w-3" />
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setAberto(ativo ? null : e.id)}
+                    title="Editar este elemento"
+                    className={cn('rounded p-1', ativo ? 'bg-primary/20 text-primary' : 'text-[#9aa4aa] hover:text-white')}
+                  >
+                    <SlidersHorizontal className="h-3 w-3" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => alternarVisivel(e.id)}
+                    title={e.visivel ? 'Ocultar' : 'Mostrar'}
+                    className="rounded p-1 text-[#9aa4aa] hover:text-white"
+                  >
+                    {e.visivel ? <Eye className="h-3 w-3" /> : <EyeOff className="h-3 w-3" />}
+                  </button>
+                </div>
+              )}
 
-            {editando && renomeando === b.id && (
-              <div className="absolute inset-x-2 top-4 z-30 flex items-center gap-1 rounded-[var(--radius)] border border-primary/40 bg-card p-1.5">
-                <input
-                  autoFocus
-                  defaultValue={tituloDoBloco(b)}
-                  maxLength={60}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') { renomear(b.id, (e.target as HTMLInputElement).value); setRenomeando(null); }
-                    if (e.key === 'Escape') setRenomeando(null);
-                  }}
-                  className="h-7 min-w-0 flex-1 rounded-[var(--radius)] border border-border bg-background px-2 text-xs text-foreground outline-none focus:border-primary"
+              {editando && ativo && (
+                <ControlesElemento
+                  id={e.id}
+                  estilo={estilos[e.id] ?? {}}
+                  onChange={(patch) => mudarEstilo(e.id, patch)}
+                  onLimpar={() => limparEstilo(e.id)}
+                  onFechar={() => setAberto(null)}
+                  // Encostado na metade direita, o painel abriria para fora da tela.
+                  alinhar={e.x + e.w > COLS - 3 ? 'direita' : 'esquerda'}
                 />
-                <button type="button" title="Confirmar"
-                  onClick={(e) => {
-                    const input = (e.currentTarget.parentElement?.querySelector('input')) as HTMLInputElement | null;
-                    if (input) renomear(b.id, input.value);
-                    setRenomeando(null);
-                  }}
-                  className="rounded-[var(--radius)] bg-primary p-1 text-black">
-                  <Check className="h-3 w-3" />
-                </button>
-              </div>
-            )}
+              )}
 
-            <div className="h-full overflow-auto">{conteudo(b)}</div>
-          </div>
-        ))}
+              <div className="h-full">{conteudo(e)}</div>
+            </div>
+          );
+        })}
       </Grid>
-
-      {editando && inspecionando && (
-        <Inspector
-          bloco={inspecionando}
-          estilos={rascunho.estilos ?? {}}
-          onChange={mudarEstilo}
-          onFechar={() => setInspecionando(null)}
-        />
-      )}
     </div>
   );
 }

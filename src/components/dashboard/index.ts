@@ -8,4 +8,5 @@ export type { KpiCardProps, MiniProps, TileProps, ChapterProps } from './cards';
 
 export { Gauge, Ring, Funnel, Heatmap } from './charts';
 
-export { Card, Label, IconTile, Delta, Spark, BlocoVazio, fmt, SEM_DADO } from './primitives';
+export { Card, InnerCard, Label, IconTile, Delta, Spark, BlocoVazio, fmt, SEM_DADO, CLASSE_SUPERFICIE } from './primitives';
+export type { Superficie } from './primitives';

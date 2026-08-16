@@ -6,7 +6,7 @@
 // nenhuma continua exatamente como era.
 
 import type { LucideIcon } from 'lucide-react';
-import { InnerCard, Delta, IconTile, Label, Spark } from './primitives';
+import { InnerCard, Delta, IconTile, Label, Spark, CLASSE_SUPERFICIE, type Superficie } from './primitives';
 import { CLASSE_TEXTO, type TomGrafico } from '@/types/dashboard';
 import { styleTexto, styleValor, styleFundo, type EstiloElemento } from '@/lib/dashboard-elementos';
 import { cn } from '@/lib/utils';
@@ -26,12 +26,14 @@ export type KpiCardProps = {
   spark?: number[];
   sub?: string;
   estilo?: EstiloElemento;
+  superficie?: Superficie;
+  className?: string;
 };
 
 /** KPI principal: valor grande e sparkline dividindo a linha. */
-export function KpiCard({ icon, tom = 'primary', label, valor, delta, menorMelhor, spark, sub, estilo = VAZIO }: KpiCardProps) {
+export function KpiCard({ icon, tom = 'primary', label, valor, delta, menorMelhor, spark, sub, estilo = VAZIO, superficie, className }: KpiCardProps) {
   return (
-    <InnerCard style={styleFundo(estilo)}>
+    <InnerCard superficie={superficie} className={className} style={styleFundo(estilo)}>
       <div className="flex items-start gap-3">
         <IconTile icon={icon} tom={tom} size={estilo.tamanhoIcone ?? 32} cor={estilo.corIcone} />
         <div className="min-w-0 flex-1">
@@ -61,14 +63,16 @@ export type MiniProps = {
   grande?: boolean;
   className?: string;
   estilo?: EstiloElemento;
+  superficie?: Superficie;
 };
 
 /** Bloco pequeno reaproveitado DENTRO dos cards — é o que evita card vazio. */
-export function Mini({ label, valor, sub, icon, tom = 'primary', grande, className, estilo = VAZIO }: MiniProps) {
+export function Mini({ label, valor, sub, icon, tom = 'primary', grande, className, estilo = VAZIO, superficie = 'inner' }: MiniProps) {
   return (
     <div
       className={cn(
-        'flex items-center gap-2.5 rounded-[12px] border border-white/[0.08] bg-[#071014]',
+        'flex items-center gap-2.5',
+        CLASSE_SUPERFICIE[superficie],
         grande ? 'p-4' : 'p-2.5',
         className,
       )}

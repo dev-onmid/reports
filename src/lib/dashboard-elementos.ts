@@ -1,10 +1,15 @@
 /**
- * Estilo por ELEMENTO — a camada que falta para editar métrica por métrica.
+ * Catálogo de ELEMENTOS do dashboard — a unidade que o editor manipula.
  *
- * O modelo de blocos (dashboard-modelo.ts) enxerga 7 caixas opacas: dá para
- * mover e ocultar "Faturamento e ticket médio", mas não para mexer só no
- * Faturamento. Aqui cada elemento dentro do bloco ganha id estável e estilo
- * próprio.
+ * ⚠️ Mudança de arquitetura (pedido do Matheus): a unidade deixou de ser o
+ * BLOCO e passou a ser o ELEMENTO. Antes, arrastar "Vendas" levava junto as 4
+ * métricas de dentro dele; não havia como mover só o Faturamento. Agora cada
+ * métrica, título e gráfico é um item próprio da grade — por isso a posição
+ * (x/y/w/h) mora aqui, ao lado do estilo.
+ *
+ * O bloco sobrevive apenas como AGRUPAMENTO semântico (`bloco`), para rotular
+ * o elemento na tela de edição ("Vendas › Receita"). Ele não posiciona mais
+ * nada.
  *
  * ⚠️ Liberdade total foi decisão explícita do Matheus: cor em hex livre e
  * tamanho em px livre, não uma lista fechada de tons e tamanhos. A consequência
@@ -16,7 +21,7 @@
 
 import type { BlocoId } from '@/lib/dashboard-modelo';
 
-/** `bloco.elemento` — ex: 'resultado.faturamento'. Estável, nunca renomear. */
+/** `bloco.elemento` — ex: 'vendas.receita'. Estável, nunca renomear. */
 export type ElementoId = string;
 
 export type EstiloElemento = {
@@ -34,67 +39,89 @@ export type EstiloElemento = {
   /** Nome do ícone lucide (ex: 'Wallet'). `null` = o de fábrica. */
   icone?: string | null;
   visivel?: boolean;
-  /** Ordem dentro do bloco; menor primeiro. `null` = ordem de fábrica. */
-  ordem?: number | null;
 };
 
 export type EstilosPorElemento = Record<ElementoId, EstiloElemento>;
 
-/** Elemento declarado pelo código — o que o inspetor pode editar. */
+export type PropriedadeEditavel =
+  | 'texto' | 'corTexto' | 'corValor' | 'corIcone' | 'corFundo'
+  | 'tamanhoTexto' | 'tamanhoValor' | 'tamanhoIcone' | 'icone' | 'visivel';
+
+/** Elemento declarado pelo código — o que o editor pode mover e estilizar. */
 export type DefinicaoElemento = {
   id: ElementoId;
   bloco: BlocoId;
   /** Rótulo de fábrica, mostrado quando não há `texto` customizado. */
   rotulo: string;
-  /** O que é editável neste elemento — o inspetor esconde o resto. */
-  suporta: Array<'texto' | 'corTexto' | 'corValor' | 'corIcone' | 'corFundo'
-    | 'tamanhoTexto' | 'tamanhoValor' | 'tamanhoIcone' | 'icone' | 'visivel' | 'ordem'>;
+  /** O que é editável neste elemento — os controles escondem o resto. */
+  suporta: PropriedadeEditavel[];
+  /** Posição e tamanho de FÁBRICA na grade de 12 colunas. */
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  minW: number;
+  minH: number;
 };
 
-const TUDO: DefinicaoElemento['suporta'] = [
+const TUDO: PropriedadeEditavel[] = [
   'texto', 'corTexto', 'corValor', 'corIcone', 'corFundo',
-  'tamanhoTexto', 'tamanhoValor', 'tamanhoIcone', 'icone', 'visivel', 'ordem',
+  'tamanhoTexto', 'tamanhoValor', 'tamanhoIcone', 'icone', 'visivel',
 ];
 
 /** Só título e ícone — cabeçalhos não têm "valor". */
-const CABECALHO: DefinicaoElemento['suporta'] = [
+const CABECALHO: PropriedadeEditavel[] = [
   'texto', 'corTexto', 'corIcone', 'tamanhoTexto', 'tamanhoIcone', 'icone', 'visivel',
 ];
 
 /**
- * Catálogo dos elementos editáveis. Elemento que não está aqui não aparece no
- * inspetor — é a lista que impede o modelo salvo de referenciar algo que o
- * código não sabe estilizar.
+ * Catálogo dos elementos editáveis. Elemento que não está aqui não existe para
+ * o editor — é a lista que impede o modelo salvo de referenciar algo que o
+ * código não sabe renderizar nem estilizar.
+ *
+ * ⚠️ As posições de fábrica reproduzem a leitura atual da tela (hero → KPIs →
+ * vendas → horários/ritmo → base/recorrência) e são coerentes com a compactação
+ * vertical do grid: não há buraco que faça um elemento "subir sozinho".
  */
 export const ELEMENTOS: DefinicaoElemento[] = [
-  { id: 'resultado.titulo',       bloco: 'resultado',     rotulo: 'Título do bloco',   suporta: CABECALHO },
-  { id: 'resultado.faturamento',  bloco: 'resultado',     rotulo: 'Faturamento',       suporta: TUDO },
-  { id: 'resultado.ticket',       bloco: 'resultado',     rotulo: 'Ticket médio',      suporta: TUDO },
+  // Hero — meta de faturamento e ticket
+  { id: 'resultado.faturamento',  bloco: 'resultado',     rotulo: 'Faturamento',        suporta: ['texto', 'corTexto', 'corValor', 'corIcone', 'tamanhoTexto', 'tamanhoValor', 'tamanhoIcone', 'icone', 'visivel'], x: 0,  y: 0,  w: 6,  h: 3, minW: 3, minH: 2 },
+  { id: 'resultado.ticket',       bloco: 'resultado',     rotulo: 'Ticket médio',       suporta: ['texto', 'corTexto', 'corValor', 'corIcone', 'tamanhoTexto', 'tamanhoValor', 'tamanhoIcone', 'icone', 'visivel'], x: 6,  y: 0,  w: 6,  h: 3, minW: 3, minH: 2 },
 
-  { id: 'kpis.investimento',      bloco: 'kpis',          rotulo: 'Investimento total', suporta: TUDO },
-  { id: 'kpis.custo_pedido',      bloco: 'kpis',          rotulo: 'Custo por pedido',   suporta: TUDO },
-  { id: 'kpis.roas',              bloco: 'kpis',          rotulo: 'ROAS',               suporta: TUDO },
-  { id: 'kpis.cac',               bloco: 'kpis',          rotulo: 'CAC',                suporta: TUDO },
-  { id: 'kpis.ticket',            bloco: 'kpis',          rotulo: 'Ticket médio',       suporta: TUDO },
+  // Faixa de eficiência
+  { id: 'kpis.investimento',      bloco: 'kpis',          rotulo: 'Investimento total', suporta: TUDO, x: 0,  y: 3,  w: 3,  h: 2, minW: 2, minH: 2 },
+  { id: 'kpis.custo_pedido',      bloco: 'kpis',          rotulo: 'Custo por pedido',   suporta: TUDO, x: 3,  y: 3,  w: 3,  h: 2, minW: 2, minH: 2 },
+  { id: 'kpis.roas',              bloco: 'kpis',          rotulo: 'ROAS',               suporta: TUDO, x: 6,  y: 3,  w: 2,  h: 2, minW: 2, minH: 2 },
+  { id: 'kpis.ticket',            bloco: 'kpis',          rotulo: 'Ticket médio',       suporta: TUDO, x: 8,  y: 3,  w: 2,  h: 2, minW: 2, minH: 2 },
+  { id: 'kpis.recorrencia',       bloco: 'kpis',          rotulo: 'Recorrência',        suporta: TUDO, x: 10, y: 3,  w: 2,  h: 2, minW: 2, minH: 2 },
 
-  { id: 'vendas.titulo',          bloco: 'vendas',        rotulo: 'Título do bloco',    suporta: CABECALHO },
-  { id: 'vendas.receita',         bloco: 'vendas',        rotulo: 'Receita',            suporta: TUDO },
-  { id: 'vendas.pedidos',         bloco: 'vendas',        rotulo: 'Pedidos',            suporta: TUDO },
-  { id: 'vendas.ticket',          bloco: 'vendas',        rotulo: 'Ticket médio',       suporta: TUDO },
-  { id: 'vendas.novos',           bloco: 'vendas',        rotulo: 'Novos clientes',     suporta: TUDO },
+  // Vendas
+  { id: 'vendas.titulo',          bloco: 'vendas',        rotulo: 'Vendas',             suporta: CABECALHO, x: 0,  y: 5,  w: 12, h: 1, minW: 2, minH: 1 },
+  { id: 'vendas.receita',         bloco: 'vendas',        rotulo: 'Receita',            suporta: TUDO, x: 0,  y: 6,  w: 3,  h: 2, minW: 2, minH: 1 },
+  { id: 'vendas.pedidos',         bloco: 'vendas',        rotulo: 'Pedidos',            suporta: TUDO, x: 3,  y: 6,  w: 3,  h: 2, minW: 2, minH: 1 },
+  { id: 'vendas.ticket',          bloco: 'vendas',        rotulo: 'Ticket médio',       suporta: TUDO, x: 6,  y: 6,  w: 3,  h: 2, minW: 2, minH: 1 },
+  { id: 'vendas.novos',           bloco: 'vendas',        rotulo: 'Novos clientes',     suporta: TUDO, x: 9,  y: 6,  w: 3,  h: 2, minW: 2, minH: 1 },
 
-  { id: 'quando_vendem.titulo',   bloco: 'quando_vendem', rotulo: 'Título do bloco',    suporta: CABECALHO },
-  { id: 'ritmo.titulo',           bloco: 'ritmo',         rotulo: 'Título do bloco',    suporta: CABECALHO },
-  { id: 'ritmo.receita_dia',      bloco: 'ritmo',         rotulo: 'Receita/dia',        suporta: TUDO },
-  { id: 'ritmo.pedidos_dia',      bloco: 'ritmo',         rotulo: 'Pedidos/dia',        suporta: TUDO },
+  // Quando vendem
+  { id: 'quando_vendem.titulo',   bloco: 'quando_vendem', rotulo: 'Quando vendem',      suporta: CABECALHO, x: 0, y: 8,  w: 7,  h: 1, minW: 2, minH: 1 },
+  { id: 'quando_vendem.mapa',     bloco: 'quando_vendem', rotulo: 'Mapa de horários',   suporta: ['corFundo', 'visivel'], x: 0, y: 9, w: 7, h: 4, minW: 4, minH: 3 },
 
-  { id: 'base_clientes.titulo',   bloco: 'base_clientes', rotulo: 'Título do bloco',    suporta: CABECALHO },
-  { id: 'base_clientes.ativos',   bloco: 'base_clientes', rotulo: 'Ativos',             suporta: TUDO },
-  { id: 'base_clientes.risco',    bloco: 'base_clientes', rotulo: 'Em risco',           suporta: TUDO },
-  { id: 'base_clientes.inativos', bloco: 'base_clientes', rotulo: 'Inativos',           suporta: TUDO },
+  // Ritmo
+  { id: 'ritmo.titulo',           bloco: 'ritmo',         rotulo: 'Ritmo',              suporta: CABECALHO, x: 7, y: 8,  w: 5,  h: 1, minW: 2, minH: 1 },
+  { id: 'ritmo.receita_dia',      bloco: 'ritmo',         rotulo: 'Receita/dia',        suporta: TUDO, x: 7,  y: 9,  w: 5,  h: 1, minW: 2, minH: 1 },
+  { id: 'ritmo.pedidos_dia',      bloco: 'ritmo',         rotulo: 'Pedidos/dia',        suporta: TUDO, x: 7,  y: 10, w: 5,  h: 1, minW: 2, minH: 1 },
+  { id: 'ritmo.saldos',           bloco: 'ritmo',         rotulo: 'Saldo das contas',   suporta: ['corFundo', 'visivel'], x: 7, y: 11, w: 5, h: 2, minW: 2, minH: 1 },
 
-  { id: 'recorrencia.titulo',     bloco: 'recorrencia',   rotulo: 'Título do bloco',    suporta: CABECALHO },
-  { id: 'recorrencia.barras',     bloco: 'recorrencia',   rotulo: 'Barras e anéis',     suporta: ['corValor', 'corIcone', 'tamanhoIcone', 'visivel'] },
+  // Situação da base
+  { id: 'base_clientes.titulo',   bloco: 'base_clientes', rotulo: 'Situação da base',   suporta: CABECALHO, x: 0, y: 13, w: 5, h: 1, minW: 2, minH: 1 },
+  { id: 'base_clientes.gauge',    bloco: 'base_clientes', rotulo: 'Medidor de ativos',  suporta: ['corFundo', 'visivel'], x: 0, y: 14, w: 2, h: 3, minW: 2, minH: 2 },
+  { id: 'base_clientes.ativos',   bloco: 'base_clientes', rotulo: 'Ativos',             suporta: TUDO, x: 2,  y: 14, w: 3,  h: 1, minW: 2, minH: 1 },
+  { id: 'base_clientes.risco',    bloco: 'base_clientes', rotulo: 'Em risco',           suporta: TUDO, x: 2,  y: 15, w: 3,  h: 1, minW: 2, minH: 1 },
+  { id: 'base_clientes.inativos', bloco: 'base_clientes', rotulo: 'Inativos',           suporta: TUDO, x: 2,  y: 16, w: 3,  h: 1, minW: 2, minH: 1 },
+
+  // Recorrência
+  { id: 'recorrencia.titulo',     bloco: 'recorrencia',   rotulo: 'Recorrência',        suporta: CABECALHO, x: 5, y: 13, w: 7, h: 1, minW: 2, minH: 1 },
+  { id: 'recorrencia.barras',     bloco: 'recorrencia',   rotulo: 'Barras e anéis',     suporta: ['corValor', 'corIcone', 'corFundo', 'tamanhoIcone', 'visivel'], x: 5, y: 14, w: 7, h: 4, minW: 4, minH: 3 },
 ];
 
 export function definicaoElemento(id: ElementoId): DefinicaoElemento | null {
@@ -103,6 +130,11 @@ export function definicaoElemento(id: ElementoId): DefinicaoElemento | null {
 
 export function elementosDoBloco(bloco: BlocoId): DefinicaoElemento[] {
   return ELEMENTOS.filter((e) => e.bloco === bloco);
+}
+
+/** O elemento aceita esta propriedade? Os controles usam para esconder campo morto. */
+export function suporta(id: ElementoId, prop: PropriedadeEditavel): boolean {
+  return definicaoElemento(id)?.suporta.includes(prop) ?? false;
 }
 
 const HEX = /^#[0-9a-fA-F]{6}$/;
@@ -145,7 +177,6 @@ export function normalizarEstilos(bruto: unknown): EstilosPorElemento {
       tamanhoIcone: px(r.tamanhoIcone, LIMITE.icone),
       icone: typeof r.icone === 'string' && r.icone.trim() ? r.icone.trim().slice(0, 40) : null,
       visivel: r.visivel !== false,
-      ordem: Number.isFinite(Number(r.ordem)) ? Number(r.ordem) : null,
     };
   }
   return out;
@@ -163,31 +194,6 @@ export function elementoVisivel(estilos: EstilosPorElemento, id: ElementoId): bo
 export function textoDe(estilos: EstilosPorElemento, id: ElementoId, padrao: string): string {
   const t = estiloDe(estilos, id).texto?.trim();
   return t || padrao;
-}
-
-/**
- * Ordena elementos de um bloco pela `ordem` customizada, caindo na ordem de
- * declaração do catálogo quando não há customização — assim reordenar um
- * elemento não embaralha os outros.
- */
-export function ordenarElementos(
-  estilos: EstilosPorElemento, ids: ElementoId[],
-): ElementoId[] {
-  const chave = (id: ElementoId) => {
-    const o = estiloDe(estilos, id).ordem;
-    const explicito = o !== null && o !== undefined;
-    return { valor: explicito ? o : ids.indexOf(id), explicito };
-  };
-  return [...ids].sort((a, b) => {
-    const ka = chave(a);
-    const kb = chave(b);
-    if (ka.valor !== kb.valor) return ka.valor - kb.valor;
-    // ⚠️ Empate entre ordem EXPLÍCITA e implícita: a explícita vence. Sem isto,
-    // mandar um elemento para a posição 0 o deixava atrás do que já ocupava o
-    // índice 0 — ou seja, arrastar para o topo não funcionava.
-    if (ka.explicito !== kb.explicito) return ka.explicito ? -1 : 1;
-    return ids.indexOf(a) - ids.indexOf(b);
-  });
 }
 
 /** Converte o estilo em `style` inline. Campo nulo sai do objeto (herda o CSS). */

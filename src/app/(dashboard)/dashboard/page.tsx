@@ -81,10 +81,10 @@ import {
 import { FunilLeadsModal } from '@/components/funil-leads-modal';
 import { normalizarSegmento, perfilDaSelecao } from '@/lib/dashboard-segmento';
 import { Chapter } from '@/components/dashboard';
-import { blocosDelivery } from '@/components/dashboard/delivery-view';
+import { elementosDelivery } from '@/components/dashboard/delivery-view';
 import { ModeloEditor, useModelo } from '@/components/dashboard/modelo-editor';
-import { tituloDoBloco, type BlocoId } from '@/lib/dashboard-modelo';
-import { elementoVisivel, estiloDe } from '@/lib/dashboard-elementos';
+import { iconePorNome } from '@/components/dashboard/controles-elemento';
+import { estiloDe, styleTexto, styleValor, type EstiloElemento } from '@/lib/dashboard-elementos';
 import { useDadosDelivery } from '@/components/dashboard/use-dados-delivery';
 import {
   formatarMetrica, custoPorPedido, roas as roasFood,
@@ -4346,9 +4346,9 @@ function premiumValue(value: number | null | undefined, format: PremiumMetricFor
   return value.toLocaleString('pt-BR');
 }
 
-function PremiumPanel({ children, className = '' }: { children: ReactNode; className?: string }) {
+function PremiumPanel({ children, className = '', style }: { children: ReactNode; className?: string; style?: React.CSSProperties }) {
   return (
-    <section className={cn('rounded-[14px] border border-white/[0.08] bg-[#0d1519]/92 shadow-[0_18px_60px_rgba(0,0,0,0.28)]', className)}>
+    <section className={cn('rounded-[14px] border border-white/[0.08] bg-[#0d1519]/92 shadow-[0_18px_60px_rgba(0,0,0,0.28)]', className)} style={style}>
       {children}
     </section>
   );
@@ -4364,8 +4364,18 @@ function StatusPill({ status }: { status: 'Excelente' | 'Bom' | 'Neutro' | 'Aler
   return <span className={cn('rounded-md border px-2 py-1 text-[10px] font-black uppercase tracking-[0.04em]', styles)}>{status}</span>;
 }
 
+/**
+ * Estilo por elemento nos cards da própria página.
+ *
+ * ⚠️ Sem isto o hero e a faixa de KPIs seriam os ÚNICOS pedaços do dashboard de
+ * food não editáveis — e são justamente os que o Matheus citou ("quero deixar só
+ * faturamento", "mudar a cor", "deixar o ícone maior"). O `estilo` chega do
+ * modelo por segmento; ausente, tudo fica exatamente como era.
+ */
+const ESTILO_VAZIO: EstiloElemento = {};
+
 function GoalProgressCard({
-  title, icon: Icon, target, partial, value, format = 'number',
+  title, icon: Icon, target, partial, value, format = 'number', estilo = ESTILO_VAZIO, className,
 }: {
   title: string;
   icon: React.ElementType;
@@ -4373,18 +4383,24 @@ function GoalProgressCard({
   partial: number;
   value: number;
   format?: PremiumMetricFormat;
+  estilo?: EstiloElemento;
+  className?: string;
 }) {
   const base = partial > 0 ? partial : target;
   const progress = base > 0 ? Math.max(0, Math.min(100, (value / base) * 100)) : 0;
+  const iconSize = estilo.tamanhoIcone ?? 40;
   return (
-    <PremiumPanel className="relative overflow-hidden p-5">
+    <PremiumPanel className={cn('relative overflow-hidden p-5', className)}>
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_8%_0%,rgba(108,255,47,0.16),transparent_32%),linear-gradient(135deg,rgba(108,255,47,0.05),rgba(22,139,255,0.02))]" />
       <div className="relative flex items-start gap-4">
-        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[#6cff2f]/18 bg-[#6cff2f]/10 text-[#6cff2f]">
-          <Icon className="h-5 w-5" />
+        <span
+          className={cn('flex shrink-0 items-center justify-center rounded-full border border-current/20 bg-current/10', !estilo.corIcone && 'text-[#6cff2f]')}
+          style={{ width: iconSize, height: iconSize, ...(estilo.corIcone ? { color: estilo.corIcone } : {}) }}
+        >
+          <Icon style={{ width: iconSize * 0.5, height: iconSize * 0.5 }} />
         </span>
         <div className="min-w-0 flex-1">
-          <h2 className="text-sm font-black uppercase tracking-[0.07em] text-[#f4f7f8]">{title}</h2>
+          <h2 className="text-sm font-black uppercase tracking-[0.07em] text-[#f4f7f8]" style={styleTexto(estilo)}>{estilo.texto ?? title}</h2>
           <div className="mt-5 grid grid-cols-3 gap-3">
             {[
               ['Meta', target],
@@ -4392,7 +4408,7 @@ function GoalProgressCard({
               ['Realizado', value],
             ].map(([label, amount]) => (
               <div key={String(label)} className="min-w-0">
-                <p className="truncate font-heading text-2xl leading-none text-[#f4f7f8]">{Number(amount) > 0 ? premiumValue(Number(amount), format) : '—'}</p>
+                <p className="truncate font-heading text-2xl leading-none text-[#f4f7f8]" style={styleValor(estilo)}>{Number(amount) > 0 ? premiumValue(Number(amount), format) : '—'}</p>
                 <p className="mt-1.5 text-xs font-medium text-[#a7b0b6]">{label}</p>
               </div>
             ))}
@@ -4426,25 +4442,31 @@ function GoalProgressCard({
 
 // Hero grande sem meta — o par do GoalProgressCard para métrica que não é alvo
 // (ex.: Ticket médio no food). Mesma moldura premium; mostra valor + variação.
-function HeroStatCard({ title, icon: Icon, value, change, sub }: {
+function HeroStatCard({ title, icon: Icon, value, change, sub, estilo = ESTILO_VAZIO, className }: {
   title: string;
   icon: React.ElementType;
   value: string;
   change?: number | null;
   sub?: string;
+  estilo?: EstiloElemento;
+  className?: string;
 }) {
   const hasChange = change !== null && change !== undefined && Number.isFinite(change);
   const positive = !hasChange || change >= 0;
+  const iconSize = estilo.tamanhoIcone ?? 40;
   return (
-    <PremiumPanel className="relative overflow-hidden p-5">
+    <PremiumPanel className={cn('relative overflow-hidden p-5', className)}>
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_8%_0%,rgba(108,255,47,0.16),transparent_32%),linear-gradient(135deg,rgba(108,255,47,0.05),rgba(22,139,255,0.02))]" />
       <div className="relative flex items-start gap-4">
-        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[#6cff2f]/18 bg-[#6cff2f]/10 text-[#6cff2f]">
-          <Icon className="h-5 w-5" />
+        <span
+          className={cn('flex shrink-0 items-center justify-center rounded-full border border-current/20 bg-current/10', !estilo.corIcone && 'text-[#6cff2f]')}
+          style={{ width: iconSize, height: iconSize, ...(estilo.corIcone ? { color: estilo.corIcone } : {}) }}
+        >
+          <Icon style={{ width: iconSize * 0.5, height: iconSize * 0.5 }} />
         </span>
         <div className="min-w-0 flex-1">
-          <h2 className="text-sm font-black uppercase tracking-[0.07em] text-[#f4f7f8]">{title}</h2>
-          <p className="mt-5 font-heading text-4xl leading-none text-[#f4f7f8]">{value}</p>
+          <h2 className="text-sm font-black uppercase tracking-[0.07em] text-[#f4f7f8]" style={styleTexto(estilo)}>{estilo.texto ?? title}</h2>
+          <p className="mt-5 font-heading text-4xl leading-none text-[#f4f7f8]" style={styleValor(estilo)}>{value}</p>
           <p className={cn('mt-3 text-sm font-bold', positive ? 'text-[#6cff2f]' : 'text-red-400')}>
             {hasChange ? `${change >= 0 ? '+' : ''}${change.toFixed(1).replace('.', ',')}%` : '—'}{' '}
             <span className="font-medium text-[#a7b0b6]">vs período anterior</span>
@@ -4456,24 +4478,30 @@ function HeroStatCard({ title, icon: Icon, value, change, sub }: {
   );
 }
 
-function QuickMetricCard({ title, value, change, icon: Icon, inverseChange }: {
+function QuickMetricCard({ title, value, change, icon: Icon, inverseChange, estilo = ESTILO_VAZIO, className }: {
   title: string;
   value: string;
   change?: number | null;
   icon: React.ElementType;
   inverseChange?: boolean;
+  estilo?: EstiloElemento;
+  className?: string;
 }) {
   const hasChange = change !== null && change !== undefined && Number.isFinite(change);
   const positive = !hasChange || (inverseChange ? change <= 0 : change >= 0);
+  const iconSize = estilo.tamanhoIcone ?? 32;
   return (
-    <PremiumPanel className="relative overflow-hidden p-4">
+    <PremiumPanel className={cn('relative overflow-hidden p-4', className)} style={estilo.corFundo ? { backgroundColor: estilo.corFundo } : undefined}>
       <div className="flex items-start gap-3">
-        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[#6cff2f]/18 bg-[#6cff2f]/10 text-[#6cff2f]">
-          <Icon className="h-4 w-4" />
+        <span
+          className={cn('flex shrink-0 items-center justify-center rounded-lg border border-current/20 bg-current/10', !estilo.corIcone && 'text-[#6cff2f]')}
+          style={{ width: iconSize, height: iconSize, ...(estilo.corIcone ? { color: estilo.corIcone } : {}) }}
+        >
+          <Icon style={{ width: iconSize * 0.5, height: iconSize * 0.5 }} />
         </span>
         <div className="min-w-0">
-          <p className="text-[11px] font-black uppercase tracking-[0.06em] text-[#dce4e8]">{title}</p>
-          <p className="mt-2 font-heading text-2xl leading-none text-[#f4f7f8]">{value}</p>
+          <p className="text-[11px] font-black uppercase tracking-[0.06em] text-[#dce4e8]" style={styleTexto(estilo)}>{estilo.texto ?? title}</p>
+          <p className="mt-2 font-heading text-2xl leading-none text-[#f4f7f8]" style={styleValor(estilo)}>{value}</p>
           <p className={cn('mt-1 text-xs font-bold', positive ? 'text-[#6cff2f]' : 'text-red-400')}>
             {hasChange ? `${change >= 0 ? '+' : ''}${change.toFixed(1).replace('.', ',')}%` : '—'} <span className="font-medium text-[#a7b0b6]">vs mês passado</span>
           </p>
@@ -6170,11 +6198,10 @@ export default function GeneralDashboard() {
             )}
 
             {/* ── FOOD: um grid único, dirigido pelo MODELO ──
-                Todos os blocos (hero, KPIs, vendas, heatmap, ritmo, base e
-                recorrência) entram na mesma grade, então o editor pode mover,
-                redimensionar, ocultar e renomear qualquer um deles. Layout fixo
-                em JSX não seria editável — foi por isso que a tela precisou
-                deixar de ser JSX fixo. */}
+                ⚠️ A grade é por ELEMENTO: cada métrica (não cada bloco) é um
+                item movível. Antes, "Vendas" era um item só e arrastá-lo levava
+                junto as 4 métricas de dentro — impossível mover só o
+                Faturamento, que foi o pedido do Matheus. */}
             {modoFood && dadosFood && modeloFood ? (
               <>
                 <Chapter
@@ -6191,39 +6218,55 @@ export default function GeneralDashboard() {
                     </button>
                   ) : undefined}
                 />
-                {(() => {
-                  const titulos = Object.fromEntries(
-                    modeloFood.blocos.map(b => [b.id, tituloDoBloco(b)]),
-                  ) as Partial<Record<BlocoId, string>>;
-                  return (
-                    <ModeloEditor
-                      modelo={modeloFood}
-                      editando={editandoModelo}
-                      onSair={() => setEditandoModelo(false)}
-                      onSalvou={setModeloFood}
-                      // Função dos estilos, não mapa fixo: é o que faz a cor
-                      // escolhida no inspetor aparecer na hora, sem salvar.
-                      render={(estilos) => ({
-                        resultado: (
-                          <div className="grid h-full gap-4 xl:grid-cols-2">
-                            {elementoVisivel(estilos, 'resultado.faturamento') && (
-                              <GoalProgressCard title={estiloDe(estilos, 'resultado.faturamento').texto ?? titulos.resultado ?? 'Faturamento'} icon={DollarSign} target={plannedRevenue} partial={effectiveRevenueGoal} value={dadosFood.vendas.receita} format="currency" />
-                            )}
-                            {elementoVisivel(estilos, 'resultado.ticket') && (
-                              <HeroStatCard title={estiloDe(estilos, 'resultado.ticket').texto ?? 'Ticket médio'} icon={Receipt} value={formatarMetrica(dadosFood.vendas.ticket, 'moeda')} change={dadosFood.variacao.ticket} sub="valor médio por pedido no período" />
-                            )}
-                          </div>
-                        ),
-                        kpis: (
-                          <div className="grid h-full gap-3 md:grid-cols-3 xl:grid-cols-5">
-                            {quickMetricsFood.map((metric) => <QuickMetricCard key={metric.title} {...metric} />)}
-                          </div>
-                        ),
-                        ...blocosDelivery(dadosFood, titulos, estilos),
-                      })}
-                    />
-                  );
-                })()}
+                <ModeloEditor
+                  modelo={modeloFood}
+                  editando={editandoModelo}
+                  onSair={() => setEditandoModelo(false)}
+                  onSalvou={setModeloFood}
+                  // Função dos estilos, não mapa fixo: é o que faz a cor
+                  // escolhida no elemento aparecer na hora, sem salvar.
+                  render={(estilos) => {
+                    const est = (id: string) => estiloDe(estilos, id);
+                    // A faixa de eficiência é montada por índice; os ids do
+                    // catálogo dão a cada célula uma identidade estável, para o
+                    // estilo não trocar de dono quando a lista mudar de ordem.
+                    const IDS_KPI = ['kpis.investimento', 'kpis.custo_pedido', 'kpis.roas', 'kpis.ticket', 'kpis.recorrencia'];
+                    const kpis = Object.fromEntries(
+                      quickMetricsFood.map((metric, i) => {
+                        const id = IDS_KPI[i];
+                        return [id, (
+                          <QuickMetricCard
+                            key={id}
+                            {...metric}
+                            icon={iconePorNome(est(id).icone, metric.icon as never)}
+                            estilo={est(id)}
+                            className="h-full"
+                          />
+                        )];
+                      }),
+                    );
+                    return {
+                      'resultado.faturamento': (
+                        <GoalProgressCard
+                          title="Faturamento" icon={iconePorNome(est('resultado.faturamento').icone, DollarSign)}
+                          target={plannedRevenue} partial={effectiveRevenueGoal}
+                          value={dadosFood.vendas.receita} format="currency"
+                          estilo={est('resultado.faturamento')} className="h-full"
+                        />
+                      ),
+                      'resultado.ticket': (
+                        <HeroStatCard
+                          title="Ticket médio" icon={iconePorNome(est('resultado.ticket').icone, Receipt)}
+                          value={formatarMetrica(dadosFood.vendas.ticket, 'moeda')}
+                          change={dadosFood.variacao.ticket} sub="valor médio por pedido no período"
+                          estilo={est('resultado.ticket')} className="h-full"
+                        />
+                      ),
+                      ...kpis,
+                      ...elementosDelivery(dadosFood, estilos),
+                    };
+                  }}
+                />
               </>
             ) : (
               <>
