@@ -81,7 +81,9 @@ import {
 import { FunilLeadsModal } from '@/components/funil-leads-modal';
 import { normalizarSegmento, perfilDaSelecao } from '@/lib/dashboard-segmento';
 import { Chapter } from '@/components/dashboard';
-import { DeliveryView } from '@/components/dashboard/delivery-view';
+import { blocosDelivery } from '@/components/dashboard/delivery-view';
+import { ModeloEditor, useModelo } from '@/components/dashboard/modelo-editor';
+import { tituloDoBloco, type BlocoId } from '@/lib/dashboard-modelo';
 import { useDadosDelivery } from '@/components/dashboard/use-dados-delivery';
 import {
   formatarMetrica, custoPorPedido, roas as roasFood,
@@ -6019,6 +6021,12 @@ export default function GeneralDashboard() {
   // Faixa de eficiência do food. Fica no topo porque responde "o anúncio está
   // pagando?", que a DeliveryView (focada em vendas e base) não responde.
   // Agendamentos e CPL somem: não existem em delivery.
+  // Modelo editável do segmento — decide posição, tamanho, ordem, visibilidade
+  // e título de cada bloco. É por SEGMENTO: salvar muda o painel de todos os
+  // clientes de food.
+  const { modelo: modeloFood, setModelo: setModeloFood } = useModelo('food');
+  const [editandoModelo, setEditandoModelo] = useState(false);
+
   const quickMetricsFood = dadosFood ? (() => {
     // Comparativos que dão pra fechar com o período anterior: custo por pedido
     // (investimento ÷ pedidos) e ROAS (receita ÷ investimento). `null` quando
@@ -6160,35 +6168,67 @@ export default function GeneralDashboard() {
               </div>
             )}
 
-            {/* Cabeçalho do capítulo, no mesmo padrão de Vendas e Clientes da
-                DeliveryView. Fica ACIMA do hero: ele titula o bloco inteiro
-                (Faturamento, Ticket e a faixa de eficiência), não só a faixa. */}
-            {modoFood && dadosFood && (
-              <Chapter
-                icon={LayoutDashboard}
-                titulo="Resumo"
-                sub={`${periodoISO.from.split('-').reverse().join('/')} a ${periodoISO.to.split('-').reverse().join('/')} · ${dadosFood.vendas.dias} dias`}
-              />
-            )}
-
-            {/* Hero do topo. Em food, "Leads" não existe (o evento de sucesso é o
-                pedido pago): o par vira Faturamento (dos pedidos) + Ticket médio.
-                O Faturamento continua sendo meta-progresso; o Ticket, valor+Δ. */}
-            {modoFood && dadosFood ? (
-              <div className="grid gap-4 xl:grid-cols-2">
-                <GoalProgressCard title="Faturamento" icon={DollarSign} target={plannedRevenue} partial={effectiveRevenueGoal} value={dadosFood.vendas.receita} format="currency" />
-                <HeroStatCard title="Ticket médio" icon={Receipt} value={formatarMetrica(dadosFood.vendas.ticket, 'moeda')} change={dadosFood.variacao.ticket} sub="valor médio por pedido no período" />
-              </div>
+            {/* ── FOOD: um grid único, dirigido pelo MODELO ──
+                Todos os blocos (hero, KPIs, vendas, heatmap, ritmo, base e
+                recorrência) entram na mesma grade, então o editor pode mover,
+                redimensionar, ocultar e renomear qualquer um deles. Layout fixo
+                em JSX não seria editável — foi por isso que a tela precisou
+                deixar de ser JSX fixo. */}
+            {modoFood && dadosFood && modeloFood ? (
+              <>
+                <Chapter
+                  icon={LayoutDashboard}
+                  titulo="Resumo"
+                  sub={`${periodoISO.from.split('-').reverse().join('/')} a ${periodoISO.to.split('-').reverse().join('/')} · ${dadosFood.vendas.dias} dias`}
+                  right={isAdmin && !editandoModelo ? (
+                    <button
+                      type="button"
+                      onClick={() => setEditandoModelo(true)}
+                      className="inline-flex items-center gap-1.5 rounded-[var(--radius)] border border-border px-2.5 py-1 text-[11px] font-semibold text-muted-foreground hover:border-primary/40 hover:text-foreground"
+                    >
+                      <LayoutTemplate className="h-3.5 w-3.5" /> Editar modelo
+                    </button>
+                  ) : undefined}
+                />
+                {(() => {
+                  const titulos = Object.fromEntries(
+                    modeloFood.blocos.map(b => [b.id, tituloDoBloco(b)]),
+                  ) as Partial<Record<BlocoId, string>>;
+                  return (
+                    <ModeloEditor
+                      modelo={modeloFood}
+                      editando={editandoModelo}
+                      onSair={() => setEditandoModelo(false)}
+                      onSalvou={setModeloFood}
+                      render={{
+                        resultado: (
+                          <div className="grid h-full gap-4 xl:grid-cols-2">
+                            <GoalProgressCard title={titulos.resultado ?? 'Faturamento'} icon={DollarSign} target={plannedRevenue} partial={effectiveRevenueGoal} value={dadosFood.vendas.receita} format="currency" />
+                            <HeroStatCard title="Ticket médio" icon={Receipt} value={formatarMetrica(dadosFood.vendas.ticket, 'moeda')} change={dadosFood.variacao.ticket} sub="valor médio por pedido no período" />
+                          </div>
+                        ),
+                        kpis: (
+                          <div className="grid h-full gap-3 md:grid-cols-3 xl:grid-cols-5">
+                            {quickMetricsFood.map((metric) => <QuickMetricCard key={metric.title} {...metric} />)}
+                          </div>
+                        ),
+                        ...blocosDelivery(dadosFood, titulos),
+                      }}
+                    />
+                  );
+                })()}
+              </>
             ) : (
-              <div className="grid gap-4 xl:grid-cols-2">
-                <GoalProgressCard title="Faturamento" icon={DollarSign} target={plannedRevenue} partial={effectiveRevenueGoal} value={revenue} format="currency" />
-                <GoalProgressCard title="Leads" icon={Users} target={leadsGoal} partial={effectiveLeadsGoal} value={totalLeads} />
-              </div>
+              <>
+                <div className="grid gap-4 xl:grid-cols-2">
+                  <GoalProgressCard title="Faturamento" icon={DollarSign} target={plannedRevenue} partial={effectiveRevenueGoal} value={revenue} format="currency" />
+                  <GoalProgressCard title="Leads" icon={Users} target={leadsGoal} partial={effectiveLeadsGoal} value={totalLeads} />
+                </div>
+                <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
+                  {quickMetrics.map((metric) => <QuickMetricCard key={metric.title} {...metric} />)}
+                </div>
+              </>
             )}
-
-            <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
-              {(modoFood && dadosFood ? quickMetricsFood : quickMetrics).map((metric) => <QuickMetricCard key={metric.title} {...metric} />)}
-            </div>
 
             <PremiumPanel className="p-4">
               <h3 className="mb-4 text-sm font-black uppercase tracking-[0.07em] text-[#f4f7f8]">Resumo de Tráfego</h3>
@@ -6220,12 +6260,9 @@ export default function GeneralDashboard() {
               </div>
             </PremiumPanel>
 
-            {/* ── MODO FOOD: blocos da seção 6 do briefing, na ordem do perfil ──
-                Substitui o funil de leads (conceito sem equivalente em delivery)
-                pela cadeia mídia → catálogo → pedido → receita. */}
-            {modoFood && dadosFood ? (
-              <DeliveryView dados={dadosFood} />
-            ) : (
+            {/* Em food os blocos já foram renderizados no grid editável acima —
+                aqui fica só o funil de leads, que não existe em delivery. */}
+            {!modoFood && (
               <div className="grid gap-4 xl:grid-cols-[1.08fr_0.92fr]">
                 {deliverySoloId ? (
                   <DeliveryResumoCard clientId={deliverySoloId} from={deliveryRange.from} to={deliveryRange.to} />
