@@ -6,15 +6,18 @@
  * arranjos seria impossível de manter (um bloco novo teria de ser posicionado
  * 45 vezes).
  *
- * Escopo do editor, também decidido: LAYOUT e TÍTULO. Cor, fonte e ícone
- * continuam vindo do design system — liberar estilo por bloco faria cada cliente
- * ter um painel diferente e o "Verde Onmid como única cor de CTA" deixaria de
- * valer na prática.
+ * Escopo do editor: LAYOUT dos blocos aqui; o estilo POR ELEMENTO (cor, fonte,
+ * ícone, texto) vive em dashboard-elementos.ts, referenciado pelo campo estilos.
+ *
+ * ⚠️ Liberdade total de cor e tamanho foi decisão do Matheus. A contrapartida
+ * aceita: dois clientes podem ficar visualmente diferentes, e o design system
+ * passa a ser o PADRÃO inicial, não uma garantia.
  *
  * Puro e client-safe: sem pg, sem fetch. A tela e os testes importam daqui.
  */
 
 import type { SegmentoDashboard } from '@/lib/dashboard-segmento';
+import { normalizarEstilos, type EstilosPorElemento } from '@/lib/dashboard-elementos';
 
 /** Blocos disponíveis no dashboard de food. Id é ESTÁVEL — nunca renomeie. */
 export type BlocoId =
@@ -67,6 +70,12 @@ export type BlocoNoModelo = {
 export type ModeloDashboard = {
   segmento: SegmentoDashboard;
   blocos: BlocoNoModelo[];
+  /**
+   * Estilo por ELEMENTO (`bloco.elemento`) — cor, tamanho, ícone, texto, ordem
+   * e visibilidade de cada métrica dentro do bloco. Ver dashboard-elementos.ts.
+   * Ausente = tudo nos padrões do componente.
+   */
+  estilos?: EstilosPorElemento;
 };
 
 /** Layout de fábrica do food — a ordem que a tela tem hoje. */
@@ -141,7 +150,7 @@ export function mesclarModelo(
     proximoY = Math.max(proximoY, (s?.y ?? p.y) + (s?.h ?? p.h));
   }
   void proximoY;
-  return { segmento: padrao.segmento, blocos };
+  return { segmento: padrao.segmento, blocos, estilos: salvo?.estilos ?? {} };
 }
 
 /** Só os visíveis, na ordem de leitura (cima→baixo, esquerda→direita). */
@@ -176,5 +185,6 @@ export function normalizarModelo(bruto: unknown, segmento: SegmentoDashboard): M
       titulo: typeof r.titulo === 'string' && r.titulo.trim() ? r.titulo.trim().slice(0, 60) : null,
     });
   }
-  return mesclarModelo({ segmento, blocos: limpos }, padrao);
+  const estilos = normalizarEstilos((bruto as { estilos?: unknown }).estilos);
+  return mesclarModelo({ segmento, blocos: limpos, estilos }, padrao);
 }
