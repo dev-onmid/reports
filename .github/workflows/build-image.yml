@@ -42,3 +42,57 @@ jobs:
           name: onmid-reports-image
           path: onmid-reports-image.tar.gz
           retention-days: 7
+
+      # ─────────────────────────────── PUBLICAR ────────────────────────────────
+      # Antes daqui, "está na main" NÃO significava "está no ar": o build subia
+      # como artefato e alguém precisava baixar, mandar por scp e rodar o script
+      # na VPS à mão. Na prática o site ficava dias atrás do repositório.
+      #
+      # Este passo fecha essa lacuna e devolve o comportamento que a Vercel tinha:
+      # push na main → no ar em poucos minutos.
+      #
+      # ⚠️ Só roda se os 3 segredos existirem. Sem eles o passo é PULADO e o
+      # build continua verde — quem clonar o repo sem acesso à VPS não vê o
+      # workflow falhando, e o deploy manual segue possível pelo artefato.
+      - name: Publicar na VPS
+        if: ${{ github.ref == 'refs/heads/main' && env.VPS_HOST != '' && env.VPS_USER != '' && env.VPS_SSH_KEY != '' }}
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_SHA::8}"
+
+          mkdir -p ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          # Fixa a identidade do host: sem isso, StrictHostKeyChecking=no aceitaria
+          # qualquer servidor que respondesse no IP.
+          ssh-keyscan -H "$VPS_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+
+          SSH="ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes"
+
+          echo "→ enviando imagem ($TAG)"
+          scp -i ~/.ssh/deploy_key -o IdentitiesOnly=yes \
+            onmid-reports-image.tar.gz "$VPS_USER@$VPS_HOST:/opt/onmid-reports/"
+
+          echo "→ publicando"
+          # deploy-recv.sh já vive na VPS: docker load + troca a tag no compose +
+          # up -d + smoke test na porta local 3900. Se ele falhar, o `set -e` do
+          # lado de lá devolve saída != 0 e este passo fica VERMELHO — é o que
+          # impede um deploy quebrado passar despercebido.
+          $SSH "$VPS_USER@$VPS_HOST" "cd /opt/onmid-reports && bash deploy-recv.sh $TAG"
+
+          rm -f ~/.ssh/deploy_key
+
+      - name: Conferir se o site respondeu
+        if: ${{ github.ref == 'refs/heads/main' && env.VPS_HOST != '' }}
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+        run: |
+          # Smoke test de fora: o deploy-recv.sh testa a porta local 3900, mas só
+          # isto prova que o Traefik está roteando o domínio para o container novo.
+          code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 https://reports.onmid.app/login || echo 000)
+          echo "GET /login → $code"
+          test "$code" = "200"
