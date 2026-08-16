@@ -96,3 +96,35 @@ jobs:
           code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 https://reports.onmid.app/login || echo 000)
           echo "GET /login → $code"
           test "$code" = "200"
+
+  # ---------------------------------------------------------------- publicação
+  # Depois do build, entrega na VPS e sobe. A chave SSH é DEDICADA a deploy
+  # (secret VPS_DEPLOY_KEY) — revogável removendo uma linha do authorized_keys
+  # da VPS, sem afetar o acesso pessoal do Matheus.
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: onmid-reports-image
+
+      - name: Preparar chave SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VPS_DEPLOY_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H 2.25.144.71 >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Enviar imagem e publicar
+        run: |
+          scp -i ~/.ssh/deploy_key onmid-reports-image.tar.gz root@2.25.144.71:/opt/onmid-reports/
+          ssh -i ~/.ssh/deploy_key root@2.25.144.71 "bash /opt/onmid-reports/deploy-recv.sh ${GITHUB_SHA::8}"
+
+      - name: Conferir o site no ar
+        run: |
+          sleep 5
+          code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 https://reports.onmid.app/)
+          echo "https://reports.onmid.app -> HTTP $code"
+          [ "$code" = "200" ] || exit 1
