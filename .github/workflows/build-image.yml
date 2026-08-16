@@ -93,6 +93,8 @@ jobs:
         run: |
           # Smoke test de fora: o deploy-recv.sh testa a porta local 3900, mas só
           # isto prova que o Traefik está roteando o domínio para o container novo.
-          code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 https://reports.onmid.app/login || echo 000)
-          echo "GET /login → $code"
+          # ⚠️ A raiz "/" É a tela de login deste app — não existe rota /login
+          # (conferir era 404 e reprovava deploy são; visto ao vivo em 16/08).
+          code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 https://reports.onmid.app/ || echo 000)
+          echo "GET / → $code"
           test "$code" = "200"
