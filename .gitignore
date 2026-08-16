@@ -46,3 +46,4 @@ scratchpad/build/
 # Artefato de build da imagem Docker — baixado do GitHub Actions para deploy
 # manual na VPS. Nunca versionar (dezenas de MB).
 onmid-reports-image.tar.gz
+scratchpad/build*/
