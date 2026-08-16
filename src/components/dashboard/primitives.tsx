@@ -33,9 +33,11 @@ export const fmt = {
       : nf.format(Math.round(v)),
 };
 
-export function Label({ children, className }: { children: React.ReactNode; className?: string }) {
+export function Label({ children, className, style }: {
+  children: React.ReactNode; className?: string; style?: React.CSSProperties;
+}) {
   return (
-    <p className={cn('text-[10px] font-black uppercase tracking-[0.07em] text-[#9aa4aa]', className)}>
+    <p className={cn('text-[10px] font-black uppercase tracking-[0.07em] text-[#9aa4aa]', className)} style={style}>
       {children}
     </p>
   );
@@ -46,9 +48,11 @@ export function Label({ children, className }: { children: React.ReactNode; clas
  * cantos 12px sobre o painel de 14px, fundo mais escuro que a superfície do
  * bloco. Usar o `Card` aqui daria painel dentro de painel.
  */
-export function InnerCard({ children, className }: { children: React.ReactNode; className?: string }) {
+export function InnerCard({ children, className, style }: {
+  children: React.ReactNode; className?: string; style?: React.CSSProperties;
+}) {
   return (
-    <div className={cn('rounded-[12px] border border-white/[0.08] bg-[#071014] p-4', className)}>
+    <div className={cn('rounded-[12px] border border-white/[0.08] bg-[#071014] p-4', className)} style={style}>
       {children}
     </div>
   );
@@ -77,16 +81,20 @@ export function Card({ children, className }: { children: React.ReactNode; class
 }
 
 /** Ícone em círculo — mesmo formato do card de Faturamento (era quadrado). */
-export function IconTile({ icon: Icon, tom = 'primary', size = 40 }: {
+export function IconTile({ icon: Icon, tom = 'primary', size = 40, cor }: {
   icon: LucideIcon; tom?: TomGrafico; size?: number;
+  /** Hex livre vindo do inspetor. Quando presente, ignora o `tom`. */
+  cor?: string | null;
 }) {
   return (
     <div
       className={cn(
         'flex shrink-0 items-center justify-center rounded-full border bg-current/10 border-current/20',
-        CLASSE_TEXTO[tom],
+        // A classe do tom só entra sem cor custom — senão as duas brigariam e a
+        // do Tailwind venceria por especificidade.
+        !cor && CLASSE_TEXTO[tom],
       )}
-      style={{ width: size, height: size }}
+      style={{ width: size, height: size, ...(cor ? { color: cor } : {}) }}
     >
       <Icon style={{ width: size * 0.5, height: size * 0.5 }} />
     </div>
