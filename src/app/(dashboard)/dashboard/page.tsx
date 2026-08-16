@@ -6160,6 +6160,17 @@ export default function GeneralDashboard() {
               </div>
             )}
 
+            {/* Cabeçalho do capítulo, no mesmo padrão de Vendas e Clientes da
+                DeliveryView. Fica ACIMA do hero: ele titula o bloco inteiro
+                (Faturamento, Ticket e a faixa de eficiência), não só a faixa. */}
+            {modoFood && dadosFood && (
+              <Chapter
+                icon={LayoutDashboard}
+                titulo="Resumo"
+                sub={`${periodoISO.from.split('-').reverse().join('/')} a ${periodoISO.to.split('-').reverse().join('/')} · ${dadosFood.vendas.dias} dias`}
+              />
+            )}
+
             {/* Hero do topo. Em food, "Leads" não existe (o evento de sucesso é o
                 pedido pago): o par vira Faturamento (dos pedidos) + Ticket médio.
                 O Faturamento continua sendo meta-progresso; o Ticket, valor+Δ. */}
@@ -6175,16 +6186,6 @@ export default function GeneralDashboard() {
               </div>
             )}
 
-            {/* No modo food a faixa de eficiência ganha cabeçalho próprio, no
-                mesmo padrão dos capítulos da DeliveryView (Vendas, Clientes) —
-                sem ele a tela abria com números soltos, sem título. */}
-            {modoFood && dadosFood && (
-              <Chapter
-                icon={LayoutDashboard}
-                titulo="Resumo"
-                sub={`${periodoISO.from.split('-').reverse().join('/')} a ${periodoISO.to.split('-').reverse().join('/')} · ${dadosFood.vendas.dias} dias`}
-              />
-            )}
             <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
               {(modoFood && dadosFood ? quickMetricsFood : quickMetrics).map((metric) => <QuickMetricCard key={metric.title} {...metric} />)}
             </div>
