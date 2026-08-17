@@ -1,6 +1,6 @@
 import { makeServerPool } from '@/lib/server-db';
 import { getAiBillingSettings } from '@/lib/ai-billing-settings';
-import { sendText } from '@/lib/zapi';
+import { sendTextByInstanceId } from '@/lib/whatsapp-send';
 
 function providerFromModel(model: string): 'openai' | 'claude' {
   return model.toLowerCase().includes('claude') ? 'claude' : 'openai';
@@ -51,19 +51,11 @@ export async function GET() {
       return Response.json({ ok: true, skipped: 'cooldown', balances });
     }
 
-    const { rows: [zapi] } = await pool.query<{
-      instance_id: string; token: string; security_token: string | null;
-    }>(
-      `SELECT instance_id, token, security_token
-         FROM public.zapi_clients
-        WHERE id = $1::uuid AND active = true`,
-      [settings.zapi_client_id],
-    );
-    if (!zapi) return Response.json({ ok: false, error: 'Instância WhatsApp não encontrada' }, { status: 404 });
-
     const lines = balances.map(item => `${item.label}: US$ ${Math.max(item.balance, 0).toFixed(2)}`);
-    const result = await sendText(
-      { instanceId: zapi.instance_id, token: zapi.token, clientToken: zapi.security_token ?? undefined },
+    // Ramifica por provider (Evolution principal / Z-API) via helper canônico.
+    const result = await sendTextByInstanceId(
+      pool,
+      settings.zapi_client_id,
       settings.alert_phone,
       `Alerta de creditos IA\nSaldo estimado abaixo de US$ ${settings.alert_threshold_usd.toFixed(2)}:\n${lines.join('\n')}`,
     );

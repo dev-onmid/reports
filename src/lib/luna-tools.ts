@@ -7,6 +7,7 @@ import { deflateSync } from 'zlib';
 import { makeServerPool } from '@/lib/server-db';
 import { internalHeaders } from '@/lib/session';
 import { sendText } from '@/lib/zapi';
+import { sendEvolutionText } from '@/lib/evolution-api';
 import { getFreshMetaToken } from '@/lib/meta-token';
 import { resolveMetaPeriod, resolveGaqlPeriod, applyMetaDateToUrl } from '@/lib/period-utils';
 import { countMetaResults } from '@/lib/meta-results';
@@ -107,7 +108,7 @@ function fmtBrt(d: Date | string | null | undefined): string {
 // configurada em system_settings['luna_zapi_client_id'] (delegável pela UI de
 // Agendamentos). Sem config, cai na instância de TESTE (name com "test"). Se
 // nada existir, NÃO envia — jamais usa outra instância como fallback.
-export type LunaSendInstance = { id: string; name: string; instance_id: string; token: string; security_token: string | null };
+export type LunaSendInstance = { id: string; name: string; instance_id: string; token: string; security_token: string | null; provider?: string };
 
 export async function getLunaSendInstance(pool: ReturnType<typeof makeServerPool>): Promise<LunaSendInstance | null> {
   await pool.query(`CREATE TABLE IF NOT EXISTS public.system_settings (
@@ -117,15 +118,17 @@ export async function getLunaSendInstance(pool: ReturnType<typeof makeServerPool
   const configuredId = cfg[0]?.value?.trim();
   if (configuredId) {
     const { rows } = await pool.query(
-      `SELECT id, name, instance_id, token, security_token FROM public.zapi_clients WHERE id = $1 AND active = TRUE`,
+      `SELECT id, name, instance_id, token, security_token, COALESCE(provider,'zapi') AS provider FROM public.zapi_clients WHERE id = $1 AND active = TRUE`,
       [configuredId]
     ).catch(() => ({ rows: [] as LunaSendInstance[] }));
     return rows[0] ?? null; // configurada mas inativa/apagada → não envia (engessado)
   }
+  // Fallback sem config: prefere uma instância de teste, priorizando Evolution
+  // (provedor principal). Não exclui mais Evolution.
   const { rows } = await pool.query(
-    `SELECT id, name, instance_id, token, security_token FROM public.zapi_clients
-      WHERE active = TRUE AND COALESCE(provider,'zapi') <> 'evolution' AND name ILIKE '%test%'
-      ORDER BY created_at ASC LIMIT 1`
+    `SELECT id, name, instance_id, token, security_token, COALESCE(provider,'zapi') AS provider FROM public.zapi_clients
+      WHERE active = TRUE AND name ILIKE '%test%'
+      ORDER BY (COALESCE(provider,'zapi') = 'evolution') DESC, created_at ASC LIMIT 1`
   ).catch(() => ({ rows: [] as LunaSendInstance[] }));
   return rows[0] ?? null;
 }
@@ -1233,16 +1236,27 @@ function appOrigin(): string {
 // "invalid input syntax for type uuid" quando o valor não é um uuid.
 export async function resolveZapiConn(
   pool: ReturnType<typeof makeServerPool>, idOrName: string | null | undefined,
-): Promise<{ instance_id: string; token: string; security_token?: string } | null> {
+): Promise<{ instance_id: string; token: string; security_token?: string; provider?: string } | null> {
   const v = String(idOrName ?? '').trim();
   if (!v) return null;
   const { rows } = await pool.query(
-    `SELECT instance_id, token, security_token FROM public.zapi_clients
+    `SELECT instance_id, token, security_token, COALESCE(provider,'zapi') AS provider FROM public.zapi_clients
       WHERE id::text = $1 OR name ILIKE $1
       ORDER BY (id::text = $1) DESC, active DESC NULLS LAST LIMIT 1`,
     [v],
-  ).catch(() => ({ rows: [] as Array<{ instance_id: string; token: string; security_token?: string }> }));
+  ).catch(() => ({ rows: [] as Array<{ instance_id: string; token: string; security_token?: string; provider?: string }> }));
   return rows[0] ?? null;
+}
+
+// Envio de texto por conexão resolvida, ramificando pelo provider: Evolution
+// (principal) usa a Evolution API pelo NOME da instância (instance_id); Z-API usa
+// a nuvem. Sem provider (config bruta de ferramenta externa) assume Z-API.
+export async function lunaConnSend(
+  conn: { instance_id: string; token: string; security_token?: string | null; provider?: string },
+  phone: string, message: string,
+): Promise<{ ok: boolean; error?: string }> {
+  if (conn.provider === 'evolution') return sendEvolutionText(conn.instance_id, phone, message);
+  return sendText({ instanceId: conn.instance_id, token: conn.token, clientToken: conn.security_token ?? undefined }, phone, message);
 }
 
 // GET numa rota interna do próprio sistema (reuso da lógica canônica em vez de duplicar).
@@ -1920,27 +1934,24 @@ export async function execSystemTool(
         return `✅ ${label} de ${clientName} gerado. Estou renderizando o PDF completo no navegador e enviando para ${phone} via WhatsApp — confirmo em instantes.\n🔗 Link do relatório: ${url}`;
       }
 
-      // Formato LINK (padrão) — resolve a Z-API e manda o link do relatório completo.
-      let zapiConn: { instance_id: string; token: string; security_token?: string } | null = null;
+      // Formato LINK (padrão) — resolve a instância e manda o link do relatório completo.
+      let zapiConn: { instance_id: string; token: string; security_token?: string | null; provider?: string } | null = null;
       if (zapi_client_id) zapiConn = await resolveZapiConn(pool, zapi_client_id);
       if (!zapiConn) {
-        const { rows } = await pool.query("SELECT instance_id, token, security_token FROM public.zapi_clients WHERE active = true ORDER BY created_at ASC LIMIT 1");
+        const { rows } = await pool.query("SELECT instance_id, token, security_token, COALESCE(provider,'zapi') AS provider FROM public.zapi_clients WHERE active = true ORDER BY (COALESCE(provider,'zapi')='evolution') DESC, created_at ASC LIMIT 1");
         if (rows[0]) zapiConn = rows[0];
       }
       if (!zapiConn) {
         const { rows } = await pool.query("SELECT config FROM public.agent_external_tools WHERE type = 'zapi_whatsapp' AND enabled = true LIMIT 1");
         if (rows[0]?.config?.instance_id) {
-          zapiConn = { instance_id: rows[0].config.instance_id, token: rows[0].config.token, security_token: rows[0].config.security_token };
+          zapiConn = { instance_id: rows[0].config.instance_id, token: rows[0].config.token, security_token: rows[0].config.security_token, provider: 'zapi' };
         }
       }
-      if (!zapiConn) return `⚠️ Relatório gerado (${url}) mas nenhuma conexão Z-API foi encontrada para enviar. Use list_zapi_clients.`;
+      if (!zapiConn) return `⚠️ Relatório gerado (${url}) mas nenhuma conexão de WhatsApp foi encontrada para enviar. Use list_zapi_clients.`;
 
       const msg = caption ?? `📊 *${label} — ${clientName}*\n\nSeu relatório está pronto!\n\nAcesse aqui: ${url}`;
       onEvent?.({ type: 'report_link', token, url, clientName, label: `${label} — ${clientName}` });
-      const result = await sendText(
-        { instanceId: zapiConn.instance_id, token: zapiConn.token, clientToken: zapiConn.security_token },
-        phone, msg,
-      );
+      const result = await lunaConnSend(zapiConn, phone, msg);
       if (result.ok) return `✅ ${label} de ${clientName} enviado para ${phone} (link do relatório completo).\n🔗 ${url}`;
       return `❌ Relatório gerado mas falha ao enviar no WhatsApp: ${result.error}.\n🔗 Link: ${url}`;
     }
@@ -3812,18 +3823,20 @@ export async function execExternalTool(tool: ExternalTool, input: Record<string,
       let instanceId = cfg.instance_id ?? '';
       let token = cfg.token ?? '';
       let securityToken = cfg.security_token;
+      let provider = 'zapi';
 
       // Look up credentials from existing zapi_clients if referenced by ID or name
       if (cfg.zapi_client_id) {
         const pool2 = makeServerPool();
         try {
           const conn = await resolveZapiConn(pool2, cfg.zapi_client_id);
-          if (conn) { instanceId = conn.instance_id; token = conn.token; securityToken = conn.security_token ?? undefined; }
+          if (conn) { instanceId = conn.instance_id; token = conn.token; securityToken = conn.security_token ?? undefined; provider = conn.provider ?? 'zapi'; }
         } finally { await pool2.end(); }
       }
 
-      if (!instanceId || !token) return 'Configuração Z-API incompleta — instance_id e token são obrigatórios.';
-      const result = await sendText({ instanceId, token, clientToken: securityToken }, phone, message);
+      // Evolution só precisa do nome da instância; Z-API precisa de instance_id + token.
+      if (!instanceId || (provider !== 'evolution' && !token)) return 'Configuração de WhatsApp incompleta.';
+      const result = await lunaConnSend({ instance_id: instanceId, token, security_token: securityToken, provider }, phone, message);
       return result.ok ? 'Mensagem WhatsApp enviada com sucesso.' : `Erro ao enviar: ${result.error}`;
     }
 

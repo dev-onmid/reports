@@ -1,7 +1,7 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { sendGmail } from '@/lib/gmail';
-import { sendText as sendWhatsapp } from '@/lib/zapi';
+import { sendTextByInstanceId as sendWhatsapp } from '@/lib/whatsapp-send';
 import { sendInstagramDM } from '@/lib/instagram-dm';
 import { injectTracking } from '@/lib/email-tracking';
 import { getFreshMetaToken } from '@/lib/meta-token';
@@ -110,14 +110,10 @@ export async function GET(request: NextRequest) {
           await advance(getNextNode());
           continue;
         }
-        const { rows: zapiRows } = await pool.query(
-          `SELECT instance_id, token, security_token FROM public.zapi_clients WHERE id=$1 AND active=true`,
-          [clientId],
-        );
-        if (zapiRows.length === 0) continue;
-        const { instance_id, token, security_token } = zapiRows[0] as { instance_id: string; token: string; security_token: string };
+        // Ramifica por provider (Evolution principal / Z-API) via helper canônico.
         const result = await sendWhatsapp(
-          { instanceId: instance_id, token, clientToken: security_token },
+          pool,
+          clientId as string,
           contact.whatsapp as string,
           message
             .replace(/\{nome\}/g, (contact.name as string) ?? '')

@@ -1,6 +1,7 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { sendDocument } from '@/lib/zapi';
+import { sendEvolutionDocument } from '@/lib/evolution-api';
 import { resolveZapiConn } from '@/lib/luna-tools';
 
 export const maxDuration = 60;
@@ -26,12 +27,12 @@ export async function POST(req: NextRequest) {
 
   const pool = makeServerPool();
   try {
-    // Resolve a conexão Z-API: a escolhida (por id OU nome) > primeira ativa > ferramenta externa.
-    let zapiConn: { instance_id: string; token: string; security_token?: string } | null = null;
+    // Resolve a conexão: a escolhida (por id OU nome) > primeira ativa > ferramenta externa.
+    let zapiConn: { instance_id: string; token: string; security_token?: string | null; provider?: string } | null = null;
     if (body.zapi_client_id) zapiConn = await resolveZapiConn(pool, body.zapi_client_id);
     if (!zapiConn) {
       const { rows } = await pool.query(
-        "SELECT instance_id, token, security_token FROM public.zapi_clients WHERE active = true ORDER BY created_at ASC LIMIT 1",
+        "SELECT instance_id, token, security_token, COALESCE(provider,'zapi') AS provider FROM public.zapi_clients WHERE active = true ORDER BY (COALESCE(provider,'zapi')='evolution') DESC, created_at ASC LIMIT 1",
       );
       if (rows[0]) zapiConn = rows[0];
     }
@@ -40,11 +41,11 @@ export async function POST(req: NextRequest) {
         "SELECT config FROM public.agent_external_tools WHERE type = 'zapi_whatsapp' AND enabled = true LIMIT 1",
       );
       if (rows[0]?.config?.instance_id) {
-        zapiConn = { instance_id: rows[0].config.instance_id, token: rows[0].config.token, security_token: rows[0].config.security_token };
+        zapiConn = { instance_id: rows[0].config.instance_id, token: rows[0].config.token, security_token: rows[0].config.security_token, provider: 'zapi' };
       }
     }
     if (!zapiConn) {
-      return Response.json({ ok: false, error: 'Nenhuma conexão Z-API encontrada.' }, { status: 400 });
+      return Response.json({ ok: false, error: 'Nenhuma conexão de WhatsApp encontrada.' }, { status: 400 });
     }
 
     // Guarda uma cópia do arquivo (best-effort).
@@ -67,10 +68,13 @@ export async function POST(req: NextRequest) {
     } catch { /* best-effort */ }
 
     const caption = body.caption ?? `📊 ${body.client_name ? `Relatório — ${body.client_name}` : 'Relatório'}\n\nGerado via Luna IA · Onmid Reports`;
-    const result = await sendDocument(
-      { instanceId: zapiConn.instance_id, token: zapiConn.token, clientToken: zapiConn.security_token },
-      phone, pdf_base64, filename, caption,
-    );
+    // Ramifica por provider: Evolution (principal) pelo nome da instância; Z-API pela nuvem.
+    const result = zapiConn.provider === 'evolution'
+      ? await sendEvolutionDocument(zapiConn.instance_id, phone, pdf_base64, filename, caption)
+      : await sendDocument(
+          { instanceId: zapiConn.instance_id, token: zapiConn.token, clientToken: zapiConn.security_token ?? undefined },
+          phone, pdf_base64, filename, caption,
+        );
 
     if (result.ok) return Response.json({ ok: true });
     return Response.json({ ok: false, error: result.error || 'Falha ao enviar via WhatsApp.' }, { status: 502 });

@@ -1,11 +1,10 @@
 import type { NextRequest } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
 import { makeServerPool } from '@/lib/server-db';
-import { sendText } from '@/lib/zapi';
 import { logAiUsage } from '@/lib/ai-usage-logger';
 import {
   getInstructions, systemTools, execSystemTool,
-  ensureLunaTasksTable, computeNextRun, getLunaSendInstance,
+  ensureLunaTasksTable, computeNextRun, getLunaSendInstance, lunaConnSend,
 } from '@/lib/luna-tools';
 
 // Agendador da Luna — executa tarefas de public.luna_tasks sem usuário presente.
@@ -103,11 +102,8 @@ async function deliverWhatsApp(pool: ReturnType<typeof makeServerPool>, task: Lu
   // nunca enviar pelo número de outra instância.
   const inst = await getLunaSendInstance(pool);
   if (!inst) return 'nenhuma instância de envio configurada pra Luna (defina em Luna → Agendamentos)';
-  const r = await sendText(
-    { instanceId: inst.instance_id, token: inst.token, clientToken: inst.security_token ?? undefined },
-    task.whatsapp_phone,
-    `🤖 *Luna — ${task.titulo}*\n\n${text}`.slice(0, 4000),
-  );
+  // Ramifica por provider (Evolution principal / Z-API).
+  const r = await lunaConnSend(inst, task.whatsapp_phone, `🤖 *Luna — ${task.titulo}*\n\n${text}`.slice(0, 4000));
   return r.ok ? null : (r.error ?? 'falha no envio');
 }
 

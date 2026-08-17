@@ -108,7 +108,7 @@ export default function RedesSociaisPage() {
   // ── Aviso WhatsApp (Z-API) ──
   const [alertOpen, setAlertOpen] = useState(false);
   const [alertCfg, setAlertCfg] = useState<AlertConfig>({ ativo: false, zapiClientId: null, groupId: null, groupName: null });
-  const [alertInstances, setAlertInstances] = useState<Array<{ id: string; name: string }>>([]);
+  const [alertInstances, setAlertInstances] = useState<Array<{ id: string; name: string; provider: string }>>([]);
   const [alertGroups, setAlertGroups] = useState<ZapiGroup[]>([]);
   const [groupSearch, setGroupSearch] = useState('');
   const [loadingGroups, setLoadingGroups] = useState(false);
@@ -193,22 +193,35 @@ export default function RedesSociaisPage() {
     try {
       const res = await fetch('/api/social-monitor/alert-config');
       if (!res.ok) return;
-      const data = await res.json() as { config: AlertConfig; instances: Array<{ id: string; name: string }> };
+      const data = await res.json() as { config: AlertConfig; instances: Array<{ id: string; name: string; provider: string }> };
       setAlertCfg(data.config);
       setAlertInstances(data.instances);
-      if (data.config.zapiClientId) void loadGroups(data.config.zapiClientId);
+      if (data.config.zapiClientId) {
+        const prov = data.instances.find(i => i.id === data.config.zapiClientId)?.provider ?? 'zapi';
+        void loadGroups(data.config.zapiClientId, prov);
+      }
     } catch { /* modal abre com defaults */ }
   }
 
-  async function loadGroups(zapiClientId: string) {
+  // Lista os grupos do endpoint certo conforme o provider: Evolution pelos grupos
+  // da Evolution (jid @g.us), Z-API pelos chats da nuvem.
+  async function loadGroups(instanceId: string, provider: string) {
     setLoadingGroups(true);
     setAlertGroups([]);
     try {
-      const res = await fetch(`/api/disparos/extract/chats?clientId=${encodeURIComponent(zapiClientId)}&type=groups`, { headers: callerHeaders() });
+      const url = provider === 'evolution'
+        ? `/api/otimizador/whatsapp-groups?zapiClientId=${encodeURIComponent(instanceId)}`
+        : `/api/disparos/extract/chats?clientId=${encodeURIComponent(instanceId)}&type=groups`;
+      const res = await fetch(url, { headers: callerHeaders() });
       if (!res.ok) { setAlertFeedback('Não foi possível listar os grupos dessa instância.'); return; }
-      const data = await res.json() as { chats?: ZapiGroup[] } | ZapiGroup[];
-      const list = Array.isArray(data) ? data : (data.chats ?? []);
-      setAlertGroups(list.map(g => ({ phone: String(g.phone), name: g.name || String(g.phone) })));
+      const data = await res.json() as unknown;
+      const raw = Array.isArray(data) ? data : ((data as { chats?: unknown[] }).chats ?? []);
+      const list = (raw as Array<Record<string, unknown>>).map(g => ({
+        // Evolution: { jid, nome }; Z-API: { phone, name }
+        phone: String(g.jid ?? g.phone ?? ''),
+        name: String(g.nome ?? g.name ?? g.jid ?? g.phone ?? ''),
+      })).filter(g => g.phone);
+      setAlertGroups(list);
     } catch {
       setAlertFeedback('Erro ao buscar grupos.');
     } finally {
@@ -640,18 +653,23 @@ export default function RedesSociaisPage() {
               </label>
 
               <div>
-                <p className="mb-1 text-xs font-bold uppercase tracking-widest text-muted-foreground">Instância Z-API</p>
+                <p className="mb-1 text-xs font-bold uppercase tracking-widest text-muted-foreground">Instância de WhatsApp</p>
                 <select
                   value={alertCfg.zapiClientId ?? ''}
                   onChange={e => {
                     const id = e.target.value || null;
                     setAlertCfg(c => ({ ...c, zapiClientId: id, groupId: null, groupName: null }));
-                    if (id) void loadGroups(id);
+                    if (id) {
+                      const prov = alertInstances.find(i => i.id === id)?.provider ?? 'zapi';
+                      void loadGroups(id, prov);
+                    }
                   }}
                   className="h-10 w-full rounded-[var(--radius)] border border-border bg-background px-3 text-sm font-semibold outline-none focus:border-primary/60"
                 >
                   <option value="">Selecione a instância…</option>
-                  {alertInstances.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
+                  {alertInstances.map(i => (
+                    <option key={i.id} value={i.id}>{i.name}{i.provider === 'evolution' ? ' (Evolution)' : ' (Z-API)'}</option>
+                  ))}
                 </select>
               </div>
 

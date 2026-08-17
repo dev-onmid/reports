@@ -1,5 +1,5 @@
 import type { Pool } from 'pg';
-import { sendText, isZapiConnected } from '@/lib/zapi';
+import { resolveInstance, isInstanceConnected, sendInstanceText } from '@/lib/whatsapp-send';
 
 // Aviso diário do Monitor de Redes Sociais via Z-API: depois da coleta do cron,
 // manda no grupo escolhido a lista de contas VISÍVEIS no radar (monitored=TRUE)
@@ -149,25 +149,19 @@ export async function sendSocialMonitorAlert(pool: Pool, opts: { force?: boolean
   const alertRows = await buildAlertRows(pool);
   if (alertRows.length === 0 && !opts.force) return { sent: false, reason: 'Nenhuma conta vermelha', clientes: 0 };
 
-  const { rows } = await pool.query(
-    `SELECT instance_id, token, security_token FROM public.zapi_clients WHERE id = $1 AND active = TRUE`,
-    [cfg.zapiClientId],
-  );
-  const inst = rows[0] as { instance_id: string; token: string; security_token: string | null } | undefined;
-  if (!inst) return { sent: false, reason: 'Instância Z-API não encontrada ou inativa' };
-  const client = { instanceId: inst.instance_id, token: inst.token, clientToken: inst.security_token ?? undefined };
+  const inst = await resolveInstance(pool, cfg.zapiClientId);
+  if (!inst) return { sent: false, reason: 'Instância de WhatsApp não encontrada ou inativa' };
 
-  // O Z-API responde "ok" no /send-text MESMO com o celular desconectado — a
-  // mensagem some silenciosamente. Sem esta checagem, marcávamos "enviado" e
-  // queimávamos a trava do dia sem nada chegar no grupo. Confere a conexão real
-  // (campo `connected` do /status, não só o HTTP 200 que o checkStatus do zapi.ts vê).
-  if (!(await isZapiConnected(client))) {
-    return { sent: false, reason: 'Instância Z-API desconectada — reconecte o WhatsApp', clientes: alertRows.length };
+  // Confere a conexão REAL antes de enviar (Evolution: state 'open'; Z-API: campo
+  // `connected`). O Z-API responde "ok" no send mesmo desconectado — sem esta
+  // checagem, marcávamos "enviado" e queimávamos a trava do dia sem nada chegar.
+  if (!(await isInstanceConnected(inst))) {
+    return { sent: false, reason: 'Instância de WhatsApp desconectada — reconecte', clientes: alertRows.length };
   }
 
   const message = buildAlertMessage(alertRows);
-  const result = await sendText(client, cfg.groupId, message);
-  if (!result.ok) return { sent: false, reason: result.error ?? 'Falha no envio Z-API', clientes: alertRows.length };
+  const result = await sendInstanceText(inst, cfg.groupId, message);
+  if (!result.ok) return { sent: false, reason: result.error ?? 'Falha no envio', clientes: alertRows.length };
 
   // Marca a data só no fluxo do cron — o teste manual pode reenviar quantas vezes quiser.
   if (!opts.force) await setSetting(pool, K.lastSent, today);

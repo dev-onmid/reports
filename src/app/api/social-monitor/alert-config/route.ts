@@ -11,21 +11,21 @@ export async function GET() {
   const pool = makeServerPool();
   try {
     const config = await loadSocialAlertConfig(pool);
-    // provider='evolution' fica de fora: o aviso usa o caminho Z-API (sendText).
-    // COALESCE cobre linhas antigas criadas antes da coluna provider existir.
-    let instances: Array<{ id: string; name: string }> = [];
+    // Oferece TODAS as instâncias ativas com o provider — Evolution (principal) e
+    // Z-API. O envio (social-monitor-alert) ramifica por provider; a UI usa o
+    // provider pra listar os grupos do endpoint certo.
+    let instances: Array<{ id: string; name: string; provider: string }> = [];
     try {
       const { rows } = await pool.query(
-        `SELECT id, name FROM public.zapi_clients
-          WHERE active = TRUE AND COALESCE(provider, 'zapi') <> 'evolution'
-          ORDER BY name`,
+        `SELECT id, name, COALESCE(provider, 'zapi') AS provider
+           FROM public.zapi_clients WHERE active = TRUE ORDER BY name`,
       );
-      instances = rows as Array<{ id: string; name: string }>;
+      instances = rows as Array<{ id: string; name: string; provider: string }>;
     } catch {
       const { rows } = await pool.query(
         `SELECT id, name FROM public.zapi_clients WHERE active = TRUE ORDER BY name`,
       );
-      instances = rows as Array<{ id: string; name: string }>;
+      instances = (rows as Array<{ id: string; name: string }>).map(r => ({ ...r, provider: 'zapi' }));
     }
     return Response.json({ config, instances });
   } catch (e) {

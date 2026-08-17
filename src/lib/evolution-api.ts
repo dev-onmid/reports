@@ -166,6 +166,32 @@ export async function sendEvolutionImage(
   });
 }
 
+export async function sendEvolutionDocument(
+  instanceName: string,
+  phone: string,
+  documentBase64: string,
+  fileName: string,
+  caption?: string,
+): Promise<SendResult> {
+  // Evolution manda documento pelo mesmo /message/sendMedia, com mediatype 'document'.
+  // O media aceita base64 puro (sem prefixo data:); fileName define o nome no chat.
+  const ext = (fileName.split('.').pop() || 'pdf').toLowerCase();
+  const mimeByExt: Record<string, string> = {
+    pdf: 'application/pdf', doc: 'application/msword', xls: 'application/vnd.ms-excel',
+    xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  };
+  return postEvolution(`${base()}/message/sendMedia/${encodeURIComponent(instanceName)}`, {
+    number: phone,
+    options: { delay: 1200 },
+    mediatype: 'document',
+    mimetype: mimeByExt[ext] ?? 'application/octet-stream',
+    media: documentBase64,
+    fileName,
+    caption: caption ?? '',
+  });
+}
+
 export async function checkEvolutionStatus(instanceName: string): Promise<boolean> {
   try {
     const { state } = await getEvolutionState(instanceName);
