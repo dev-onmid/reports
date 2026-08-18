@@ -45,6 +45,8 @@ const PUBLIC_PREFIXES = [
   // Datalytics: token de 48 hex POR CLIENTE na URL é a credencial (mesma
   // classe de exposição de /api/webhooks/).
   '/api/integrations/datalytics/',
+  // Webhook do Agendor — token de 48 hex por cliente na URL é a credencial.
+  '/api/integrations/agendor/',
 
   // Pixel e clique de e-mail: abertos pelo cliente de e-mail do destinatário.
   '/api/email/track/open',
@@ -69,6 +71,7 @@ const CRON_PREFIXES = [
   '/api/alerts/webshare-cron',
   '/api/automations/multi/worker',
   '/api/cardapioweb/sync-cron',
+  '/api/agendor/sync-cron',
   '/api/anotaai/sync-cron',
   '/api/crm/backfill-ctwa',
   '/api/crm/sanear-kanban',
