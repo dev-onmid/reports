@@ -1,7 +1,7 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { buscarAtividadesMeta, buscarMudancasGoogle } from '@/lib/atividade-conta';
-import { compilarResumoDoDia } from '@/lib/resumo-dia';
+import { compilarResumoDoDia, diaDoEvento, ehRuidoFinanceiro } from '@/lib/resumo-dia';
 import { ensureOtimizacaoHistoricoSchema } from '@/lib/otimizacao-historico';
 
 /**
@@ -69,8 +69,10 @@ export async function GET(req: NextRequest) {
           buscarAtividadesMeta(pool, cliente.client_id, since),
           buscarMudancasGoogle(pool, cliente.client_id, since),
         ]);
-        // Corte exato pro dia-alvo pelo prefixo (cobre "T" e espaço).
-        const doDia = [...meta, ...google].filter(ev => ev.criadoEm.slice(0, 10) === dia);
+        // Corte exato pro dia-alvo (a Meta manda data em pt-BR!) e filtro de
+        // ruído financeiro — cobrança não é otimização.
+        const doDia = [...meta, ...google].filter(ev =>
+          diaDoEvento(ev.criadoEm) === dia && !ehRuidoFinanceiro(ev.descricao));
         const resumos = compilarResumoDoDia(doDia, diaLabel);
         if (resumos.length === 0) {
           resultados.push({ client: cliente.name, dia, eventos: 0 });

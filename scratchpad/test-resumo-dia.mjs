@@ -49,3 +49,15 @@ eq(compilarResumoDoDia([], '15/08'), [], 'vazio não gera resumo');
   eq(r[0].acoes, [], 'sem chip forçado');
 }
 console.log(`✓ ${n} asserts do resumo-do-dia passaram`);
+
+// ---- diaDoEvento: a Meta manda data em pt-BR (bug real do dry-run)
+import { diaDoEvento, ehRuidoFinanceiro } from './build/resumo-dia.mjs';
+eq(diaDoEvento('18/08/2026 às 06:31'), '2026-08-18', 'data pt-BR da Meta');
+eq(diaDoEvento('2026-08-15 10:22:33'), '2026-08-15', 'Google com espaço');
+eq(diaDoEvento('2026-08-15T10:22:33-0300'), '2026-08-15', 'ISO com T');
+eq(diaDoEvento('ontem'), null, 'lixo vira null');
+ok(ehRuidoFinanceiro('Conta cobrada'), 'cobrança é ruído');
+ok(ehRuidoFinanceiro('Quantia adicionada ao saldo'), 'saldo é ruído');
+ok(!ehRuidoFinanceiro('Status da campanha atualizado'), 'gestão NÃO é ruído');
+ok(!ehRuidoFinanceiro('Orçamento do conjunto atualizado'), 'orçamento NÃO é ruído');
+console.log(`✓ ${n} asserts (com data pt-BR e ruído)`);

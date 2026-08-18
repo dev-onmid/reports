@@ -39,6 +39,28 @@ function chaveDoGrupo(ev: EventoConta): string {
   return `${ev.descricao.trim().toLowerCase()}|${ev.autor.trim().toLowerCase()}`;
 }
 
+
+/**
+ * Dia (YYYY-MM-DD) de um evento. ⚠️ A Meta devolve a data JÁ FORMATADA em
+ * pt-BR ("18/08/2026 às 06:31") — descoberto no dry-run real: o filtro por
+ * prefixo ISO nunca casava e o resumo saía vazio. O Google vem ISO-like.
+ */
+export function diaDoEvento(criadoEm: string): string | null {
+  const br = /^(\d{2})\/(\d{2})\/(\d{4})/.exec(criadoEm);
+  if (br) return `${br[3]}-${br[2]}-${br[1]}`;
+  const iso = /^(\d{4}-\d{2}-\d{2})/.exec(criadoEm);
+  return iso ? iso[1] : null;
+}
+
+/**
+ * Ruído financeiro/automático da plataforma ("Conta cobrada", "Quantia
+ * adicionada ao saldo") — visto nos eventos reais. Cobrança não é ação de
+ * gestão; entrar no resumo diria "houve otimização" onde só houve fatura.
+ */
+export function ehRuidoFinanceiro(descricao: string): boolean {
+  return /conta cobrada|quantia adicionada|saldo|billing|funding|cobran[çc]a|fatura/i.test(descricao);
+}
+
 const MAX_LINHAS = 12;
 
 export function compilarResumoDoDia(eventos: EventoConta[], diaLabel: string): ResumoCanal[] {
