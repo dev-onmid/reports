@@ -14,6 +14,7 @@ import {
   ChevronDown, ChevronUp, AlertTriangle,
 } from 'lucide-react';
 import { cn, formatCurrencyBRL } from '@/lib/utils';
+import { acaoLabel } from '@/lib/otimizacao-ui';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -311,6 +312,101 @@ function SummaryCard({ summary, onEdit }: { summary: MonthlySummary; onEdit: () 
 
 // ── Main Tab ──────────────────────────────────────────────────────────────────
 
+type RegistroOtimizacao = {
+  id: string;
+  user_name: string | null;
+  canal: string;
+  canal_detalhe: string | null;
+  acoes: string[];
+  descricao: string;
+  origem: string;
+  created_at: string;
+};
+
+const CANAL_LOGO: Record<string, string> = {
+  meta: '/brand/meta-ads-logo.webp',
+  google: '/brand/google-ads-logo.png',
+};
+
+/**
+ * Timeline do Histórico GERAL (otimizacao_registros) recortada pro cliente —
+ * a MESMA fonte da aba Histórico da sidebar, pra os dois serem um só (pedido
+ * do Matheus). Inclui os resumos automáticos do dia (origem='resumo').
+ */
+function RegistrosOtimizacao({ clientId }: { clientId: string }) {
+  const [registros, setRegistros] = useState<RegistroOtimizacao[]>([]);
+  const [carregando, setCarregando] = useState(true);
+  const [aberto, setAberto] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch(`/api/otimizacoes?clientId=${encodeURIComponent(clientId)}&limit=40`)
+      .then(r => r.ok ? r.json() as Promise<{ registros?: RegistroOtimizacao[] } | RegistroOtimizacao[]> : Promise.reject())
+      .then(data => setRegistros(Array.isArray(data) ? data : (data.registros ?? [])))
+      .catch(() => setRegistros([]))
+      .finally(() => setCarregando(false));
+  }, [clientId]);
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between space-y-0">
+        <CardTitle className="flex items-center gap-2 text-base">
+          <History className="w-4 h-4 text-primary" />
+          Histórico de otimizações
+        </CardTitle>
+        <a href="/otimizacoes" className="text-xs text-primary hover:underline">Abrir Histórico geral →</a>
+      </CardHeader>
+      <CardContent>
+        {carregando ? (
+          <p className="text-sm text-muted-foreground">Carregando…</p>
+        ) : registros.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            Nenhum registro ainda — as otimizações registradas no Histórico (e os resumos
+            automáticos do dia) aparecem aqui.
+          </p>
+        ) : (
+          <ul className="space-y-2">
+            {registros.map(reg => {
+              const resumoAuto = reg.origem === 'resumo';
+              const multilinha = reg.descricao.includes('\n');
+              const expandido = aberto === reg.id;
+              return (
+                <li key={reg.id} className="rounded-lg border border-slate-800/60 bg-[rgba(8,15,27,0.6)] px-3 py-2">
+                  <div
+                    role={multilinha ? 'button' : undefined}
+                    onClick={multilinha ? () => setAberto(a => a === reg.id ? null : reg.id) : undefined}
+                    className={cn('flex items-start gap-2', multilinha && 'cursor-pointer')}
+                  >
+                    {CANAL_LOGO[reg.canal]
+                      ? <img src={CANAL_LOGO[reg.canal]} alt={reg.canal} className="mt-0.5 h-4 w-4 object-contain" />
+                      : <Zap className="mt-0.5 h-4 w-4 text-muted-foreground" />}
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                        <span className="font-semibold">{resumoAuto ? '🤖 Resumo do dia' : (reg.user_name ?? '—')}</span>
+                        {reg.acoes.map(a => (
+                          <span key={a} className="rounded bg-slate-800 px-1.5 py-0.5 text-[10px] text-slate-300">{acaoLabel(a)}</span>
+                        ))}
+                        <span className="ml-auto text-muted-foreground">
+                          {new Date(reg.created_at).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}
+                        </span>
+                      </div>
+                      <p className={cn('mt-0.5 whitespace-pre-line text-xs text-muted-foreground', !expandido && multilinha && 'line-clamp-2')}>
+                        {reg.descricao}
+                      </p>
+                      {multilinha && (
+                        <span className="text-[10px] text-primary">{expandido ? 'recolher' : 'ver tudo'}</span>
+                      )}
+                    </div>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export function HistoricoTab({ clientId }: { clientId: string }) {
   const [events, setEvents]     = useState<ActivityEvent[]>([]);
   const [summaries, setSummaries] = useState<MonthlySummary[]>([]);
@@ -365,6 +461,8 @@ export function HistoricoTab({ clientId }: { clientId: string }) {
 
   return (
     <div className="space-y-6">
+      <RegistrosOtimizacao clientId={clientId} />
+
       {/* Stats row */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {[

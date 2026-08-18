@@ -31,6 +31,10 @@ export async function GET(req: NextRequest) {
               client_id, canal, canal_detalhe, user_name, acoes,
               LEFT(descricao, 220) AS resumo, created_at
          FROM public.otimizacao_registros
+        -- Resumo automático do dia (origem='resumo') é OBSERVAÇÃO, não
+        -- otimização: se contasse como "última ação", toda conta ficaria
+        -- eternamente "em dia" e o alerta de atraso morreria.
+        WHERE origem <> 'resumo'
         ORDER BY client_id, canal, created_at DESC`,
     );
     const { rows: agenda } = await pool.query<OtimizacaoAgendaRow>(
