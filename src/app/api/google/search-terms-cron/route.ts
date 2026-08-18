@@ -6,13 +6,14 @@ import {
   lunaGoogleSearch, lunaGoogleMutatePartial, criarKeywordsGoogle, resolveGoogleAccountIds,
 } from '@/lib/luna-tools';
 import { ensureOtimizacaoHistoricoSchema } from '@/lib/otimizacao-historico';
+import { sendTextByInstanceId } from '@/lib/whatsapp-send';
 import {
   filtrarTermosParaAnalise, planejarAplicacao, parseDecisoesIa, resumoParaHistorico,
   PROMPT_SISTEMA_TERMOS, type TermoBruto,
 } from '@/lib/search-terms-rotina';
 
 /**
- * Rotina SEMANAL de saneamento de termos de pesquisa do Google Ads.
+ * Rotina DIÁRIA de saneamento de termos de pesquisa do Google Ads.
  *
  * Por cliente com conta Google vinculada: lê os termos reais de 30 dias →
  * pré-filtra sem IA → a IA classifica (negativar / promover / ignorar) → as
@@ -24,8 +25,9 @@ import {
  * negativa nunca pode bloquear keyword ativa, keyword nova só com conversão ou
  * volume de cliques, e tetos por rodada. `?dry=1` roda tudo SEM aplicar.
  *
- * Cadência: semanal (o Google esconde termo de baixo volume; janela de 30 dias
- * com corte semanal é o ponto onde a amostra é significativa e nada se perde).
+ * Cadência: DIÁRIA às 09h BRT (pedido do Matheus) sobre janela de 30 dias — o
+ * status ADDED/EXCLUDED filtra o que já foi tratado, então a rodada diária só
+ * age sobre termo NOVO relevante; o resumo de ações e alertas sai no WhatsApp.
  */
 
 export const maxDuration = 300;
@@ -51,6 +53,52 @@ type ResultadoCliente = {
   };
 };
 
+// Resumo diário no WhatsApp (pedido do Matheus: "me envie um resumo de ações e
+// alertas"). Canal: grupo próprio em system_settings['gads_rotina_group_id'] ou,
+// na falta dele, o MESMO canal do aviso do Monitor Social (ativo e validado
+// diariamente). Best-effort — falha de WhatsApp nunca derruba a rotina.
+function montarResumoWhatsApp(resultados: ResultadoCliente[], totNeg: number, totProm: number): string {
+  const agora = new Date(Date.now() - 3 * 3600_000); // BRT fixo, mesmo padrão do repo
+  const dia = `${String(agora.getUTCDate()).padStart(2, '0')}/${String(agora.getUTCMonth() + 1).padStart(2, '0')}`;
+  const comAcao = resultados.filter(r => (r.negativadas ?? 0) + (r.promovidas ?? 0) > 0);
+  const recusadas = resultados.reduce((s2, r) => s2 + (r.recusadas ?? 0), 0);
+  const linhas: string[] = [`🤖 *Rotina Google Ads* — ${dia} · varredura diária`];
+  linhas.push(totNeg + totProm > 0
+    ? `✂️ ${totNeg} negativa(s) · ➕ ${totProm} keyword(s) nova(s) · ${comAcao.length} conta(s)`
+    : `✅ Nenhum ajuste necessário hoje — termos sob controle`);
+  if (recusadas > 0) linhas.push(`🛡️ ${recusadas} propostas RECUSADAS pelas travas (marca/conflito/teto)`);
+  for (const r of comAcao.sort((a, b) => ((b.negativadas ?? 0) + (b.promovidas ?? 0)) - ((a.negativadas ?? 0) + (a.promovidas ?? 0))).slice(0, 5)) {
+    linhas.push(`  • ${r.nome}: ${r.negativadas ? `${r.negativadas}✂️` : ''}${r.promovidas ? ` ${r.promovidas}➕` : ''}`.trimEnd());
+  }
+  const alertas: string[] = [];
+  for (const r of resultados) {
+    if (!r.erro) continue;
+    if (/credit balance|invalid_request_error.*credit/i.test(r.erro)) {
+      if (!alertas.some(a => a.includes('SEM CRÉDITOS'))) alertas.push(`🚨 API Anthropic SEM CRÉDITOS — a rotina NÃO conseguiu analisar (recarregar em console.anthropic.com)`);
+    } else {
+      alertas.push(`⚠️ ${r.nome}: ${r.erro.slice(0, 90)}`);
+    }
+  }
+  if (alertas.length) { linhas.push(''); linhas.push('*Alertas:*'); linhas.push(...alertas.slice(0, 6)); }
+  linhas.push('');
+  linhas.push('📒 Detalhe termo a termo: Histórico de cada cliente no Reports');
+  return linhas.join('\n');
+}
+
+async function enviarResumoWhatsApp(pool: ReturnType<typeof makeServerPool>, texto: string): Promise<boolean> {
+  try {
+    const { rows } = await pool.query(
+      `SELECT key, value FROM public.system_settings
+        WHERE key IN ('gads_rotina_group_id', 'social_alert_zapi_client_id', 'social_alert_group_id')`);
+    const map = Object.fromEntries(rows.map((r: { key: string; value: string | null }) => [r.key, r.value ?? '']));
+    const grupo = map['gads_rotina_group_id'] || map['social_alert_group_id'];
+    const inst = map['social_alert_zapi_client_id'];
+    if (!grupo || !inst) return false;
+    const r = await sendTextByInstanceId(pool, inst, grupo, texto);
+    return Boolean((r as { ok?: boolean }).ok);
+  } catch { return false; }
+}
+
 export async function GET(req: NextRequest) {
   const secret = req.nextUrl.searchParams.get('secret') ?? '';
   const valid = [process.env.CRON_SECRET, process.env.REPORTS_CRON_SECRET, process.env.CRM_CRON_SECRET]
@@ -69,6 +117,7 @@ export async function GET(req: NextRequest) {
   const anthropic = new Anthropic({ apiKey });
   const resultados: ResultadoCliente[] = [];
   let semTempo = false;
+  let waEnviado = false;
 
   try {
     await ensureOtimizacaoHistoricoSchema(pool);
@@ -215,6 +264,16 @@ export async function GET(req: NextRequest) {
       }
       resultados.push(res);
     }
+
+    // Resumo de ações e alertas no WhatsApp — só em execução REAL (dry não envia)
+    // e ANTES do pool fechar. Best-effort: falha de envio não derruba a resposta.
+    if (!dry) {
+      const t = resultados.reduce((acc, r) => ({
+        negativadas: acc.negativadas + (r.negativadas ?? 0),
+        promovidas: acc.promovidas + (r.promovidas ?? 0),
+      }), { negativadas: 0, promovidas: 0 });
+      waEnviado = await enviarResumoWhatsApp(pool, montarResumoWhatsApp(resultados, t.negativadas, t.promovidas));
+    }
   } catch (e) {
     return Response.json({ ok: false, error: e instanceof Error ? e.message : 'erro' }, { status: 500 });
   } finally {
@@ -227,6 +286,6 @@ export async function GET(req: NextRequest) {
   }), { negativadas: 0, promovidas: 0 });
   return Response.json({
     ok: true, dry, semTempo, clientes: resultados.length,
-    ...total, tookMs: Date.now() - started, resultados,
+    ...total, whatsapp_enviado: waEnviado, tookMs: Date.now() - started, resultados,
   });
 }
