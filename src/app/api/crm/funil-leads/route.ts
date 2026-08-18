@@ -45,12 +45,21 @@ export async function GET(req: NextRequest) {
 
   const pool = makeServerPool();
   try {
+    // Garante as colunas de tipo/fechamento (idempotente). O summary também as
+    // cria, mas esta rota pode ser chamada sem ele ter rodado antes.
+    await pool.query(`
+      ALTER TABLE public.crm_leads
+        ADD COLUMN IF NOT EXISTS registro_tipo TEXT DEFAULT 'hibrido',
+        ADD COLUMN IF NOT EXISTS data_fechamento DATE
+    `).catch(() => {});
+
     const params: unknown[] = [];
     let dateFilter = '';
     if (from && to) {
       params.push(from, to);
-      // Mesma regra do summary: lead sem data fica DENTRO.
-      dateFilter = `AND (COALESCE(l.lead_date, l.data) IS NULL OR (COALESCE(l.lead_date, l.data) >= $1 AND COALESCE(l.lead_date, l.data) <= $2))`;
+      // Mesma regra do summary: venda janela por data de fechamento, lead/hibrido
+      // por cadastro; lead sem data fica DENTRO.
+      dateFilter = `AND (COALESCE(l.data_fechamento, l.lead_date, l.data) IS NULL OR (COALESCE(l.data_fechamento, l.lead_date, l.data) >= $1 AND COALESCE(l.data_fechamento, l.lead_date, l.data) <= $2))`;
     }
     let clientFilter = '';
     if (clientIds.length) {
@@ -74,7 +83,10 @@ export async function GET(req: NextRequest) {
               COALESCE(l.lead_date, l.data, l.created_at::date) AS data_lead
          FROM public.crm_leads l
          LEFT JOIN public.clients c ON c.id = l.client_id
-        WHERE TRUE ${dateFilter} ${clientFilter}
+        -- Registro de VENDA é ledger de faturamento, não lead: fica fora da
+        -- listagem por etapa (senão apareceria como "contato" fantasma e o modal
+        -- divergiria do card, que também o exclui).
+        WHERE COALESCE(l.registro_tipo, 'hibrido') <> 'venda' ${dateFilter} ${clientFilter}
         ORDER BY COALESCE(l.lead_date, l.data, l.created_at::date) DESC NULLS LAST`,
       params,
     );

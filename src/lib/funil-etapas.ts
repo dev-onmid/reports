@@ -95,6 +95,17 @@ export type LeadParaFunil = {
   agendou: boolean;
   dataAgendada: string | null;
   receita: number;
+  /**
+   * De qual planilha o registro veio, para separar VENDA de LEAD (default
+   * 'hibrido' = comportamento antigo, para todo lead do WhatsApp/CRM e para as
+   * importações que não escolheram tipo):
+   *  • 'lead'    → alimenta só o funil; o R$ dele NÃO é faturamento (a receita
+   *               mora no relatório de Vendas). Evita o duplo-count.
+   *  • 'venda'   → ledger de faturamento: entra SÓ como receita (já filtrada
+   *               por data de fechamento na query); não é um contato do funil.
+   *  • 'hibrido' → conta no funil E soma receita ao fechar (como sempre foi).
+   */
+  tipo?: 'lead' | 'venda' | 'hibrido';
 };
 
 export type EtapaDeStage = {
@@ -193,6 +204,14 @@ export function contarFunil(leads: LeadParaFunil[], stages: EtapaDeStage[]): Con
 
   const c: ContagemFunil = { ...FUNIL_VAZIO };
   for (const lead of leads) {
+    // Registro de VENDA (ledger de faturamento): entra SÓ como receita — já
+    // veio filtrado por data de fechamento na query. Não é um contato do funil,
+    // então não incrementa contatos/etapas nem infla o topo.
+    if (lead.tipo === 'venda') {
+      c.receita += Number(lead.receita) || 0;
+      continue;
+    }
+
     c.contatos++;
 
     const { posto, perdido } = etapaDoLead(lead, mapa);
@@ -203,7 +222,10 @@ export function contarFunil(leads: LeadParaFunil[], stages: EtapaDeStage[]): Con
     if (posto >= 3) c.comparecimentos++;
     if (posto >= 4) {
       c.fechamentos++;
-      c.receita += Number(lead.receita) || 0;
+      // 'lead' alimenta só o funil: o R$ FECHADO dele não vira faturamento
+      // (a receita é contada pelo relatório de Vendas, senão dobraria). 'hibrido'
+      // (default de tudo que já existe) soma a receita, como sempre.
+      if (lead.tipo !== 'lead') c.receita += Number(lead.receita) || 0;
     }
   }
   return c;

@@ -42,7 +42,7 @@ import {
 import { useMetaConnections, type MetaConnection } from '@/lib/meta-connections-store';
 import { useGoogleConnections, type GoogleConnection } from '@/lib/google-connections-store';
 import { useClients } from '@/lib/client-store';
-import type { SpreadsheetAnalysis, SpreadsheetColumnMapping, SpreadsheetMapping, SpreadsheetFormato } from '@/app/api/integrations/spreadsheet/route';
+import type { SpreadsheetAnalysis, SpreadsheetColumnMapping, SpreadsheetMapping, SpreadsheetFormato, TipoPlanilha } from '@/app/api/integrations/spreadsheet/route';
 
 // ─── Account avatar helpers ───────────────────────────────────────────────────
 
@@ -1461,6 +1461,13 @@ function SpreadsheetImportPanel() {
    * perceberia até o Dashboard mostrar data errada.
    */
   const [porFormato, setPorFormato] = useState<Record<string, Record<SpreadsheetFieldKey, string>>>({});
+  /**
+   * Tipo de cada planilha (por assinatura de cabeçalho): Leads (só funil),
+   * Vendas (só faturamento, por data de fechamento) ou Híbrida (tudo).
+   * Default 'hibrido' = comportamento antigo. Separar aqui é o que impede o
+   * duplo-count de somar R$ FECHADO (Leads) + VALOR FATURADO (Vendas).
+   */
+  const [tipoPorFormato, setTipoPorFormato] = useState<Record<string, TipoPlanilha>>({});
   const [importResults, setImportResults] = useState<Record<string, number> | null>(null);
   const [relatorio, setRelatorio] = useState<{
     arquivos?: { nome: string; linhas: number }[];
@@ -1471,6 +1478,44 @@ function SpreadsheetImportPanel() {
     receita_descartada?: number;
   } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Limpeza de leads de importações ANTIGAS (para reimportar do zero com os
+  // tipos certos, sem a duplicidade de quando tudo entrava como 'hibrido').
+  const [cleanClientId, setCleanClientId] = useState('');
+  const [cleanInfo, setCleanInfo] = useState<{ total: number; remover: number; preservar: number; receita_removida: number; amostra: { nome: string; valor: number }[] } | null>(null);
+  const [cleanLoading, setCleanLoading] = useState(false);
+  const [cleanError, setCleanError] = useState('');
+  const [cleanDone, setCleanDone] = useState<number | null>(null);
+
+  async function handleCleanCheck() {
+    if (!cleanClientId) return;
+    setCleanLoading(true); setCleanError(''); setCleanInfo(null); setCleanDone(null);
+    try {
+      const res = await fetch(`/api/integrations/spreadsheet/cleanup?clientId=${encodeURIComponent(cleanClientId)}`);
+      const data = await res.json();
+      if (!res.ok || data.error) { setCleanError(data.error ?? 'Falha ao verificar.'); return; }
+      setCleanInfo(data);
+    } catch { setCleanError('Erro de conexão ao verificar.'); }
+    finally { setCleanLoading(false); }
+  }
+
+  async function handleCleanRun() {
+    if (!cleanClientId || !cleanInfo) return;
+    const nome = clients.find(c => c.id === cleanClientId)?.name ?? 'este cliente';
+    if (!window.confirm(`Remover ${cleanInfo.remover} leads de planilha de ${nome}? Os ${cleanInfo.preservar} leads do WhatsApp são preservados. Não dá pra desfazer — depois reimporte as planilhas com os tipos certos.`)) return;
+    setCleanLoading(true); setCleanError('');
+    try {
+      const res = await fetch('/api/integrations/spreadsheet/cleanup', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clientId: cleanClientId }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) { setCleanError(data.error ?? 'Falha ao remover.'); return; }
+      setCleanDone(data.removidos ?? 0);
+      setCleanInfo(null);
+    } catch { setCleanError('Erro de conexão ao remover.'); }
+    finally { setCleanLoading(false); }
+  }
 
   function handleFiles(lista: File[]) {
     const invalidos = lista.filter(f => !f.name.match(/\.(xlsx|xls|csv)$/i));
@@ -1566,6 +1611,16 @@ function SpreadsheetImportPanel() {
           };
         }
         setPorFormato(inicial);
+        // Palpite do tipo pelo cabeçalho: relatório com data de faturamento e
+        // sem coluna de status de funil cheira a Vendas. Só um palpite — o
+        // usuário confirma no seletor.
+        const tipos: Record<string, TipoPlanilha> = {};
+        for (const f of data.formatos) {
+          const temFechamento = f.headers.some(h => /faturamento|data\s+venda|data\s+fechamento/i.test(h));
+          const temFunil = f.headers.some(h => /situa[cç][aã]o|status|etapa|agendad/i.test(h));
+          tipos[f.assinatura] = temFechamento && !temFunil ? 'venda' : 'hibrido';
+        }
+        setTipoPorFormato(tipos);
       }
       setColumnOverrides(prev => ({
         ...prev,
@@ -1618,12 +1673,13 @@ function SpreadsheetImportPanel() {
       const lotes = formatos
         ? formatos.map(f => ({
             cols: porFormato[f.assinatura] ?? columnOverrides,
+            tipo: tipoPorFormato[f.assinatura] ?? 'hibrido',
             // Só os arquivos DESTE formato — é o que garante o de-para certo
             // nas linhas certas.
             arquivos: (files.length ? files : [file]).filter(x => f.arquivos.some(a => a.nome === x.name)),
             rotulo: f.arquivos.map(a => a.nome).join(', '),
           })).filter(l => l.arquivos.length > 0)
-        : [{ cols: columnOverrides, arquivos: files.length ? files : [file], rotulo: file.name }];
+        : [{ cols: columnOverrides, tipo: tipoPorFormato['__unico__'] ?? 'hibrido', arquivos: files.length ? files : [file], rotulo: file.name }];
 
       for (const lote of lotes) {
         const fd = new FormData();
@@ -1644,6 +1700,7 @@ function SpreadsheetImportPanel() {
           ['dealId', 'dealIdColumn'], ['stage', 'stageColumn'], ['updatedDate', 'updatedDateColumn'],
         ];
         for (const [chave, campo] of campos) if (lote.cols[chave]) fd.append(campo, lote.cols[chave]);
+        fd.append('tipoPlanilha', lote.tipo);
 
         const res = await fetch('/api/integrations/spreadsheet?step=import', { method: 'POST', body: fd });
         const data = await res.json() as {
@@ -1710,6 +1767,7 @@ function SpreadsheetImportPanel() {
     });
     setImportResults(null);
     setPorFormato({});
+    setTipoPorFormato({});
     setRelatorio(null);
     setFiles([]);
     setError('');
@@ -1791,6 +1849,61 @@ function SpreadsheetImportPanel() {
             <Button onClick={handleAnalyze} disabled={!file || loading} className="w-full h-10 font-bold text-sm">
               {loading ? <><RefreshCw className="w-3.5 h-3.5 animate-spin mr-2" />Analisando com IA...</> : 'Analisar planilha'}
             </Button>
+
+            {/* Corrigir importações antigas — limpar leads de planilha p/ reimportar do zero. */}
+            <div className="rounded-lg border border-border/70 bg-muted/10 p-4 space-y-3">
+              <div>
+                <p className="text-xs font-bold">Corrigir importações antigas</p>
+                <p className="text-[11px] text-muted-foreground mt-0.5">
+                  Remove os leads que vieram de <strong>planilha</strong> (pra reimportar do zero com os tipos certos).
+                  Leads do <strong>WhatsApp/Rastreio</strong> — mesmo os que uma planilha já atualizou — são preservados.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <select
+                  value={cleanClientId}
+                  onChange={e => { setCleanClientId(e.target.value); setCleanInfo(null); setCleanDone(null); setCleanError(''); }}
+                  className="flex-1 min-w-[180px] rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground"
+                >
+                  <option value="">— escolha a clínica / cliente —</option>
+                  {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+                <Button variant="outline" onClick={handleCleanCheck} disabled={!cleanClientId || cleanLoading} className="h-8 text-xs">
+                  {cleanLoading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : 'Verificar'}
+                </Button>
+              </div>
+              {cleanError && <p className="text-[11px] text-red-400">{cleanError}</p>}
+              {cleanInfo && (
+                <div className="rounded-md border border-amber-400/30 bg-amber-400/10 p-3 space-y-2 text-xs">
+                  <p className="text-amber-300 leading-relaxed">
+                    <strong>{cleanInfo.remover.toLocaleString('pt-BR')}</strong> leads de planilha a remover
+                    {' · '}<strong>{cleanInfo.receita_removida.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</strong> de receita
+                    {' · '}<strong>{cleanInfo.preservar.toLocaleString('pt-BR')}</strong> leads do WhatsApp preservados
+                  </p>
+                  {cleanInfo.amostra.length > 0 && (
+                    <p className="text-[10px] text-muted-foreground truncate">Ex.: {cleanInfo.amostra.map(a => a.nome).slice(0, 5).join(', ')}…</p>
+                  )}
+                  {cleanInfo.remover > 0 ? (
+                    <button
+                      type="button"
+                      onClick={handleCleanRun}
+                      disabled={cleanLoading}
+                      className="rounded-md bg-red-500 px-3 py-1.5 text-xs font-bold text-white hover:bg-red-600 disabled:opacity-60"
+                    >
+                      Apagar {cleanInfo.remover.toLocaleString('pt-BR')} leads e liberar reimportação
+                    </button>
+                  ) : (
+                    <p className="text-[11px] text-emerald-400">Nada de planilha para remover neste cliente.</p>
+                  )}
+                </div>
+              )}
+              {cleanDone != null && (
+                <p className="text-[11px] text-emerald-400 leading-relaxed">
+                  ✓ {cleanDone.toLocaleString('pt-BR')} leads removidos. Agora reimporte: <strong>DetalhamentoLeads</strong> como
+                  {' '}“Leads” e <strong>DetalhamentoFaturamento</strong> como “Vendas”.
+                </p>
+              )}
+            </div>
           </div>
         )}
 
@@ -1825,6 +1938,52 @@ function SpreadsheetImportPanel() {
                   {fmt.headers.length} colunas · {fmt.rowCount.toLocaleString('pt-BR')} linhas
                 </span>
               </div>
+
+              {/* Tipo da planilha — separa VENDA de LEAD pra receita não contar 2x. */}
+              {(() => {
+                const tipoAtual = tipoPorFormato[fmt.assinatura] ?? 'hibrido';
+                const OPCOES: { valor: TipoPlanilha; titulo: string; sub: string }[] = [
+                  { valor: 'hibrido', titulo: 'Híbrida (tudo)', sub: 'funil + faturamento na mesma planilha' },
+                  { valor: 'lead', titulo: 'Leads / Funil', sub: 'só o funil — não conta como faturamento' },
+                  { valor: 'venda', titulo: 'Vendas / Faturamento', sub: 'só receita, pela data de fechamento' },
+                ];
+                return (
+                  <div className="rounded-lg border border-border/70 bg-background/45 p-3 space-y-2">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">O que esta planilha é</p>
+                    <div className="grid gap-2 sm:grid-cols-3">
+                      {OPCOES.map(op => (
+                        <button
+                          key={op.valor}
+                          type="button"
+                          onClick={() => setTipoPorFormato(prev => ({ ...prev, [fmt.assinatura]: op.valor }))}
+                          className={cn(
+                            'rounded-md border px-3 py-2 text-left transition-colors',
+                            tipoAtual === op.valor
+                              ? 'border-primary bg-primary/10'
+                              : 'border-border bg-background hover:border-primary/40',
+                          )}
+                        >
+                          <p className={cn('text-xs font-bold', tipoAtual === op.valor ? 'text-primary' : 'text-foreground')}>{op.titulo}</p>
+                          <p className="text-[10px] text-muted-foreground mt-0.5">{op.sub}</p>
+                        </button>
+                      ))}
+                    </div>
+                    {tipoAtual === 'venda' && (
+                      <p className="text-[10px] text-amber-400/90 leading-relaxed">
+                        No tipo <strong>Vendas</strong>: mapeie <strong>Data</strong> para a data de FECHAMENTO
+                        (ex.: DATA FATURAMENTO) e <strong>Faturamento</strong> para o valor da venda. Reimportar
+                        o mesmo relatório não duplica, e o faturamento é somado por todo canal (sem corte de origem).
+                      </p>
+                    )}
+                    {tipoAtual === 'lead' && (
+                      <p className="text-[10px] text-muted-foreground leading-relaxed">
+                        No tipo <strong>Leads</strong>: alimenta só o funil. O valor fechado desta planilha
+                        <strong> não</strong> entra no faturamento (evita somar a mesma venda duas vezes).
+                      </p>
+                    )}
+                  </div>
+                );
+              })()}
 
               {SPREADSHEET_FIELD_GROUPS.map(group => (
                 <div key={group.title} className="space-y-2">

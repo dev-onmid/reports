@@ -46,16 +46,23 @@ export async function GET(req: NextRequest) {
         ADD COLUMN IF NOT EXISTS compareceu BOOLEAN DEFAULT FALSE,
         ADD COLUMN IF NOT EXISTS fechou BOOLEAN DEFAULT FALSE,
         ADD COLUMN IF NOT EXISTS valor_rs NUMERIC,
-        ADD COLUMN IF NOT EXISTS revenue NUMERIC DEFAULT 0
+        ADD COLUMN IF NOT EXISTS revenue NUMERIC DEFAULT 0,
+        ADD COLUMN IF NOT EXISTS registro_tipo TEXT DEFAULT 'hibrido',
+        ADD COLUMN IF NOT EXISTS data_fechamento DATE
     `);
 
     const params: (string | null)[] = [];
     let dateFilter = '';
     if (from && to) {
       params.push(from, to);
+      // Data de referência POR REGISTRO: venda janela por data de fechamento
+      // (data_fechamento), lead/hibrido por data de cadastro (lead_date/data).
+      // Como data_fechamento é NULL em tudo que já existe, o comportamento
+      // antigo é preservado — só o ledger de vendas passa a filtrar pelo
+      // fechamento, que é o que o Matheus pediu ("venda = período de fechamento").
       // Lead sem data fica DENTRO: planilhas chegam sem a coluna preenchida e
       // sumir com eles esvaziaria o funil de quem mais precisa dele.
-      dateFilter = `AND (COALESCE(lead_date, data) IS NULL OR (COALESCE(lead_date, data) >= $1 AND COALESCE(lead_date, data) <= $2))`;
+      dateFilter = `AND (COALESCE(data_fechamento, lead_date, data) IS NULL OR (COALESCE(data_fechamento, lead_date, data) >= $1 AND COALESCE(data_fechamento, lead_date, data) <= $2))`;
     }
 
     const { rows } = await pool.query(
@@ -65,6 +72,7 @@ export async function GET(req: NextRequest) {
               agendou,
               data_agendada,
               compareceu,
+              COALESCE(registro_tipo, 'hibrido') AS registro_tipo,
               (fechou OR COALESCE(NULLIF(revenue, 0), valor_rs, 0) > 0) AS fechou,
               COALESCE(NULLIF(revenue, 0), valor_rs, 0) AS valor_rs
          FROM public.crm_leads
@@ -106,6 +114,7 @@ export async function GET(req: NextRequest) {
         compareceu: row.compareceu === true,
         fechou: row.fechou === true,
         receita: Number(row.valor_rs) || 0,
+        tipo: (row.registro_tipo as 'lead' | 'venda' | 'hibrido') ?? 'hibrido',
       });
     }
 

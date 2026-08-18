@@ -1,7 +1,30 @@
 import type { NextRequest } from 'next/server';
+import { createHash } from 'node:crypto';
 import { makeServerPool } from '@/lib/server-db';
 
 import { origemIntegravel, resumirOrigens, dedupLote, dedupPorTelefone, idExterno, chaveTelefone, sinaisDoStatus } from '@/lib/importacao-origem';
+
+/** Tipo da planilha, escolhido na importação. Ver comentário em LeadParaFunil. */
+export type TipoPlanilha = 'lead' | 'venda' | 'hibrido';
+function normalizarTipoPlanilha(v: unknown): TipoPlanilha {
+  return v === 'lead' || v === 'venda' ? v : 'hibrido';
+}
+
+/**
+ * external_id ESTÁVEL para o ledger de Vendas (que não tem telefone nem ID de
+ * negócio). Sem isso, reimportar o mesmo relatório de faturamento inseria tudo
+ * de novo e DOBRAVA a receita a cada importação — o bug central que o Matheus
+ * relatou. Com uma chave derivada de (paciente + data de fechamento + valor +
+ * detalhe), o reimport faz UPDATE em vez de duplicar. Parcelas do mesmo paciente
+ * têm valores diferentes, então não colapsam entre si.
+ */
+function sintetizarIdVenda(
+  clientId: string,
+  r: { leadName: string | null; dataFechamento: string | null; revenue: number; notes: string | null },
+): string {
+  const base = [clientId, (r.leadName ?? '').trim().toLowerCase(), r.dataFechamento ?? '', r.revenue, (r.notes ?? '').slice(0, 60)].join('|');
+  return 'venda:' + createHash('sha1').update(base).digest('hex').slice(0, 32);
+}
 
 /** Um grupo de arquivos com o MESMO cabeçalho — mesmo mapeamento serve pros dois. */
 export type SpreadsheetFormato = {
@@ -270,7 +293,12 @@ async function ensureTables(pool: ReturnType<typeof makeServerPool>) {
       ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW(),
       ADD COLUMN IF NOT EXISTS external_id TEXT,
       ADD COLUMN IF NOT EXISTS stage TEXT,
-      ADD COLUMN IF NOT EXISTS updated_at_external DATE
+      ADD COLUMN IF NOT EXISTS updated_at_external DATE,
+      -- Separa VENDA de LEAD (default 'hibrido' = tudo que já existe, sem mudança).
+      ADD COLUMN IF NOT EXISTS registro_tipo TEXT DEFAULT 'hibrido',
+      -- Data de FECHAMENTO da venda; a receita é janelada por ela (não pela data
+      -- de cadastro do lead), que é o "período de venda = fechamento" pedido.
+      ADD COLUMN IF NOT EXISTS data_fechamento DATE
   `);
   // Lets multiple imports of the same export (different months) update the same
   // deal in place instead of duplicating it — required for "resgate" flows where
@@ -301,14 +329,17 @@ async function insertLeadBatch(
     closed: boolean;
     compareceu?: boolean;
     agendou?: boolean;
+    registroTipo?: TipoPlanilha;
+    dataFechamento?: string | null;
     raw: string;
   }>,
 ) {
   if (rows.length === 0) return;
 
+  const COLS = 27;
   const values: unknown[] = [];
   const placeholders = rows.map((row, index) => {
-    const base = index * 25;
+    const base = index * COLS;
     values.push(
       row.uploadId,
       row.clientId,
@@ -336,15 +367,18 @@ async function insertLeadBatch(
       // Booleanos que o funil de performance lê (Comparecimentos/Agendamentos).
       row.compareceu ?? false,
       row.agendou ?? false,
+      row.registroTipo ?? 'hibrido',
+      row.dataFechamento ?? null,
     );
-    return `(${Array.from({ length: 25 }, (_, i) => `$${base + i + 1}`).join(',')})`;
+    return `(${Array.from({ length: COLS }, (_, i) => `$${base + i + 1}`).join(',')})`;
   }).join(',');
 
   await pool.query(
     `INSERT INTO public.crm_leads
       (upload_id, client_id, lead_date, lead_name, phone, source, city, status_raw,
        data, nome, numero, canal, observacao, orcamento, pagamento, bairro, data_agendada,
-       revenue, valor_rs, fechou, status_category, status, raw, compareceu, agendou)
+       revenue, valor_rs, fechou, status_category, status, raw, compareceu, agendou,
+       registro_tipo, data_fechamento)
      VALUES ${placeholders}
      -- SEM alvo de propósito: a producao tem uma unique (client_id, numero)
      -- criada FORA do repo; com alvo explicito, instalacao sem a constraint
@@ -388,6 +422,7 @@ async function upsertPorTelefone(
     budget: number; payment: string | null; neighborhood: string | null;
     notes: string | null; revenue: number; closed: boolean; raw: string;
     compareceu?: boolean; agendou?: boolean;
+    registroTipo?: TipoPlanilha; dataFechamento?: string | null;
   }>,
 ) {
   if (rows.length === 0) return;
@@ -486,14 +521,17 @@ async function upsertLeadBatch(
     closed: boolean;
     compareceu?: boolean;
     agendou?: boolean;
+    registroTipo?: TipoPlanilha;
+    dataFechamento?: string | null;
     raw: string;
   }>,
 ) {
   if (rows.length === 0) return;
 
+  const COLS = 30;
   const values: unknown[] = [];
   const placeholders = rows.map((row, index) => {
-    const base = index * 28;
+    const base = index * COLS;
     values.push(
       row.uploadId, row.clientId, row.externalId,
       row.leadDate, row.leadName, row.phone, row.channel, row.neighborhood, row.statusRaw,
@@ -506,8 +544,10 @@ async function upsertLeadBatch(
       row.raw,
       row.compareceu ?? false,
       row.agendou ?? false,
+      row.registroTipo ?? 'hibrido',
+      row.dataFechamento ?? null,
     );
-    return `(${Array.from({ length: 28 }, (_, i) => `$${base + i + 1}`).join(',')})`;
+    return `(${Array.from({ length: COLS }, (_, i) => `$${base + i + 1}`).join(',')})`;
   }).join(',');
 
   await pool.query(
@@ -517,7 +557,8 @@ async function upsertLeadBatch(
        data, nome, numero, canal, bairro, data_agendada,
        stage, updated_at_external,
        orcamento, pagamento, observacao,
-       revenue, valor_rs, fechou, status_category, status, raw, compareceu, agendou)
+       revenue, valor_rs, fechou, status_category, status, raw, compareceu, agendou,
+       registro_tipo, data_fechamento)
      VALUES ${placeholders}
      -- ATENCAO: o WHERE abaixo e OBRIGATORIO. O indice unico de
      -- (client_id, external_id) é PARCIAL (só vale com external_id NOT NULL), e
@@ -554,6 +595,9 @@ async function upsertLeadBatch(
        observacao = EXCLUDED.observacao,
        revenue = EXCLUDED.revenue, valor_rs = EXCLUDED.valor_rs,
        fechou = EXCLUDED.fechou,
+       -- Ledger de vendas: reimport atualiza tipo/data de fechamento no lugar.
+       registro_tipo = EXCLUDED.registro_tipo,
+       data_fechamento = COALESCE(EXCLUDED.data_fechamento, public.crm_leads.data_fechamento),
        status_category = EXCLUDED.status_category,
        status = EXCLUDED.status,
        -- compareceu e agendou só AVANÇAM: quem já compareceu/agendou não deixa
@@ -710,6 +754,7 @@ export async function POST(req: NextRequest) {
     }
 
     // ── Step: import ───────────────────────────────────────────────────────────
+    const tipoPlanilha = normalizarTipoPlanilha(formData.get('tipoPlanilha'));
     const mappingsRaw = formData.get('mappings') as string | null;
     const clinicColumnOverride = formData.get('clinicColumn') as string | null;
     const revenueColumnOverride = formData.get('revenueColumn') as string | null;
@@ -769,10 +814,16 @@ export async function POST(req: NextRequest) {
     const pool = makeServerPool();
     await ensureTables(pool);
 
+    // O ledger de VENDAS é o faturamento REAL da clínica — não se corta por
+    // canal (senão o total não bate com o painel dela). O filtro de origem
+    // (que existe pra não inflar resultado de MÍDIA com lead orgânico) vale só
+    // para Leads e Híbrida.
+    const aplicaFiltroOrigem = tipoPlanilha !== 'venda';
+
     const results: Record<string, number> = {};
     // Relatório do que foi cortado. Vai pra resposta de propósito: descarte
     // silencioso faria o usuário achar que a importação perdeu linhas.
-    const resumoOrigem = channelCol
+    const resumoOrigem = channelCol && aplicaFiltroOrigem
       ? resumirOrigens(rows.map(r => r[channelCol]))
       : { aceitas: rows.length, descartadas: 0, origens: [] as { origem: string; linhas: number }[] };
 
@@ -781,7 +832,7 @@ export async function POST(req: NextRequest) {
     // (R$ 604 mil de R$ 1,03 mi) — dizer só "325 linhas" esconderia a ordem de
     // grandeza do que não vai aparecer no Dashboard.
     let receitaDescartada = 0;
-    if (channelCol && revenueCol) {
+    if (channelCol && revenueCol && aplicaFiltroOrigem) {
       for (const r of rows) {
         if (!origemIntegravel(r[channelCol])) receitaDescartada += parseRevenue(r[revenueCol]);
       }
@@ -801,8 +852,8 @@ export async function POST(req: NextRequest) {
         // Corte da allowlist de origem. Acontece AQUI, antes de virar lead:
         // `crm_leads` é lida por 54 arquivos e 85 consultas, e filtrar em todas
         // seria inviável — uma esquecida faria o CRM mostrar um total e o
-        // Dashboard outro.
-        if (channelCol) clientRows = clientRows.filter(r => origemIntegravel(r[channelCol]));
+        // Dashboard outro. Pulado no tipo Venda (faturamento total, todo canal).
+        if (channelCol && aplicaFiltroOrigem) clientRows = clientRows.filter(r => origemIntegravel(r[channelCol]));
 
         // Dedupe do lote quando há ID do negócio: importar meses diferentes faz
         // a mesma linha aparecer várias vezes, e vale a versão MAIS RECENTE —
@@ -839,7 +890,12 @@ export async function POST(req: NextRequest) {
         );
 
         const toRow = (row: Record<string, unknown>) => {
-          const revenue = revenueCol ? parseRevenue(row[revenueCol]) : 0;
+          const revenueBruto = revenueCol ? parseRevenue(row[revenueCol]) : 0;
+          // Leads alimentam SÓ o funil: o valor não vira faturamento em lugar
+          // nenhum (revenue = 0). Separar aqui, na gravação, protege TODAS as
+          // telas que somam receita de crm_leads (relatório, portal, criativos…)
+          // de contar a mesma venda de novo — não só o dashboard.
+          const revenue = tipoPlanilha === 'lead' ? 0 : revenueBruto;
           const statusRaw = statusCol ? String(row[statusCol] ?? '').trim() || null : null;
           // O funil de performance lê os BOOLEANOS `compareceu`/`fechou`, não o
           // texto. Sem traduzir aqui, "Avaliação Realizada" nunca vira
@@ -869,12 +925,36 @@ export async function POST(req: NextRequest) {
             revenue,
             // `fechou` pelo vocabulário da planilha OU pela regra antiga —
             // manter as duas evita quebrar quem já importava com outro texto.
-            closed: sinais.fechou || (statusCol ? isWonStatus(statusRaw) : revenue > 0),
+            // No ledger de Vendas toda linha É uma venda concluída. Usa o valor
+            // BRUTO no heurístico (o revenue já pode ter sido zerado no tipo Leads).
+            closed: tipoPlanilha === 'venda'
+              ? true
+              : sinais.fechou || (statusCol ? isWonStatus(statusRaw) : revenueBruto > 0),
+            registroTipo: tipoPlanilha,
+            // Data de fechamento = a data mapeada no relatório de Vendas
+            // (ex.: DATA FATURAMENTO). Só o tipo Venda janela a receita por ela.
+            dataFechamento: tipoPlanilha === 'venda' ? (dateCol ? parseDate(row[dateCol]) : null) : null,
             raw: JSON.stringify(row),
           };
         };
 
-        if (dealIdCol) {
+        if (tipoPlanilha === 'venda') {
+          // Ledger de faturamento: sem telefone nem ID, cada linha recebe um
+          // external_id ESTÁVEL (sintetizarIdVenda) e vai pelo upsert — reimportar
+          // o mesmo relatório ATUALIZA em vez de duplicar (era o bug do "mais que
+          // deveria"). Dedupe dentro do lote pelo mesmo id (ON CONFLICT não pode
+          // tocar a mesma linha 2x num INSERT).
+          const porId = new Map<string, ReturnType<typeof toRow> & { externalId: string; stage: string | null; updatedAtExternal: string | null }>();
+          for (const row of groupedRows) {
+            const r = toRow(row);
+            const externalId = sintetizarIdVenda(clientId, r);
+            porId.set(externalId, { ...r, externalId, stage: null, updatedAtExternal: r.dataFechamento });
+          }
+          const batchVendas = [...porId.values()];
+          for (let i = 0; i < batchVendas.length; i += 150) {
+            await upsertLeadBatch(pool, batchVendas.slice(i, i + 150));
+          }
+        } else if (dealIdCol) {
           // Upsert path — preserves deals from earlier imports (different
           // months) and only updates a deal if this row is at least as
           // recent, so it never overwrites a later status with an older one.
