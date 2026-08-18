@@ -814,11 +814,14 @@ export async function POST(req: NextRequest) {
     const pool = makeServerPool();
     await ensureTables(pool);
 
-    // O ledger de VENDAS é o faturamento REAL da clínica — não se corta por
-    // canal (senão o total não bate com o painel dela). O filtro de origem
-    // (que existe pra não inflar resultado de MÍDIA com lead orgânico) vale só
-    // para Leads e Híbrida.
-    const aplicaFiltroOrigem = tipoPlanilha !== 'venda';
+    // O filtro de origem (allowlist ORIGENS_INTEGRAVEIS) vale para TODOS os
+    // tipos, INCLUSIVE Vendas. O faturamento do dashboard é o dos canais que a
+    // agência opera (WhatsApp/Chatwoot/Facebook/Instagram/Google/Site); Indicação,
+    // Fachada/Passou em Frente e "Reavaliação/Já sou Paciente" NÃO entram — o
+    // número de referência da clínica (validado com o Matheus) é exatamente o
+    // total MENOS esses canais orgânicos. As linhas fora da allowlist viram
+    // `receita_descartada` na resposta (transparência).
+    const aplicaFiltroOrigem = true;
 
     const results: Record<string, number> = {};
     // Relatório do que foi cortado. Vai pra resposta de propósito: descarte
