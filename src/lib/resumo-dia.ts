@@ -61,6 +61,16 @@ export function ehRuidoFinanceiro(descricao: string): boolean {
   return /conta cobrada|quantia adicionada|saldo|billing|funding|cobran[çc]a|fatura/i.test(descricao);
 }
 
+/**
+ * Evento da PRÓPRIA plataforma falando de si ("Anúncio exibido — Meta",
+ * revisão concluída) — visto no dry-run real: autor vem literalmente "Meta".
+ * O resumo é de AÇÕES DE GESTÃO (gestor/Luna); veiculação automática fora.
+ */
+export function ehEventoDaPlataforma(autor: string): boolean {
+  const a = autor.trim().toLowerCase();
+  return a === 'meta' || a === 'facebook' || a === 'google' || a === 'google ads';
+}
+
 const MAX_LINHAS = 12;
 
 export function compilarResumoDoDia(eventos: EventoConta[], diaLabel: string): ResumoCanal[] {
