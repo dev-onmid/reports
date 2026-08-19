@@ -14,7 +14,7 @@ export async function GET() {
           u.tokens_usados,
           u.custo_estimado_usd::float AS custo_estimado_usd,
           COALESCE(cfg.ia_limite_chamadas_dia, 500)::int AS ia_limite_chamadas_dia,
-          COALESCE(cfg.ia_ativa, TRUE) AS ia_ativa,
+          COALESCE(cfg.ia_ativa, FALSE) AS ia_ativa,
           COALESCE(today.total, 0)::int AS chamadas_hoje
          FROM public.ia_uso_mensal u
          LEFT JOIN public.clients c ON c.id::text = u.client_id

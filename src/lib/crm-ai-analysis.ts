@@ -133,7 +133,7 @@ export async function ensureCrmAiSchema(pool: Pool) {
       ADD COLUMN IF NOT EXISTS ia_limite_chamadas_dia INTEGER NOT NULL DEFAULT 500;
 
     ALTER TABLE public.client_tracking_config
-      ADD COLUMN IF NOT EXISTS ia_ativa BOOLEAN NOT NULL DEFAULT TRUE;
+      ADD COLUMN IF NOT EXISTS ia_ativa BOOLEAN NOT NULL DEFAULT FALSE;
   `);
 
   for (const [temperatura, criterios] of Object.entries(DEFAULT_CRITERIA)) {
@@ -339,13 +339,16 @@ export async function analisarConversa(pool: Pool, leadId: string): Promise<void
 
     const { rows: [config] } = await pool.query(
       `SELECT COALESCE(ia_limite_chamadas_dia, 500)::int AS limite,
-              COALESCE(ia_ativa, TRUE) AS ativa
+              COALESCE(ia_ativa, FALSE) AS ativa
          FROM public.client_tracking_config
         WHERE client_id = $1`,
       [clientId],
     );
-    // Interruptor POR CLIENTE: desligado = nenhuma análise/movimentação de etapa por IA.
-    if (config && config.ativa === false) return;
+    // Interruptor POR CLIENTE — padrão DESLIGADO (decisão do Matheus,
+    // 2026-08-19: sem movimentação automática ainda). ⚠️ Opt-in explícito:
+    // cliente SEM linha de config também fica fora — antes "sem config"
+    // significava ligado, e era exatamente o buraco que religaria todo mundo.
+    if (config?.ativa !== true) return;
     const dailyLimit = Number(config?.limite ?? 500);
     const { rows: [usageToday] } = await pool.query(
       `SELECT COUNT(*)::int AS total
