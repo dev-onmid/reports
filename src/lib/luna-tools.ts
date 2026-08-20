@@ -15,6 +15,7 @@ import { ensureOptimizerClientConfigTable } from '@/lib/optimizer';
 import { executeOptimizerAction } from '@/lib/optimizer-execucao';
 import { dispararEventosPorStatus } from '@/lib/conversions';
 import { sanitizeGoogleKeywords, parsePartialFailure, cityNameVariants, type PartialFailureResult } from '@/lib/google-campaign-utils';
+import { salvarAssetDeUrl, salvarVideoUrl, listarAssets, obterAssetImagem } from '@/lib/client-assets';
 import type { OptimizerAcaoTipo, OptimizerObjetoTipo } from '@/lib/optimizer';
 
 // ─── Agendamento (luna_tasks) ────────────────────────────────────────────────
@@ -891,6 +892,29 @@ Sempre confirme com o usuário antes de remover; pausar é reversível, remover 
         final_url: { type: 'string', description: 'Nova URL de destino. Omita para manter a atual.' },
       },
       required: ['client_id', 'campaign_id'],
+    },
+  },
+  {
+    name: 'save_client_asset',
+    description: 'Salva um arquivo na BIBLIOTECA DE ASSETS do cliente (logo ou imagem de anúncio, por URL — aceita link direto e link de compartilhar do Google Drive/Dropbox público; ou URL de vídeo como referência). Depois de salvo, a criação de campanhas usa o asset AUTOMATICAMENTE, sem precisar da URL de novo. Use quando o usuário mandar o logo/imagem de um cliente ("guarda esse logo do cliente X").',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        client_id: { type: 'string', description: 'ID interno do cliente (de list_clients)' },
+        tipo: { type: 'string', enum: ['logo', 'imagem', 'video_url'], description: 'logo = marca do cliente; imagem = arte de anúncio; video_url = link de vídeo (YouTube etc., só referência)' },
+        url: { type: 'string', description: 'URL do arquivo (JPG/PNG/WebP até 4MB; Drive precisa estar "qualquer pessoa com o link")' },
+        nome: { type: 'string', description: 'Nome descritivo (ex: "Logo oficial 2026", "Arte promo implantes")' },
+      },
+      required: ['client_id', 'tipo', 'url'],
+    },
+  },
+  {
+    name: 'list_client_assets',
+    description: 'Lista os assets salvos na biblioteca de um cliente (logos, imagens de anúncio, vídeos de referência), com data e tamanho. Use antes de criar campanha pra saber o que já existe.',
+    input_schema: {
+      type: 'object' as const,
+      properties: { client_id: { type: 'string', description: 'ID interno do cliente' } },
+      required: ['client_id'],
     },
   },
   // ── Pacote A: execução Meta + Google ──────────────────────────────────────
@@ -2350,6 +2374,28 @@ export async function execSystemTool(
       return `Credencial "${title}" salva no Cofre de ${clientRows[0].name}.`;
     }
 
+    if (name === 'save_client_asset') {
+      const clientId = String(input.client_id ?? '');
+      const tipo = String(input.tipo ?? 'imagem');
+      const url = String(input.url ?? '').trim();
+      if (!clientId || !url) return 'Informe client_id e url.';
+      try {
+        const salvo = tipo === 'video_url'
+          ? await salvarVideoUrl(pool, clientId, url, input.nome as string | undefined, 'luna')
+          : await salvarAssetDeUrl(pool, clientId, tipo as 'logo' | 'imagem', url, input.nome as string | undefined, 'luna');
+        return `✅ Asset salvo na biblioteca do cliente: "${salvo.nome}" (${tipo}${salvo.kb ? `, ${salvo.kb}KB` : ''}). A partir de agora a criação de campanhas usa esse arquivo automaticamente.`;
+      } catch (e) {
+        return `❌ Não consegui salvar: ${e instanceof Error ? e.message : 'erro'}`;
+      }
+    }
+
+    if (name === 'list_client_assets') {
+      const clientId = String(input.client_id ?? '');
+      const assets = await listarAssets(pool, clientId).catch(() => []);
+      if (assets.length === 0) return 'Nenhum asset na biblioteca desse cliente. Peça ao usuário o logo/imagens e salve com save_client_asset.';
+      return JSON.stringify(assets.map(a => ({ id: a.id, tipo: a.tipo, nome: a.nome, kb: a.kb, url: a.url ?? undefined, salvo_em: String(a.created_at).slice(0, 10) })));
+    }
+
     if (name === 'create_meta_campaign') {
       const {
         client_id, name: campName, objective, daily_budget,
@@ -2720,6 +2766,17 @@ export async function execSystemTool(
               }
             } catch (e) {
               avisoImagem = `falha ao baixar a imagem (${String(e).slice(0, 80)}) — usei o placeholder`;
+            }
+          }
+          if (!imgBuf) {
+            // Biblioteca de assets: sem URL informada, usa a imagem/logo salvo do cliente.
+            const daBiblioteca = await obterAssetImagem(pool, client_id, 'imagem').catch(() => null);
+            if (daBiblioteca?.bytes) {
+              imgBuf = daBiblioteca.bytes;
+              imgTipo = daBiblioteca.mime ?? 'image/jpeg';
+              imgNome = /png/.test(imgTipo) ? 'criativo.png' : /webp/.test(imgTipo) ? 'criativo.webp' : 'criativo.jpg';
+              usouImagemReal = true;
+              avisoImagem = `usei "${daBiblioteca.nome}" da biblioteca de assets do cliente`;
             }
           }
           if (!imgBuf) imgBuf = createBlackPng(1080, 1080);
@@ -3282,6 +3339,20 @@ export async function execSystemTool(
           extResumo.push('error' in l
             ? `⚠️ Nome da empresa criado mas não vinculado — ${l.error}`
             : `✅ Nome da empresa: "${businessName}" (sujeito à aprovação do Google — precisa casar com o anunciante verificado)`);
+        }
+      }
+
+      // Logo da biblioteca de assets → BUSINESS_LOGO da campanha (best-effort).
+      const logoAsset = await obterAssetImagem(pool, clientId, 'logo').catch(() => null);
+      if (logoAsset?.bytes) {
+        const la = await lunaGoogleMutate(customerId, token, login, 'assets',
+          [{ create: { name: `Logo — ${logoAsset.nome} ${Date.now()}`, imageAsset: { data: logoAsset.bytes.toString('base64') } } }]);
+        if ('error' in la) extResumo.push(`⚠️ Logo: FALHA no upload — ${la.error}`);
+        else {
+          const l = await linkAssets(la.resourceNames, 'BUSINESS_LOGO');
+          extResumo.push('error' in l
+            ? `⚠️ Logo subiu mas não vinculou — ${l.error}`
+            : `✅ Logo "${logoAsset.nome}" (da biblioteca do cliente, sujeito à aprovação do Google)`);
         }
       }
 
