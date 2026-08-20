@@ -3,7 +3,8 @@ import { makeServerPool } from '@/lib/server-db';
 import { parsePhoneList } from '@/lib/phone-formatter';
 import { getCallerScope } from '@/lib/disparos-access';
 import { serializeActiveDays } from '@/lib/disparos-schedule';
-import { checkWhatsappNumbers } from '@/lib/evolution-api';
+import { checkWhatsappNumbers, checkEvolutionStatus } from '@/lib/evolution-api';
+import { resolverDestino, garantirZapiClient, nomeConfere } from '@/lib/disparos-destinos';
 
 async function ensureColumns(pool: ReturnType<typeof makeServerPool>) {
   await pool.query(`
@@ -22,9 +23,16 @@ export async function GET(request: NextRequest) {
     await ensureColumns(pool);
     const scope = await getCallerScope(request, pool);
     const { rows } = await pool.query(
-      `SELECT c.*, cl.name AS client_name
+      `SELECT c.*, cl.name AS client_name, cl.instance_id,
+              link.client_id AS onmid_client_id, oc.name AS onmid_client_name
          FROM public.zapi_campaigns c
          JOIN public.zapi_clients cl ON cl.id = c.client_id
+         LEFT JOIN LATERAL (
+           SELECT client_id FROM public.client_zapi_instances
+            WHERE instance_id = cl.instance_id AND ativo = true
+            ORDER BY created_at DESC LIMIT 1
+         ) link ON true
+         LEFT JOIN public.clients oc ON oc.id = link.client_id
         WHERE ($1::boolean OR cl.owner_id = $2)
         ORDER BY c.created_at DESC`,
       [scope.unrestricted, scope.userId],
@@ -37,7 +45,12 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   const body = await request.json() as {
-    clientId: string;
+    /** Cliente da ONMID (clients.id) — o destino é o cliente, não a instância. */
+    onmidClientId: string;
+    /** Qual número do cliente usar (client_zapi_instances.instance_id). */
+    instanceId: string;
+    /** Nome do cliente digitado na confirmação. */
+    confirmClientName: string;
     name: string;
     message: string;
     messages?: string[];
@@ -53,7 +66,7 @@ export async function POST(request: NextRequest) {
     activeDays?: number[];
   };
 
-  const { clientId, name, message, messages, imageUrls, numbers, startsAt, endsAt, activeFrom, activeUntil, activeDays } = body;
+  const { onmidClientId, instanceId, confirmClientName, name, message, messages, imageUrls, numbers, startsAt, endsAt, activeFrom, activeUntil, activeDays } = body;
   // Piso anti-bloqueio: intervalo aleatório nunca abaixo de 90s (decisão do
   // Matheus, 2026-07-31) — mesmo que o form mande menos, o servidor trava aqui
   // e o motor (worker/tick) trava de novo pra campanhas antigas.
@@ -65,7 +78,12 @@ export async function POST(request: NextRequest) {
   const imageUrl = imageUrls && imageUrls.length > 0 ? JSON.stringify(imageUrls) : null;
   const messagesJson = messages && messages.length > 1 ? JSON.stringify(messages) : null;
 
-  if (!clientId || !name || !message || !numbers || !startsAt) {
+  if (!onmidClientId || !instanceId) {
+    return Response.json({
+      error: 'Escolha o cliente e o número de WhatsApp que vai disparar.',
+    }, { status: 400 });
+  }
+  if (!name || !message || !numbers || !startsAt) {
     return Response.json({ error: 'Campos obrigatórios ausentes.' }, { status: 400 });
   }
 
@@ -86,13 +104,44 @@ export async function POST(request: NextRequest) {
   try {
     await ensureColumns(pool);
     const scope = await getCallerScope(request, pool);
-    if (!scope.unrestricted) {
-      const { rows: [owned] } = await pool.query(
-        `SELECT 1 FROM public.zapi_clients WHERE id = $1 AND owner_id = $2`,
-        [clientId, scope.userId],
-      );
-      if (!owned) return Response.json({ error: 'Sem permissão para esta instância' }, { status: 403 });
+
+    // ── Portão do servidor ──────────────────────────────────────────────
+    // A tela é só apresentação. Aqui é onde se garante que (1) a instância é
+    // MESMO daquele cliente, (2) quem disparou digitou o nome do cliente e (3)
+    // o WhatsApp está conectado AGORA. Foi a ausência do item 3 que deixou uma
+    // campanha nascer apontada pra uma instância inexistente e queimar 89
+    // contatos em 404 antes de alguém perceber (20/08/2026).
+    const destino = await resolverDestino(pool, onmidClientId, instanceId);
+    if ('erro' in destino) {
+      return Response.json({ error: destino.erro }, { status: 400 });
     }
+    if (!nomeConfere(confirmClientName ?? '', destino.clientName)) {
+      return Response.json({
+        error: `Confirmação não confere. Digite exatamente o nome do cliente: ${destino.clientName}`,
+      }, { status: 400 });
+    }
+
+    if (destino.provider === 'evolution') {
+      let conectada = false;
+      try { conectada = await checkEvolutionStatus(destino.instanceId); } catch { conectada = false; }
+      if (!conectada) {
+        return Response.json({
+          error: `O WhatsApp de ${destino.clientName} não está conectado (${destino.instanceId}). `
+               + 'Reconecte em Configurações → Instâncias antes de criar a campanha.',
+          instancia_desconectada: true,
+        }, { status: 409 });
+      }
+    }
+
+    // Resolve-ou-cria a linha de zapi_clients desta instância: o FK da campanha
+    // e o JOIN do worker continuam intactos.
+    const clientId = await garantirZapiClient(pool, {
+      instanceId: destino.instanceId,
+      nomeCliente: destino.clientName,
+      provider: destino.provider,
+      token: destino.token,
+      ownerId: scope.unrestricted ? null : scope.userId,
+    });
 
     const startsAtDate = new Date(startsAt);
     const initialStatus = startsAtDate <= new Date() ? 'running' : 'pending';
@@ -103,12 +152,8 @@ export async function POST(request: NextRequest) {
     // → segue sem validação, nunca bloqueia a criação por indisponibilidade.
     let finalNumbers = parsed;
     let invalid: Array<{ phone: string; name?: string | null }> = [];
-    const { rows: [inst] } = await pool.query<{ instance_id: string; provider: string }>(
-      `SELECT instance_id, provider FROM public.zapi_clients WHERE id = $1`,
-      [clientId],
-    );
-    if (inst?.provider === 'evolution') {
-      const check = await checkWhatsappNumbers(inst.instance_id, parsed.map(p => p.phone));
+    if (destino.provider === 'evolution') {
+      const check = await checkWhatsappNumbers(destino.instanceId, parsed.map(p => p.phone));
       if (check && check.size > 0) {
         finalNumbers = parsed.filter(p => check.get(p.phone.replace(/\D/g, '')) !== false);
         invalid = parsed

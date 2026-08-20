@@ -14,6 +14,9 @@ import { makeServerPool } from '@/lib/server-db';
 import { sendText, sendImage } from '@/lib/zapi';
 import { sendFollowupMessage, type WaInstance } from '@/lib/followup-send';
 import { isWithinWindow, isActiveDayNow } from '@/lib/disparos-schedule';
+import { classificarErroEnvio } from '@/lib/disparos-destinos';
+import { sondarInstancia } from '@/lib/disparos-sonda';
+import { pausarCampanhaPorInstancia } from '@/lib/disparos-alerta';
 
 export const maxDuration = 30;
 
@@ -65,6 +68,8 @@ async function runWorker(req: NextRequest) {
 
     const { rows: campaigns } = await pool.query<{
       id: string;
+      name: string;
+      client_name: string;
       status: string;
       message: string;
       messages: string | null;
@@ -83,10 +88,10 @@ async function runWorker(req: NextRequest) {
       security_token: string | null;
       provider: string;
     }>(`
-      SELECT c.id, c.status, c.message, c.messages, c.message_index, c.image_url, c.ends_at,
+      SELECT c.id, c.name, c.status, c.message, c.messages, c.message_index, c.image_url, c.ends_at,
              c.active_from, c.active_until, c.active_days, c.interval_min, c.interval_max,
              c.daily_limit, c.client_id,
-             cl.instance_id, cl.token, cl.security_token, cl.provider
+             cl.instance_id, cl.token, cl.security_token, cl.provider, cl.name AS client_name
         FROM public.zapi_campaigns c
         JOIN public.zapi_clients cl ON cl.id = c.client_id
        WHERE c.status = 'running'
@@ -131,6 +136,33 @@ async function runWorker(req: NextRequest) {
             `UPDATE public.zapi_campaigns
                 SET next_tick_at = (date_trunc('day', NOW() AT TIME ZONE 'America/Sao_Paulo') + INTERVAL '1 day') AT TIME ZONE 'America/Sao_Paulo'
               WHERE id = $1`,
+            [campaign.id],
+          );
+          continue;
+        }
+      }
+
+      // ── Sonda a instância ANTES de gastar contato ───────────────────────
+      // Instância morta marcava cada número como `failed` e o worker só pega
+      // `pending` — a lista ia embora sem retry e sem aviso. Agora a campanha
+      // pausa e avisa; Evolution fora do ar (transitório) só adia o tick.
+      if (campaign.provider === 'evolution') {
+        const estado = await sondarInstancia(campaign.instance_id);
+        if (estado === 'inexistente' || estado === 'desconectada') {
+          await pausarCampanhaPorInstancia(pool, {
+            campaignId: campaign.id,
+            campanha: campaign.name,
+            cliente: campaign.client_name,
+            instancia: campaign.instance_id,
+            motivo: estado === 'inexistente'
+              ? 'a instância não existe mais no servidor Evolution'
+              : 'o WhatsApp está desconectado',
+          });
+          continue;
+        }
+        if (estado === 'indisponivel') {
+          await pool.query(
+            `UPDATE public.zapi_campaigns SET next_tick_at = NOW() + INTERVAL '60 seconds' WHERE id = $1`,
             [campaign.id],
           );
           continue;
@@ -222,6 +254,24 @@ async function runWorker(req: NextRequest) {
           result = isEvolution
             ? await sendFollowupMessage({ instance: waInstance, phone: number.phone, tipo: 'texto', conteudo: message, vars: {} })
             : await sendText(client, number.phone, message);
+        }
+
+        // Culpa da INSTÂNCIA não queima o contato: devolve pra fila e pausa.
+        // (Número sem WhatsApp — `exists:false` — segue marcado como failed,
+        // que é o certo: tentar de novo não faria ele existir.)
+        if (!result.ok && classificarErroEnvio(result.error ?? '') === 'instancia') {
+          await pool.query(
+            `UPDATE public.zapi_numbers SET status = 'pending', sent_at = NULL, error_msg = $2 WHERE id = $1`,
+            [number.id, result.error ?? null],
+          );
+          await pausarCampanhaPorInstancia(pool, {
+            campaignId: campaign.id,
+            campanha: campaign.name,
+            cliente: campaign.client_name,
+            instancia: campaign.instance_id,
+            motivo: `a instância falhou no envio: ${String(result.error ?? '').slice(0, 160)}`,
+          });
+          break;
         }
 
         const newStatus = result.ok ? 'sent' : 'failed';

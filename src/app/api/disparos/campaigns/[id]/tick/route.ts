@@ -8,6 +8,8 @@ import { makeServerPool } from '@/lib/server-db';
 import { sendText, sendImage } from '@/lib/zapi';
 import { sendFollowupMessage, type WaInstance } from '@/lib/followup-send';
 import { isWithinWindow, isActiveDayNow } from '@/lib/disparos-schedule';
+import { classificarErroEnvio } from '@/lib/disparos-destinos';
+import { pausarCampanhaPorInstancia } from '@/lib/disparos-alerta';
 
 function interpolate(template: string, phone: string, name: string) {
   return template.replace(/\{telefone\}/g, phone).replace(/\{nome\}/g, name);
@@ -27,7 +29,7 @@ export async function POST(
     await pool.query(`ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS daily_limit INT`);
 
     const { rows: [campaign] } = await pool.query(
-      `SELECT c.*, cl.instance_id, cl.token, cl.security_token, cl.provider
+      `SELECT c.*, cl.instance_id, cl.token, cl.security_token, cl.provider, cl.name AS client_name
          FROM public.zapi_campaigns c
          JOIN public.zapi_clients cl ON cl.id = c.client_id
         WHERE c.id = $1`,
@@ -161,6 +163,27 @@ export async function POST(
       result = isEvolution
         ? await sendFollowupMessage({ instance: waInstance, phone: number.phone, tipo: 'texto', conteudo: message, vars: {} })
         : await sendText(client, number.phone, message);
+    }
+
+    // Mesma regra do worker: falha da INSTÂNCIA devolve o contato pra fila e
+    // pausa a campanha, em vez de queimar a lista um número por tick.
+    if (!result.ok && classificarErroEnvio(result.error ?? '') === 'instancia') {
+      await pool.query(
+        `UPDATE public.zapi_numbers SET status = 'pending', sent_at = NULL, error_msg = $2 WHERE id = $1`,
+        [number.id, result.error ?? null],
+      );
+      await pausarCampanhaPorInstancia(pool, {
+        campaignId: id,
+        campanha: campaign.name,
+        cliente: campaign.client_name,
+        instancia: campaign.instance_id,
+        motivo: `a instância falhou no envio: ${String(result.error ?? '').slice(0, 160)}`,
+      });
+      return Response.json({
+        done: false,
+        paused: true,
+        error: `Campanha pausada: ${result.error ?? 'falha na instância'}`,
+      });
     }
 
     const newStatus = result.ok ? 'sent' : 'failed';

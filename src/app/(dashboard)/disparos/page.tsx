@@ -18,6 +18,9 @@ import { cn } from '@/lib/utils';
 import { callerHeaders } from '@/lib/auth-store';
 import { useClients } from '@/lib/client-store';
 import { DictateButton } from '@/components/ui/dictate-button';
+import { SeletorCliente } from '@/components/disparos/seletor-cliente';
+import { ConfirmarClienteModal } from '@/components/disparos/confirmar-cliente-modal';
+import type { DestinoCliente, InstanciaOrfa } from '@/lib/disparos-destinos';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -29,6 +32,8 @@ type ZClient = {
 
 type Campaign = {
   id: string; name: string; client_name: string; client_id: string;
+  instance_id?: string | null;
+  onmid_client_id?: string | null; onmid_client_name?: string | null;
   message: string; messages?: string | string[] | null; image_url: string | null;
   status: 'pending' | 'running' | 'paused' | 'done' | 'cancelled';
   starts_at: string; ends_at: string | null;
@@ -49,7 +54,7 @@ type NumberDetail = {
 };
 
 type CampaignPrefill = {
-  clientId: string; name: string; message: string; numbers: string;
+  onmidClientId: string; instanceId: string; name: string; message: string; numbers: string;
   imageUrls?: string[]; intervalMin: number; intervalMax: number; dailyLimit?: number;
   activeFrom?: string; activeUntil?: string; activeDays?: number[];
 };
@@ -1066,9 +1071,12 @@ const FORM_STEPS = [
 
 function NovaCampanhaTab({ onCreated, prefill, editCampaign }: { onCreated: () => void; prefill?: CampaignPrefill | null; editCampaign?: Campaign | null }) {
   const isEdit = !!editCampaign;
-  const [clients, setClients] = useState<ZClient[]>([]);
+  const [destinos, setDestinos] = useState<DestinoCliente[]>([]);
+  const [orfas, setOrfas] = useState<InstanciaOrfa[]>([]);
+  const [erroEvolution, setErroEvolution] = useState('');
+  const [confirmando, setConfirmando] = useState(false);
   const [form, setForm] = useState({
-    clientId: '', name: '', message: '', numbers: '',
+    onmidClientId: '', instanceId: '', name: '', message: '', numbers: '',
     isNow: true, startsAt: '', endsAt: '',
     activeFrom: '', activeUntil: '',
     activeDays: ALL_DAYS as number[],
@@ -1094,16 +1102,23 @@ function NovaCampanhaTab({ onCreated, prefill, editCampaign }: { onCreated: () =
     return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
   }
 
+  // Destinos = CLIENTES com WhatsApp, com status lido ao vivo da Evolution.
+  // (A lista antiga vinha de `zapi_clients` e mostrava só as instâncias criadas
+  // pela própria tela — os clientes de verdade nunca apareciam ali.)
   useEffect(() => {
-    fetch('/api/disparos/clients', { headers: callerHeaders() }).then(r => r.json() as Promise<ZClient[]>).then(data => {
-      setClients(data);
-      if (data[0]) setForm(p => ({ ...p, clientId: p.clientId || data[0].id }));
-    });
+    fetch('/api/disparos/destinos', { headers: callerHeaders() })
+      .then(r => r.json() as Promise<{ clientes: DestinoCliente[]; orfas: InstanciaOrfa[]; erroEvolution?: string }>)
+      .then(data => {
+        setDestinos(data.clientes ?? []);
+        setOrfas(data.orfas ?? []);
+        setErroEvolution(data.erroEvolution ?? '');
+      })
+      .catch(() => { /* tela degrada: seletor vazio, criacao bloqueada pelo servidor */ });
   }, []);
 
   useEffect(() => {
     if (!prefill) return;
-    setForm({ clientId: prefill.clientId, name: prefill.name + ' (cópia)', message: prefill.message, numbers: prefill.numbers, isNow: true, startsAt: '', endsAt: '', activeFrom: prefill.activeFrom ?? '', activeUntil: prefill.activeUntil ?? '', activeDays: prefill.activeDays ?? ALL_DAYS, intervalMin: Math.max(90, prefill.intervalMin), intervalMax: Math.max(120, prefill.intervalMax), dailyLimit: prefill.dailyLimit ?? 120 });
+    setForm({ onmidClientId: prefill.onmidClientId, instanceId: prefill.instanceId, name: prefill.name + ' (cópia)', message: prefill.message, numbers: prefill.numbers, isNow: true, startsAt: '', endsAt: '', activeFrom: prefill.activeFrom ?? '', activeUntil: prefill.activeUntil ?? '', activeDays: prefill.activeDays ?? ALL_DAYS, intervalMin: Math.max(90, prefill.intervalMin), intervalMax: Math.max(120, prefill.intervalMax), dailyLimit: prefill.dailyLimit ?? 120 });
     setImageUrls(prefill.imageUrls ?? []);
   }, [prefill]);
 
@@ -1120,7 +1135,8 @@ function NovaCampanhaTab({ onCreated, prefill, editCampaign }: { onCreated: () =
     const vars = msgs.slice(1).map(t => ({ text: t, label: '', editing: false }));
     setForm(p => ({
       ...p,
-      clientId: editCampaign.client_id,
+      onmidClientId: editCampaign.onmid_client_id ?? '',
+      instanceId: editCampaign.instance_id ?? '',
       name: editCampaign.name,
       message: mainMsg,
       numbers: '',
@@ -1224,8 +1240,14 @@ function NovaCampanhaTab({ onCreated, prefill, editCampaign }: { onCreated: () =
     return `${String(d.getUTCHours()).padStart(2,'0')}:${String(d.getUTCMinutes()).padStart(2,'0')}`;
   }
 
+  /**
+   * Criar campanha = começar a mandar mensagem pra lista de um cliente. Por
+   * isso não dispara direto: para no modal que exige digitar o nome do cliente.
+   * Edição de campanha existente não passa por aqui (não religa envio).
+   */
   async function create() {
-    if (!isEdit && (!form.clientId || !form.name || !form.message || !form.numbers)) { setError('Preencha todos os campos obrigatórios.'); return; }
+    if (!isEdit && (!form.onmidClientId || !form.instanceId)) { setError('Escolha o cliente que vai disparar.'); return; }
+    if (!isEdit && (!form.name || !form.message || !form.numbers)) { setError('Preencha todos os campos obrigatórios.'); return; }
     if (!isEdit && !form.isNow && !form.startsAt) { setError('Selecione o horário de início ou escolha "Agora".'); return; }
     if (form.activeDays.length === 0) { setError('Selecione pelo menos um dia da semana para os disparos.'); return; }
     setSaving(true); setError('');
@@ -1257,14 +1279,29 @@ function NovaCampanhaTab({ onCreated, prefill, editCampaign }: { onCreated: () =
         return;
       }
 
+      setConfirmando(true);
+    } finally { setSaving(false); }
+  }
+
+  /** Só aqui a campanha nasce — com o nome do cliente digitado junto. */
+  async function confirmarECriar(confirmClientName: string) {
+    setSaving(true); setError('');
+    try {
+      const endsAt      = form.endsAt ? toISO(form.endsAt) : null;
+      const activeFrom  = form.activeFrom && form.activeUntil ? localTimeToUTC(form.activeFrom) : null;
+      const activeUntil = form.activeFrom && form.activeUntil ? localTimeToUTC(form.activeUntil) : null;
+      const activeDays  = form.activeDays.length < 7 ? form.activeDays : null;
+      const allMessages = variations.length > 0 ? [form.message, ...variations.map(v => v.text)] : undefined;
       const startsAt = form.isNow ? new Date().toISOString() : toISO(form.startsAt);
-      const res = await fetch('/api/disparos/campaigns', { method: 'POST', headers: { 'Content-Type': 'application/json', ...callerHeaders() }, body: JSON.stringify({ clientId: form.clientId, name: form.name, message: form.message, messages: allMessages, numbers: form.numbers, startsAt, endsAt, activeFrom, activeUntil, activeDays, intervalMin: form.intervalMin, intervalMax: form.intervalMax, dailyLimit: form.dailyLimit, imageUrls: imageUrls.length > 0 ? imageUrls : undefined }) });
+
+      const res = await fetch('/api/disparos/campaigns', { method: 'POST', headers: { 'Content-Type': 'application/json', ...callerHeaders() }, body: JSON.stringify({ onmidClientId: form.onmidClientId, instanceId: form.instanceId, confirmClientName, name: form.name, message: form.message, messages: allMessages, numbers: form.numbers, startsAt, endsAt, activeFrom, activeUntil, activeDays, intervalMin: form.intervalMin, intervalMax: form.intervalMax, dailyLimit: form.dailyLimit, imageUrls: imageUrls.length > 0 ? imageUrls : undefined }) });
       const data = await res.json() as { error?: string; invalid_count?: number };
       if (!res.ok) { setError(data.error ?? 'Erro ao criar campanha.'); return; }
       if (data.invalid_count && data.invalid_count > 0) {
         alert(`${data.invalid_count} número(s) não existem no WhatsApp e foram removidos da campanha automaticamente.`);
       }
-      setForm({ clientId: clients[0]?.id ?? '', name: '', message: '', numbers: '', isNow: true, startsAt: '', endsAt: '', activeFrom: '', activeUntil: '', activeDays: ALL_DAYS, intervalMin: 90, intervalMax: 210, dailyLimit: 120 });
+      setConfirmando(false);
+      setForm({ onmidClientId: '', instanceId: '', name: '', message: '', numbers: '', isNow: true, startsAt: '', endsAt: '', activeFrom: '', activeUntil: '', activeDays: ALL_DAYS, intervalMin: 90, intervalMax: 210, dailyLimit: 120 });
       setImageUrls([]);
       setVariations([]);
       setPreviewVariationIdx(null);
@@ -1315,14 +1352,23 @@ function NovaCampanhaTab({ onCreated, prefill, editCampaign }: { onCreated: () =
                     className="w-full h-9 rounded-lg border border-border bg-background px-3 text-sm outline-none focus:ring-1 focus:ring-primary" />
                 </div>
                 <div className="space-y-1.5">
-                  <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Instância Z-API *</label>
-                  <div className="relative">
-                    <select value={form.clientId} onChange={e => setForm(p => ({ ...p, clientId: e.target.value }))}
-                      className="w-full h-9 rounded-lg border border-border bg-background pl-3 pr-8 text-sm outline-none focus:ring-1 focus:ring-primary appearance-none">
-                      {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                    </select>
-                    <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-                  </div>
+                  {isEdit ? (
+                    <>
+                      <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Cliente</label>
+                      <div className="h-9 flex items-center rounded-lg border border-border bg-muted/30 px-3 text-sm text-muted-foreground">
+                        {editCampaign?.onmid_client_name ?? editCampaign?.client_name ?? '—'}
+                      </div>
+                    </>
+                  ) : (
+                    <SeletorCliente
+                      destinos={destinos}
+                      orfas={orfas}
+                      onmidClientId={form.onmidClientId}
+                      instanceId={form.instanceId}
+                      erroEvolution={erroEvolution}
+                      onChange={v => setForm(p => ({ ...p, ...v }))}
+                    />
+                  )}
                 </div>
               </div>
             </div>
@@ -1750,6 +1796,18 @@ function NovaCampanhaTab({ onCreated, prefill, editCampaign }: { onCreated: () =
           </button>
         </div>
       </div>
+
+      <ConfirmarClienteModal
+        aberto={confirmando}
+        clienteNome={destinos.find(d => d.clientId === form.onmidClientId)?.clientName ?? ''}
+        instanciaNome={form.instanceId}
+        totalContatos={contactCount}
+        acao="criar"
+        erro={error}
+        enviando={saving}
+        onCancelar={() => { setConfirmando(false); setError(''); }}
+        onConfirmar={confirmarECriar}
+      />
     </>
   );
 }
@@ -1771,6 +1829,9 @@ function DashboardTab({ onReuse, onNewCampaign, onManageInstances, onEdit }: {
   const [deleting, setDeleting] = useState<string | null>(null);
   const [showAllCampaigns, setShowAllCampaigns] = useState(false);
   const [showAllUpcoming, setShowAllUpcoming] = useState(false);
+  const [retomando, setRetomando] = useState<Campaign | null>(null);
+  const [retomarErro, setRetomarErro] = useState('');
+  const [retomarSaving, setRetomarSaving] = useState(false);
   const campaignsTableRef = useRef<HTMLDivElement>(null);
 
   async function load() {
@@ -1785,9 +1846,31 @@ function DashboardTab({ onReuse, onNewCampaign, onManageInstances, onEdit }: {
 
   useEffect(() => { load(); }, []);
 
+  // Pausar/cancelar são imediatos: parar nunca precisa de ritual. Religar o
+  // envio (start/resume) passa pela mesma trava da criação — digitar o cliente.
   async function handleAction(id: string, action: string) {
+    if (action === 'resume' || action === 'start') {
+      const alvo = campaigns.find(c => c.id === id);
+      if (alvo) { setRetomando(alvo); setRetomarErro(''); return; }
+    }
     await fetch(`/api/disparos/campaigns/${id}/action`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...callerHeaders() }, body: JSON.stringify({ action }) });
     load();
+  }
+
+  async function confirmarRetomada(confirmClientName: string) {
+    if (!retomando) return;
+    setRetomarSaving(true); setRetomarErro('');
+    try {
+      const res = await fetch(`/api/disparos/campaigns/${retomando.id}/action`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...callerHeaders() },
+        body: JSON.stringify({ action: retomando.status === 'paused' ? 'resume' : 'start', confirmClientName }),
+      });
+      const data = await res.json() as { error?: string };
+      if (!res.ok) { setRetomarErro(data.error ?? 'Erro ao retomar.'); return; }
+      setRetomando(null);
+      load();
+    } finally { setRetomarSaving(false); }
   }
 
   async function fetchNumbers(id: string) {
@@ -1816,7 +1899,7 @@ function DashboardTab({ onReuse, onNewCampaign, onManageInstances, onEdit }: {
       if (c.image_url.startsWith('[')) { try { imageUrls = JSON.parse(c.image_url); } catch { imageUrls = [c.image_url]; } }
       else { imageUrls = [c.image_url]; }
     }
-    onReuse({ clientId: c.client_id, name: c.name, message: c.message, numbers, imageUrls, intervalMin: c.interval_min, intervalMax: c.interval_max, dailyLimit: c.daily_limit ?? undefined, activeFrom: c.active_from ?? undefined, activeUntil: c.active_until ?? undefined, activeDays: c.active_days ? parseActiveDaysClient(c.active_days) : undefined });
+    onReuse({ onmidClientId: c.onmid_client_id ?? '', instanceId: c.instance_id ?? '', name: c.name, message: c.message, numbers, imageUrls, intervalMin: c.interval_min, intervalMax: c.interval_max, dailyLimit: c.daily_limit ?? undefined, activeFrom: c.active_from ?? undefined, activeUntil: c.active_until ?? undefined, activeDays: c.active_days ? parseActiveDaysClient(c.active_days) : undefined });
   }
 
   // ── Computed ──────────────────────────────────────────────────────────────
@@ -2214,6 +2297,17 @@ function DashboardTab({ onReuse, onNewCampaign, onManageInstances, onEdit }: {
 
         </div>
       </div>
+
+      <ConfirmarClienteModal
+        aberto={!!retomando}
+        clienteNome={retomando?.onmid_client_name ?? retomando?.client_name ?? ''}
+        instanciaNome={retomando?.instance_id ?? ''}
+        acao="retomar"
+        erro={retomarErro}
+        enviando={retomarSaving}
+        onCancelar={() => { setRetomando(null); setRetomarErro(''); }}
+        onConfirmar={confirmarRetomada}
+      />
     </div>
   );
 }
@@ -2618,7 +2712,7 @@ export default function DisparosPage() {
   function handleEdit(c: Campaign) { setEditCampaign(c); setPrefill(null); setTab('nova'); }
 
   function handleExtractCampaign(numbers: string) {
-    setPrefill({ clientId: '', name: 'Campanha do extrator', message: '', numbers, intervalMin: 10, intervalMax: 30 });
+    setPrefill({ onmidClientId: '', instanceId: '', name: 'Campanha do extrator', message: '', numbers, intervalMin: 10, intervalMax: 30 });
     setTab('nova');
   }
 

@@ -284,3 +284,38 @@ export async function setEvolutionWebhook(
     return { ok: false, error: String(err) };
   }
 }
+
+export interface EvolutionInstanceSummary {
+  name: string;
+  connectionStatus: string | null;
+  profileName?: string | null;
+  ownerJid?: string | null;
+}
+
+/**
+ * Todas as instâncias que existem no servidor Evolution AGORA.
+ *
+ * ⚠️ `connectionStatus` é o campo PERSISTIDO da Evolution — instância que sumiu
+ * do servidor simplesmente não vem nesta lista (não vem como "desconectada").
+ * Quem consome precisa tratar ausência e desconexão como coisas diferentes:
+ * a primeira significa que o vínculo aponta pro vazio.
+ */
+export async function fetchEvolutionInstances(): Promise<EvolutionInstanceSummary[]> {
+  const res = await fetch(`${base()}/instance/fetchInstances`, {
+    headers: headers(),
+    cache: 'no-store',
+  });
+  if (!res.ok) throw new Error(`Evolution API ${res.status}`);
+  const json = await res.json() as unknown;
+  const list = Array.isArray(json) ? json : [];
+  return list.map((i) => {
+    const r = i as Record<string, unknown>;
+    const inner = (r.instance ?? {}) as Record<string, unknown>;
+    return {
+      name: String(r.name ?? inner.instanceName ?? r.instanceName ?? ''),
+      connectionStatus: (r.connectionStatus ?? inner.state ?? r.status ?? null) as string | null,
+      profileName: (r.profileName ?? null) as string | null,
+      ownerJid: (r.ownerJid ?? null) as string | null,
+    };
+  }).filter(i => i.name.length > 0);
+}
