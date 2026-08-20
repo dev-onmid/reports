@@ -296,6 +296,28 @@ export async function resolveGoogleAccountIds(
 const SEM_CONTA_GOOGLE =
   'Nenhuma conta Google Ads vinculada a esse cliente. Confira o client_id: use o ID INTERNO do cliente no sistema (o mesmo que list_clients devolve) — NÃO o número da conta Google.';
 
+// Geocodifica um endereço via Nominatim (OSM) com cadeia de fallback: endereço
+// completo → últimos 3 componentes → últimos 2 (bairro+cidade resolve quase tudo
+// no Brasil). O geocodificador da PRÓPRIA Meta (address_string) recusa a maioria
+// dos endereços BR — por isso mandamos lat/long resolvidos aqui.
+// Nominatim pede no máx 1 req/s — o sleep entre tentativas respeita isso.
+async function geocodificarEndereco(endereco: string): Promise<{ lat: number; lon: number; usado: string } | null> {
+  const partes = endereco.split(',').map(x => x.trim()).filter(Boolean);
+  const tentativas = [endereco];
+  if (partes.length > 3) tentativas.push(partes.slice(-3).join(', '));
+  if (partes.length > 2) tentativas.push(partes.slice(-2).join(', '));
+  for (const q of tentativas) {
+    const r = await fetch(
+      'https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=br&q=' + encodeURIComponent(q),
+      { headers: { 'User-Agent': 'onmid-reports/1.0 (dev@onmid.com.br)' } },
+    ).catch(() => null);
+    const d = r && r.ok ? await r.json().catch(() => []) as Array<{ lat?: string; lon?: string }> : [];
+    if (d[0]?.lat) return { lat: Number(d[0].lat), lon: Number(d[0].lon), usado: q };
+    await new Promise(res => setTimeout(res, 1100));
+  }
+  return null;
+}
+
 // Cria keywords num grupo com partialFailure + retry de ISENÇÃO de política.
 // Recusa exemptible (termo de saúde tipo "implante dentário") é reenviada UMA vez
 // com exemptPolicyViolationKeys — o mesmo pedido que o painel do Google faz sozinho;
@@ -712,7 +734,7 @@ IMPORTANTE: SEMPRE preencha ad_body (texto principal), ad_headline (título) e a
 - image_url: sem ela a ferramenta usa a imagem/logo da BIBLIOTECA do cliente; sem nada na biblioteca, o anúncio nasce com um quadrado PRETO de placeholder — avise. video_url cria anúncio em VÍDEO (arquivo MP4/MOV por link direto ou Drive público; YouTube NÃO serve) com a imagem como thumbnail.
 - Conversa no WhatsApp (CTWA — o formato mais usado da agência): objective=OUTCOME_ENGAGEMENT + destination='whatsapp'. Exige que a Página do cliente tenha WhatsApp vinculado; o CTA vira WHATSAPP_MESSAGE automaticamente.
 - Vendas (OUTCOME_SALES): o conjunto otimiza por conversões do PIXEL — a ferramenta acha o pixel da conta sozinha e usa conversion_event (padrão LEAD). Conta sem pixel → a ferramenta recusa ANTES de criar e sugere OUTCOME_LEADS ou conversa WhatsApp.
-Antes de chamar, analise o negócio/segmento do cliente e preencha os campos de targeting adequados (cidade, interesses, placements, faixa etária).
+Antes de chamar, analise o negócio/segmento do cliente e preencha os campos de targeting adequados. NEGÓCIO LOCAL (clínica, restaurante, loja): prefira pins (endereço + raio em km) a cidade inteira — é o padrão profissional. Cidade inteira só pra negócio que atende a cidade toda.
 A ferramenta busca automaticamente os IDs de cidades e interesses na API Meta, você só precisa fornecer os nomes.`,
     input_schema: {
       type: 'object' as const,
@@ -732,6 +754,18 @@ A ferramenta busca automaticamente os IDs de cidades e interesses na API Meta, v
         cities: {
           type: 'array', items: { type: 'string' },
           description: 'Cidades alvo por nome (ex: ["Londrina", "Maringá"]). A ferramenta busca os IDs automaticamente na API Meta.',
+        },
+        pins: {
+          type: 'array',
+          description: 'Segmentação por RAIO — o padrão de negócio local (clínica, restaurante): pontos "endereço + raio em km"; a Meta geocodifica o endereço sozinha. Ex: [{"address": "Av. das Gaivotas 1000, Ingleses, Florianópolis - SC", "radius_km": 3}]. Pode combinar com cities (a área final é a SOMA). Raio: 1 a 80 km.',
+          items: {
+            type: 'object',
+            properties: {
+              address: { type: 'string', description: 'Endereço ou ponto de referência (rua+bairro+cidade funciona melhor)' },
+              radius_km: { type: 'number', description: 'Raio em km (1-80; padrão 3)' },
+            },
+            required: ['address'],
+          },
         },
         countries: {
           type: 'array', items: { type: 'string' },
@@ -2401,7 +2435,7 @@ export async function execSystemTool(
       const {
         client_id, name: campName, objective, daily_budget,
         adset_name, age_min = 18, age_max = 65,
-        genders = 'all', cities = [], countries = ['BR'],
+        genders = 'all', cities = [], countries = ['BR'], pins = [],
         interests = [], placements = 'all',
         ad_body, ad_headline, ad_description,
         destination_url = 'https://onmid.com.br', audience_notes,
@@ -2410,7 +2444,7 @@ export async function execSystemTool(
         client_id: string; name: string; objective: string; daily_budget: number;
         adset_name?: string; age_min?: number; age_max?: number;
         genders?: 'all' | 'male' | 'female';
-        cities?: string[]; countries?: string[];
+        cities?: string[]; countries?: string[]; pins?: Array<{ address?: string; radius_km?: number }>;
         interests?: string[]; placements?: string;
         ad_body?: string; ad_headline?: string; ad_description?: string;
         ad_cta?: string; destination_url?: string; audience_notes?: string;
@@ -2591,10 +2625,25 @@ export async function execSystemTool(
         interests.length > 0 ? searchMetaInterests(interests) : Promise.resolve([]),
       ]);
 
+      // Pins de raio: geocodificamos AQUI (Nominatim) e mandamos lat/long — o
+      // geocodificador da Meta (address_string) recusa a maioria dos endereços BR.
+      const pinsPedidos = (Array.isArray(pins) ? pins : [])
+        .map(pin => ({ address: String(pin?.address ?? '').trim(), radius: Math.min(80, Math.max(1, Number(pin?.radius_km) || 3)) }))
+        .filter(pin => pin.address)
+        .slice(0, 20);
+      const pinsIn: Array<{ latitude: number; longitude: number; radius: number; distance_unit: string; rotulo: string }> = [];
+      const pinsFalhos: string[] = [];
+      for (const pin of pinsPedidos) {
+        const geoPin = await geocodificarEndereco(pin.address);
+        if (geoPin) pinsIn.push({ latitude: geoPin.lat, longitude: geoPin.lon, radius: pin.radius, distance_unit: 'kilometer', rotulo: `${pin.radius}km de "${geoPin.usado.slice(0, 40)}"` });
+        else pinsFalhos.push(pin.address);
+      }
+
       const geoLocations: Record<string, unknown> = {};
+      if (pinsIn.length > 0) geoLocations.custom_locations = pinsIn.map(({ latitude, longitude, radius, distance_unit }) => ({ latitude, longitude, radius, distance_unit }));
       if (resolvedCities.length > 0) {
         geoLocations.cities = resolvedCities.map(c => ({ key: c.key }));
-      } else {
+      } else if (pinsIn.length === 0) {
         geoLocations.countries = countries.length > 0 ? countries : ['BR'];
       }
 
@@ -2717,9 +2766,10 @@ export async function execSystemTool(
       } else {
         const adsetId = adsetData.id;
         const genderLabel = genders === 'male' ? 'Masculino' : genders === 'female' ? 'Feminino' : 'Todos';
-        const geoLabel = resolvedCities.length > 0
-          ? resolvedCities.map(c => c.name).join(', ')
-          : countries.join(', ');
+        const partesGeo: string[] = [];
+        if (pinsIn.length > 0) partesGeo.push(pinsIn.map(pin => pin.rotulo).join(' + '));
+        if (resolvedCities.length > 0) partesGeo.push(resolvedCities.map(c => c.name).join(', '));
+        const geoLabel = partesGeo.length > 0 ? partesGeo.join(' + ') : countries.join(', ');
         report.push(`✅ Conjunto de anúncios criado`);
         report.push(`   Nome: ${resolvedAdsetName}`);
         report.push(`   Otimização: ${optimizationGoal}`);
@@ -2731,6 +2781,7 @@ export async function execSystemTool(
           const notFound = cities.filter((_, i) => !resolvedCities[i]);
           report.push(`   ⚠️ Cidades não encontradas: ${notFound.join(', ')} (usando país como fallback)`);
         }
+        if (pinsFalhos.length > 0) report.push(`   ⚠️ Endereço(s) não geocodificado(s) — pin ignorado: ${pinsFalhos.join(' | ')}. Tente "bairro, cidade".`);
         report.push(`   ID: ${adsetId}`);
         report.push('');
 
