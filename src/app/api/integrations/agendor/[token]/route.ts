@@ -57,12 +57,15 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ token: str
 
     // O negócio referencia a pessoa sem telefone — busca o cadastro completo
     // com o token do cliente. Falha aqui não derruba a ingestão.
-    const pessoa = conn.api_token && evento.negocio.pessoa.id
-      ? await buscarPessoaAgendor(conn.api_token, evento.negocio.pessoa.id)
+    const tentouPessoa = Boolean(conn.api_token && evento.negocio.pessoa.id);
+    const pessoa = tentouPessoa
+      ? await buscarPessoaAgendor(conn.api_token!, evento.negocio.pessoa.id!)
       : null;
 
     // Filtros de importação do cliente (funil/origem escolhidos no card).
-    const { negocio, bloqueado } = await conferirFiltros(conn, evento.negocio, pessoa);
+    // pessoaFalhou: origem desconhecida por erro passa (não barrar por 429).
+    const { negocio, bloqueado } = await conferirFiltros(
+      conn, evento.negocio, pessoa, tentouPessoa && pessoa === null);
     if (bloqueado) {
       await registrarLogAgendor(pool, {
         clientId: conn.client_id, raw, resultado: 'filtrado', detalhe: bloqueado,

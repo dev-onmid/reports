@@ -204,12 +204,6 @@ const FB_SCOPE = [
   'public_profile',
   'ads_read',
   'ads_management',
-  // pages_manage_ads: sem ela a API não lê o vínculo de cadastros da página e a
-  // criação de lead ads devolve o erro ENGANOSO de "Termos não aceitos" (subcode
-  // 1815089) mesmo com os termos ok — visto em Cost E Cinfel (2026-08-20).
-  // leads_retrieval: ler respostas de formulário (pode exigir App Review da Meta).
-  'pages_manage_ads',
-  'leads_retrieval',
   'business_management',
   'pages_show_list',
   'pages_read_engagement',

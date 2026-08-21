@@ -201,6 +201,15 @@ export function passaFiltros(
   filtros: FiltrosImportacao,
   negocio: NegocioAgendor,
   pessoa: PessoaAgendor | null,
+  opts?: {
+    /**
+     * A busca da pessoa FALHOU (rate limit/rede) — origem é desconhecida, não
+     * ausente. Barrar aqui descartaria negócio legítimo por um 429 passageiro
+     * (visto ao vivo na reimportação da Cinfel); desconhecido passa, e a
+     * reconciliação seguinte completa os dados.
+     */
+    origemDesconhecida?: boolean;
+  },
 ): { passa: boolean; motivo: string | null } {
   if (filtros.funis && filtros.funis.length > 0 && negocio.funilId !== null) {
     if (!filtros.funis.includes(negocio.funilId)) {
@@ -208,6 +217,7 @@ export function passaFiltros(
     }
   }
   if (filtros.origens && filtros.origens.length > 0) {
+    if (opts?.origemDesconhecida) return { passa: true, motivo: null };
     const id = pessoa?.origemLeadId ?? null;
     // Origem conhecida e fora da lista → barra. Pessoa sem origem cadastrada
     // no Agendor conta como "fora" quando há filtro — origem específica foi

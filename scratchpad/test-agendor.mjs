@@ -130,3 +130,14 @@ eq(parseFiltro(null), null, 'null = sem filtro');
   eq(p.origemLeadId, '3', 'origemLeadId extraído');
 }
 console.log(`✓ ${n} asserts (com filtros)`);
+
+// origem DESCONHECIDA por falha (429) passa; sem origem de verdade barra
+{
+  const soSite = { funis: null, origens: ['5'] };
+  const neg = { idExterno: '1', funilId: null, funilNome: null, pessoa: { id: '9' } };
+  ok(passaFiltros(soSite, neg, null, { origemDesconhecida: true }).passa, 'falha na busca → passa (não perder por 429)');
+  ok(!passaFiltros(soSite, neg, null).passa, 'sem pessoa e sem flag → barra como antes');
+  ok(!passaFiltros(soSite, neg, { origemLeadId: null, origemLead: null }, { origemDesconhecida: false }).passa,
+     'pessoa BUSCADA sem origem → barra (o filtro pediu origens específicas)');
+}
+console.log(`✓ ${n} asserts (com tolerância a 429)`);

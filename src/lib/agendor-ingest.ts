@@ -87,6 +87,7 @@ export function filtrosDaConexao(conn: ConexaoAgendor): FiltrosImportacao {
  */
 export async function conferirFiltros(
   conn: ConexaoAgendor, negocio: NegocioAgendor, pessoa: PessoaAgendor | null,
+  pessoaFalhou = false,
 ): Promise<{ negocio: NegocioAgendor; bloqueado: string | null }> {
   const filtros = filtrosDaConexao(conn);
   let n = negocio;
@@ -98,7 +99,7 @@ export async function conferirFiltros(
       if (completo?.funilId) n = { ...n, funilId: completo.funilId, funilNome: completo.funilNome };
     } catch { /* segue com o que tem — passaFiltros é permissivo no desconhecido */ }
   }
-  const { passa, motivo } = passaFiltros(filtros, n, pessoa);
+  const { passa, motivo } = passaFiltros(filtros, n, pessoa, { origemDesconhecida: pessoaFalhou });
   return { negocio: n, bloqueado: passa ? null : motivo };
 }
 

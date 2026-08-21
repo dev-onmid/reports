@@ -28,7 +28,7 @@ const HEADLESS_READ_TOOLS = new Set([
   'list_reports', 'get_report_configs', 'list_disparos_campaigns', 'get_whatsapp_instances',
   'get_crm_inbox', 'get_followup_status', 'list_automations', 'list_email_campaigns',
   'list_leadlovers_campaigns', 'get_lp_analytics', 'get_link_redirects', 'get_ig_posts',
-  'get_optimizer_queue', 'get_activity_logs', 'list_client_assets',
+  'get_optimizer_queue', 'get_activity_logs',
 ]);
 const HEADLESS_ACTION_TOOLS = new Set([
   'execute_ad_action', 'update_meta_campaign_status', 'duplicate_meta_campaign', 'move_crm_lead',
