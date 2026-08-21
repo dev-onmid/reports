@@ -1,8 +1,17 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { getCallerScope } from '@/lib/disparos-access';
+import { fetchEvolutionGroups, fetchEvolutionChatContacts } from '@/lib/evolution-api';
 
 const BASE = 'https://api.z-api.io/instances';
+
+type ChatItem = {
+  phone: string;
+  name: string;
+  isGroup: boolean;
+  membersCount?: number;
+  profilePicUrl?: string;
+};
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
@@ -15,7 +24,7 @@ export async function GET(request: NextRequest) {
   try {
     const scope = await getCallerScope(request, pool);
     const { rows } = await pool.query(
-      `SELECT instance_id, token, security_token, owner_id FROM public.zapi_clients WHERE id = $1`,
+      `SELECT instance_id, token, security_token, owner_id, provider FROM public.zapi_clients WHERE id = $1`,
       [clientId],
     );
     if (rows.length === 0) return Response.json({ error: 'Instância não encontrada' }, { status: 404 });
@@ -23,9 +32,56 @@ export async function GET(request: NextRequest) {
       return Response.json({ error: 'Sem permissão para esta instância' }, { status: 403 });
     }
 
-    const { instance_id, token, security_token } = rows[0] as {
-      instance_id: string; token: string; security_token: string | null;
+    const { instance_id, token, security_token, provider } = rows[0] as {
+      instance_id: string; token: string; security_token: string | null; provider: string | null;
     };
+
+    // Instância Evolution: a API é outra (por NOME da instância). Falar Z-API aqui
+    // devolvia "Instance not found" e o Extrator ficava inutilizável no provider
+    // que hoje é o principal.
+    if (provider === 'evolution') {
+      try {
+        const result: ChatItem[] = [];
+        if (type === 'groups' || type === 'all') {
+          const groups = await fetchEvolutionGroups(instance_id);
+          result.push(...groups.map((g) => ({
+            phone: g.jid,
+            name: g.subject,
+            isGroup: true,
+            membersCount: g.size ?? undefined,
+          })));
+        }
+        let semTelefone = 0;
+        if (type === 'conversations' || type === 'all') {
+          const chats = await fetchEvolutionChatContacts(instance_id);
+
+          // Instância em modo LID não expõe o telefone da conversa. O LID passaria
+          // num filtro de "8 a 15 dígitos" e viraria destino inválido de disparo —
+          // então só entra quem TEM telefone, resolvendo pelo que o CRM já gravou.
+          const lids = chats.filter((c) => !c.phone && c.lid).map((c) => c.lid as string);
+          const porLid = new Map<string, string>();
+          if (lids.length > 0) {
+            const { rows: leads } = await pool.query<{ whatsapp_lid: string; numero: string }>(
+              `SELECT whatsapp_lid, numero FROM public.crm_leads
+                WHERE whatsapp_lid = ANY($1::text[]) AND numero IS NOT NULL AND numero <> ''`,
+              [lids],
+            ).catch(() => ({ rows: [] as Array<{ whatsapp_lid: string; numero: string }> }));
+            for (const l of leads) porLid.set(l.whatsapp_lid, l.numero.replace(/\D/g, ''));
+          }
+
+          for (const c of chats) {
+            const phone = c.phone ?? (c.lid ? porLid.get(c.lid) ?? '' : '');
+            if (!phone || phone.length < 8) { semTelefone++; continue; }
+            result.push({ phone, name: c.name || phone, isGroup: false });
+          }
+        }
+        return Response.json(result, {
+          headers: semTelefone > 0 ? { 'X-Sem-Telefone': String(semTelefone) } : undefined,
+        });
+      } catch (err) {
+        return Response.json({ error: String(err instanceof Error ? err.message : err) }, { status: 502 });
+      }
+    }
 
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (security_token) headers['Client-Token'] = security_token;
