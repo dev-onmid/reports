@@ -47,15 +47,27 @@ async function processarLote(
   cachePessoas: Map<string, PessoaAgendor | null>,
 ): Promise<number> {
   let feitos = 0;
+  let falhasDePessoa = 0;
   for (const n of negocios) {
     let pessoa: PessoaAgendor | null = null;
+    let pessoaFalhou = false;
     if (n.pessoa.id && conn.api_token) {
       if (!cachePessoas.has(n.pessoa.id)) {
+        // Ritmo: 600ms entre buscas ~ 100 req/min. Medido ao vivo na Cinfel:
+        // rajada e ate 5 req/s tomavam 429 do Agendor (limite real ~120/min).
+        // O cursor de pagina espalha o resto entre execucoes do cron.
+        await new Promise(res => setTimeout(res, 600));
         cachePessoas.set(n.pessoa.id, await buscarPessoaAgendor(conn.api_token, n.pessoa.id));
       }
       pessoa = cachePessoas.get(n.pessoa.id) ?? null;
+      pessoaFalhou = pessoa === null;
+      if (pessoaFalhou) falhasDePessoa++;
     }
-    const { negocio: nf, bloqueado } = await conferirFiltros(conn, n, pessoa);
+    // Freio: muitas falhas de pessoa = rate limit em curso. Abortar SEM avancar
+    // a pagina garante que nada entra com dados pela metade em massa — a
+    // proxima execucao refaz a pagina inteira (upsert idempotente).
+    if (falhasDePessoa > 10) throw new Error('muitas falhas ao buscar pessoas (rate limit?) — pagina sera refeita');
+    const { negocio: nf, bloqueado } = await conferirFiltros(conn, n, pessoa, pessoaFalhou);
     if (bloqueado) continue; // fora do filtro: nem log por item no backfill (viraria ruído aos milhares)
     const r = await ingerirNegocioAgendor(pool, conn.client_id, nf, pessoa);
     await posProcessarIngestao(pool, conn, nf, pessoa, r, { sync: origem, dealId: nf.idExterno },

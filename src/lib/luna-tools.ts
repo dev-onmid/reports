@@ -15,6 +15,7 @@ import { ensureOptimizerClientConfigTable } from '@/lib/optimizer';
 import { executeOptimizerAction } from '@/lib/optimizer-execucao';
 import { dispararEventosPorStatus } from '@/lib/conversions';
 import { sanitizeGoogleKeywords, parsePartialFailure, cityNameVariants, type PartialFailureResult } from '@/lib/google-campaign-utils';
+import { salvarAssetDeUrl, salvarVideoUrl, listarAssets, obterAssetImagem } from '@/lib/client-assets';
 import type { OptimizerAcaoTipo, OptimizerObjetoTipo } from '@/lib/optimizer';
 
 // ─── Agendamento (luna_tasks) ────────────────────────────────────────────────
@@ -294,6 +295,28 @@ export async function resolveGoogleAccountIds(
 
 const SEM_CONTA_GOOGLE =
   'Nenhuma conta Google Ads vinculada a esse cliente. Confira o client_id: use o ID INTERNO do cliente no sistema (o mesmo que list_clients devolve) — NÃO o número da conta Google.';
+
+// Geocodifica um endereço via Nominatim (OSM) com cadeia de fallback: endereço
+// completo → últimos 3 componentes → últimos 2 (bairro+cidade resolve quase tudo
+// no Brasil). O geocodificador da PRÓPRIA Meta (address_string) recusa a maioria
+// dos endereços BR — por isso mandamos lat/long resolvidos aqui.
+// Nominatim pede no máx 1 req/s — o sleep entre tentativas respeita isso.
+async function geocodificarEndereco(endereco: string): Promise<{ lat: number; lon: number; usado: string } | null> {
+  const partes = endereco.split(',').map(x => x.trim()).filter(Boolean);
+  const tentativas = [endereco];
+  if (partes.length > 3) tentativas.push(partes.slice(-3).join(', '));
+  if (partes.length > 2) tentativas.push(partes.slice(-2).join(', '));
+  for (const q of tentativas) {
+    const r = await fetch(
+      'https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=br&q=' + encodeURIComponent(q),
+      { headers: { 'User-Agent': 'onmid-reports/1.0 (dev@onmid.com.br)' } },
+    ).catch(() => null);
+    const d = r && r.ok ? await r.json().catch(() => []) as Array<{ lat?: string; lon?: string }> : [];
+    if (d[0]?.lat) return { lat: Number(d[0].lat), lon: Number(d[0].lon), usado: q };
+    await new Promise(res => setTimeout(res, 1100));
+  }
+  return null;
+}
 
 // Cria keywords num grupo com partialFailure + retry de ISENÇÃO de política.
 // Recusa exemptible (termo de saúde tipo "implante dentário") é reenviada UMA vez
@@ -708,10 +731,10 @@ export const systemTools: Anthropic.Tool[] = [
     name: 'create_meta_campaign',
     description: `Cria uma campanha COMPLETA no Meta Ads: campanha + conjunto de anúncios + anúncio com criativo.
 IMPORTANTE: SEMPRE preencha ad_body (texto principal), ad_headline (título) e ad_cta antes de chamar. Gere a copy com base no segmento/objetivo do cliente.
-- image_url: SEMPRE pergunte ao usuário se tem a URL de uma imagem para o criativo (pode ser link direto de imagem do site/drive/Instagram). Sem ela o anúncio nasce com um quadrado PRETO de placeholder que o gestor precisa trocar — avise isso ao usuário.
+- image_url: sem ela a ferramenta usa a imagem/logo da BIBLIOTECA do cliente; sem nada na biblioteca, o anúncio nasce com um quadrado PRETO de placeholder — avise. video_url cria anúncio em VÍDEO (arquivo MP4/MOV por link direto ou Drive público; YouTube NÃO serve) com a imagem como thumbnail.
 - Conversa no WhatsApp (CTWA — o formato mais usado da agência): objective=OUTCOME_ENGAGEMENT + destination='whatsapp'. Exige que a Página do cliente tenha WhatsApp vinculado; o CTA vira WHATSAPP_MESSAGE automaticamente.
 - Vendas (OUTCOME_SALES): o conjunto otimiza por conversões do PIXEL — a ferramenta acha o pixel da conta sozinha e usa conversion_event (padrão LEAD). Conta sem pixel → a ferramenta recusa ANTES de criar e sugere OUTCOME_LEADS ou conversa WhatsApp.
-Antes de chamar, analise o negócio/segmento do cliente e preencha os campos de targeting adequados (cidade, interesses, placements, faixa etária).
+Antes de chamar, analise o negócio/segmento do cliente e preencha os campos de targeting adequados. NEGÓCIO LOCAL (clínica, restaurante, loja): prefira pins (endereço + raio em km) a cidade inteira — é o padrão profissional. Cidade inteira só pra negócio que atende a cidade toda.
 A ferramenta busca automaticamente os IDs de cidades e interesses na API Meta, você só precisa fornecer os nomes.`,
     input_schema: {
       type: 'object' as const,
@@ -731,6 +754,18 @@ A ferramenta busca automaticamente os IDs de cidades e interesses na API Meta, v
         cities: {
           type: 'array', items: { type: 'string' },
           description: 'Cidades alvo por nome (ex: ["Londrina", "Maringá"]). A ferramenta busca os IDs automaticamente na API Meta.',
+        },
+        pins: {
+          type: 'array',
+          description: 'Segmentação por RAIO — o padrão de negócio local (clínica, restaurante): pontos "endereço + raio em km"; a Meta geocodifica o endereço sozinha. Ex: [{"address": "Av. das Gaivotas 1000, Ingleses, Florianópolis - SC", "radius_km": 3}]. Pode combinar com cities (a área final é a SOMA). Raio: 1 a 80 km.',
+          items: {
+            type: 'object',
+            properties: {
+              address: { type: 'string', description: 'Endereço ou ponto de referência (rua+bairro+cidade funciona melhor)' },
+              radius_km: { type: 'number', description: 'Raio em km (1-80; padrão 3)' },
+            },
+            required: ['address'],
+          },
         },
         countries: {
           type: 'array', items: { type: 'string' },
@@ -755,7 +790,8 @@ A ferramenta busca automaticamente os IDs de cidades e interesses na API Meta, v
         },
         destination_url: { type: 'string', description: 'URL de destino do anúncio (site, LP). Ignorada quando destination=whatsapp. Padrão: onmid.com.br' },
         destination: { type: 'string', enum: ['website', 'whatsapp'], description: "'whatsapp' = campanha de CONVERSA (CTWA): conjunto com destino WhatsApp e otimização por conversas iniciadas — use com objective=OUTCOME_ENGAGEMENT. Exige a Página do cliente com WhatsApp vinculado. Padrão: website." },
-        image_url: { type: 'string', description: 'URL pública da imagem do criativo (JPG/PNG, ideal 1080×1080). Aceita link de imagem direto E link de compartilhar do Google Drive/Dropbox (no Drive o arquivo precisa estar como "qualquer pessoa com o link"). A ferramenta baixa e sobe na conta. SEM isso o anúncio nasce com placeholder PRETO — sempre pergunte ao usuário.' },
+        image_url: { type: 'string', description: 'URL pública da imagem do criativo (JPG/PNG, ideal 1080×1080). Aceita link de imagem direto E link de compartilhar do Google Drive/Dropbox (no Drive o arquivo precisa estar como "qualquer pessoa com o link"). Sem image_url, a ferramenta usa a imagem/logo da BIBLIOTECA do cliente; sem nada, placeholder PRETO — avise.' },
+        video_url: { type: 'string', description: 'URL de um arquivo de VÍDEO (MP4/MOV — link direto ou Drive/Dropbox público) para anúncio em vídeo. A Meta baixa e processa; o thumbnail sai da imagem/biblioteca. ⚠️ NÃO aceita link do YouTube (YouTube é só Google Ads) — precisa ser o ARQUIVO do vídeo.' },
         conversion_event: { type: 'string', enum: ['LEAD', 'PURCHASE', 'COMPLETE_REGISTRATION', 'CONTACT'], description: 'Só para OUTCOME_SALES: evento do pixel que o conjunto otimiza (padrão LEAD).' },
         page_name: { type: 'string', description: 'Nome da Página do Facebook do cliente (para o promoted_object de leads). Se omitido, a ferramenta resolve pelo vínculo do sistema ou pelo nome do cliente — informe quando o usuário indicar a página ou quando a criação falhar por Termos de Geração de Cadastros com a página errada.' },
         audience_notes: { type: 'string', description: 'Análise de público-alvo gerada pela Luna (incluída no relatório)' },
@@ -891,6 +927,29 @@ Sempre confirme com o usuário antes de remover; pausar é reversível, remover 
         final_url: { type: 'string', description: 'Nova URL de destino. Omita para manter a atual.' },
       },
       required: ['client_id', 'campaign_id'],
+    },
+  },
+  {
+    name: 'save_client_asset',
+    description: 'Salva um arquivo na BIBLIOTECA DE ASSETS do cliente (logo ou imagem de anúncio, por URL — aceita link direto e link de compartilhar do Google Drive/Dropbox público; ou URL de vídeo como referência). Depois de salvo, a criação de campanhas usa o asset AUTOMATICAMENTE, sem precisar da URL de novo. Use quando o usuário mandar o logo/imagem de um cliente ("guarda esse logo do cliente X").',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        client_id: { type: 'string', description: 'ID interno do cliente (de list_clients)' },
+        tipo: { type: 'string', enum: ['logo', 'imagem', 'video_url'], description: 'logo = marca do cliente; imagem = arte de anúncio; video_url = link de vídeo (YouTube etc., só referência)' },
+        url: { type: 'string', description: 'URL do arquivo (JPG/PNG/WebP até 4MB; Drive precisa estar "qualquer pessoa com o link")' },
+        nome: { type: 'string', description: 'Nome descritivo (ex: "Logo oficial 2026", "Arte promo implantes")' },
+      },
+      required: ['client_id', 'tipo', 'url'],
+    },
+  },
+  {
+    name: 'list_client_assets',
+    description: 'Lista os assets salvos na biblioteca de um cliente (logos, imagens de anúncio, vídeos de referência), com data e tamanho. Use antes de criar campanha pra saber o que já existe.',
+    input_schema: {
+      type: 'object' as const,
+      properties: { client_id: { type: 'string', description: 'ID interno do cliente' } },
+      required: ['client_id'],
     },
   },
   // ── Pacote A: execução Meta + Google ──────────────────────────────────────
@@ -2350,24 +2409,46 @@ export async function execSystemTool(
       return `Credencial "${title}" salva no Cofre de ${clientRows[0].name}.`;
     }
 
+    if (name === 'save_client_asset') {
+      const clientId = String(input.client_id ?? '');
+      const tipo = String(input.tipo ?? 'imagem');
+      const url = String(input.url ?? '').trim();
+      if (!clientId || !url) return 'Informe client_id e url.';
+      try {
+        const salvo = tipo === 'video_url'
+          ? await salvarVideoUrl(pool, clientId, url, input.nome as string | undefined, 'luna')
+          : await salvarAssetDeUrl(pool, clientId, tipo as 'logo' | 'imagem', url, input.nome as string | undefined, 'luna');
+        return `✅ Asset salvo na biblioteca do cliente: "${salvo.nome}" (${tipo}${salvo.kb ? `, ${salvo.kb}KB` : ''}). A partir de agora a criação de campanhas usa esse arquivo automaticamente.`;
+      } catch (e) {
+        return `❌ Não consegui salvar: ${e instanceof Error ? e.message : 'erro'}`;
+      }
+    }
+
+    if (name === 'list_client_assets') {
+      const clientId = String(input.client_id ?? '');
+      const assets = await listarAssets(pool, clientId).catch(() => []);
+      if (assets.length === 0) return 'Nenhum asset na biblioteca desse cliente. Peça ao usuário o logo/imagens e salve com save_client_asset.';
+      return JSON.stringify(assets.map(a => ({ id: a.id, tipo: a.tipo, nome: a.nome, kb: a.kb, url: a.url ?? undefined, salvo_em: String(a.created_at).slice(0, 10) })));
+    }
+
     if (name === 'create_meta_campaign') {
       const {
         client_id, name: campName, objective, daily_budget,
         adset_name, age_min = 18, age_max = 65,
-        genders = 'all', cities = [], countries = ['BR'],
+        genders = 'all', cities = [], countries = ['BR'], pins = [],
         interests = [], placements = 'all',
         ad_body, ad_headline, ad_description,
         destination_url = 'https://onmid.com.br', audience_notes,
-        destination = 'website', image_url = '', conversion_event = 'LEAD',
+        destination = 'website', image_url = '', video_url = '', conversion_event = 'LEAD',
       } = input as {
         client_id: string; name: string; objective: string; daily_budget: number;
         adset_name?: string; age_min?: number; age_max?: number;
         genders?: 'all' | 'male' | 'female';
-        cities?: string[]; countries?: string[];
+        cities?: string[]; countries?: string[]; pins?: Array<{ address?: string; radius_km?: number }>;
         interests?: string[]; placements?: string;
         ad_body?: string; ad_headline?: string; ad_description?: string;
         ad_cta?: string; destination_url?: string; audience_notes?: string;
-        destination?: 'website' | 'whatsapp'; image_url?: string; conversion_event?: string;
+        destination?: 'website' | 'whatsapp'; image_url?: string; video_url?: string; conversion_event?: string;
       };
       const isWhatsapp = destination === 'whatsapp';
       // CTWA: o CTA correto é WHATSAPP_MESSAGE, qualquer outro quebra o destino.
@@ -2544,10 +2625,25 @@ export async function execSystemTool(
         interests.length > 0 ? searchMetaInterests(interests) : Promise.resolve([]),
       ]);
 
+      // Pins de raio: geocodificamos AQUI (Nominatim) e mandamos lat/long — o
+      // geocodificador da Meta (address_string) recusa a maioria dos endereços BR.
+      const pinsPedidos = (Array.isArray(pins) ? pins : [])
+        .map(pin => ({ address: String(pin?.address ?? '').trim(), radius: Math.min(80, Math.max(1, Number(pin?.radius_km) || 3)) }))
+        .filter(pin => pin.address)
+        .slice(0, 20);
+      const pinsIn: Array<{ latitude: number; longitude: number; radius: number; distance_unit: string; rotulo: string }> = [];
+      const pinsFalhos: string[] = [];
+      for (const pin of pinsPedidos) {
+        const geoPin = await geocodificarEndereco(pin.address);
+        if (geoPin) pinsIn.push({ latitude: geoPin.lat, longitude: geoPin.lon, radius: pin.radius, distance_unit: 'kilometer', rotulo: `${pin.radius}km de "${geoPin.usado.slice(0, 40)}"` });
+        else pinsFalhos.push(pin.address);
+      }
+
       const geoLocations: Record<string, unknown> = {};
+      if (pinsIn.length > 0) geoLocations.custom_locations = pinsIn.map(({ latitude, longitude, radius, distance_unit }) => ({ latitude, longitude, radius, distance_unit }));
       if (resolvedCities.length > 0) {
         geoLocations.cities = resolvedCities.map(c => ({ key: c.key }));
-      } else {
+      } else if (pinsIn.length === 0) {
         geoLocations.countries = countries.length > 0 ? countries : ['BR'];
       }
 
@@ -2670,9 +2766,10 @@ export async function execSystemTool(
       } else {
         const adsetId = adsetData.id;
         const genderLabel = genders === 'male' ? 'Masculino' : genders === 'female' ? 'Feminino' : 'Todos';
-        const geoLabel = resolvedCities.length > 0
-          ? resolvedCities.map(c => c.name).join(', ')
-          : countries.join(', ');
+        const partesGeo: string[] = [];
+        if (pinsIn.length > 0) partesGeo.push(pinsIn.map(pin => pin.rotulo).join(' + '));
+        if (resolvedCities.length > 0) partesGeo.push(resolvedCities.map(c => c.name).join(', '));
+        const geoLabel = partesGeo.length > 0 ? partesGeo.join(' + ') : countries.join(', ');
         report.push(`✅ Conjunto de anúncios criado`);
         report.push(`   Nome: ${resolvedAdsetName}`);
         report.push(`   Otimização: ${optimizationGoal}`);
@@ -2684,6 +2781,7 @@ export async function execSystemTool(
           const notFound = cities.filter((_, i) => !resolvedCities[i]);
           report.push(`   ⚠️ Cidades não encontradas: ${notFound.join(', ')} (usando país como fallback)`);
         }
+        if (pinsFalhos.length > 0) report.push(`   ⚠️ Endereço(s) não geocodificado(s) — pin ignorado: ${pinsFalhos.join(' | ')}. Tente "bairro, cidade".`);
         report.push(`   ID: ${adsetId}`);
         report.push('');
 
@@ -2722,6 +2820,17 @@ export async function execSystemTool(
               avisoImagem = `falha ao baixar a imagem (${String(e).slice(0, 80)}) — usei o placeholder`;
             }
           }
+          if (!imgBuf) {
+            // Biblioteca de assets: sem URL informada, usa a imagem/logo salvo do cliente.
+            const daBiblioteca = await obterAssetImagem(pool, client_id, 'imagem').catch(() => null);
+            if (daBiblioteca?.bytes) {
+              imgBuf = daBiblioteca.bytes;
+              imgTipo = daBiblioteca.mime ?? 'image/jpeg';
+              imgNome = /png/.test(imgTipo) ? 'criativo.png' : /webp/.test(imgTipo) ? 'criativo.webp' : 'criativo.jpg';
+              usouImagemReal = true;
+              avisoImagem = `usei "${daBiblioteca.nome}" da biblioteca de assets do cliente`;
+            }
+          }
           if (!imgBuf) imgBuf = createBlackPng(1080, 1080);
           const imgForm = new FormData();
           const imgArrayBuf = imgBuf.buffer.slice(imgBuf.byteOffset, imgBuf.byteOffset + imgBuf.byteLength) as ArrayBuffer;
@@ -2733,25 +2842,58 @@ export async function execSystemTool(
           const imgData = await imgRes.json() as { images?: Record<string, { hash: string }> };
           const imageHash = Object.values(imgData.images ?? {})[0]?.hash;
 
+          // ── STEP 3c: vídeo (opcional) — a Meta baixa da URL (file_url) e processa;
+          // o imageHash acima vira o THUMBNAIL obrigatório do video_data.
+          let videoId = '';
+          let avisoVideo = '';
+          if (video_url && /^https?:\/\//.test(video_url)) {
+            if (/youtube\.com|youtu\.be/.test(video_url)) {
+              avisoVideo = 'link do YouTube não serve pra anúncio Meta (precisa do ARQUIVO do vídeo) — criei com imagem';
+            } else {
+              const { normalizarUrlDownload } = await import('@/lib/client-assets');
+              const vr = await fetch(`https://graph.facebook.com/v21.0/${acctNode}/advideos`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ file_url: normalizarUrlDownload(video_url), name: `Vídeo — ${campName}`, access_token: token }),
+              });
+              const vd = await vr.json() as { id?: string; error?: { message?: string; error_user_msg?: string } };
+              if (vd.id) videoId = vd.id;
+              else avisoVideo = `upload do vídeo falhou (${vd.error?.error_user_msg ?? vd.error?.message ?? 'erro'}) — criei com imagem`;
+            }
+          }
+
           if (imageHash && fbPageId) {
             // ── STEP 4: AdCreative ──────────────────────────
             // CTWA: o link do criativo é o gancho do WhatsApp — a Meta resolve o número
             // vinculado à Página; destination_url é ignorada de propósito.
-            const linkData: Record<string, unknown> = {
-              image_hash: imageHash,
-              link: isWhatsapp ? 'https://api.whatsapp.com/send' : destination_url,
-              call_to_action: { type: ad_cta },
-            };
-            if (ad_body)        linkData.message     = ad_body;
-            if (ad_headline)    linkData.name        = ad_headline;
-            if (ad_description) linkData.description = ad_description;
+            const linkAlvo = isWhatsapp ? 'https://api.whatsapp.com/send' : destination_url;
+            let storySpec: Record<string, unknown>;
+            if (videoId) {
+              const videoData: Record<string, unknown> = {
+                video_id: videoId,
+                image_hash: imageHash, // thumbnail obrigatório
+                call_to_action: { type: ad_cta, value: { link: linkAlvo } },
+              };
+              if (ad_body)     videoData.message = ad_body;
+              if (ad_headline) videoData.title   = ad_headline;
+              storySpec = { page_id: fbPageId, video_data: videoData };
+            } else {
+              const linkData: Record<string, unknown> = {
+                image_hash: imageHash,
+                link: linkAlvo,
+                call_to_action: { type: ad_cta },
+              };
+              if (ad_body)        linkData.message     = ad_body;
+              if (ad_headline)    linkData.name        = ad_headline;
+              if (ad_description) linkData.description = ad_description;
+              storySpec = { page_id: fbPageId, link_data: linkData };
+            }
 
             const creativeRes = await fetch(`https://graph.facebook.com/v21.0/${acctNode}/adcreatives`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 name: `Criativo — ${campName}`,
-                object_story_spec: { page_id: fbPageId, link_data: linkData },
+                object_story_spec: storySpec,
                 access_token: token,
               }),
             });
@@ -2775,10 +2917,12 @@ export async function execSystemTool(
                 report.push(`✅ Anúncio criado (PAUSADO)`);
                 report.push(`   ID: ${adData.id}`);
                 if (isWhatsapp) report.push(`   Destino: conversa no WhatsApp da Página ${fbPageName}`);
-                report.push(usouImagemReal
+                if (videoId) report.push(`   Criativo: VÍDEO ${videoId} (processando na Meta — thumbnail ${usouImagemReal ? 'da imagem real' : 'placeholder'}) ✅`);
+                else report.push(usouImagemReal
                   ? `   Criativo: imagem enviada a partir da URL informada ✅`
                   : `   Criativo: imagem preta placeholder — troque pelo criativo definitivo`);
                 if (avisoImagem) report.push(`   ⚠️ ${avisoImagem}`);
+                if (avisoVideo) report.push(`   ⚠️ ${avisoVideo}`);
               } else {
                 const adErr = adData.error?.error_user_msg ?? adData.error?.message ?? 'erro desconhecido';
                 report.push(`⚠️ Anúncio: FALHA — ${adErr}`);
@@ -3282,6 +3426,20 @@ export async function execSystemTool(
           extResumo.push('error' in l
             ? `⚠️ Nome da empresa criado mas não vinculado — ${l.error}`
             : `✅ Nome da empresa: "${businessName}" (sujeito à aprovação do Google — precisa casar com o anunciante verificado)`);
+        }
+      }
+
+      // Logo da biblioteca de assets → BUSINESS_LOGO da campanha (best-effort).
+      const logoAsset = await obterAssetImagem(pool, clientId, 'logo').catch(() => null);
+      if (logoAsset?.bytes) {
+        const la = await lunaGoogleMutate(customerId, token, login, 'assets',
+          [{ create: { name: `Logo — ${logoAsset.nome} ${Date.now()}`, imageAsset: { data: logoAsset.bytes.toString('base64') } } }]);
+        if ('error' in la) extResumo.push(`⚠️ Logo: FALHA no upload — ${la.error}`);
+        else {
+          const l = await linkAssets(la.resourceNames, 'BUSINESS_LOGO');
+          extResumo.push('error' in l
+            ? `⚠️ Logo subiu mas não vinculou — ${l.error}`
+            : `✅ Logo "${logoAsset.nome}" (da biblioteca do cliente, sujeito à aprovação do Google)`);
         }
       }
 

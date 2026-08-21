@@ -1,7 +1,6 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { getCallerScope } from '@/lib/disparos-access';
-import { fetchEvolutionGroupParticipants } from '@/lib/evolution-api';
 
 const BASE = 'https://api.z-api.io/instances';
 
@@ -46,7 +45,7 @@ export async function GET(request: NextRequest) {
   try {
     const scope = await getCallerScope(request, pool);
     const { rows } = await pool.query(
-      `SELECT instance_id, token, security_token, owner_id, provider FROM public.zapi_clients WHERE id = $1`,
+      `SELECT instance_id, token, security_token, owner_id FROM public.zapi_clients WHERE id = $1`,
       [clientId],
     );
     if (rows.length === 0) return Response.json({ error: 'Instância não encontrada' }, { status: 404 });
@@ -54,26 +53,9 @@ export async function GET(request: NextRequest) {
       return Response.json({ error: 'Sem permissão para esta instância' }, { status: 403 });
     }
 
-    const { instance_id, token, security_token, provider } = rows[0] as {
-      instance_id: string; token: string; security_token: string | null; provider: string | null;
+    const { instance_id, token, security_token } = rows[0] as {
+      instance_id: string; token: string; security_token: string | null;
     };
-
-    // Evolution fala por NOME da instância e devolve os participantes num
-    // endpoint próprio — o caminho Z-API abaixo não serve pra ela.
-    if (provider === 'evolution') {
-      try {
-        const members = await fetchEvolutionGroupParticipants(instance_id, groupId);
-        if (members.length === 0) {
-          return Response.json(
-            { error: 'Nenhum membro encontrado. A Evolution só lista participantes de grupos em que a instância está dentro e sincronizada.' },
-            { status: 502 },
-          );
-        }
-        return Response.json(members);
-      } catch (err) {
-        return Response.json({ error: String(err instanceof Error ? err.message : err) }, { status: 502 });
-      }
-    }
 
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (security_token) headers['Client-Token'] = security_token;
