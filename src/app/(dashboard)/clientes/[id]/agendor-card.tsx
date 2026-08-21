@@ -32,8 +32,12 @@ type Config = {
   ultima_sync_em: string | null;
   last_received_at: string | null;
   ultimo_erro: string | null;
+  filtro_funis: string[] | null;
+  filtro_origens: string[] | null;
   logs: LogEntry[];
 };
+
+type Opcao = { id: string; nome: string };
 
 const RESULTADO_BADGE: Record<string, string> = {
   criado: 'bg-emerald-500/15 text-emerald-400',
@@ -41,6 +45,7 @@ const RESULTADO_BADGE: Record<string, string> = {
   backfill: 'bg-violet-500/15 text-violet-400',
   teste_get: 'bg-violet-500/15 text-violet-400',
   ignorado: 'bg-yellow-500/15 text-yellow-400',
+  filtrado: 'bg-orange-500/15 text-orange-400',
   sem_telefone: 'bg-yellow-500/15 text-yellow-400',
   desativado: 'bg-muted text-muted-foreground',
   erro: 'bg-red-500/15 text-red-400',
@@ -52,6 +57,7 @@ const RESULTADO_LABEL: Record<string, string> = {
   backfill: 'Importado (histórico)',
   teste_get: 'Teste de conexão',
   ignorado: 'Ignorado',
+  filtrado: 'Fora do filtro',
   sem_telefone: 'Sem telefone',
   desativado: 'Desativada',
   erro: 'Erro',
@@ -62,6 +68,126 @@ function fmtData(iso: string | null): string {
   try {
     return new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
   } catch { return iso; }
+}
+
+/**
+ * Filtros de importação: quais funis do Agendor e quais origens de lead
+ * entram. Vazio = tudo (o estado natural — lista com todos os ids
+ * envelheceria mal quando o cliente criasse funil novo lá).
+ */
+function FiltrosImportacao({ clientId, cfg, aoSalvar }: {
+  clientId: string;
+  cfg: Config;
+  aoSalvar: () => void;
+}) {
+  const [aberto, setAberto] = useState(false);
+  const [opcoes, setOpcoes] = useState<{ funis: Opcao[]; origens: Opcao[] } | null>(null);
+  const [funis, setFunis] = useState<string[]>(cfg.filtro_funis ?? []);
+  const [origens, setOrigens] = useState<string[]>(cfg.filtro_origens ?? []);
+  const [salvando, setSalvando] = useState(false);
+  const [msg, setMsg] = useState('');
+
+  useEffect(() => {
+    if (!aberto || opcoes) return;
+    fetch(`/api/clients/${clientId}/agendor/opcoes`)
+      .then(r => r.ok ? r.json() as Promise<{ funis: Opcao[]; origens: Opcao[] }> : Promise.reject())
+      .then(setOpcoes)
+      .catch(() => setOpcoes({ funis: [], origens: [] }));
+  }, [aberto, opcoes, clientId]);
+
+  function alternarId(lista: string[], setLista: (v: string[]) => void, id: string) {
+    setLista(lista.includes(id) ? lista.filter(x => x !== id) : [...lista, id]);
+  }
+
+  async function salvar() {
+    setSalvando(true);
+    setMsg('');
+    try {
+      const res = await fetch(`/api/clients/${clientId}/agendor`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filtro_funis: funis, filtro_origens: origens }),
+      });
+      if (!res.ok) throw new Error();
+      setMsg('✓ Filtros salvos — valem para as próximas entradas e sincronizações.');
+      aoSalvar();
+    } catch {
+      setMsg('Erro ao salvar os filtros.');
+    } finally {
+      setSalvando(false);
+    }
+  }
+
+  const resumo = [
+    (cfg.filtro_funis?.length ?? 0) > 0 ? `${cfg.filtro_funis!.length} funil(is)` : 'todos os funis',
+    (cfg.filtro_origens?.length ?? 0) > 0 ? `${cfg.filtro_origens!.length} origem(ns)` : 'todas as origens',
+  ].join(' · ');
+
+  function bloco(titulo: string, todasLabel: string, lista: Opcao[], marcados: string[], setLista: (v: string[]) => void) {
+    return (
+      <div>
+        <p className="text-xs font-semibold mb-1.5">{titulo}</p>
+        <label className="flex items-center gap-2 text-xs mb-1 cursor-pointer">
+          <input type="checkbox" checked={marcados.length === 0} onChange={() => setLista([])} />
+          <span className={marcados.length === 0 ? 'text-primary font-semibold' : 'text-muted-foreground'}>{todasLabel}</span>
+        </label>
+        <div className="max-h-36 overflow-y-auto space-y-1 pl-1">
+          {lista.map(o => (
+            <label key={o.id} className="flex items-center gap-2 text-xs cursor-pointer">
+              <input
+                type="checkbox"
+                checked={marcados.includes(o.id)}
+                onChange={() => alternarId(marcados, setLista, o.id)}
+              />
+              <span className="truncate">{o.nome}</span>
+            </label>
+          ))}
+          {lista.length === 0 && <p className="text-xs text-muted-foreground">nenhuma opção encontrada</p>}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-4 rounded-lg border border-border/60 bg-background/40">
+      <button
+        onClick={() => setAberto(a => !a)}
+        className="flex w-full items-center gap-2 px-3 py-2 text-xs font-semibold"
+      >
+        {aberto ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+        Filtros de importação
+        <span className="ml-auto font-normal text-muted-foreground">{resumo}</span>
+      </button>
+      {aberto && (
+        <div className="border-t border-border/60 px-3 py-3 space-y-3">
+          {!opcoes ? (
+            <p className="text-xs text-muted-foreground">Carregando funis e origens do Agendor…</p>
+          ) : (
+            <>
+              <div className="grid gap-4 sm:grid-cols-2">
+                {bloco('Funis do Agendor', 'Todos os funis', opcoes.funis, funis, setFunis)}
+                {bloco('Origens de lead', 'Todas as origens', opcoes.origens, origens, setOrigens)}
+              </div>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => void salvar()}
+                  disabled={salvando}
+                  className="rounded-lg bg-primary px-3 py-1.5 text-xs font-bold text-black disabled:opacity-50"
+                >
+                  {salvando ? 'Salvando…' : 'Salvar filtros'}
+                </button>
+                {msg && <span className="text-xs">{msg}</span>}
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                O filtro vale daqui pra frente (webhook e sincronizações). O que já foi importado permanece
+                — negócio barrado aparece no log como “Fora do filtro”.
+              </p>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function AgendorCard({ clientId }: { clientId: string }) {
@@ -214,6 +340,10 @@ export function AgendorCard({ clientId }: { clientId: string }) {
           </button>
         </div>
         {msgConexao && <p className="mt-2 text-xs">{msgConexao}</p>}
+
+        {cfg.conectado && (
+          <FiltrosImportacao clientId={clientId} cfg={cfg} aoSalvar={() => void carregar()} />
+        )}
       </div>
 
       <div className="rounded-xl border border-border bg-card p-5">

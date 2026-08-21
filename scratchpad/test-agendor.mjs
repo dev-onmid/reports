@@ -83,3 +83,50 @@ eq(normalizarNegocio({ id: 1, value: '3.500,00' }).valor, null, 'valor BR ambíg
 eq(normalizarNegocio({ id: 1, value: '3500,50' }).valor, 3500.5, 'vírgula decimal simples ok');
 
 console.log(`✓ ${n} asserts do Agendor passaram`);
+
+// ---------------------------------------------------------------- filtros
+import { passaFiltros, parseFiltro } from './build/agendor.mjs';
+{
+  const neg = (funilId, funilNome) => ({ idExterno: '1', funilId, funilNome, pessoa: {} });
+  const pes = (origemLeadId, origemLead) => ({ origemLeadId: origemLeadId ?? null, origemLead: origemLead ?? null });
+  const sem = { funis: null, origens: null };
+
+  // sem filtro: tudo passa
+  ok(passaFiltros(sem, neg('9', 'X'), pes('2', 'Site')).passa, 'sem filtro passa');
+  ok(passaFiltros(sem, neg(null, null), null).passa, 'sem filtro e sem dados passa');
+
+  // filtro de funil
+  const soFunil1 = { funis: ['1'], origens: null };
+  ok(passaFiltros(soFunil1, neg('1', 'Vendas'), null).passa, 'funil na lista passa');
+  ok(!passaFiltros(soFunil1, neg('2', 'Pós-venda'), null).passa, 'funil fora barra');
+  ok(passaFiltros(soFunil1, neg(null, null), null).passa, 'funil DESCONHECIDO passa (permissivo — perder legítimo é pior)');
+  ok(passaFiltros(soFunil1, neg('2', 'Pós-venda'), null).motivo.includes('Pós-venda'), 'motivo cita o funil');
+
+  // filtro de origem
+  const soSite = { funis: null, origens: ['5'] };
+  ok(passaFiltros(soSite, neg('1', 'V'), pes('5', 'Site')).passa, 'origem na lista passa');
+  ok(!passaFiltros(soSite, neg('1', 'V'), pes('7', 'Indicação')).passa, 'origem fora barra');
+  ok(!passaFiltros(soSite, neg('1', 'V'), pes(null, null)).passa, 'SEM origem barra quando há filtro (origem específica exclui o resto)');
+  ok(!passaFiltros(soSite, neg('1', 'V'), null).passa, 'sem pessoa idem');
+
+  // os dois juntos: precisa passar nos dois
+  const ambos = { funis: ['1'], origens: ['5'] };
+  ok(passaFiltros(ambos, neg('1', 'V'), pes('5', 'Site')).passa, 'passa nos dois');
+  ok(!passaFiltros(ambos, neg('1', 'V'), pes('7', 'Ind')).passa, 'funil ok mas origem fora barra');
+}
+// parseFiltro: JSONB sujo nunca vira filtro fantasma
+eq(parseFiltro(['1', 2, null, '']), ['1', '2'], 'ids viram strings, lixo cai');
+eq(parseFiltro([]), null, 'lista vazia = sem filtro');
+eq(parseFiltro('nada'), null, 'não-array = sem filtro');
+eq(parseFiltro(null), null, 'null = sem filtro');
+// funil extraído na normalização
+{
+  const n = normalizarNegocio({ id: 1, dealStage: { id: 2, name: 'Etapa', funnel: { id: 7, name: 'Funil de vendas' } } });
+  eq(n.funilId, '7', 'funilId extraído');
+  eq(n.funilNome, 'Funil de vendas', 'funilNome extraído');
+}
+{
+  const p = normalizarPessoa({ name: 'A', leadOrigin: { id: 3, name: 'Site' } });
+  eq(p.origemLeadId, '3', 'origemLeadId extraído');
+}
+console.log(`✓ ${n} asserts (com filtros)`);

@@ -29,6 +29,9 @@ export type NegocioAgendor = {
   valor: number | null;
   /** Nome legível da etapa (dealStage.name) — espelhável no Kanban. */
   etapa: string | null;
+  /** Funil do Agendor a que o negócio pertence (dealStage.funnel) — base do filtro de importação. */
+  funilId: string | null;
+  funilNome: string | null;
   status: StatusNegocio;
   ganhoEm: string | null;
   perdidoEm: string | null;
@@ -50,6 +53,7 @@ export type PessoaAgendor = {
   cidade: string | null;
   estado: string | null;
   origemLead: string | null;
+  origemLeadId: string | null;
 };
 
 type Obj = Record<string, unknown>;
@@ -98,12 +102,15 @@ export function normalizarNegocio(d: Obj): NegocioAgendor | null {
   if (!id) return null;
   const pessoa = obj(d.person);
   const etapaObj = obj(d.dealStage);
+  const funilObj = obj(etapaObj?.funnel);
   return {
     idExterno: id,
     titulo: str(d.title),
     valor: num(d.value),
     // dealStage pode vir como objeto {name} (API) ou string solta (webhook).
     etapa: str(etapaObj?.name) ?? (typeof d.dealStage === 'string' ? str(d.dealStage) : null),
+    funilId: str(funilObj?.id),
+    funilNome: str(funilObj?.name),
     status: statusDoNegocio(d),
     ganhoEm: str(d.wonAt),
     perdidoEm: str(d.lostAt),
@@ -136,6 +143,7 @@ export function normalizarPessoa(p: Obj): PessoaAgendor {
     cidade: str(endereco.city),
     estado: str(endereco.state),
     origemLead: str(obj(p.leadOrigin)?.name),
+    origemLeadId: str(obj(p.leadOrigin)?.id),
   };
 }
 
@@ -169,4 +177,51 @@ export function extrairEventoAgendor(raw: unknown): EventoAgendor {
     }
   }
   return { tipo: 'desconhecido', evento };
+}
+
+// ---------------------------------------------------------------- filtros
+
+export type FiltrosImportacao = {
+  /** Ids de funil do Agendor permitidos; null/[] = todos. */
+  funis: string[] | null;
+  /** Ids de origem de lead permitidos; null/[] = todas. */
+  origens: string[] | null;
+};
+
+/**
+ * O negócio passa nos filtros de importação do cliente?
+ *
+ * Regra deliberadamente PERMISSIVA no desconhecido: filtro de funil ligado +
+ * negócio sem informação de funil no payload → PASSA (com o chamador tendo
+ * tentado resolver antes via API). Bloquear no desconhecido perderia negócio
+ * legítimo em silêncio — o custo de um indesejado entrar é visível e
+ * reversível; o de um legítimo sumir, não.
+ */
+export function passaFiltros(
+  filtros: FiltrosImportacao,
+  negocio: NegocioAgendor,
+  pessoa: PessoaAgendor | null,
+): { passa: boolean; motivo: string | null } {
+  if (filtros.funis && filtros.funis.length > 0 && negocio.funilId !== null) {
+    if (!filtros.funis.includes(negocio.funilId)) {
+      return { passa: false, motivo: `funil "${negocio.funilNome ?? negocio.funilId}" fora do filtro` };
+    }
+  }
+  if (filtros.origens && filtros.origens.length > 0) {
+    const id = pessoa?.origemLeadId ?? null;
+    // Origem conhecida e fora da lista → barra. Pessoa sem origem cadastrada
+    // no Agendor conta como "fora" quando há filtro — origem específica foi
+    // pedida justamente pra excluir o resto.
+    if (id === null || !filtros.origens.includes(id)) {
+      return { passa: false, motivo: `origem "${pessoa?.origemLead ?? 'sem origem'}" fora do filtro` };
+    }
+  }
+  return { passa: true, motivo: null };
+}
+
+/** Normaliza o JSONB salvo (array de ids como strings; lixo → null = sem filtro). */
+export function parseFiltro(v: unknown): string[] | null {
+  if (!Array.isArray(v)) return null;
+  const ids = v.map(x => str(x)).filter((x): x is string => x !== null);
+  return ids.length > 0 ? ids : null;
 }

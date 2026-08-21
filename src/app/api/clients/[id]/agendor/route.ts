@@ -41,6 +41,8 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
       ultima_sync_em: conn.ultima_sync_em,
       last_received_at: conn.last_received_at,
       ultimo_erro: conn.ultimo_erro,
+      filtro_funis: conn.filtro_funis,
+      filtro_origens: conn.filtro_origens,
       logs,
     });
   } catch (err) {
@@ -96,18 +98,41 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
 
 export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
-  const body = await req.json().catch(() => ({})) as { enabled?: boolean };
-  if (typeof body.enabled !== 'boolean') {
-    return Response.json({ error: 'enabled deve ser boolean' }, { status: 400 });
+  const body = await req.json().catch(() => ({})) as {
+    enabled?: boolean;
+    filtro_funis?: string[] | null;
+    filtro_origens?: string[] | null;
+  };
+  const temFiltros = 'filtro_funis' in body || 'filtro_origens' in body;
+  if (typeof body.enabled !== 'boolean' && !temFiltros) {
+    return Response.json({ error: 'Informe enabled ou filtros.' }, { status: 400 });
   }
+  const sanear = (v: unknown): string[] | null =>
+    Array.isArray(v) ? v.map(String).filter(Boolean).slice(0, 100) : null;
+
   const pool = makeServerPool();
   try {
     await ensureAgendorSchema(pool);
-    await pool.query(
-      `UPDATE public.agendor_connections SET enabled = $2 WHERE client_id = $1`,
-      [id, body.enabled],
-    );
-    return Response.json({ ok: true, enabled: body.enabled });
+    if (typeof body.enabled === 'boolean') {
+      await pool.query(
+        `UPDATE public.agendor_connections SET enabled = $2 WHERE client_id = $1`,
+        [id, body.enabled],
+      );
+    }
+    if (temFiltros) {
+      // Lista vazia/limpa vira NULL = sem filtro (importa tudo) — "todas" é o
+      // estado natural, não uma lista com todos os ids (que envelheceria mal
+      // quando o cliente criasse um funil novo no Agendor).
+      const funis = sanear(body.filtro_funis);
+      const origens = sanear(body.filtro_origens);
+      await pool.query(
+        `UPDATE public.agendor_connections
+            SET filtro_funis = $2::jsonb, filtro_origens = $3::jsonb
+          WHERE client_id = $1`,
+        [id, funis ? JSON.stringify(funis) : null, origens ? JSON.stringify(origens) : null],
+      );
+    }
+    return Response.json({ ok: true });
   } finally {
     await pool.end();
   }

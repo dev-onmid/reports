@@ -4,7 +4,7 @@ import { normalizarNegocio, type NegocioAgendor, type PessoaAgendor } from '@/li
 import {
   agendorFetch, AGENDOR_API, listarConexoesAgendorAtivas, type ConexaoAgendor,
 } from '@/lib/agendor-server';
-import { buscarPessoaAgendor, ingerirNegocioAgendor, posProcessarIngestao } from '@/lib/agendor-ingest';
+import { buscarPessoaAgendor, conferirFiltros, ingerirNegocioAgendor, posProcessarIngestao } from '@/lib/agendor-ingest';
 
 /**
  * Sincronismo Agendor: backfill do histórico + reconciliação.
@@ -55,8 +55,10 @@ async function processarLote(
       }
       pessoa = cachePessoas.get(n.pessoa.id) ?? null;
     }
-    const r = await ingerirNegocioAgendor(pool, conn.client_id, n, pessoa);
-    await posProcessarIngestao(pool, conn, n, pessoa, r, { sync: origem, dealId: n.idExterno },
+    const { negocio: nf, bloqueado } = await conferirFiltros(conn, n, pessoa);
+    if (bloqueado) continue; // fora do filtro: nem log por item no backfill (viraria ruído aos milhares)
+    const r = await ingerirNegocioAgendor(pool, conn.client_id, nf, pessoa);
+    await posProcessarIngestao(pool, conn, nf, pessoa, r, { sync: origem, dealId: nf.idExterno },
       origem === 'backfill' ? 'backfill' : (r.criado ? 'criado' : 'atualizado'));
     feitos++;
   }

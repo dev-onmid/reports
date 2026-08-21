@@ -17,8 +17,8 @@
  */
 
 import type { Pool } from 'pg';
-import type { NegocioAgendor, PessoaAgendor } from '@/lib/agendor';
-import { normalizarPessoa } from '@/lib/agendor';
+import type { FiltrosImportacao, NegocioAgendor, PessoaAgendor } from '@/lib/agendor';
+import { normalizarNegocio, normalizarPessoa, parseFiltro, passaFiltros } from '@/lib/agendor';
 import { agendorFetch, AGENDOR_API, type ConexaoAgendor, registrarLogAgendor } from '@/lib/agendor-server';
 import { chaveTelefone, sinaisDoStatus } from '@/lib/importacao-origem';
 import { classificarEtapa, normalizarEtiqueta } from '@/lib/funil-etapas';
@@ -71,6 +71,35 @@ export async function buscarPessoaAgendor(
   } catch {
     return null;
   }
+}
+
+/** Filtros salvos na conexão, prontos pra `passaFiltros`. */
+export function filtrosDaConexao(conn: ConexaoAgendor): FiltrosImportacao {
+  return { funis: parseFiltro(conn.filtro_funis), origens: parseFiltro(conn.filtro_origens) };
+}
+
+/**
+ * Aplica os filtros de importação; devolve null (com motivo) quando o negócio
+ * NÃO deve entrar. Se o filtro de funil está ligado e o payload veio sem o
+ * funil (webhook às vezes manda a etapa como texto solto), busca o negócio
+ * completo na API antes de decidir — melhor uma chamada a mais que barrar ou
+ * deixar passar no escuro.
+ */
+export async function conferirFiltros(
+  conn: ConexaoAgendor, negocio: NegocioAgendor, pessoa: PessoaAgendor | null,
+): Promise<{ negocio: NegocioAgendor; bloqueado: string | null }> {
+  const filtros = filtrosDaConexao(conn);
+  let n = negocio;
+  if (filtros.funis && filtros.funis.length > 0 && n.funilId === null && conn.api_token) {
+    try {
+      const r = await agendorFetch<{ data?: Record<string, unknown> }>(
+        conn.api_token, `${AGENDOR_API}/deals/${encodeURIComponent(n.idExterno)}`);
+      const completo = r?.data ? normalizarNegocio(r.data) : null;
+      if (completo?.funilId) n = { ...n, funilId: completo.funilId, funilNome: completo.funilNome };
+    } catch { /* segue com o que tem — passaFiltros é permissivo no desconhecido */ }
+  }
+  const { passa, motivo } = passaFiltros(filtros, n, pessoa);
+  return { negocio: n, bloqueado: passa ? null : motivo };
 }
 
 export type ResultadoIngestao = {

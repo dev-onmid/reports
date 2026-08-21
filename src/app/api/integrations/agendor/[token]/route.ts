@@ -4,7 +4,7 @@ import { extrairEventoAgendor } from '@/lib/agendor';
 import {
   conexaoAgendorPorToken, ensureAgendorSchema, registrarLogAgendor,
 } from '@/lib/agendor-server';
-import { buscarPessoaAgendor, ingerirNegocioAgendor, posProcessarIngestao } from '@/lib/agendor-ingest';
+import { buscarPessoaAgendor, conferirFiltros, ingerirNegocioAgendor, posProcessarIngestao } from '@/lib/agendor-ingest';
 
 /**
  * Receptor do webhook do Agendor — um token POR CLIENTE na URL.
@@ -61,8 +61,17 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ token: str
       ? await buscarPessoaAgendor(conn.api_token, evento.negocio.pessoa.id)
       : null;
 
-    const r = await ingerirNegocioAgendor(pool, conn.client_id, evento.negocio, pessoa);
-    await posProcessarIngestao(pool, conn, evento.negocio, pessoa, r, raw,
+    // Filtros de importação do cliente (funil/origem escolhidos no card).
+    const { negocio, bloqueado } = await conferirFiltros(conn, evento.negocio, pessoa);
+    if (bloqueado) {
+      await registrarLogAgendor(pool, {
+        clientId: conn.client_id, raw, resultado: 'filtrado', detalhe: bloqueado,
+      });
+      return Response.json({ ok: true, resultado: 'filtrado' });
+    }
+
+    const r = await ingerirNegocioAgendor(pool, conn.client_id, negocio, pessoa);
+    await posProcessarIngestao(pool, conn, negocio, pessoa, r, raw,
       r.criado ? 'criado' : 'atualizado');
 
     return Response.json({ ok: true, resultado: r.criado ? 'criado' : 'atualizado', leadId: r.leadId });

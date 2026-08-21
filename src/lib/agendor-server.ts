@@ -53,6 +53,11 @@ export function ensureAgendorSchema(pool: Pool): Promise<void> {
         )
       `);
       await pool.query(`
+        ALTER TABLE public.agendor_connections
+          ADD COLUMN IF NOT EXISTS filtro_funis JSONB,
+          ADD COLUMN IF NOT EXISTS filtro_origens JSONB
+      `);
+      await pool.query(`
         CREATE TABLE IF NOT EXISTS public.agendor_log (
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
           client_id TEXT,
@@ -85,10 +90,13 @@ export type ConexaoAgendor = {
   ultima_sync_em: string | null;
   last_received_at: string | null;
   ultimo_erro: string | null;
+  filtro_funis: unknown;
+  filtro_origens: unknown;
 };
 
 const CONN_COLS = `id, client_id, token, api_token, enabled, account_name, subscriptions,
-  backfill_pagina, backfill_concluido, ultima_sync_em, last_received_at, ultimo_erro`;
+  backfill_pagina, backfill_concluido, ultima_sync_em, last_received_at, ultimo_erro,
+  filtro_funis, filtro_origens`;
 
 export async function garantirConexaoAgendor(pool: Pool, clientId: string): Promise<ConexaoAgendor> {
   await ensureAgendorSchema(pool);
@@ -196,11 +204,29 @@ export async function garantirAssinaturasAgendor(
   return { criadas, existentes: [...jaTem], erros };
 }
 
+/** Funis e origens de lead disponíveis na conta do Agendor (pro seletor da UI). */
+export async function listarOpcoesAgendor(apiToken: string): Promise<{
+  funis: Array<{ id: string; nome: string }>;
+  origens: Array<{ id: string; nome: string }>;
+}> {
+  type Item = { id?: number | string; name?: string };
+  const pegar = async (path: string): Promise<Array<{ id: string; nome: string }>> => {
+    try {
+      const r = await agendorFetch<{ data?: Item[] }>(apiToken, `${AGENDOR_API}${path}`);
+      return (r?.data ?? [])
+        .filter(x => x.id !== undefined && x.name)
+        .map(x => ({ id: String(x.id), nome: String(x.name) }));
+    } catch { return []; }
+  };
+  const [funis, origens] = await Promise.all([pegar('/funnels'), pegar('/lead_origins')]);
+  return { funis, origens };
+}
+
 // ---------------------------------------------------------------- log cru
 
 export type ResultadoLogAgendor =
   | 'criado' | 'atualizado' | 'sem_telefone' | 'token_invalido' | 'desativado'
-  | 'erro' | 'ignorado' | 'backfill' | 'teste_get';
+  | 'erro' | 'ignorado' | 'backfill' | 'teste_get' | 'filtrado';
 
 export async function registrarLogAgendor(pool: Pool, d: {
   clientId: string | null;
