@@ -4415,7 +4415,10 @@ function GoalProgressCard({
   className?: string;
 }) {
   const base = partial > 0 ? partial : target;
-  const progress = base > 0 ? Math.max(0, Math.min(100, (value / base) * 100)) : 0;
+  // rawProgress é o número VERDADEIRO (pode passar de 100%); o clamp é só da
+  // largura da barra — clampar o rótulo travava "100,00%" pra quem fez 250%.
+  const rawProgress = base > 0 ? Math.max(0, (value / base) * 100) : 0;
+  const progress = Math.min(100, rawProgress);
   const iconSize = estilo.tamanhoIcone ?? 40;
   return (
     <PremiumPanel className={cn('relative overflow-hidden p-5', className)}>
@@ -4453,7 +4456,7 @@ function GoalProgressCard({
                 }}
               />
               <div className="absolute inset-0 flex items-center justify-center">
-                <span className="text-sm font-black text-black drop-shadow-sm">{progress > 0 ? premiumValue(progress, 'percent') : '—'}</span>
+                <span className="text-sm font-black text-black drop-shadow-sm">{rawProgress > 0 ? premiumValue(rawProgress, 'percent') : '—'}</span>
               </div>
             </div>
             <div className="mt-2 flex justify-between text-xs text-[#a7b0b6]">
@@ -5715,8 +5718,10 @@ export default function GeneralDashboard() {
     googleSearchAbsTopIS /= googleCompetitiveCount;
     googleSearchTopIS /= googleCompetitiveCount;
   }
-  const ctrPlatformCount = (metaCtr > 0 ? 1 : 0) + (googleCtrValue > 0 ? 1 : 0);
-  const avgCtr = ctrPlatformCount > 0 ? (metaCtr + googleCtrValue) / ctrPlatformCount : 0;
+  // CTR combinado PONDERADO por impressões — média simples fazia uma conta com
+  // 100 impressões pesar igual a outra com 1 milhão.
+  const totalImpr = metaImpressions + googleImpressions;
+  const avgCtr = totalImpr > 0 ? ((metaClicks + googleClicks) / totalImpr) * 100 : 0;
   const selectedRange = periodToDateRange(period, customDateFrom, customDateTo);
   const selectedDateKeys = dateKeysInRange(selectedRange.from, selectedRange.to);
   const dailySeries = aggregateDailySeries(metricsByClient, selectedIds, selectedDateKeys);
@@ -5810,6 +5815,7 @@ export default function GeneralDashboard() {
   let prevMetaLeads = 0, prevMetaSpend = 0, prevGoogleConv = 0, prevGoogleCost = 0;
   let prevMetaReach = 0, prevMetaImpressions = 0, prevMetaClicks = 0;
   let prevGoogleImpressions = 0, prevGoogleClicks = 0;
+  let prevRevenue = 0, prevCrmSales = 0;
   for (const id of selectedIds) {
     const m = prevMetricsByClient[id];
     if (m?.meta) {
@@ -5820,11 +5826,12 @@ export default function GeneralDashboard() {
       prevGoogleConv += m.google.conversions; prevGoogleCost += m.google.cost;
       prevGoogleImpressions += m.google.impressions; prevGoogleClicks += m.google.clicks;
     }
+    if (m?.crm) { prevRevenue += m.crm.revenue ?? 0; prevCrmSales += m.crm.sales ?? 0; }
   }
   const prevTotalLeads = prevMetaLeads + prevGoogleConv;
   const prevTotalSpend = prevMetaSpend + prevGoogleCost;
   const prevCpl = prevTotalLeads > 0 ? prevTotalSpend / prevTotalLeads : 0;
-  const prevRoi = prevTotalSpend > 0 ? 0 / prevTotalSpend : 0;
+  const prevRoi = prevTotalSpend > 0 ? prevRevenue / prevTotalSpend : 0;
   const prevMetaCtr = prevMetaImpressions > 0 ? (prevMetaClicks / prevMetaImpressions) * 100 : 0;
   const prevAvgCpl = prevMetaLeads > 0 ? prevMetaSpend / prevMetaLeads : 0;
   const prevGoogleCpc = prevGoogleClicks > 0 ? prevGoogleCost / prevGoogleClicks : 0;
@@ -5981,7 +5988,11 @@ export default function GeneralDashboard() {
   const conversions = funilCrm.fechamentos || crmSales || googleConv;
   const funnelVisitors = Math.max(metaReach + googleImpressions, totalLeads, conversions);
   const conversionRate = funnelVisitors > 0 ? (conversions / funnelVisitors) * 100 : 0;
-  const previousConversionRate = prevTotalLeads > 0 ? ((conversions || totalLeads) / Math.max(prevTotalLeads, 1)) * 100 : null;
+  // Mesma conta da taxa atual, com os números do período ANTERIOR — a versão
+  // antiga dividia conversões atuais por leads anteriores e dava variação absurda.
+  const prevConversions = prevCrmSales || prevGoogleConv;
+  const prevFunnelVisitors = Math.max(prevMetaReach + prevGoogleImpressions, prevTotalLeads, prevConversions);
+  const previousConversionRate = prevFunnelVisitors > 0 ? (prevConversions / prevFunnelVisitors) * 100 : null;
   const quickMetrics = [
     { title: 'Investimento Total', value: premiumValue(totalSpend, 'currency'), change: pctChange(totalSpend, prevTotalSpend), icon: CreditCard },
     { title: 'CPL Médio', value: totalCostPerLead > 0 ? premiumValue(totalCostPerLead, 'currency') : '—', change: pctChange(totalCostPerLead, prevCpl), icon: Tag, inverseChange: true },
@@ -6147,6 +6158,84 @@ export default function GeneralDashboard() {
         />
       )}
 
+      {/* Copy layout modal */}
+      {copyLayoutOpen && selectedIds.size === 1 && (() => {
+        const srcClient = clients.find(c => selectedIds.has(c.id));
+        const otherClients = clients.filter(c => !selectedIds.has(c.id));
+        const allSelected = copyLayoutDest.size === otherClients.length;
+        return createPortal(
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+            <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-md flex flex-col max-h-[80vh]">
+              <div className="flex items-center justify-between px-5 pt-5 pb-4 border-b border-border shrink-0">
+                <div>
+                  <h2 className="text-sm font-bold">Copiar layout</h2>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">
+                    De <span className="font-semibold text-foreground">{srcClient?.name}</span> para:
+                  </p>
+                </div>
+                <button onClick={() => setCopyLayoutOpen(false)} className="text-muted-foreground hover:text-foreground p-1">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div className="px-5 pt-3 pb-2 border-b border-border shrink-0 flex items-center justify-between gap-2">
+                <span className="text-[11px] text-muted-foreground">{copyLayoutDest.size} de {otherClients.length} selecionado{copyLayoutDest.size !== 1 ? 's' : ''}</span>
+                <button
+                  onClick={() => setCopyLayoutDest(allSelected ? new Set() : new Set(otherClients.map(c => c.id)))}
+                  className="text-[11px] font-semibold text-primary hover:underline"
+                >
+                  {allSelected ? 'Desmarcar todos' : 'Selecionar todos'}
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto px-5 py-3 space-y-1 min-h-0">
+                {otherClients.map(c => {
+                  const checked = copyLayoutDest.has(c.id);
+                  return (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => setCopyLayoutDest(prev => {
+                        const next = new Set(prev);
+                        if (next.has(c.id)) next.delete(c.id); else next.add(c.id);
+                        return next;
+                      })}
+                      className={cn(
+                        'w-full flex items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm transition-colors',
+                        checked ? 'bg-primary/10 border border-primary/30' : 'hover:bg-muted/40 border border-transparent'
+                      )}
+                    >
+                      <div className={cn('h-4 w-4 rounded border flex items-center justify-center shrink-0', checked ? 'bg-primary border-primary' : 'border-border')}>
+                        {checked && <Check className="h-3 w-3 text-black" />}
+                      </div>
+                      <ClientAvatar clientId={c.id} name={c.name} size="sm" />
+                      <span className="font-medium truncate">{c.name}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="px-5 pb-5 pt-3 border-t border-border shrink-0 flex gap-2 justify-end">
+                <button
+                  onClick={() => setCopyLayoutOpen(false)}
+                  className="px-4 py-2 rounded-xl border border-border text-sm font-semibold text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={copyLayoutToClients}
+                  disabled={copyLayoutDest.size === 0}
+                  className="px-4 py-2 rounded-xl bg-primary text-black text-sm font-bold hover:bg-primary/90 transition-colors disabled:opacity-40"
+                >
+                  Copiar para {copyLayoutDest.size > 0 ? `${copyLayoutDest.size} cliente${copyLayoutDest.size !== 1 ? 's' : ''}` : 'clientes'}
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        );
+      })()}
+
       <div className="sticky top-0 z-20 border-b border-white/[0.08] bg-[#060a0d]/92 px-4 py-3 backdrop-blur-xl xl:px-6">
         <div className="flex items-center gap-3 overflow-x-auto">
           <ClientSelector clients={clients} selected={selectedIds} onChange={setSelectedIds} />
@@ -6183,19 +6272,42 @@ export default function GeneralDashboard() {
               Modo {perfilAtivo.rotuloSegmento}
             </span>
           )}
-          <span className="ml-auto inline-flex items-center gap-2 rounded-[10px] border border-white/[0.08] bg-[#0b1216] px-3 py-2 text-xs font-semibold text-[#dce4e8]">
-            <span className="h-2 w-2 rounded-full bg-[#6cff2f]" /> Ao vivo
+          {/* Badge honesto: "Ao vivo" só quando o dado veio fresco da API;
+              cache mostra a idade (o selo fixo mentia — auditoria 2026-08-22). */}
+          <span
+            className="ml-auto inline-flex items-center gap-2 rounded-[10px] border border-white/[0.08] bg-[#0b1216] px-3 py-2 text-xs font-semibold text-[#dce4e8]"
+            title={dataCacheAge === null || dataCacheAge === 0 ? 'Dados recém-buscados da API' : `Dados em cache — buscados há ${Math.round(dataCacheAge / 60)} min. Atualizados a cada 15 min.`}
+          >
+            <span className={cn('h-2 w-2 rounded-full', dataCacheAge === null || dataCacheAge === 0 ? 'bg-[#6cff2f]' : 'bg-amber-400')} />
+            {dataCacheAge === null || dataCacheAge === 0 ? 'Ao vivo' : `Cache · ${Math.round(dataCacheAge / 60)} min`}
           </span>
-          <div className="relative hidden w-[240px] shrink-0 2xl:block">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#9aa4aa]" />
-            <Input className="h-10 rounded-[10px] border-white/[0.08] bg-[#0b1216] pl-10 text-xs text-[#f4f7f8] placeholder:text-[#9aa4aa]" placeholder="Buscar clientes, relatórios..." />
-          </div>
-          <button type="button" className="rounded-[10px] border border-white/[0.08] bg-[#0b1216] px-4 py-2 text-xs font-bold text-[#f4f7f8] hover:border-[#6cff2f]/35">
-            Exportar
+          {/* Botões REAIS no lugar da busca/Exportar/sino decorativos que não
+              faziam nada (auditoria 2026-08-22) — religa Métricas, Copiar
+              layout e Analisar com IA, que ficaram órfãos no bloco antigo. */}
+          <button
+            type="button"
+            onClick={() => setCustomizerOpen(true)}
+            className="rounded-[10px] border border-white/[0.08] bg-[#0b1216] px-4 py-2 text-xs font-bold text-[#f4f7f8] hover:border-[#6cff2f]/35"
+          >
+            Métricas
           </button>
-          <button type="button" className="relative rounded-full p-2 text-[#f4f7f8] hover:bg-white/[0.06]">
-            <Bell className="h-5 w-5" />
-            <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-[#6cff2f]" />
+          {selectedIds.size === 1 && (
+            <button
+              type="button"
+              onClick={openCopyLayout}
+              className="rounded-[10px] border border-white/[0.08] bg-[#0b1216] px-4 py-2 text-xs font-bold text-[#f4f7f8] hover:border-[#6cff2f]/35"
+            >
+              Copiar layout
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={analyzeWithAI}
+            disabled={aiLoading || selectedIds.size === 0 || metricsLoading}
+            className="inline-flex items-center gap-1.5 rounded-[10px] border border-[#6cff2f]/35 bg-[#6cff2f]/10 px-4 py-2 text-xs font-bold text-[#6cff2f] hover:bg-[#6cff2f]/20 disabled:opacity-40"
+          >
+            {aiLoading ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+            {aiLoading ? 'Analisando...' : 'Analisar com IA'}
           </button>
           <Avatar className="h-9 w-9 border border-white/[0.08]">
             <AvatarFallback className="bg-[#78d957] text-sm font-black text-black">
@@ -6272,6 +6384,9 @@ export default function GeneralDashboard() {
           </div>
         ) : (
           <div className="space-y-5">
+            {aiInsights.length > 0 && (
+              <AiRecommendationsBox insights={aiInsights} loading={aiLoading} onAnalyze={analyzeWithAI} />
+            )}
             {aiError && <div className="rounded-xl border border-red-400/30 bg-red-500/10 px-4 py-3 text-xs text-red-300">{aiError}</div>}
             {!metricsLoading && alerts.length > 0 && (
               <div className="rounded-xl border border-amber-400/20 bg-amber-400/8 px-4 py-3 text-xs text-amber-200">
@@ -6601,878 +6716,4 @@ export default function GeneralDashboard() {
     </div>
   );
 
-  return (
-    <div className="space-y-6 pb-10">
-      {customizerOpen && (
-        <MetricConfigPanel
-          prefs={dashboardPrefs}
-          onPrefsChange={setDashboardPrefs}
-          onClose={() => setCustomizerOpen(false)}
-        />
-      )}
-
-      {/* Copy layout modal */}
-      {copyLayoutOpen && selectedIds.size === 1 && (() => {
-        const srcClient = clients.find(c => selectedIds.has(c.id));
-        const otherClients = clients.filter(c => !selectedIds.has(c.id));
-        const allSelected = copyLayoutDest.size === otherClients.length;
-        return createPortal(
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-            <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-md flex flex-col max-h-[80vh]">
-              <div className="flex items-center justify-between px-5 pt-5 pb-4 border-b border-border shrink-0">
-                <div>
-                  <h2 className="text-sm font-bold">Copiar layout</h2>
-                  <p className="text-[11px] text-muted-foreground mt-0.5">
-                    De <span className="font-semibold text-foreground">{srcClient?.name}</span> para:
-                  </p>
-                </div>
-                <button onClick={() => setCopyLayoutOpen(false)} className="text-muted-foreground hover:text-foreground p-1">
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-
-              <div className="px-5 pt-3 pb-2 border-b border-border shrink-0 flex items-center justify-between gap-2">
-                <span className="text-[11px] text-muted-foreground">{copyLayoutDest.size} de {otherClients.length} selecionado{copyLayoutDest.size !== 1 ? 's' : ''}</span>
-                <button
-                  onClick={() => setCopyLayoutDest(allSelected ? new Set() : new Set(otherClients.map(c => c.id)))}
-                  className="text-[11px] font-semibold text-primary hover:underline"
-                >
-                  {allSelected ? 'Desmarcar todos' : 'Selecionar todos'}
-                </button>
-              </div>
-
-              <div className="flex-1 overflow-y-auto px-5 py-3 space-y-1 min-h-0">
-                {otherClients.map(c => {
-                  const checked = copyLayoutDest.has(c.id);
-                  return (
-                    <button
-                      key={c.id}
-                      type="button"
-                      onClick={() => setCopyLayoutDest(prev => {
-                        const next = new Set(prev);
-                        if (next.has(c.id)) next.delete(c.id); else next.add(c.id);
-                        return next;
-                      })}
-                      className={cn(
-                        'w-full flex items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm transition-colors',
-                        checked ? 'bg-primary/10 border border-primary/30' : 'hover:bg-muted/40 border border-transparent'
-                      )}
-                    >
-                      <div className={cn('h-4 w-4 rounded border flex items-center justify-center shrink-0', checked ? 'bg-primary border-primary' : 'border-border')}>
-                        {checked && <Check className="h-3 w-3 text-black" />}
-                      </div>
-                      <ClientAvatar clientId={c.id} name={c.name} size="sm" />
-                      <span className="font-medium truncate">{c.name}</span>
-                    </button>
-                  );
-                })}
-              </div>
-
-              <div className="px-5 pb-5 pt-3 border-t border-border shrink-0 flex gap-2 justify-end">
-                <button
-                  onClick={() => setCopyLayoutOpen(false)}
-                  className="px-4 py-2 rounded-xl border border-border text-sm font-semibold text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  Cancelar
-                </button>
-                <button
-                  onClick={copyLayoutToClients}
-                  disabled={copyLayoutDest.size === 0}
-                  className="px-4 py-2 rounded-xl bg-primary text-black text-sm font-bold hover:bg-primary/90 transition-colors disabled:opacity-40"
-                >
-                  Copiar para {copyLayoutDest.size > 0 ? `${copyLayoutDest.size} cliente${copyLayoutDest.size !== 1 ? 's' : ''}` : 'clientes'}
-                </button>
-              </div>
-            </div>
-          </div>,
-          document.body
-        );
-      })()}
-
-      {/* UNIFIED TOP BAR */}
-      <div className="sticky top-0 z-20 -mx-6 bg-background/95 backdrop-blur-sm border-b border-border">
-        <div className="flex items-center gap-1.5 px-4 h-14 overflow-x-auto">
-          <BackButton />
-          {/* Client selector */}
-          <ClientSelector clients={clients} selected={selectedIds} onChange={setSelectedIds} />
-
-          {/* Period buttons */}
-          <div className="flex items-center gap-0.5 rounded-xl border border-border bg-card p-1">
-            {PERIODS.filter(p => p.value !== 'yesterday').map(p => (
-              <button
-                key={p.value}
-                onClick={() => setPeriod(p.value)}
-                className={cn(
-                  'flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-[11px] font-semibold whitespace-nowrap transition-all',
-                  period === p.value ? 'bg-primary text-black shadow-[0_0_10px_rgba(85,245,47,0.35)]' : 'text-muted-foreground hover:text-foreground'
-                )}
-              >
-                {p.value === 'custom' && <Calendar className="h-3 w-3" />}
-                {p.label}
-              </button>
-            ))}
-          </div>
-
-          {metricsLoading && <RefreshCw className="h-4 w-4 shrink-0 animate-spin text-muted-foreground" />}
-
-          {!metricsLoading && dataCacheAge !== null && (
-            <span
-              title={dataCacheAge === 0 ? 'Dados recém-buscados da API' : `Dados em cache — buscados há ${Math.round((dataCacheAge ?? 0) / 60)} min. Atualizados automaticamente a cada 15 min.`}
-              className="flex items-center gap-1 rounded-full border border-border bg-muted/30 px-2 py-0.5 text-[10px] font-semibold text-muted-foreground cursor-default"
-            >
-              <Clock className="h-3 w-3" />
-              {dataCacheAge === 0 ? 'Ao vivo' : `Cache · ${Math.round((dataCacheAge ?? 0) / 60)} min`}
-            </span>
-          )}
-
-          {/* Spacer */}
-          <div className="flex-1" />
-
-          {/* Search */}
-          <div className="relative hidden lg:block w-44 xl:w-52">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-            <Input
-              type="search"
-              placeholder="Buscar clientes, relatórios..."
-              className="pl-9 bg-muted/50 border-transparent focus-visible:ring-primary text-xs h-9"
-            />
-          </div>
-
-          {/* AI button */}
-          <button
-            type="button"
-            onClick={analyzeWithAI}
-            disabled={aiLoading || selectedIds.size === 0 || metricsLoading}
-            className="flex items-center gap-1.5 rounded-xl border border-violet-500/40 bg-violet-500/15 px-3 py-2 text-xs font-semibold text-violet-400 hover:bg-violet-500/25 transition-colors disabled:opacity-50 whitespace-nowrap"
-          >
-            {aiLoading ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
-            <span className="hidden sm:inline">{aiLoading ? 'Analisando...' : 'Analisar com IA'}</span>
-          </button>
-
-
-          {/* Copy layout */}
-          {selectedIds.size === 1 && (
-            <button
-              type="button"
-              onClick={openCopyLayout}
-              className="flex items-center gap-1.5 rounded-xl border border-border bg-card px-3 py-2 text-xs font-semibold text-muted-foreground hover:text-foreground hover:border-primary/40 transition-colors whitespace-nowrap"
-              title="Copiar layout para outros clientes"
-            >
-              <LayoutTemplate className="h-3.5 w-3.5" />
-              <span className="hidden sm:inline">Copiar layout</span>
-            </button>
-          )}
-
-          {/* Metric customizer */}
-          <button
-            type="button"
-            onClick={() => setCustomizerOpen(true)}
-            className="flex items-center gap-1.5 rounded-xl border border-border bg-card px-3 py-2 text-xs font-semibold text-muted-foreground hover:text-foreground hover:border-primary/40 transition-colors whitespace-nowrap"
-            title="Configurar métricas visíveis"
-          >
-            <Settings2 className="h-3.5 w-3.5" />
-            <span className="hidden sm:inline">Métricas</span>
-          </button>
-
-          {/* Theme + bell + user */}
-          <ThemeToggle />
-          <button className="relative p-2 text-muted-foreground hover:text-foreground transition-colors">
-            <Bell className="h-5 w-5" />
-            <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-primary" />
-          </button>
-          <div className="flex items-center gap-2.5 border-l border-border pl-3">
-            <div className="hidden md:flex flex-col items-end leading-none gap-0.5">
-              <span className="text-sm font-medium">{session?.name ?? 'Usuário'}</span>
-              <span className="text-[11px] text-muted-foreground">{session?.role ?? ''}</span>
-            </div>
-            <Avatar className="h-8 w-8 border border-border">
-              <AvatarImage src="" alt="User" />
-              <AvatarFallback className="bg-primary/20 text-primary text-xs font-bold">
-                {(session?.name ?? 'ON').split(' ').map(p => p[0]).join('').slice(0, 2).toUpperCase()}
-              </AvatarFallback>
-            </Avatar>
-          </div>
-        </div>
-
-        {period === 'custom' && (
-          <div className="flex items-center gap-3 px-6 pb-2.5">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Período</span>
-            <input type="date" value={customDateFrom} onChange={e => setCustomDateFrom(e.target.value)} className="h-8 rounded-lg border border-border bg-card px-2.5 text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-primary" />
-            <span className="text-xs text-muted-foreground">→</span>
-            <input type="date" value={customDateTo} onChange={e => setCustomDateTo(e.target.value)} className="h-8 rounded-lg border border-border bg-card px-2.5 text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-primary" />
-            {customReady && customDateFrom && customDateTo && <span className="text-[11px] font-semibold text-primary">Aplicado</span>}
-          </div>
-        )}
-      </div>
-
-      {/* ── CLIENT PICKER EMPTY STATE ── */}
-      {selectedIds.size === 0 && clients.length > 0 && (
-        <div className="flex flex-col items-center justify-center py-16 gap-8">
-          <div className="text-center">
-            <h2 className="font-heading font-normal text-xl uppercase tracking-wide text-foreground">Escolha um cliente</h2>
-            <p className="mt-2 text-sm text-muted-foreground">Selecione para abrir o dashboard</p>
-          </div>
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 max-w-3xl w-full">
-            {clients.map(c => (
-              <button
-                key={c.id}
-                onClick={() => setSelectedIds(new Set([c.id]))}
-                className="flex flex-col items-center gap-3 rounded-xl border border-border bg-card px-4 py-6 hover:border-primary/50 hover:bg-primary/5 transition-all group"
-              >
-                <ClientAvatar clientId={c.id} name={c.name} size="lg" />
-                <div className="text-center">
-                  <p className="font-bold text-sm text-foreground group-hover:text-primary transition-colors">{c.name}</p>
-                  {(c.category_name ?? c.segment) && (
-                    <p className="text-[10px] text-muted-foreground mt-0.5 uppercase tracking-wide">{c.category_name ?? c.segment}</p>
-                  )}
-                  {c.dashboard_type && (
-                    <span className={cn(
-                      'mt-1.5 inline-block text-[10px] font-bold px-2 py-0.5 rounded-full uppercase',
-                      c.dashboard_type === 'leads' ? 'text-violet-400 bg-violet-500/15' :
-                      c.dashboard_type === 'branding' ? 'text-blue-400 bg-blue-500/15' :
-                      'text-emerald-400 bg-emerald-500/15'
-                    )}>
-                      {c.dashboard_type === 'leads' ? 'Leads' : c.dashboard_type === 'branding' ? 'Branding' : 'Conversão'}
-                    </span>
-                  )}
-                </div>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {selectedIds.size > 0 && <DashboardEditCtx.Provider value={{ editMode, hideCard, toggleChart }}>
-
-      {/* AI RECOMMENDATIONS */}
-      <AiRecommendationsBox insights={aiInsights} loading={aiLoading} onAnalyze={analyzeWithAI} />
-
-      {/* AI ERROR */}
-      {aiError && (
-        <div className="rounded-xl border border-red-400/30 bg-red-500/5 px-4 py-3 text-xs text-red-400">{aiError}</div>
-      )}
-
-      {/* ALERTS (sem IA) */}
-      {!metricsLoading && alerts.length > 0 && !aiInsights.length && (
-        <div className="rounded-xl border border-orange-400/30 bg-orange-500/5 overflow-hidden">
-          <button type="button" onClick={toggleAlertsCollapsed} className="w-full flex items-center justify-between gap-2 px-4 py-3 hover:bg-orange-500/5 transition-colors">
-            <div className="flex items-center gap-2">
-              <AlertTriangle className="h-4 w-4 text-orange-400 shrink-0" />
-              <p className="text-sm font-bold text-orange-400">{alerts.length} alerta{alerts.length > 1 ? 's' : ''} fora do padrão</p>
-            </div>
-            <ChevronDown className={cn('h-4 w-4 text-orange-400/60 shrink-0 transition-transform', alertsCollapsed && '-rotate-90')} />
-          </button>
-          {!alertsCollapsed && (
-            <div className="border-t border-orange-400/15 px-4 pb-3 pt-2 space-y-1.5">
-              {alerts.map((a, i) => (
-                <div key={i} className="flex items-start gap-3">
-                  <span className={cn('shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-bold', a.severity === 'critical' ? 'bg-red-500/15 text-red-400 border-red-500/30' : 'bg-orange-500/15 text-orange-400 border-orange-500/30')}>
-                    {a.severity === 'critical' ? 'Crítico' : 'Atenção'}
-                  </span>
-                  <div className="text-xs">
-                    <Link href={`/clientes/${a.clientId}`} className="font-bold hover:text-primary transition-colors">{a.clientName}</Link>
-                    <span className="text-muted-foreground"> — {a.msg}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-      <SortableContext items={dashboardPrefs.sectionOrder} strategy={verticalListSortingStrategy}>
-      <div className="flex flex-col gap-6">
-
-      {/* 1. MÉTRICAS GERAIS */}
-      {hasVisibleGeneralCards && <SortableSection id="geral" editMode={editMode} orderIndex={dashboardPrefs.sectionOrder.indexOf('geral')}>
-      <section className="relative overflow-hidden rounded-2xl border border-[#55F52F]/55 bg-[#050C0A] p-5 shadow-[0_0_56px_rgba(85,245,47,0.22)]">
-        <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(135deg,rgba(85,245,47,0.16),transparent_38%),radial-gradient(circle_at_92%_8%,rgba(85,245,47,0.28),transparent_34%)]" />
-        <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,#55F52F,transparent)]" />
-        <div className="relative mb-4 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#55F52F]/70 bg-[#55F52F]/25 text-primary shadow-[0_0_24px_rgba(85,245,47,0.65)]">
-              <LayoutDashboard className="h-[18px] w-[18px]" />
-            </span>
-            <div>
-              <h2 className="text-sm font-bold uppercase tracking-wider text-foreground">Métricas Gerais</h2>
-              <p className="text-[11px] text-foreground/60">Consolidado do período antes da leitura por canal.</p>
-            </div>
-          </div>
-          <button type="button" onClick={() => toggleSection('geral')} className="flex items-center gap-1 rounded-lg border border-[#55F52F]/30 bg-[#55F52F]/10 px-2.5 py-1.5 text-[11px] font-semibold text-[#55F52F]/80 hover:bg-[#55F52F]/20 transition-colors">
-            <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', collapsedSections.has('geral') && '-rotate-90')} />
-            {collapsedSections.has('geral') ? 'Expandir' : 'Recolher'}
-          </button>
-        </div>
-        {!collapsedSections.has('geral') && (() => {
-          const generalCards: Record<string, ReactNode> = {
-            'general-revenue': <TargetSummaryCard title="Faturamento" value={revenue} partial={effectiveRevenueGoal} target={plannedRevenue} format="currency" accent="#22c55e" icon={DollarSign} />,
-            'general-leads':   <TargetSummaryCard title="Leads" value={totalLeads} partial={effectiveLeadsGoal} target={leadsGoal} format="number" accent="#22c55e" icon={Users} />,
-            'general-roi':     <KpiCard title="ROI" value={roi} prevValue={prevRoi > 0 ? prevRoi : undefined} goalValue={roiGoal > 0 ? roiGoal : undefined} format="times" icon={TrendingUp} iconColor="#22c55e" iconBg="#22c55e" loading={metricsLoading} chart={dashboardPrefs.cards['general-roi'].chart} series={seriesOrPacing(roiSeries, roi)} />,
-            'general-cpl':     <KpiCard title="CPL Geral" value={totalCostPerLead} prevValue={prevCpl > 0 ? prevCpl : undefined} goalValue={cplGoal > 0 ? cplGoal : undefined} format="currency" icon={Tag} iconColor="#22c55e" iconBg="#22c55e" loading={metricsLoading} inverseGoal inverseChange chart={dashboardPrefs.cards['general-cpl'].chart} series={seriesOrPacing(cplSeries, totalCostPerLead)} />,
-            'general-ctr':     <KpiCard title="CTR Geral" value={avgCtr} format="percent" icon={MousePointerClick} iconColor="#22c55e" iconBg="#22c55e" loading={metricsLoading} chart={dashboardPrefs.cards['general-ctr'].chart} series={seriesOrPacing(avgCtrSeries, avgCtr)} />,
-            'general-spend':   <KpiCard title="Valor Investido" value={totalSpend} format="currency" icon={CreditCard} iconColor="#e2e8f0" iconBg="#e2e8f0" loading={metricsLoading} chart={dashboardPrefs.cards['general-spend'].chart} series={seriesOrPacing(totalSpendSeries, totalSpend)} />,
-            'general-crm': <CrmResultCard
-              revenue={revenue}
-              revenueGoal={plannedRevenue}
-              revenuePartial={effectiveRevenueGoal}
-              sales={crmSales}
-              salesGoal={plannedSalesTotal}
-              salesPartial={effectiveSalesGoal}
-              ticket={avgCrmTicket}
-            />,
-            'general-funnel':
-            // `?? ''` em vez de narrowing: nesta altura do arquivo (7 mil
-            // linhas) o tsc estoura o orçamento de análise de fluxo e nem
-            // `x !== null ? x : y` estreita `string | null` — o build quebra.
-            // O ramo só renderiza com deliverySoloId preenchido, então o ''
-            // nunca chega ao componente.
-            deliverySoloId !== null
-            ? <DeliveryResumoCard clientId={deliverySoloId ?? ''} from={deliveryRange.from} to={deliveryRange.to} />
-            : (() => {
-              // MESMOS números do Funil de Performance principal — antes este
-              // card usava leads de anúncio no topo e ainda dropava Fechamento
-              // (6 valores para 5 labels). Uma fonte só, sem versões da verdade.
-              const labels = ['CONTATOS', 'QUALIFICADOS', 'AGENDAMENTOS', 'COMPARECIMENTOS', 'FECHAMENTOS'];
-              const values = [funnelTopo, qualified, appointments, showUps, conversions];
-              const colors = ['#14B8FF', '#9B5CFF', '#F03A9C', '#FF7A00', '#35E84B'];
-              const icons = [Users, UserPlus, CheckCircle2, Calendar, Users];
-              const rows = labels.map((label, index) => ({
-                label,
-                value: values[index] ?? 0,
-                color: colors[index],
-                Icon: icons[index],
-              }));
-
-              return (
-                <DashboardPerformanceFunnel
-                  periodLabel={PERIODS.find(p => p.value === period)?.label ?? period}
-                  rows={rows}
-                />
-              );
-            })(),
-          };
-          const visibleLayout = generalLayout.filter(l => dashboardPrefs.cards[l.i as DashboardCardId]?.visible !== false);
-          return (
-            <RglGrid
-              layout={visibleLayout}
-              cols={RGL_COLS}
-              rowHeight={RGL_ROW_H}
-              margin={RGL_MARGIN}
-              containerPadding={[0, 0]}
-              isDraggable
-              isResizable
-              draggableHandle=".drag-handle"
-              compactType="vertical"
-              onLayoutChange={nl => setGeneralLayout(prev => prev.map(item => { const u = nl.find(l => l.i === item.i); return u ? { ...item, x: u.x, y: u.y, w: u.w, h: u.h } : item; }))}
-            >
-              {visibleLayout.map(l => (
-                <div key={l.i} className="h-full">
-                  <RglCardShell id={l.i as DashboardCardId} prefs={dashboardPrefs}>
-                    {generalCards[l.i]}
-                  </RglCardShell>
-                </div>
-              ))}
-            </RglGrid>
-          );
-        })()}
-
-      </section>
-      </SortableSection>}
-
-      {/* 2. META ADS */}
-      {hasVisibleMetaCards && <SortableSection id="meta" editMode={editMode} orderIndex={dashboardPrefs.sectionOrder.indexOf('meta')}>
-      <section className="relative overflow-hidden rounded-2xl border border-[#0B84FF]/70 bg-[#050A16] p-5 shadow-[0_0_64px_rgba(11,132,255,0.28)]">
-        <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(135deg,rgba(11,132,255,0.20),transparent_42%),radial-gradient(circle_at_92%_0%,rgba(0,194,255,0.30),transparent_36%)]" />
-        <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,#00C2FF,#0B84FF,transparent)]" />
-        <div className="relative mb-4 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <span className="flex h-9 w-9 items-center justify-center rounded-lg border border-[#0B84FF]/70 bg-[#0B84FF]/20 text-white shadow-[0_0_24px_rgba(11,132,255,0.55)]">
-              <MetaAdsMark className="h-[18px] w-[18px] translate-y-px text-white" />
-            </span>
-            <h2 className="flex items-center gap-2 text-sm font-bold uppercase tracking-wider text-foreground">
-              Meta Ads
-            </h2>
-          </div>
-          <div className="flex items-center gap-3">
-            <p className="text-[11px] text-foreground/60">{metaFormLeads.toLocaleString('pt-BR')} formulários + {metaConversations.toLocaleString('pt-BR')} conversas no período</p>
-            <button type="button" onClick={() => toggleSection('meta')} className="flex items-center gap-1 rounded-lg border border-[#0B84FF]/30 bg-[#0B84FF]/10 px-2.5 py-1.5 text-[11px] font-semibold text-[#0B84FF]/80 hover:bg-[#0B84FF]/20 transition-colors whitespace-nowrap">
-              <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', collapsedSections.has('meta') && '-rotate-90')} />
-              {collapsedSections.has('meta') ? 'Expandir' : 'Recolher'}
-            </button>
-          </div>
-        </div>
-
-        {!collapsedSections.has('meta') && (() => {
-          const metaCards: Record<string, ReactNode> = {
-            'meta-reach':            <KpiCard title="Alcance Meta" value={metaReach} format="number" icon={Users} iconColor="#0668E1" iconBg="#0668E1" loading={metricsLoading} chart={dashboardPrefs.cards['meta-reach'].chart} series={seriesOrPacing(metaReachSeries, metaReach)} />,
-            'meta-impressions':      <KpiCard title="Impressões Meta" value={metaImpressions} format="number" icon={BarChart3} iconColor="#0668E1" iconBg="#0668E1" loading={metricsLoading} chart={dashboardPrefs.cards['meta-impressions'].chart} series={seriesOrPacing(metaImpressionsSeries, metaImpressions)} />,
-            'meta-leads':            <KpiCard title="Leads Meta Ads" value={metaLeads} prevValue={prevMetaLeads > 0 ? prevMetaLeads : undefined} format="number" icon={Target} iconColor="#0668E1" iconBg="#0668E1" loading={metricsLoading} logo={<img src="/brand/meta-ads-logo.webp" alt="Meta Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['meta-leads'].chart} series={seriesOrPacing(metaLeadsSeries, metaLeads)} />,
-            'meta-cpl':              <KpiCard title="CPL Meta Ads" value={avgCpl} format="currency" icon={Zap} iconColor="#0668E1" iconBg="#0668E1" loading={metricsLoading} inverseGoal inverseChange logo={<img src="/brand/meta-ads-logo.webp" alt="Meta Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['meta-cpl'].chart} series={seriesOrPacing(metaCplSeries, avgCpl)} />,
-            'meta-spend':            <KpiCard title="Valor Investido Meta" value={metaSpend} format="currency" icon={Wallet} iconColor="#e2e8f0" iconBg="#e2e8f0" loading={metricsLoading} logo={<img src="/brand/meta-ads-logo.webp" alt="Meta Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['meta-spend'].chart} series={seriesOrPacing(metaSpendSeries, metaSpend)} />,
-            'meta-ctr':              <KpiCard title="CTR Meta Ads" value={metaCtr} format="percent" icon={MousePointerClick} iconColor="#0668E1" iconBg="#0668E1" loading={metricsLoading} chart={dashboardPrefs.cards['meta-ctr'].chart} series={seriesOrPacing(metaCtrSeries, metaCtr)} />,
-            'meta-total-spend':      <KpiCard title="Total Investido Meta" value={metaCampaignSpend || metaSpend} format="currency" icon={CreditCard} iconColor="#e2e8f0" iconBg="#e2e8f0" loading={campaignsLoading || metricsLoading} chart={dashboardPrefs.cards['meta-total-spend'].chart} series={seriesOrPacing(metaSpendSeries, metaCampaignSpend || metaSpend)} />,
-            'meta-balance':          <KpiCard title="Saldo da Conta Meta" value={metaBalance} format="currency" icon={PiggyBank} iconColor="#e2e8f0" iconBg="#e2e8f0" loading={balancesLoading} logo={<img src="/brand/meta-ads-logo.webp" alt="Meta Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['meta-balance'].chart} series={pacingSeries(metaBalance, Math.max(2, selectedDateKeys.length || 2))} />,
-            'meta-active-campaigns': <CompactInfoCard title="Campanhas Ativas" value={activeMetaCampaigns} icon={Briefcase} color="#0668E1" />,
-            'meta-adsets':           <CompactInfoCard title="Conjuntos" value="Ver na tabela" icon={LayoutDashboard} color="#0668E1" helper="Expanda uma campanha para visualizar conjuntos e anúncios." />,
-            'meta-creatives':        <CompactInfoCard title="Criativos" value={metaCreativeCount} icon={ImageIcon} color="#0668E1" helper="Com preview no carrossel abaixo." />,
-            'meta-clicks':           <KpiCard title="Cliques Meta" value={metaClicks} format="number" icon={MousePointerClick} iconColor="#0668E1" iconBg="#0668E1" loading={metricsLoading} chart={dashboardPrefs.cards['meta-clicks'].chart} series={seriesOrPacing(metaClicksSeries, metaClicks)} />,
-          };
-          const visibleLayout = metaKpiLayout.filter(l => dashboardPrefs.cards[l.i as DashboardCardId]?.visible !== false);
-          return (
-            <RglGrid
-              layout={visibleLayout}
-              cols={RGL_COLS}
-              rowHeight={RGL_ROW_H}
-              margin={RGL_MARGIN}
-              containerPadding={[0, 0]}
-              isDraggable
-              isResizable
-              draggableHandle=".drag-handle"
-              compactType="vertical"
-              onLayoutChange={nl => setMetaKpiLayout(prev => prev.map(item => {
-                const u = nl.find(l => l.i === item.i);
-                return u ? { ...item, x: u.x, y: u.y, w: u.w, h: u.h } : item;
-              }))}
-            >
-              {visibleLayout.map(l => (
-                <div key={l.i} className="h-full">
-                  <RglCardShell id={l.i as DashboardCardId} prefs={dashboardPrefs}>
-                    {metaCards[l.i]}
-                  </RglCardShell>
-                </div>
-              ))}
-            </RglGrid>
-          );
-        })()}
-
-        {!collapsedSections.has('meta') && <div className="mt-5" />}
-
-        {!collapsedSections.has('meta') && (() => {
-          const metaPanelCards: Record<string, ReactNode> = {
-            'meta-campaigns': (
-              <div className="rounded-xl border border-[#0B84FF]/35 bg-black/35 p-4 shadow-[inset_0_0_30px_rgba(11,132,255,0.10),0_0_28px_rgba(11,132,255,0.16)] h-full flex flex-col">
-                <div className="mb-3 shrink-0 flex flex-wrap items-center justify-between gap-3">
-                  <p className="text-[11px] font-bold uppercase tracking-widest text-foreground/75">Campanhas Meta Ads</p>
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] font-bold uppercase tracking-widest text-foreground/55">Ordenar por</span>
-                    <div className="flex overflow-hidden rounded-lg border border-[#0B84FF]/30 bg-black/45">
-                      {SORT_OPTIONS.map(opt => (
-                        <button key={opt.value} onClick={() => setCampaignSortBy(opt.value)}
-                          className={cn('px-3 py-1.5 text-[11px] font-semibold transition-colors', campaignSortBy === opt.value ? 'bg-primary text-black shadow-[0_0_10px_rgba(85,245,47,0.28)]' : 'text-muted-foreground hover:text-foreground')}>
-                          {opt.label}
-                        </button>
-                      ))}
-                    </div>
-                    {campaignsLoading && <RefreshCw className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
-                  </div>
-                </div>
-                <div className="flex-1 min-h-0">
-                  <CampaignPerformanceTable campaigns={metaCampaigns} loading={campaignsLoading} period={period} dateFrom={customDateFrom} dateTo={customDateTo} />
-                </div>
-              </div>
-            ),
-            'meta-audience': <AudiencePlatformBlock title="Meta Ads" description="Recortes por idade, gênero, plataforma e dispositivo." color="#0B84FF" colors={META_AUDIENCE_COLORS} data={audience.meta} chartVariant={dashboardPrefs.metaAudienceChart} />,
-            'meta-creative-preview': (
-              <div className="rounded-xl border border-[#0B84FF]/35 bg-black/35 p-4 shadow-[inset_0_0_30px_rgba(11,132,255,0.10),0_0_28px_rgba(11,132,255,0.16)] h-full flex flex-col overflow-hidden">
-                <div className="flex-none flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <p className="text-[11px] font-bold uppercase tracking-widest text-foreground/75">Criativos Meta Ads</p>
-                    <p className="mt-0.5 text-[11px] text-foreground/55">Anúncios e previews com melhor desempenho no período selecionado.</p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] font-bold uppercase tracking-widest text-foreground/55">Ordenar por</span>
-                    <div className="flex overflow-hidden rounded-lg border border-[#0B84FF]/30 bg-black/45">
-                      {([{ value: 'spend' as SortKey, label: 'Investimento' }, { value: 'leads' as SortKey, label: 'Leads' }, { value: 'cpl' as SortKey, label: 'CPL' }, { value: 'ctr' as SortKey, label: 'CTR' }]).map(opt => (
-                        <button key={opt.value} onClick={() => setSortBy(opt.value)}
-                          className={cn('px-3 py-1.5 text-[11px] font-semibold transition-colors', sortBy === opt.value ? 'bg-primary text-black shadow-[0_0_14px_rgba(85,245,47,0.42)]' : 'text-foreground/60 hover:bg-white/10 hover:text-foreground')}>
-                          {opt.label}
-                        </button>
-                      ))}
-                    </div>
-                    {creativesLoading && <RefreshCw className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
-                  </div>
-                </div>
-                <div className="mt-4 flex-1 min-h-0 overflow-y-auto" style={{ scrollbarWidth: 'thin' }}>
-                  {creativesLoading ? (
-                    <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(228px, 1fr))' }}>
-                      {Array.from({ length: 5 }).map((_, i) => (
-                        <div key={i} className="animate-pulse rounded-xl border border-border bg-muted/10">
-                          <div className="bg-muted/30 rounded-t-xl" style={{ aspectRatio: '9/16' }} />
-                          <div className="p-2.5 space-y-2"><div className="h-3 bg-muted/40 rounded w-3/4" /></div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : creatives.length === 0 ? (
-                    <div className="py-10 text-center">
-                      <ImageIcon className="mx-auto mb-2 h-8 w-8 text-muted-foreground/30" />
-                      <p className="text-sm text-muted-foreground">Nenhum criativo encontrado.</p>
-                      <p className="mt-1 text-xs text-muted-foreground/60">Conecte uma conta Meta Ads em Integrações.</p>
-                    </div>
-                  ) : (
-                    <div className="grid gap-3 pb-2" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(228px, 1fr))' }}>
-                      {creatives.map((c, idx) => (
-                        <CreativeCarouselCard key={c.adId} creative={c} idx={idx} sortBy={sortBy} onPreview={setPreviewCreative} />
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            ),
-          };
-          const visibleLayout = metaPanelsLayout.filter(l => dashboardPrefs.cards[l.i as DashboardCardId]?.visible !== false);
-          return (
-            <RglGrid
-              layout={visibleLayout}
-              cols={RGL_COLS}
-              rowHeight={RGL_ROW_H}
-              margin={RGL_MARGIN}
-              containerPadding={[0, 0]}
-              isDraggable
-              isResizable
-              draggableHandle=".drag-handle"
-              compactType="vertical"
-              onLayoutChange={nl => setMetaPanelsLayout(prev => prev.map(item => { const u = nl.find(l => l.i === item.i); return u ? { ...item, x: u.x, y: u.y, w: u.w, h: u.h } : item; }))}
-            >
-              {visibleLayout.map(l => (
-                <div key={l.i} className="h-full">
-                  <RglCardShell id={l.i as DashboardCardId} prefs={dashboardPrefs}>
-                    {metaPanelCards[l.i]}
-                  </RglCardShell>
-                </div>
-              ))}
-            </RglGrid>
-          );
-        })()}
-      </section>
-      </SortableSection>}
-
-      {/* 3. GOOGLE ADS */}
-      {hasVisibleGoogleCards && <SortableSection id="google" editMode={editMode} orderIndex={dashboardPrefs.sectionOrder.indexOf('google')}>
-      <section className="relative overflow-hidden rounded-2xl border border-[#EA4335]/75 bg-[#120607] p-5 shadow-[0_0_64px_rgba(234,67,53,0.30)]">
-        <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(135deg,rgba(234,67,53,0.22),transparent_42%),radial-gradient(circle_at_92%_0%,rgba(251,188,5,0.24),transparent_34%)]" />
-        <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,#EA4335,#FBBC05,transparent)]" />
-        <div className="relative mb-4 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#EA4335]/75 bg-[#EA4335]/25 shadow-[0_0_26px_rgba(234,67,53,0.70)]">
-              <GoogleAdsMark className="h-5 w-5" />
-            </span>
-            <h2 className="flex items-center gap-2 text-sm font-bold uppercase tracking-wider text-foreground">
-              Google Ads
-            </h2>
-          </div>
-          <button type="button" onClick={() => toggleSection('google')} className="flex items-center gap-1 rounded-lg border border-[#EA4335]/30 bg-[#EA4335]/10 px-2.5 py-1.5 text-[11px] font-semibold text-[#EA4335]/80 hover:bg-[#EA4335]/20 transition-colors whitespace-nowrap">
-            <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', collapsedSections.has('google') && '-rotate-90')} />
-            {collapsedSections.has('google') ? 'Expandir' : 'Recolher'}
-          </button>
-        </div>
-
-        {!collapsedSections.has('google') && (() => {
-          const googleCards: Record<string, ReactNode> = {
-            'google-impressions':      <KpiCard title="Impressões Google" value={googleImpressions} format="number" icon={BarChart3} iconColor="#EA4335" iconBg="#EA4335" loading={metricsLoading} chart={dashboardPrefs.cards['google-impressions'].chart} series={seriesOrPacing(googleImpressionsSeries, googleImpressions)} />,
-            'google-conversions':      <KpiCard title="Conversões Google" value={googleConv} prevValue={prevGoogleConv > 0 ? prevGoogleConv : undefined} format="number" icon={BarChart3} iconColor="#EA4335" iconBg="#EA4335" loading={metricsLoading} logo={<img src="/brand/google-ads-logo.png" alt="Google Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['google-conversions'].chart} series={seriesOrPacing(googleConversionsSeries, googleConv)} />,
-            'google-cpa':              <KpiCard title="Custo por Conversão" value={avgCpa} format="currency" icon={Briefcase} iconColor="#EA4335" iconBg="#EA4335" loading={metricsLoading} inverseGoal inverseChange logo={<img src="/brand/google-ads-logo.png" alt="Google Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['google-cpa'].chart} series={seriesOrPacing(googleCpaSeries, avgCpa)} />,
-            'google-spend':            <KpiCard title="Valor Investido Google" value={googleCost} format="currency" icon={CreditCard} iconColor="#e2e8f0" iconBg="#e2e8f0" loading={metricsLoading} logo={<img src="/brand/google-ads-logo.png" alt="Google Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['google-spend'].chart} series={seriesOrPacing(googleCostSeries, googleCost)} />,
-            'google-ctr':              <KpiCard title="CTR Google Ads" value={googleCtrValue} format="percent" icon={MousePointerClick} iconColor="#EA4335" iconBg="#EA4335" loading={metricsLoading} chart={dashboardPrefs.cards['google-ctr'].chart} series={seriesOrPacing(googleCtrSeries, googleCtrValue)} />,
-            'google-total-spend':      <KpiCard title="Total Investido Google" value={googleCampaignSpend || googleCost} format="currency" icon={Wallet} iconColor="#e2e8f0" iconBg="#e2e8f0" loading={campaignsLoading || metricsLoading} chart={dashboardPrefs.cards['google-total-spend'].chart} series={seriesOrPacing(googleCostSeries, googleCampaignSpend || googleCost)} />,
-            'google-balance':          <KpiCard title="Saldo da Conta Google" value={googleBalance} format="currency" icon={Wallet} iconColor="#e2e8f0" iconBg="#e2e8f0" loading={balancesLoading} logo={<img src="/brand/google-ads-logo.png" alt="Google Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['google-balance'].chart} series={pacingSeries(googleBalance, Math.max(2, selectedDateKeys.length || 2))} />,
-            'google-active-campaigns': <CompactInfoCard title="Campanhas Ativas" value={activeGoogleCampaigns} icon={Briefcase} color="#EA4335" />,
-            'google-keyword-count':    <CompactInfoCard title="Top Palavras-chave" value={keywords.length} icon={Search} color="#EA4335" helper="Lista ordenada abaixo." />,
-            'google-clicks':           <KpiCard title="Cliques Google" value={googleClicks} format="number" icon={MousePointerClick} iconColor="#EA4335" iconBg="#EA4335" loading={metricsLoading} chart={dashboardPrefs.cards['google-clicks'].chart} series={seriesOrPacing(googleClicksSeries, googleClicks)} />,
-            'google-cpc':              <KpiCard title="CPC Google" value={googleCpc} format="currency" icon={CreditCard} iconColor="#e2e8f0" iconBg="#e2e8f0" loading={metricsLoading} inverseGoal inverseChange logo={<img src="/brand/google-ads-logo.png" alt="Google Ads" className="h-6 w-6 object-contain" />} chart={dashboardPrefs.cards['google-cpc'].chart} series={seriesOrPacing(googleCpcSeries, googleCpc)} />,
-          };
-          const visibleLayout = googleKpiLayout.filter(l => dashboardPrefs.cards[l.i as DashboardCardId]?.visible !== false);
-          return (
-            <RglGrid
-              layout={visibleLayout}
-              cols={RGL_COLS}
-              rowHeight={RGL_ROW_H}
-              margin={RGL_MARGIN}
-              containerPadding={[0, 0]}
-              isDraggable
-              isResizable
-              draggableHandle=".drag-handle"
-              compactType="vertical"
-              onLayoutChange={nl => setGoogleKpiLayout(prev => prev.map(item => {
-                const u = nl.find(l => l.i === item.i);
-                return u ? { ...item, x: u.x, y: u.y, w: u.w, h: u.h } : item;
-              }))}
-            >
-              {visibleLayout.map(l => (
-                <div key={l.i} className="h-full">
-                  <RglCardShell id={l.i as DashboardCardId} prefs={dashboardPrefs}>
-                    {googleCards[l.i]}
-                  </RglCardShell>
-                </div>
-              ))}
-            </RglGrid>
-          );
-        })()}
-
-        {!collapsedSections.has('google') && <div className="mt-5" />}
-
-        {!collapsedSections.has('google') && (() => {
-          const googlePanelCards: Record<string, ReactNode> = {
-            'google-campaigns': (
-              <div className="rounded-xl border border-[#EA4335]/40 bg-black/35 p-4 shadow-[inset_0_0_30px_rgba(234,67,53,0.10),0_0_28px_rgba(234,67,53,0.18)] h-full flex flex-col">
-                <div className="mb-3 shrink-0 flex flex-wrap items-center justify-between gap-3">
-                  <p className="text-[11px] font-bold uppercase tracking-widest text-foreground/75">Campanhas Google Ads</p>
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] font-bold uppercase tracking-widest text-foreground/55">Ordenar por</span>
-                    <div className="flex overflow-hidden rounded-lg border border-[#EA4335]/35 bg-black/45">
-                      {SORT_OPTIONS.map(opt => (
-                        <button key={opt.value} onClick={() => setCampaignSortBy(opt.value)}
-                          className={cn('px-3 py-1.5 text-[11px] font-semibold transition-colors', campaignSortBy === opt.value ? 'bg-primary text-black shadow-[0_0_10px_rgba(85,245,47,0.28)]' : 'text-muted-foreground hover:text-foreground')}>
-                          {opt.label}
-                        </button>
-                      ))}
-                    </div>
-                    {campaignsLoading && <RefreshCw className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
-                  </div>
-                </div>
-                <div className="flex-1 min-h-0">
-                  <CampaignPerformanceTable campaigns={googleCampaigns} loading={campaignsLoading} period={period} dateFrom={customDateFrom} dateTo={customDateTo} />
-                </div>
-              </div>
-            ),
-            'google-keywords': (
-              <div className="h-full">
-                <TopKeywordsTable keywords={keywords} loading={keywordsLoading} />
-              </div>
-            ),
-            'google-audience': <AudiencePlatformBlock title="Google Ads" description="Recortes por gênero e dispositivo." color="#EA4335" colors={GOOGLE_AUDIENCE_COLORS} data={audience.google} keys={['gender', 'device']} chartVariant={dashboardPrefs.googleAudienceChart} />,
-          };
-          const visibleLayout = googlePanelsLayout.filter(l => dashboardPrefs.cards[l.i as DashboardCardId]?.visible !== false);
-          return (
-            <RglGrid
-              layout={visibleLayout}
-              cols={RGL_COLS}
-              rowHeight={RGL_ROW_H}
-              margin={RGL_MARGIN}
-              containerPadding={[0, 0]}
-              isDraggable
-              isResizable
-              draggableHandle=".drag-handle"
-              compactType="vertical"
-              onLayoutChange={nl => setGooglePanelsLayout(prev => prev.map(item => { const u = nl.find(l => l.i === item.i); return u ? { ...item, x: u.x, y: u.y, w: u.w, h: u.h } : item; }))}
-            >
-              {visibleLayout.map(l => (
-                <div key={l.i} className="h-full">
-                  <RglCardShell id={l.i as DashboardCardId} prefs={dashboardPrefs}>
-                    {googlePanelCards[l.i]}
-                  </RglCardShell>
-                </div>
-              ))}
-            </RglGrid>
-          );
-        })()}
-      </section>
-      </SortableSection>}
-
-      {/* 4. PÁGINAS SOCIAIS */}
-      {shouldRenderSocialSection && <SortableSection id="social" editMode={editMode} orderIndex={dashboardPrefs.sectionOrder.indexOf('social')}>
-      {(() => {
-        const allFbData = pageInsights.filter(p => p.facebook).map(p => p.facebook!);
-        const allIgData = pageInsights.filter(p => p.instagram).map(p => p.instagram!);
-        const prevFbData = prevPageInsights.filter(p => p.facebook).map(p => p.facebook!);
-        const prevIgData = prevPageInsights.filter(p => p.instagram).map(p => p.instagram!);
-        const hasFb = allFbData.length > 0;
-        const hasIg = allIgData.length > 0;
-        const fbFans    = allFbData.reduce((s, d) => s + d.fans, 0);
-        const fbAdds    = allFbData.reduce((s, d) => s + d.fanAdds, 0);
-        const fbReach   = allFbData.reduce((s, d) => s + d.reach, 0);
-        const fbImpr    = allFbData.reduce((s, d) => s + d.impressions, 0);
-        const fbEngage  = allFbData.reduce((s, d) => s + d.engagements, 0);
-        const fbViews   = allFbData.reduce((s, d) => s + d.pageViews, 0);
-        const igFollow   = allIgData.reduce((s, d) => s + d.followers, 0);
-        const igReach    = allIgData.reduce((s, d) => s + d.reach, 0);
-        const igViews    = allIgData.reduce((s, d) => s + d.views, 0);
-        const igPViews   = allIgData.reduce((s, d) => s + d.profileViews, 0);
-        const igClicks   = allIgData.reduce((s, d) => s + d.websiteClicks, 0);
-        const igEngaged  = allIgData.reduce((s, d) => s + d.accountsEngaged, 0);
-        const igInteract = allIgData.reduce((s, d) => s + d.totalInteractions, 0);
-        const igLikes    = allIgData.reduce((s, d) => s + d.likes, 0);
-        const igSaves    = allIgData.reduce((s, d) => s + d.saves, 0);
-        // Previous period aggregates
-        const prevFbFans    = prevFbData.reduce((s, d) => s + d.fans, 0);
-        const prevFbAdds    = prevFbData.reduce((s, d) => s + d.fanAdds, 0);
-        const prevFbReach   = prevFbData.reduce((s, d) => s + d.reach, 0);
-        const prevFbImpr    = prevFbData.reduce((s, d) => s + d.impressions, 0);
-        const prevFbEngage  = prevFbData.reduce((s, d) => s + d.engagements, 0);
-        const prevFbViews   = prevFbData.reduce((s, d) => s + d.pageViews, 0);
-        const prevIgReach   = prevIgData.reduce((s, d) => s + d.reach, 0);
-        const prevIgViews   = prevIgData.reduce((s, d) => s + d.views, 0);
-        const prevIgPViews  = prevIgData.reduce((s, d) => s + d.profileViews, 0);
-        const prevIgClicks  = prevIgData.reduce((s, d) => s + d.websiteClicks, 0);
-        const prevIgEngaged = prevIgData.reduce((s, d) => s + d.accountsEngaged, 0);
-        const prevIgInteract= prevIgData.reduce((s, d) => s + d.totalInteractions, 0);
-        const prevIgLikes   = prevIgData.reduce((s, d) => s + d.likes, 0);
-        const prevIgSaves   = prevIgData.reduce((s, d) => s + d.saves, 0);
-
-        // Daily sparkline series — aggregated across all linked accounts
-        const fbReachSeries   = aggPageSeries(allFbData.map(d => d.dailySeries), 'reach');
-        const fbImprSeries    = aggPageSeries(allFbData.map(d => d.dailySeries), 'impressions');
-        const fbEngageSeries  = aggPageSeries(allFbData.map(d => d.dailySeries), 'engagements');
-        const fbViewsSeries   = aggPageSeries(allFbData.map(d => d.dailySeries), 'pageViews');
-        const fbAddsSeries    = aggPageSeries(allFbData.map(d => d.dailySeries), 'fanAdds');
-        const igReachSeries        = aggPageSeries(allIgData.map(d => d.dailySeries), 'reach');
-        const igViewsSeries        = aggPageSeries(allIgData.map(d => d.dailySeries), 'views');
-        const igPViewsSeries       = aggPageSeries(allIgData.map(d => d.dailySeries), 'profileViews');
-        const igClicksSeries       = aggPageSeries(allIgData.map(d => d.dailySeries), 'websiteClicks');
-        const igEngagedSeries      = aggPageSeries(allIgData.map(d => d.dailySeries), 'accountsEngaged');
-        const igInteractSeries     = aggPageSeries(allIgData.map(d => d.dailySeries), 'totalInteractions');
-        const igLikesSeries        = aggPageSeries(allIgData.map(d => d.dailySeries), 'likes');
-        const igSavesSeries        = aggPageSeries(allIgData.map(d => d.dailySeries), 'saves');
-
-        const socialCards: Record<string, ReactNode> = {
-          'social-fb-fans':            <KpiCard title="Curtidas / Seg."   value={fbFans}    prevValue={prevFbFans}    format="number" icon={Users}         iconColor="#1877F2" iconBg="#1877F2" loading={pageInsightsLoading} hideGoal chart={dashboardPrefs.cards['social-fb-fans']?.chart ?? 'sparkline'}       series={socialSeriesOrSlope([], prevFbFans, fbFans)} />,
-          'social-fb-fan-adds':        <KpiCard title="Novas curtidas"    value={fbAdds}    prevValue={prevFbAdds}    format="number" icon={UserPlus}      iconColor="#1877F2" iconBg="#1877F2" loading={pageInsightsLoading} hideGoal chart={dashboardPrefs.cards['social-fb-fan-adds']?.chart ?? 'sparkline'}   series={socialSeriesOrSlope(fbAddsSeries, prevFbAdds, fbAdds)} />,
-          'social-fb-reach':           <KpiCard title="Alcance FB"        value={fbReach}   prevValue={prevFbReach}   format="number" icon={Eye}           iconColor="#1877F2" iconBg="#1877F2" loading={pageInsightsLoading} hideGoal chart={dashboardPrefs.cards['social-fb-reach']?.chart ?? 'sparkline'}      series={socialSeriesOrSlope(fbReachSeries, prevFbReach, fbReach)} />,
-          'social-fb-impressions':     <KpiCard title="Impressões FB"     value={fbImpr}    prevValue={prevFbImpr}    format="number" icon={BarChart3}     iconColor="#1877F2" iconBg="#1877F2" loading={pageInsightsLoading} hideGoal chart={dashboardPrefs.cards['social-fb-impressions']?.chart ?? 'sparkline'} series={socialSeriesOrSlope(fbImprSeries, prevFbImpr, fbImpr)} />,
-          'social-fb-engagements':     <KpiCard title="Engajamentos FB"   value={fbEngage}  prevValue={prevFbEngage}  format="number" icon={Heart}         iconColor="#1877F2" iconBg="#1877F2" loading={pageInsightsLoading} hideGoal chart={dashboardPrefs.cards['social-fb-engagements']?.chart ?? 'sparkline'} series={socialSeriesOrSlope(fbEngageSeries, prevFbEngage, fbEngage)} />,
-          'social-fb-views':           <KpiCard title="Visitas à página"  value={fbViews}   prevValue={prevFbViews}   format="number" icon={Monitor}       iconColor="#1877F2" iconBg="#1877F2" loading={pageInsightsLoading} hideGoal chart={dashboardPrefs.cards['social-fb-views']?.chart ?? 'sparkline'}      series={socialSeriesOrSlope(fbViewsSeries, prevFbViews, fbViews)} />,
-          'social-ig-followers':       <KpiCard title="Seguidores IG"     value={igFollow}                            format="number" icon={Users}         iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} hideGoal chart={dashboardPrefs.cards['social-ig-followers']?.chart ?? 'sparkline'}   series={socialSeriesOrSlope([], igFollow, igFollow)} />,
-          'social-ig-reach':           <KpiCard title="Alcance IG"        value={igReach}   prevValue={prevIgReach}   format="number" icon={Eye}           iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} hideGoal chart={dashboardPrefs.cards['social-ig-reach']?.chart ?? 'sparkline'}        series={socialSeriesOrSlope(igReachSeries, prevIgReach, igReach)} />,
-          'social-ig-views':           <KpiCard title="Visualizações IG"  value={igViews}   prevValue={prevIgViews}   format="number" icon={BarChart3}     iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} hideGoal chart={dashboardPrefs.cards['social-ig-views']?.chart ?? 'sparkline'}        series={socialSeriesOrSlope(igViewsSeries, prevIgViews, igViews)} />,
-          'social-ig-profile-views':   <KpiCard title="Visitas ao perfil" value={igPViews}  prevValue={prevIgPViews}  format="number" icon={Monitor}       iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} hideGoal chart={dashboardPrefs.cards['social-ig-profile-views']?.chart ?? 'sparkline'}  series={socialSeriesOrSlope(igPViewsSeries, prevIgPViews, igPViews)} />,
-          'social-ig-website-clicks':  <KpiCard title="Cliques no site"   value={igClicks}  prevValue={prevIgClicks}  format="number" icon={ExternalLink}  iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} hideGoal chart={dashboardPrefs.cards['social-ig-website-clicks']?.chart ?? 'sparkline'} series={socialSeriesOrSlope(igClicksSeries, prevIgClicks, igClicks)} />,
-          'social-ig-engaged':         <KpiCard title="Contas engajadas"  value={igEngaged} prevValue={prevIgEngaged} format="number" icon={Heart}         iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} hideGoal chart={dashboardPrefs.cards['social-ig-engaged']?.chart ?? 'sparkline'}       series={socialSeriesOrSlope(igEngagedSeries, prevIgEngaged, igEngaged)} />,
-          'social-ig-interactions':    <KpiCard title="Interações IG"     value={igInteract}prevValue={prevIgInteract}format="number" icon={Zap}           iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} hideGoal chart={dashboardPrefs.cards['social-ig-interactions']?.chart ?? 'sparkline'}   series={socialSeriesOrSlope(igInteractSeries, prevIgInteract, igInteract)} />,
-          'social-ig-likes':           <KpiCard title="Curtidas IG"       value={igLikes}   prevValue={prevIgLikes}   format="number" icon={Heart}         iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} hideGoal chart={dashboardPrefs.cards['social-ig-likes']?.chart ?? 'sparkline'}         series={socialSeriesOrSlope(igLikesSeries, prevIgLikes, igLikes)} />,
-          'social-ig-saves':           <KpiCard title="Salvamentos IG"    value={igSaves}   prevValue={prevIgSaves}   format="number" icon={Bookmark}      iconColor="#E1306C" iconBg="#E1306C" loading={pageInsightsLoading} hideGoal chart={dashboardPrefs.cards['social-ig-saves']?.chart ?? 'sparkline'}         series={socialSeriesOrSlope(igSavesSeries, prevIgSaves, igSaves)} />,
-          'social-ig-top-posts':       <IgTopPostsCard posts={igPosts} loading={igPostsLoading} sortBy={igSortBy} onSortChange={setIgSortBy} periodFrom={selectedRange.from.toISOString().split('T')[0]} periodTo={selectedRange.to.toISOString().split('T')[0]} />,
-        };
-
-        const visibleSocialLayout = socialKpiLayout.filter(l => {
-          if (l.i.startsWith('social-fb-') && !hasFb && !pageInsightsLoading) return false;
-          if (l.i.startsWith('social-ig-') && !hasIg && !pageInsightsLoading) return false;
-          return dashboardPrefs.cards[l.i as DashboardCardId]?.visible !== false;
-        });
-
-        return (
-          <section className="relative overflow-hidden rounded-[var(--radius)] border border-border bg-card p-5">
-            <div className="pointer-events-none absolute inset-x-0 top-0 h-0.5" style={{ background: 'linear-gradient(90deg,#1877F2,#E1306C)' }} />
-            <div className="pointer-events-none absolute top-0 left-0 h-3 w-3 bg-[#1877F2]" />
-            <div className="relative mb-4 flex flex-wrap items-center justify-between gap-3">
-              <div className="flex flex-wrap items-center gap-3">
-                <div className="flex items-center gap-2">
-                  <svg viewBox="0 0 24 24" className="h-4 w-4 fill-[#E1306C]"><path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z" /></svg>
-                  <h2 className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Páginas &amp; Perfis Sociais</h2>
-                  {pageInsightsLoading && <RefreshCw className="h-3 w-3 animate-spin text-muted-foreground" />}
-                </div>
-                {/* Account chips */}
-                <div className="flex flex-wrap gap-2">
-                {pageInsights.map(({ clientId, facebook, instagram }) => (
-                  <span key={clientId} className="flex items-center gap-2">
-                    {facebook && (
-                      <span className="flex items-center gap-1 rounded-[var(--radius)] border border-[#1877F2]/30 bg-[#1877F2]/10 px-2 py-0.5 text-[10px] font-semibold text-[#1877F2]">
-                        {facebook.picture && <img src={facebook.picture} alt="" className="h-4 w-4 rounded-full" />}
-                        {facebook.pageName}
-                      </span>
-                    )}
-                    {instagram && (
-                      <span className="flex items-center gap-1 rounded-[var(--radius)] border border-[#E1306C]/30 bg-[#E1306C]/10 px-2 py-0.5 text-[10px] font-semibold text-[#E1306C]">
-                        {instagram.picture && <img src={instagram.picture} alt="" className="h-4 w-4 rounded-full" />}
-                        @{instagram.username}
-                      </span>
-                    )}
-                  </span>
-                ))}
-                </div>
-              </div>
-              <button type="button" onClick={() => toggleSection('social')} className="flex items-center gap-1 rounded-lg border border-[#E1306C]/30 bg-[#E1306C]/10 px-2.5 py-1.5 text-[11px] font-semibold text-[#E1306C]/80 hover:bg-[#E1306C]/20 transition-colors whitespace-nowrap">
-                <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', collapsedSections.has('social') && '-rotate-90')} />
-                {collapsedSections.has('social') ? 'Expandir' : 'Recolher'}
-              </button>
-            </div>
-
-            {!collapsedSections.has('social') && <RglGrid
-              layout={visibleSocialLayout}
-              cols={RGL_COLS}
-              rowHeight={RGL_ROW_H}
-              margin={RGL_MARGIN}
-              containerPadding={[0, 0]}
-              isDraggable
-              isResizable
-              draggableHandle=".drag-handle"
-              compactType="vertical"
-              onLayoutChange={nl => setSocialKpiLayout(prev => prev.map(item => { const u = nl.find(l => l.i === item.i); return u ? { ...item, x: u.x, y: u.y, w: u.w, h: u.h } : item; }))}
-            >
-              {visibleSocialLayout.map(l => (
-                <div key={l.i} className="h-full">
-                  <RglCardShell id={l.i as DashboardCardId} prefs={dashboardPrefs}>
-                    {socialCards[l.i]}
-                  </RglCardShell>
-                </div>
-              ))}
-            </RglGrid>}
-          </section>
-        );
-      })()}
-
-      {/* Resumo por cliente */}
-      {selectedClients.length > 1 && (
-        <div className="rounded-xl border border-border bg-card p-4">
-          <p className="mb-3 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Resumo por cliente</p>
-          <div className="divide-y divide-border">
-            {selectedClients.map(client => {
-              const m = metricsByClient[client.id];
-              const leads = (m?.meta?.leads ?? 0) + (m?.google?.conversions ?? 0);
-              const spend = (m?.meta?.spend ?? 0) + (m?.google?.cost ?? 0);
-              const goal = goalsByClient[client.id];
-              const clientLeadsGoal = plannedFunnelFromGoal(goal, planningsByClient[client.id] ?? readPlanningFromStorage(client.id))[0] ?? 0;
-              const pct = clientLeadsGoal > 0 ? Math.min(100, Math.round(leads / clientLeadsGoal * 100)) : null;
-              return (
-                <div key={client.id} className="flex items-center gap-4 py-2.5">
-                  <Link href={`/clientes/${client.id}`} className="w-40 shrink-0 truncate text-sm font-bold hover:text-primary transition-colors">{client.name}</Link>
-                  <div className="flex-1 h-1.5 overflow-hidden rounded-full bg-muted">
-                    {pct !== null && <div className={cn('h-full rounded-full', pct >= 75 ? 'bg-emerald-500' : pct >= 40 ? 'bg-orange-400' : 'bg-red-500')} style={{ width: `${pct}%` }} />}
-                  </div>
-                  <div className="flex shrink-0 items-center gap-4 text-xs text-muted-foreground">
-                    <span>{leads > 0 ? `${leads} leads` : metricsLoading ? '…' : '— leads'}</span>
-                    <span>{spend > 0 ? formatCurrencyBRL(spend) : metricsLoading ? '…' : '—'}</span>
-                    {pct !== null && <span className={cn('font-bold', pct >= 75 ? 'text-emerald-400' : pct >= 40 ? 'text-orange-400' : 'text-red-400')}>{pct}%</span>}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-      </SortableSection>}
-
-      {/* ── 5. CRM LEADS PANEL (opt-in) ── */}
-      {shouldRenderCrmSection && <SortableSection id="crm" editMode={editMode} orderIndex={dashboardPrefs.sectionOrder.indexOf('crm')}>
-      <section className="relative overflow-hidden rounded-2xl border border-violet-500/40 bg-violet-950/20 p-5 space-y-1">
-        <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(135deg,rgba(139,92,246,0.12),transparent_50%)]" />
-        <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(139,92,246,0.6),transparent)]" />
-        <div className="relative mb-4 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-violet-500/40 bg-violet-500/15 shadow-[0_0_20px_rgba(139,92,246,0.4)]">
-              <UserPlus className="h-4 w-4 text-violet-400" />
-            </span>
-            <h2 className="text-sm font-bold uppercase tracking-wider text-foreground">Leads CRM</h2>
-          </div>
-          <button type="button" onClick={() => toggleSection('crm-leads')} className="flex items-center gap-1 rounded-lg border border-violet-500/30 bg-violet-500/10 px-2.5 py-1.5 text-[11px] font-semibold text-violet-400/80 hover:bg-violet-500/20 transition-colors whitespace-nowrap">
-            <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', collapsedSections.has('crm-leads') && '-rotate-90')} />
-            {collapsedSections.has('crm-leads') ? 'Expandir' : 'Recolher'}
-          </button>
-        </div>
-        {!collapsedSections.has('crm-leads') && (
-          <div className="relative">
-            <CrmDashboardPanel clientIds={selectedIds} prefs={dashboardPrefs} />
-          </div>
-        )}
-      </section>
-      </SortableSection>}
-
-      </div>
-      </SortableContext>
-      </DndContext>
-
-      <CreativePreviewOverlay creative={previewCreative} onClose={() => setPreviewCreative(null)} />
-
-      </DashboardEditCtx.Provider>}
-    </div>
-  );
 }

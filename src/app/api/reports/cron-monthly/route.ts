@@ -1,7 +1,7 @@
 import type { NextRequest } from 'next/server';
 import { fetchConfigsForToday, dispatchReportConfigs } from '@/lib/report-dispatch';
 
-export const maxDuration = 60;
+export const maxDuration = 300; // 60s estourava com 2+ clientes no dia e só o 1º recebia
 
 export async function GET(request: NextRequest) {
   const secret = request.nextUrl.searchParams.get('secret');

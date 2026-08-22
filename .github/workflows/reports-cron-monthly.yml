@@ -6,10 +6,13 @@ name: Relatórios Automáticos Mensais
 # não só no dia 1 (o cron do Vercel Hobby só permite 1x/dia por job e não dava
 # conta de clientes com send_day diferente de 1).
 
+# ⚠️ AGENDAMENTO DESLIGADO (2026-08-22). O GitHub Actions throttleia os crons
+# deste repo (nota sistêmica no CLAUDE.md) — a chamada diária confiável agora é
+# a linha `# onmid-cron` na crontab da VPS (08h05 BRT). Este workflow fica como
+# reserva manual. Para religar, descomente o schedule.
 on:
-  schedule:
-    # Todo dia às 08h BRT (11h UTC)
-    - cron: '0 11 * * *'
+  # schedule:
+  #   - cron: '0 11 * * *'
   workflow_dispatch: {}   # permite rodar manualmente pelo botão "Run workflow" no GitHub
 
 jobs:

@@ -4,7 +4,7 @@ import { buildOmniReport, saveOmniReport } from '@/lib/report-builder';
 import { buildDeliveryReport, saveDeliveryReport } from '@/lib/delivery-report-builder';
 import { buildSocialReport, saveSocialReport } from '@/lib/social-report-builder';
 
-export const maxDuration = 60;
+export const maxDuration = 300; // 60s estourava com 2+ clientes no dia e só o 1º recebia
 
 function prevMonth(): { from: string; to: string } {
   const now = new Date();

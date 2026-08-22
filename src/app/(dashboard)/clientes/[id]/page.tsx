@@ -183,8 +183,11 @@ const WEEKDAY_COLORS = [
   'bg-orange-500',
 ];
 
-function makeDate(day: number): string {
-  return `2026-05-${String(day).padStart(2, '0')}`;
+/** Data de HOJE em ISO — o antigo makeDate devolvia maio/2026 fixo (sobra de
+ * desenvolvimento) e travava o calendário inteiro naquele mês. */
+function todayISO(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
 function formatDateBR(date: string): string {
@@ -507,12 +510,12 @@ function FunnelTab({ clientId, clientName, goalConfig, isAdmin }: { clientId: st
   const [stages, setStages] = useState<FunnelStage[]>(() => readSavedClientPlanning(clientId).stages);
   const [simpleMode, setSimpleMode] = useState(() => readSavedClientPlanning(clientId).simpleMode);
   const [invPlaSimple, setInvPlaSimple] = useState(() => readSavedClientPlanning(clientId).invPlaSimple);
-  // Admin: localStorage wins immediately (pushes correct data to DB on first visit).
-  // Non-admin: must wait for DB load to prevent localStorage defaults from overwriting DB.
-  const planningDbLoaded = useRef(isAdmin);
+  // Mesma regra da meta: o BANCO manda pra todo mundo — a exceção de admin
+  // sobrescrevia o planejamento real com defaults de navegador novo.
+  const planningDbLoaded = useRef(false);
 
   useEffect(() => {
-    planningDbLoaded.current = isAdmin;
+    planningDbLoaded.current = false;
     let cancelled = false;
     const saved = readSavedClientPlanning(clientId);
     setTkm(saved.tkm);
@@ -525,8 +528,8 @@ function FunnelTab({ clientId, clientName, goalConfig, isAdmin }: { clientId: st
       .then(r => r.json())
       .then((dbData: { tkm: number; cplMeta: number; stages: FunnelStage[]; simpleMode?: boolean; invPlaSimple?: number } | null) => {
         if (cancelled) return;
-        if (dbData && !isAdmin) {
-          // Non-admin: DB is authoritative — load its data into state
+        if (dbData) {
+          // Banco tem dado → ele manda (admin incluso)
           const planning: ClientPlanningConfig = {
             tkm: dbData.tkm || saved.tkm,
             cplMeta: dbData.cplMeta || saved.cplMeta,
@@ -1970,7 +1973,7 @@ function InvestmentPaymentsTab({ clientId, clientName }: { clientId: string; cli
   const [newPayment, setNewPayment] = useState<Omit<InvestmentPayment, 'id'>>({
     clientId,
     clientName,
-    date: makeDate(6),
+    date: todayISO(),
     destination: `${clientName} - Novo investimento`,
     amount: 500,
     channel: 'Meta ADS',
@@ -1989,7 +1992,16 @@ function InvestmentPaymentsTab({ clientId, clientName }: { clientId: string; cli
   const paid = payments.filter((payment) => payment.status === 'Pago').reduce((sum, payment) => sum + payment.amount, 0);
   const pending = payments.filter((payment) => payment.status === 'Pendente').reduce((sum, payment) => sum + payment.amount, 0);
   const overdue = payments.filter((payment) => payment.status === 'Em atraso').reduce((sum, payment) => sum + payment.amount, 0);
-  const weeks = getBusinessWeeks(2026, 4, 4);
+  // Mês NAVEGÁVEL (era fixo em maio/2026 — qualquer Pix fora de maio ficava
+  // invisível). Abre no mês atual; ‹ › andam pelo calendário.
+  const [calRef, setCalRef] = useState(() => { const d = new Date(); return { ano: d.getFullYear(), mes: d.getMonth() }; });
+  const mudarMes = (delta: number) => setCalRef(prev => {
+    const d = new Date(prev.ano, prev.mes + delta, 1);
+    return { ano: d.getFullYear(), mes: d.getMonth() };
+  });
+  const tituloMes = new Date(calRef.ano, calRef.mes, 1)
+    .toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+  const weeks = getBusinessWeeks(calRef.ano, calRef.mes);
 
   function addPayment() {
     if (!newPayment.destination.trim() || newPayment.amount <= 0) return;
@@ -2042,6 +2054,11 @@ function InvestmentPaymentsTab({ clientId, clientName }: { clientId: string; cli
             <div>
               <h3 className="font-bold text-sm uppercase tracking-wider">Calendário de Pix de Investimento</h3>
               <p className="text-xs text-muted-foreground mt-1">Organize os valores por dia, canal e status antes de enviar ao cliente.</p>
+            </div>
+            <div className="flex items-center gap-1 rounded-lg border border-border bg-card px-1 py-0.5">
+              <button type="button" onClick={() => mudarMes(-1)} className="rounded-md px-2 py-1 text-xs font-bold text-muted-foreground hover:text-foreground" aria-label="Mês anterior">‹</button>
+              <span className="min-w-[130px] text-center text-xs font-bold capitalize">{tituloMes}</span>
+              <button type="button" onClick={() => mudarMes(1)} className="rounded-md px-2 py-1 text-xs font-bold text-muted-foreground hover:text-foreground" aria-label="Próximo mês">›</button>
             </div>
             <div className="flex items-center gap-2 flex-wrap">
               <Filter className="w-4 h-4 text-muted-foreground" />
@@ -4623,12 +4640,15 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
     readSavedClientGoal(id, isNewClient ? ZERO_CLIENT_GOAL : DEFAULT_CLIENT_GOAL)
   );
   const [clientGoalLoadedFor, setClientGoalLoadedFor] = useState(id);
-  // Admin: localStorage wins immediately (pushes correct data to DB on first visit).
-  // Non-admin: must wait for DB load to prevent localStorage defaults from overwriting DB.
-  const goalDbLoaded = useRef(isAdmin);
+  // ⚠️ O BANCO é a autoridade para TODO MUNDO. A regra antiga ("admin:
+  // localStorage vence") fazia um admin em navegador novo (localStorage vazio)
+  // empurrar o DEFAULT por cima da meta real do banco — sem nenhum clique.
+  // localStorage só vale enquanto o GET não respondeu, ou quando o banco está
+  // vazio (primeiro cadastro).
+  const goalDbLoaded = useRef(false);
 
   useEffect(() => {
-    goalDbLoaded.current = isAdmin;
+    goalDbLoaded.current = false;
     let cancelled = false;
     setClientGoal(readSavedClientGoal(id, isNewClient ? ZERO_CLIENT_GOAL : DEFAULT_CLIENT_GOAL));
     setClientGoalLoadedFor(id);
@@ -4636,8 +4656,8 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
       .then(r => r.json())
       .then((dbData: Partial<ClientGoalConfig> | null) => {
         if (cancelled) return;
-        if (dbData?.type && !isAdmin) {
-          // Non-admin: DB is authoritative — load its data into state
+        if (dbData?.type) {
+          // Banco tem dado → ele manda (admin incluso)
           const option = GOAL_TYPE_OPTIONS.find(o => o.type === dbData.type);
           if (option) {
             const target = Number(dbData.target ?? 0);

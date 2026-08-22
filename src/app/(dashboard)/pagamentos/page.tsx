@@ -2535,18 +2535,19 @@ export default function PagamentosPage() {
                 <div className="relative px-5 py-5">
                   <div className="absolute bottom-10 left-[78px] top-8 w-px bg-border" />
                   <div className="space-y-0">
-                    {hours.map((hour, index) => {
-                      const payment = sortedPayments[index];
+                    {/* Itera os PAGAMENTOS (a versão antiga iterava horários fixos
+                        e escondia do 12º pagamento em diante — o KPI somava tudo e a
+                        tela mostrava menos). O horário é decorativo. */}
+                    {sortedPayments.map((payment, index) => {
+                      const hour = hours[index] ?? '';
                       return (
-                        <div key={hour} className="relative grid min-h-[56px] grid-cols-[64px_1fr] items-start border-b border-dashed border-border/70 last:border-b-0">
+                        <div key={payment.id} className="relative grid min-h-[56px] grid-cols-[64px_1fr] items-start border-b border-dashed border-border/70 last:border-b-0">
                           <div className="pt-1 text-sm font-medium tabular-nums text-muted-foreground">{hour}</div>
                           <div className="relative min-h-[56px] pl-5">
                             <span className="absolute left-0 top-2 h-5 w-px bg-border" />
-                            {payment && (
-                              <div className={cn('w-[46%]', index % 2 === 0 ? 'ml-5' : 'ml-[48%]')}>
-                                <DayTimelinePaymentCard payment={payment} index={index} onStatusChange={(status) => updatePaymentStatus(payment.id, status)} onDelete={() => deletePayment(payment.id)} onToggleExtra={() => togglePaymentExtra(payment.id)} onEdit={() => setEditingPayment(payment)} />
-                              </div>
-                            )}
+                            <div className={cn('w-[46%]', index % 2 === 0 ? 'ml-5' : 'ml-[48%]')}>
+                              <DayTimelinePaymentCard payment={payment} index={index} onStatusChange={(status) => updatePaymentStatus(payment.id, status)} onDelete={() => deletePayment(payment.id)} onToggleExtra={() => togglePaymentExtra(payment.id)} onEdit={() => setEditingPayment(payment)} />
+                            </div>
                           </div>
                         </div>
                       );
