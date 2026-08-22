@@ -5,7 +5,7 @@
 import { Suspense, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { AlertTriangle, ArrowLeft, CheckCircle2, Loader2, WandSparkles } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, CheckCircle2, Loader2, RefreshCw, WandSparkles } from 'lucide-react';
 import { callerHeaders, getAuthSession } from '@/lib/auth-store';
 import { BriefingCard } from '@/components/otimizador/briefing-card';
 import type { FilaRec } from '@/lib/optimizer-ui';
@@ -20,6 +20,9 @@ function BriefingContent() {
   const [recs, setRecs] = useState<FilaRec[]>([]);
   const [index, setIndex] = useState(0);
   const [loading, setLoading] = useState(true);
+  // Falha ao carregar a fila ≠ fila vazia — sem isso o erro viraria "Nada pendente".
+  const [loadError, setLoadError] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
   const [busy, setBusy] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   const [nomeConta, setNomeConta] = useState<string | null>(null);
@@ -31,21 +34,24 @@ function BriefingContent() {
     let alive = true;
     void (async () => {
       setLoading(true);
+      setLoadError(false);
       try {
         const qs = clientId ? `?clientId=${encodeURIComponent(clientId)}&hours=200` : '?hours=200';
         const res = await fetch(`/api/otimizador/fila${qs}`);
-        if (!res.ok) return;
+        if (!res.ok) { if (alive) setLoadError(true); return; }
         const data = await res.json() as { recs: FilaRec[]; contas?: Array<{ cliente_id: string; cliente_nome: string }> };
         if (!alive) return;
         setRecs(data.recs ?? []);
         setIndex(0);
         if (clientId) setNomeConta(data.contas?.find((c) => c.cliente_id === clientId)?.cliente_nome ?? null);
+      } catch {
+        if (alive) setLoadError(true);
       } finally {
         if (alive) setLoading(false);
       }
     })();
     return () => { alive = false; };
-  }, [clientId]);
+  }, [clientId, reloadKey]);
 
   function advance() {
     setErro(null);
@@ -79,10 +85,11 @@ function BriefingContent() {
   async function doIgnorar(rec: FilaRec) {
     setBusy(true);
     try {
-      await fetch('/api/otimizador/ignorar', {
+      const res = await fetch('/api/otimizador/ignorar', {
         method: 'POST', headers: { 'Content-Type': 'application/json', ...callerHeaders() },
         body: JSON.stringify({ rec_id: rec.rec_id, analise_id: rec.analise_id, cliente_id: rec.cliente_id, ...autor }),
       });
+      if (!res.ok) { setErro('Não foi possível marcar como revisado — a decisão continua na fila.'); return; }
       advance();
     } catch {
       setErro('Erro ao marcar como revisado.');
@@ -118,6 +125,21 @@ function BriefingContent() {
       {loading ? (
         <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">
           <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Montando o briefing...
+        </div>
+      ) : loadError ? (
+        <div className="flex h-64 flex-col items-center justify-center gap-3 rounded-[14px] border border-border bg-card p-8 text-center">
+          <AlertTriangle className="h-10 w-10 text-destructive" />
+          <p className="text-lg font-bold text-foreground">Não foi possível montar o briefing</p>
+          <p className="max-w-md text-sm text-muted-foreground">
+            Erro ao carregar a fila de decisões — pode haver pendências que não estão aparecendo.
+          </p>
+          <button
+            type="button"
+            onClick={() => setReloadKey((k) => k + 1)}
+            className="mt-1 inline-flex items-center gap-1.5 rounded-[var(--radius)] border border-border px-3 py-2 text-sm text-foreground hover:border-primary/40"
+          >
+            <RefreshCw className="h-4 w-4" /> Tentar de novo
+          </button>
         </div>
       ) : recs.length === 0 || acabou ? (
         <div className="flex h-64 flex-col items-center justify-center gap-3 rounded-[14px] border border-border bg-card p-8 text-center">

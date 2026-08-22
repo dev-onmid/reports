@@ -3,6 +3,7 @@
 import { Fragment, useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import type { ReactNode } from 'react';
 import { cn } from '@/lib/utils';
+import { notificar } from '@/components/ui/toast';
 import {
   Search, MessageCircle, RefreshCw, Send, Paperclip,
   Image, Mic, Video, FileText, MapPin, X, CheckCircle2,
@@ -1058,13 +1059,20 @@ export function ChatView({
   // ── Bulk actions ────────────────────────────────────────────────────────────
   async function bulkDelete() {
     setBulkAction('deleting');
+    const ids = [...selectedLeadIds];
     try {
-      await Promise.all([...selectedLeadIds].map(id => fetch(`/api/crm/${id}`, { method: 'DELETE' })));
-      setLeads(prev => prev.filter(l => !selectedLeadIds.has(l.id)));
-      if (selectedId && selectedLeadIds.has(selectedId)) {
+      const results = await Promise.all(ids.map(id =>
+        fetch(`/api/crm/${id}`, { method: 'DELETE' }).then(res => res.ok).catch(() => false),
+      ));
+      // Só remove do estado os que o servidor confirmou; falhas ficam na lista
+      const okIds = new Set(ids.filter((_, i) => results[i]));
+      setLeads(prev => prev.filter(l => !okIds.has(l.id)));
+      if (selectedId && okIds.has(selectedId)) {
         setSelectedId(null);
         setMessages([]);
       }
+      const failed = ids.length - okIds.size;
+      if (failed > 0) notificar(`${failed} de ${ids.length} falharam — tente de novo.`, 'erro');
       exitSelectMode();
     } finally {
       setBulkAction(null);
@@ -1073,11 +1081,15 @@ export function ChatView({
 
   async function bulkClearChats() {
     setBulkAction('clearing');
+    const ids = [...selectedLeadIds];
     try {
-      await Promise.all([...selectedLeadIds].map(id =>
-        fetch(`/api/crm/${id}/messages`, { method: 'DELETE' }),
+      const results = await Promise.all(ids.map(id =>
+        fetch(`/api/crm/${id}/messages`, { method: 'DELETE' }).then(res => res.ok).catch(() => false),
       ));
-      if (selectedId && selectedLeadIds.has(selectedId)) setMessages([]);
+      const okIds = new Set(ids.filter((_, i) => results[i]));
+      if (selectedId && okIds.has(selectedId)) setMessages([]);
+      const failed = ids.length - okIds.size;
+      if (failed > 0) notificar(`${failed} de ${ids.length} falharam — tente de novo.`, 'erro');
       exitSelectMode();
     } finally {
       setBulkAction(null);
@@ -1090,8 +1102,9 @@ export function ChatView({
     setClearingChat(true);
     setMoreMenu(false);
     try {
-      await fetch(`/api/crm/${selectedId}/messages`, { method: 'DELETE' });
-      setMessages([]);
+      const res = await fetch(`/api/crm/${selectedId}/messages`, { method: 'DELETE' }).catch(() => null);
+      if (res?.ok) setMessages([]);
+      else notificar('Não foi possível limpar a conversa — tente de novo.', 'erro');
     } finally {
       setClearingChat(false);
     }
@@ -1155,8 +1168,10 @@ export function ChatView({
     return imported;
   }
 
-  async function doSend(payload: Record<string, unknown>) {
-    if (!selectedId) return;
+  // Devolve false quando a mensagem NÃO foi gravada (bolha otimista removida) —
+  // o caller pode restaurar o texto digitado.
+  async function doSend(payload: Record<string, unknown>): Promise<boolean> {
+    if (!selectedId) return false;
     setSending(true);
     setSendStatus(null);
     // Envio otimista: a bolha aparece NA HORA com o reloginho (pending); o
@@ -1197,11 +1212,13 @@ export function ChatView({
         requestAnimationFrame(() => scrollToBottom());
       }
       setTimeout(() => { setSendStatus(null); setSendError(null); }, 6000);
+      return res.ok;
     } catch (err) {
       setMessages(prev => prev.filter(m => m.id !== tempId));
       setSendStatus('err');
       setSendError(String(err));
       setTimeout(() => { setSendStatus(null); setSendError(null); }, 6000);
+      return false;
     } finally {
       setSending(false);
     }
@@ -1215,7 +1232,9 @@ export function ChatView({
       textareaRef.current.style.height = 'auto';
       textareaRef.current.focus();
     }
-    await doSend({ tipo: 'texto', text });
+    const ok = await doSend({ tipo: 'texto', text });
+    // Falha no envio: devolve o texto pro textarea em vez de descartar o que foi digitado
+    if (!ok) setReplyText(text);
   }
 
   async function sendMedia(payload: Record<string, unknown>) {

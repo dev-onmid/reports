@@ -15,9 +15,10 @@
 // daquele segmento. Por isso o botão de salvar é de administrador e o aviso
 // aparece em tela.
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import RGL, { WidthProvider, type Layout as RglLayout } from 'react-grid-layout';
 import { Eye, EyeOff, GripVertical, RotateCcw, Save, X, SlidersHorizontal } from 'lucide-react';
+import { notificar } from '@/components/ui/toast';
 import { ControlesElemento } from './controles-elemento';
 import {
   definicaoElemento, type ElementoId, type EstiloElemento, type EstilosPorElemento,
@@ -73,10 +74,13 @@ export function ModeloEditor({ modelo, render, editando, onSair, onSalvou }: Pro
   const [erro, setErro] = useState<string | null>(null);
   /** Elemento com o painel de controles aberto. */
   const [aberto, setAberto] = useState<ElementoId | null>(null);
+  // "Restaurar padrão" em DOIS cliques: o 1º arma ("Confirmar restauração?" por ~4s), o 2º executa.
+  const [confirmandoRestaurar, setConfirmandoRestaurar] = useState(false);
+  const restaurarTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Entrar em edição parte SEMPRE do modelo publicado — não de um rascunho
   // abandonado de uma sessão anterior.
-  useEffect(() => { if (editando) { setRascunho(modelo); setAberto(null); } }, [editando, modelo]);
+  useEffect(() => { if (editando) { setRascunho(modelo); setAberto(null); setConfirmandoRestaurar(false); } }, [editando, modelo]);
 
   // Aplica um patch de estilo a UM elemento, sem tocar nos demais — é o que
   // permite mexer no Faturamento sem alterar o Ticket médio.
@@ -153,6 +157,7 @@ export function ModeloEditor({ modelo, render, editando, onSair, onSalvou }: Pro
   }
 
   async function restaurarPadrao() {
+    setConfirmandoRestaurar(false);
     setSalvando(true);
     setErro(null);
     try {
@@ -163,8 +168,12 @@ export function ModeloEditor({ modelo, render, editando, onSair, onSalvou }: Pro
       onSalvou(padrao);
       setRascunho(padrao);
       setAberto(null);
+      notificar('Modelo restaurado ao padrão.', 'ok');
+      onSair();
     } catch (e) {
-      setErro(e instanceof Error ? e.message : 'Não foi possível restaurar');
+      const msg = e instanceof Error ? e.message : 'Não foi possível restaurar';
+      setErro(msg);
+      notificar(msg, 'erro');
     } finally {
       setSalvando(false);
     }
@@ -202,9 +211,20 @@ export function ModeloEditor({ modelo, render, editando, onSair, onSalvou }: Pro
           </span>
           {erro && <span className="text-[11px] font-semibold text-destructive">{erro}</span>}
           <div className="ml-auto flex items-center gap-2">
-            <button type="button" onClick={restaurarPadrao} disabled={salvando}
-              className="inline-flex items-center gap-1.5 rounded-[var(--radius)] border border-border px-2.5 py-1 text-[11px] font-semibold text-muted-foreground hover:text-foreground disabled:opacity-50">
-              <RotateCcw className="h-3.5 w-3.5" /> Restaurar padrão
+            <button type="button" disabled={salvando}
+              onClick={() => {
+                if (restaurarTimer.current) clearTimeout(restaurarTimer.current);
+                if (confirmandoRestaurar) { void restaurarPadrao(); return; }
+                setConfirmandoRestaurar(true);
+                restaurarTimer.current = setTimeout(() => setConfirmandoRestaurar(false), 4000);
+              }}
+              className={cn(
+                'inline-flex items-center gap-1.5 rounded-[var(--radius)] border px-2.5 py-1 text-[11px] font-semibold disabled:opacity-50',
+                confirmandoRestaurar
+                  ? 'border-destructive/60 bg-destructive/10 text-destructive'
+                  : 'border-border text-muted-foreground hover:text-foreground',
+              )}>
+              <RotateCcw className="h-3.5 w-3.5" /> {confirmandoRestaurar ? 'Confirmar restauração?' : 'Restaurar padrão'}
             </button>
             <button type="button" onClick={onSair} disabled={salvando}
               className="inline-flex items-center gap-1.5 rounded-[var(--radius)] border border-border px-2.5 py-1 text-[11px] font-semibold text-muted-foreground hover:text-foreground disabled:opacity-50">

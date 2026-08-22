@@ -33,6 +33,7 @@ import { LogsPanel } from '@/components/settings/logs-panel';
 import type { User as UserType, Permission, Team } from '@/lib/mock-data';
 import { cn } from '@/lib/utils';
 import { callerHeaders } from '@/lib/auth-store';
+import { notificar } from '@/components/ui/toast';
 import { USD_TO_BRL } from '@/lib/ai-usage-config';
 
 // Mirrors the sidebar nav order (src/components/layout/sidebar.tsx) so admins
@@ -162,21 +163,37 @@ function roleBadge(role: string) {
   return { cls: 'bg-zinc-700/50 text-zinc-400 border border-zinc-600/50', Icon: Eye };
 }
 
-async function persistUser(user: UserRow): Promise<boolean> {
-  const res = await fetch('/api/users', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(user),
-  });
-  return res.ok;
+async function persistUser(user: UserRow): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const res = await fetch('/api/users', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(user),
+    });
+    if (res.ok) return { ok: true };
+    const data = await res.json().catch(() => null) as { error?: string } | null;
+    return { ok: false, error: data?.error };
+  } catch {
+    return { ok: false };
+  }
 }
 
-function persistPermission(userId: string, permission: Permission) {
+function persistPermission(userId: string, permission: Permission, onFail?: () => void) {
   void fetch('/api/permissions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ userId, ...permission }),
-  }).catch((e) => console.error('Erro ao salvar permissão:', e));
+  })
+    .then((res) => {
+      if (!res.ok) {
+        onFail?.();
+        notificar('Não foi possível salvar a permissão.', 'erro');
+      }
+    })
+    .catch(() => {
+      onFail?.();
+      notificar('Não foi possível salvar a permissão.', 'erro');
+    });
 }
 
 // ── Central de instâncias WhatsApp (Evolution) ───────────────────────────────
@@ -225,7 +242,7 @@ function InstancesTab() {
         body: JSON.stringify({ instanceName: inst.name, action: inst.active ? 'deactivate' : 'activate' }),
       });
       const d = await res.json() as { ok?: boolean; error?: string };
-      if (!d.ok) alert(d.error ?? 'Não foi possível alterar');
+      if (!d.ok) notificar(d.error ?? 'Não foi possível alterar', 'erro');
       load();
     } finally { setBusy(null); }
   }
@@ -234,8 +251,14 @@ function InstancesTab() {
     if (!confirm(`Excluir a instância "${inst.profileName ?? inst.name}" da VPS Evolution?\n\nO WhatsApp será desconectado e a instância apagada do servidor. Os registros e conversas no sistema ficam guardados (desativados).`)) return;
     setBusy(inst.name);
     try {
-      await fetch(`/api/admin/instances?name=${encodeURIComponent(inst.name)}`, { method: 'DELETE' });
+      const res = await fetch(`/api/admin/instances?name=${encodeURIComponent(inst.name)}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const d = await res.json().catch(() => null) as { error?: string } | null;
+        notificar(d?.error ?? 'Não foi possível excluir a instância.', 'erro');
+      }
       load();
+    } catch {
+      notificar('Não foi possível excluir a instância.', 'erro');
     } finally { setBusy(null); }
   }
 
@@ -279,10 +302,7 @@ function InstancesTab() {
           .catch(() => {});
       }, 3000);
       const tick = setInterval(() => {
-        setQrSeconds(s => {
-          if (s <= 1) { void fetchQr(qrInstance); return 40; }
-          return s - 1;
-        });
+        setQrSeconds(s => (s <= 1 ? 0 : s - 1));
       }, 1000);
       return () => { clearInterval(poll); clearInterval(tick); };
     }
@@ -290,6 +310,13 @@ function InstancesTab() {
     if (qrPhase === 'error') { const t = setTimeout(closeQr, 5000); return () => clearTimeout(t); }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [qrInstance, qrPhase]);
+
+  // Renovação do QR quando o contador zera — fora do updater de setQrSeconds
+  // (StrictMode invoca updaters 2x, o fetch dispararia em dobro lá dentro).
+  useEffect(() => {
+    if (qrSeconds === 0 && qrPhase === 'qr' && qrInstance) void fetchQr(qrInstance);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [qrSeconds, qrPhase, qrInstance]);
 
   function statusInfo(s: string) {
     if (s === 'open') return { label: 'Conectada', dot: 'bg-primary', text: 'text-primary' };
@@ -592,20 +619,32 @@ export default function ConfiguracoesPage() {
 
   async function toggleCrmAiGlobal(next: boolean) {
     setCrmAiGlobal(next);
-    await fetch('/api/crm/ai/config', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', ...callerHeaders() },
-      body: JSON.stringify({ global_ativa: next }),
-    }).catch(() => undefined);
+    try {
+      const res = await fetch('/api/crm/ai/config', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', ...callerHeaders() },
+        body: JSON.stringify({ global_ativa: next }),
+      });
+      if (!res.ok) throw new Error();
+    } catch {
+      setCrmAiGlobal(!next);
+      notificar('Não foi possível salvar a configuração.', 'erro');
+    }
   }
 
   async function toggleCrmAiClient(clientId: string, next: boolean) {
     setAiUsage((prev) => prev.map((r) => r.client_id === clientId ? { ...r, ia_ativa: next } : r));
-    await fetch('/api/crm/ai/config', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', ...callerHeaders() },
-      body: JSON.stringify({ clientId, ia_ativa: next }),
-    }).catch(() => undefined);
+    try {
+      const res = await fetch('/api/crm/ai/config', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', ...callerHeaders() },
+        body: JSON.stringify({ clientId, ia_ativa: next }),
+      });
+      if (!res.ok) throw new Error();
+    } catch {
+      setAiUsage((prev) => prev.map((r) => r.client_id === clientId ? { ...r, ia_ativa: !next } : r));
+      notificar('Não foi possível salvar a configuração.', 'erro');
+    }
   }
 
   async function toggleOtimizadorGlobal(next: boolean) {
@@ -720,7 +759,7 @@ export default function ConfiguracoesPage() {
     setDialogOpen(true);
   }
 
-  function handleSaveUser() {
+  async function handleSaveUser() {
     if (!form.name.trim() || !form.email.trim()) return;
     // Password required only when creating; blank = keep current when editing
     if (!editingUserId && !form.password.trim()) return;
@@ -743,10 +782,17 @@ export default function ConfiguracoesPage() {
       };
       const snapshot = users;
       setUsers((prev) => prev.map((u) => u.id === editingUserId ? updated : u));
+      const r = await persistUser(updated);
+      if (!r.ok) {
+        // Mantém o diálogo aberto para o usuário corrigir/tentar de novo
+        setUsers(snapshot);
+        notificar(r.error ?? 'Não foi possível salvar o usuário.', 'erro');
+        return;
+      }
       setForm(emptyForm);
       setEditingUserId(null);
       setDialogOpen(false);
-      void persistUser(updated).then((ok) => { if (!ok) setUsers(snapshot); });
+      notificar('Usuário salvo.', 'ok');
       return;
     }
 
@@ -764,30 +810,47 @@ export default function ConfiguracoesPage() {
     const snapshot = users;
     setUsers((prev) => [...prev, user]);
     setPermissions((prev) => ({ ...prev, [id]: defaultPermission }));
+    const r = await persistUser(user);
+    if (!r.ok) {
+      // Mantém o diálogo aberto para o usuário corrigir/tentar de novo
+      setUsers(snapshot);
+      setPermissions((prev) => { const next = { ...prev }; delete next[id]; return next; });
+      notificar(r.error ?? 'Não foi possível criar o usuário.', 'erro');
+      return;
+    }
+    persistPermission(id, defaultPermission);
     setForm(emptyForm);
     setEditingUserId(null);
     setDialogOpen(false);
-    void persistUser(user).then((ok) => {
-      if (!ok) { setUsers(snapshot); return; }
-      persistPermission(id, defaultPermission);
-    });
+    notificar('Usuário salvo.', 'ok');
   }
 
   function handleDeleteUser(id: string) {
+    if (!window.confirm('Excluir este usuário? A ação não pode ser desfeita.')) return;
     const snapshot = users;
     setUsers((prev) => prev.filter((u) => u.id !== id));
     setPermissions((prev) => { const next = { ...prev }; delete next[id]; return next; });
     void fetch(`/api/users?id=${encodeURIComponent(id)}`, { method: 'DELETE' })
-      .then((res) => { if (!res.ok) setUsers(snapshot); })
-      .catch(() => setUsers(snapshot));
+      .then(async (res) => {
+        if (!res.ok) {
+          const data = await res.json().catch(() => null) as { error?: string } | null;
+          setUsers(snapshot);
+          notificar(data?.error ?? 'Não foi possível excluir.', 'erro');
+        }
+      })
+      .catch(() => {
+        setUsers(snapshot);
+        notificar('Não foi possível excluir.', 'erro');
+      });
   }
 
   function togglePermission(userId: string, module: keyof Permission) {
-    setPermissions((prev) => {
-      const current = prev[userId] ?? defaultPermission;
-      const next = { ...prev, [userId]: { ...current, [module]: !current[module] } };
-      persistPermission(userId, next[userId]);
-      return next;
+    // Fora do updater de estado (StrictMode invoca updaters 2x — o POST sairia em dobro)
+    const current = permissions[userId] ?? defaultPermission;
+    const next = { ...current, [module]: !current[module] };
+    setPermissions((prev) => ({ ...prev, [userId]: next }));
+    persistPermission(userId, next, () => {
+      setPermissions((prev) => ({ ...prev, [userId]: current }));
     });
   }
 

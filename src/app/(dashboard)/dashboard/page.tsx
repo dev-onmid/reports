@@ -1872,23 +1872,27 @@ const CAMPAIGN_ROW_COLORS = [
 ];
 
 function PauseActivateBtn({
-  status, busy, onClick,
-}: { status: string; busy: boolean; onClick: () => void }) {
+  status, busy, onClick, armed,
+}: { status: string; busy: boolean; onClick: () => void; armed?: boolean }) {
   const isActive = status === 'ACTIVE' || status === 'ENABLED';
   return (
     <button
       type="button"
       disabled={busy}
       onClick={onClick}
-      title={isActive ? 'Pausar' : 'Ativar'}
+      title={armed ? 'Clique de novo para confirmar' : isActive ? 'Pausar' : 'Ativar'}
       className={cn(
-        'inline-flex h-7 w-7 items-center justify-center rounded-lg border transition-colors',
+        'inline-flex h-7 items-center justify-center rounded-lg border transition-colors',
+        armed ? 'px-2' : 'w-7',
         busy && 'opacity-50 cursor-wait',
-        isActive ? 'border-yellow-500/30 bg-yellow-500/10 text-yellow-400 hover:bg-yellow-500/20'
+        armed ? 'border-red-500/40 bg-red-500/15 text-red-400 hover:bg-red-500/25'
+        : isActive ? 'border-yellow-500/30 bg-yellow-500/10 text-yellow-400 hover:bg-yellow-500/20'
                  : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20',
       )}
     >
-      {busy ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : isActive ? <Pause className="h-3.5 w-3.5" /> : <CircleDot className="h-3.5 w-3.5" />}
+      {busy ? <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+        : armed ? <span className="whitespace-nowrap text-[10px] font-bold">Confirmar?</span>
+        : isActive ? <Pause className="h-3.5 w-3.5" /> : <CircleDot className="h-3.5 w-3.5" />}
     </button>
   );
 }
@@ -2037,6 +2041,9 @@ function CampaignPerformanceTable({
   const [editingBudget, setEditingBudget] = useState<string | null>(null);
   const [budgetInput, setBudgetInput] = useState('');
   const [savingBudget, setSavingBudget] = useState<string | null>(null);
+  // Pausar/ativar campanha em DOIS cliques: o 1º arma o botão ("Confirmar?" por ~3s), o 2º executa.
+  const [armedToggle, setArmedToggle] = useState<string | null>(null);
+  const armedToggleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [optimizeCampaign, setOptimizeCampaign] = useState<CampaignPerformance | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [childrenMap, setChildrenMap] = useState<Record<string, ChildState>>({});
@@ -2170,6 +2177,7 @@ function CampaignPerformanceTable({
     const value = parseFloat(budgetInput);
     if (!value || value <= 0) { setEditingBudget(null); return; }
     setSavingBudget(c.id);
+    setActionError(p => ({ ...p, [c.id]: '' }));
     const apiBase = c.platform === 'meta' ? '/api/meta' : '/api/google';
     const res = await fetch(`${apiBase}/campaigns/${c.id}/action`, {
       method: 'POST',
@@ -2183,9 +2191,14 @@ function CampaignPerformanceTable({
         dailyBudget: value,
       }),
     });
-    if (res.ok) setCampaigns(prev => prev.map(x => x.id === c.id ? { ...x, dailyBudget: value } : x));
+    const data = await res.json().catch(() => ({})) as { ok?: boolean; error?: string };
+    if (res.ok) {
+      setCampaigns(prev => prev.map(x => x.id === c.id ? { ...x, dailyBudget: value } : x));
+      setEditingBudget(null);
+    } else {
+      setActionError(p => ({ ...p, [c.id]: data.error ?? 'Erro ao salvar orçamento.' }));
+    }
     setSavingBudget(null);
-    setEditingBudget(null);
   }
 
   if (loading) {
@@ -2426,7 +2439,18 @@ function CampaignPerformanceTable({
               <PauseActivateBtn
                 status={displayStatus}
                 busy={busy}
-                onClick={() => toggleStatus(row.data as CampaignPerformance)}
+                armed={armedToggle === (row.data as CampaignPerformance).id}
+                onClick={() => {
+                  const c = row.data as CampaignPerformance;
+                  if (armedToggleTimer.current) clearTimeout(armedToggleTimer.current);
+                  if (armedToggle === c.id) {
+                    setArmedToggle(null);
+                    void toggleStatus(c);
+                  } else {
+                    setArmedToggle(c.id);
+                    armedToggleTimer.current = setTimeout(() => setArmedToggle(null), 3000);
+                  }
+                }}
               />
             )}
             {rowKind === 'adset' && (

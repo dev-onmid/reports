@@ -98,7 +98,14 @@ function Tamanho({ valor, faixa, onChange }: {
         max={faixa[1]}
         value={valor ?? ''}
         placeholder="auto"
-        onChange={(ev) => onChange(ev.target.value === '' ? null : Number(ev.target.value))}
+        onChange={(ev) => {
+          // Clampe aqui, não só no servidor: um 500px cru explodia o card na
+          // pré-visualização ao vivo e depois "voltava calado" ao salvar.
+          if (ev.target.value === '') { onChange(null); return; }
+          const n = Number(ev.target.value);
+          if (!Number.isFinite(n)) return;
+          onChange(Math.min(faixa[1], Math.max(faixa[0], n)));
+        }}
         className="h-6 w-14 rounded border border-white/[0.12] bg-[#071014] px-1.5 text-[11px] text-white outline-none focus:border-primary"
       />
       <span className="text-[10px] text-[#6b7478]">px</span>

@@ -32,6 +32,7 @@ import {
 } from 'recharts';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { notificar } from '@/components/ui/toast';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { useClients } from '@/lib/client-store';
 import { callerHeaders } from '@/lib/auth-store';
@@ -1437,7 +1438,8 @@ function MonthPaymentCard({
       {payment.extra && (
         <span className="absolute inset-y-0 left-0 w-[3px] bg-violet-500 shadow-[2px_0_10px_rgba(168,85,247,0.7)]" />
       )}
-      <button type="button" onClick={onEdit} className="grid w-full grid-cols-[42px_minmax(0,1fr)_auto] items-center gap-2 text-left">
+      {/* auditoria 2026-08-22: div role="button" — <button> aninhado é HTML inválido (erro de hidratação) */}
+      <div role="button" tabIndex={0} onClick={onEdit} onKeyDown={(e) => { if (e.key === 'Enter') onEdit(); }} className="grid w-full grid-cols-[42px_minmax(0,1fr)_auto] items-center gap-2 text-left">
         <PaymentChannelLogo channel={payment.channel} className="h-9 w-10" />
         <div className="min-w-0">
           <div className="flex min-w-0 items-center gap-2">
@@ -1485,7 +1487,7 @@ function MonthPaymentCard({
             <Trash2 className="h-3 w-3" />
           </button>
         </div>
-      </button>
+      </div>
     </div>
   );
 }
@@ -1553,7 +1555,8 @@ function DayTimelinePaymentCard({
       {payment.extra && (
         <span className="absolute inset-y-0 left-0 w-[3px] bg-violet-500 shadow-[2px_0_10px_rgba(168,85,247,0.7)]" />
       )}
-      <button type="button" onClick={onEdit} className="flex w-full items-center justify-between gap-4 text-left">
+      {/* auditoria 2026-08-22: div role="button" — <button> aninhado é HTML inválido (erro de hidratação) */}
+      <div role="button" tabIndex={0} onClick={onEdit} onKeyDown={(e) => { if (e.key === 'Enter') onEdit(); }} className="flex w-full items-center justify-between gap-4 text-left">
         <div className="flex min-w-0 items-center gap-4">
           <PaymentChannelLogo channel={payment.channel} className="h-11 w-11" />
           <div className="min-w-0">
@@ -1601,7 +1604,7 @@ function DayTimelinePaymentCard({
             </button>
           </div>
         </div>
-      </button>
+      </div>
     </div>
   );
 }
@@ -1970,17 +1973,24 @@ export default function PagamentosPage() {
     }));
   }
 
-  function handleAddPayment() {
+  async function handleAddPayment() {
     if (!newPayment.clientId || !newPayment.destination.trim() || newPayment.amount <= 0) return;
     const base = { ...newPayment, destination: newPayment.destination.trim() };
 
     if (recurMode === 'none') {
-      addPayment(base);
+      void addPayment(base);
       setSelectedDate(newPayment.date);
     } else {
       const dates = previewDates;
-      for (const date of dates) addPayment({ ...base, date });
+      // auditoria 2026-08-22: sequencial (podem ser ~260 POSTs) + contagem de sucessos
+      let criados = 0;
+      for (const date of dates) {
+        if (await addPayment({ ...base, date })) criados++;
+      }
       if (dates.length > 0) setSelectedDate(dates[0]);
+      const falhas = dates.length - criados;
+      if (falhas > 0) notificar(`${criados} pagamentos criados; ${falhas} falharam.`, 'aviso');
+      else notificar(`${criados} pagamentos criados.`, 'ok');
     }
 
     // Keep the amount just sent — it's now "the last one", and the next Pix is
@@ -2462,7 +2472,7 @@ export default function PagamentosPage() {
                         )}
                         <div className="space-y-2">
                           {(expandedDates.has(date) ? dayPayments : dayPayments.slice(0, 2)).map((payment, idx) => (
-                            <MonthPaymentCard key={payment.id} payment={payment} index={idx + wi + di} onStatusChange={(status) => updatePaymentStatus(payment.id, status)} onDelete={() => deletePayment(payment.id)} onToggleExtra={() => togglePaymentExtra(payment.id)} onEdit={() => setEditingPayment(payment)} />
+                            <MonthPaymentCard key={payment.id} payment={payment} index={idx + wi + di} onStatusChange={(status) => updatePaymentStatus(payment.id, status)} onDelete={() => { if (window.confirm('Excluir este pagamento? Isso não pode ser desfeito.')) void deletePayment(payment.id); }} onToggleExtra={() => togglePaymentExtra(payment.id)} onEdit={() => setEditingPayment(payment)} />
                           ))}
                           {dayPayments.length > 2 && (
                             <button
@@ -2546,7 +2556,7 @@ export default function PagamentosPage() {
                           <div className="relative min-h-[56px] pl-5">
                             <span className="absolute left-0 top-2 h-5 w-px bg-border" />
                             <div className={cn('w-[46%]', index % 2 === 0 ? 'ml-5' : 'ml-[48%]')}>
-                              <DayTimelinePaymentCard payment={payment} index={index} onStatusChange={(status) => updatePaymentStatus(payment.id, status)} onDelete={() => deletePayment(payment.id)} onToggleExtra={() => togglePaymentExtra(payment.id)} onEdit={() => setEditingPayment(payment)} />
+                              <DayTimelinePaymentCard payment={payment} index={index} onStatusChange={(status) => updatePaymentStatus(payment.id, status)} onDelete={() => { if (window.confirm('Excluir este pagamento? Isso não pode ser desfeito.')) void deletePayment(payment.id); }} onToggleExtra={() => togglePaymentExtra(payment.id)} onEdit={() => setEditingPayment(payment)} />
                             </div>
                           </div>
                         </div>
@@ -2718,7 +2728,7 @@ export default function PagamentosPage() {
                   >
                     <div className="min-h-[342px] flex-1 space-y-2.5 p-3">
                       {day.payments.slice(0, 4).map((payment, index) => (
-                        <WeekPaymentCard key={payment.id} payment={payment} index={index + di} onStatusChange={(status) => updatePaymentStatus(payment.id, status)} onDelete={() => deletePayment(payment.id)} onToggleExtra={() => togglePaymentExtra(payment.id)} onEdit={() => setEditingPayment(payment)} />
+                        <WeekPaymentCard key={payment.id} payment={payment} index={index + di} onStatusChange={(status) => updatePaymentStatus(payment.id, status)} onDelete={() => { if (window.confirm('Excluir este pagamento? Isso não pode ser desfeito.')) void deletePayment(payment.id); }} onToggleExtra={() => togglePaymentExtra(payment.id)} onEdit={() => setEditingPayment(payment)} />
                       ))}
                       {day.payments.length > 4 && (
                         <button type="button" onClick={() => { setSelectedDate(day.date); setViewMode('dia'); }} className="w-full rounded-lg py-2 text-center text-xs font-bold text-muted-foreground hover:bg-muted/30 hover:text-primary">

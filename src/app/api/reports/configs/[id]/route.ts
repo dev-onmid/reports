@@ -11,6 +11,9 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     active?: boolean;
     template?: 'performance' | 'delivery' | 'social';
   };
+  if (body.sendDay !== undefined && (!Number.isInteger(body.sendDay) || body.sendDay < 1 || body.sendDay > 28)) {
+    return Response.json({ error: 'Dia de envio deve ser entre 1 e 28.' }, { status: 400 });
+  }
   const pool = makeServerPool();
   try {
     const sets: string[] = [];

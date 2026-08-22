@@ -1,12 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
   AlertTriangle, Bell, Calendar, Check, ChevronDown, ChevronRight, Clock,
   Loader2, Plus, Star, Wallet,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { notificar } from '@/components/ui/toast';
 import type { CardQuadro, GrupoConta, ItemFeed, Severidade } from '@/lib/painel-gestor';
 
 /**
@@ -87,17 +88,25 @@ export function PainelGestor() {
   const [salvando, setSalvando] = useState(false);
   const [form, setForm] = useState({ cliente_id: '', texto: '', categoria: '' });
 
+  // Sequência da requisição em voo — trocar de filtro rápido dispara GETs em
+  // paralelo e a resposta ANTIGA podia chegar por último e vencer a nova.
+  const reqSeq = useRef(0);
+
   const carregar = useCallback(async (f: Filtro) => {
+    const seq = ++reqSeq.current;
+    setCarregando(true);
     try {
       const res = await fetch(`/api/inicio/painel?filtro=${f}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      setData(await res.json() as PainelData);
+      const json = await res.json() as PainelData;
+      if (seq !== reqSeq.current) return; // resposta obsoleta — já há outra em voo
+      setData(json);
       setErro('');
     } catch {
       // O painel some, o resto do Início continua de pé.
-      setErro('Não foi possível carregar o painel agora.');
+      if (seq === reqSeq.current) setErro('Não foi possível carregar o painel agora.');
     } finally {
-      setCarregando(false);
+      if (seq === reqSeq.current) setCarregando(false);
     }
   }, []);
 
@@ -146,7 +155,7 @@ export function PainelGestor() {
     if (!form.cliente_id || !form.texto.trim()) return;
     setSalvando(true);
     try {
-      await fetch('/api/otimizador/notes', {
+      const res = await fetch('/api/otimizador/notes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -154,9 +163,13 @@ export function PainelGestor() {
           texto: form.texto.trim(), categoria: form.categoria.trim() || null,
         }),
       });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      // Só limpa/fecha com a nota GRAVADA — em falha o texto fica no form.
       setForm({ cliente_id: '', texto: '', categoria: '' });
       setNovaAberta(false);
       await carregar(filtro);
+    } catch {
+      notificar('Não foi possível criar a nota — o texto foi mantido, tente de novo.', 'erro');
     } finally {
       setSalvando(false);
     }

@@ -186,15 +186,17 @@ function RastreioResumoCard({ from, to }: { from: string; to: string }) {
 
 function TopCriativosCard({ from, to }: { from: string; to: string }) {
   const [rows, setRows] = useState<Creative[] | null>(null);
+  const [failed, setFailed] = useState(false);
   const [axis, setAxis] = useState('leads');
 
   useEffect(() => {
     let alive = true;
     setRows(null);
+    setFailed(false);
     fetch(`/api/creative-library?from=${from}&to=${to}`)
-      .then((r) => r.json())
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
       .then((j: { creatives?: Creative[] }) => { if (alive) setRows(j?.creatives ?? []); })
-      .catch(() => { if (alive) setRows([]); });
+      .catch(() => { if (alive) setFailed(true); });
     return () => { alive = false; };
   }, [from, to]);
 
@@ -237,7 +239,9 @@ function TopCriativosCard({ from, to }: { from: string; to: string }) {
         </div>
       )}
 
-      {rows === null ? (
+      {failed ? (
+        <p className="text-sm text-muted-foreground">Não foi possível carregar os criativos agora.</p>
+      ) : rows === null ? (
         <p className="text-sm text-muted-foreground">Carregando…</p>
       ) : top.length === 0 ? (
         <p className="text-sm text-muted-foreground">

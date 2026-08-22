@@ -62,6 +62,10 @@ export async function POST(request: NextRequest) {
     sendDay?: number;
     template?: 'performance' | 'delivery' | 'social';
   };
+  const sendDay = body.sendDay ?? 1;
+  if (!Number.isInteger(sendDay) || sendDay < 1 || sendDay > 28) {
+    return Response.json({ error: 'Dia de envio deve ser entre 1 e 28.' }, { status: 400 });
+  }
   const pool = makeServerPool();
   try {
     await ensureTables(pool);
@@ -69,7 +73,7 @@ export async function POST(request: NextRequest) {
       `INSERT INTO public.report_configs (client_id, name, whatsapp_group, zapi_client_id, send_day, template)
        VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING *`,
-      [body.clientId, body.name, body.whatsappGroup ?? null, body.zapiClientId ?? null, body.sendDay ?? 1, body.template ?? 'performance'],
+      [body.clientId, body.name, body.whatsappGroup ?? null, body.zapiClientId ?? null, sendDay, body.template ?? 'performance'],
     );
     return Response.json(rows[0]);
   } finally {

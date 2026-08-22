@@ -5,6 +5,7 @@
 
 import { useEffect, useState } from 'react';
 import { Copy, Check, ExternalLink, RefreshCw, Trash2, X, Globe2 } from 'lucide-react';
+import { notificar } from '@/components/ui/toast';
 
 export function PortalLinkModal({ clientId, clientName, onClose }: {
   clientId: string;
@@ -38,7 +39,10 @@ export function PortalLinkModal({ clientId, clientName, onClose }: {
     try {
       const res = await fetch(`/api/clients/${clientId}/portal`, { method: 'POST' });
       const d = await res.json().catch(() => null) as { path?: string } | null;
-      if (d?.path) setPath(d.path);
+      if (res.ok && d?.path) setPath(d.path);
+      else notificar('Não foi possível gerar o link.', 'erro');
+    } catch {
+      notificar('Não foi possível gerar o link.', 'erro');
     } finally {
       setWorking(false);
     }
@@ -48,9 +52,13 @@ export function PortalLinkModal({ clientId, clientName, onClose }: {
     if (!confirm('Revogar o link? O cliente perde o acesso na hora e um link novo precisará ser enviado.')) return;
     setWorking(true);
     try {
-      await fetch(`/api/clients/${clientId}/portal`, { method: 'DELETE' });
+      const res = await fetch(`/api/clients/${clientId}/portal`, { method: 'DELETE' });
+      if (!res.ok) throw new Error(`Erro ${res.status}`);
       setPath(null);
       setLastAccess(null);
+    } catch {
+      // Estado NÃO muda: o link segue valendo no servidor
+      notificar('Não foi possível revogar — o link AINDA está ativo.', 'erro');
     } finally {
       setWorking(false);
     }

@@ -25,6 +25,7 @@ import { CreativeLibrary } from '@/components/creative-library';
 import { useClients } from '@/lib/client-store';
 import { ClientAvatar, fetchClientPicture } from '@/components/client-avatar';
 import { DictateButton } from '@/components/ui/dictate-button';
+import { notificar } from '@/components/ui/toast';
 import { cn, formatCurrencyBRL } from '@/lib/utils';
 import type { Client } from '@/lib/mock-data';
 import type { AttendanceAudit } from '@/lib/crm-attendance-audit';
@@ -2568,7 +2569,11 @@ export default function CrmPage({ lockedClientId, embedded = false }: CrmPagePro
         const saved = await res.json() as CrmLead;
         setLeads(prev => prev.map(l => l.id === id ? saved : l));
         setEditId(null);
+      } else {
+        notificar('Não foi possível salvar o lead — tente de novo.', 'erro');
       }
+    } catch {
+      notificar('Não foi possível salvar o lead — tente de novo.', 'erro');
     } finally { setSaving(false); }
   }
 
@@ -2589,8 +2594,8 @@ export default function CrmPage({ lockedClientId, embedded = false }: CrmPagePro
 
   async function deleteRow(id: string) {
     setMenuId(null);
-    const res = await fetch(`/api/crm/${id}`, { method: 'DELETE' });
-    if (res.ok) {
+    const res = await fetch(`/api/crm/${id}`, { method: 'DELETE' }).catch(() => null);
+    if (res?.ok) {
       setLeads(prev => prev.filter(l => l.id !== id));
       setSelectedLeadIds(prev => {
         const next = new Set(prev);
@@ -2598,12 +2603,21 @@ export default function CrmPage({ lockedClientId, embedded = false }: CrmPagePro
         return next;
       });
       if (editId === id) setEditId(null);
+    } else {
+      notificar('Não foi possível excluir o lead — tente de novo.', 'erro');
     }
   }
 
   async function changeLeadStatus(id: string, status: string) {
+    const previousStatus = leads.find(l => l.id === id)?.status ?? null;
     setLeads(prev => prev.map(l => l.id === id ? { ...l, status } : l));
-    await fetch(`/api/crm/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) });
+    try {
+      const res = await fetch(`/api/crm/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) });
+      if (!res.ok) throw new Error(`Erro ${res.status}`);
+    } catch {
+      setLeads(prev => prev.map(l => l.id === id ? { ...l, status: previousStatus } : l));
+      notificar('Não foi possível mover o lead — tente de novo.', 'erro');
+    }
   }
 
   function toggleLeadSelection(id: string) {
@@ -2646,8 +2660,12 @@ export default function CrmPage({ lockedClientId, embedded = false }: CrmPagePro
     );
 
     const savedById = new Map(results.filter(Boolean).map(lead => [lead!.id, lead!]));
-    if (savedById.size > 0) {
-      setLeads(prev => prev.map(lead => savedById.get(lead.id) ?? lead));
+    // Falhas revertem pro lead original (o otimista acima aplicou o patch em todos)
+    const failed = targets.filter(lead => !savedById.has(lead.id));
+    const failedById = new Map(failed.map(lead => [lead.id, lead]));
+    setLeads(prev => prev.map(lead => savedById.get(lead.id) ?? failedById.get(lead.id) ?? lead));
+    if (failed.length > 0) {
+      notificar(`${failed.length} de ${targets.length} leads não foram atualizados — tente de novo.`, 'erro');
     }
   }
 
@@ -2711,7 +2729,11 @@ export default function CrmPage({ lockedClientId, embedded = false }: CrmPagePro
         const saved = await res.json() as CrmLead;
         setLeads(prev => prev.map(l => l.id === kanbanEditLead.id ? saved : l));
         setKanbanEditLead(null);
+      } else {
+        notificar('Não foi possível salvar o lead — tente de novo.', 'erro');
       }
+    } catch {
+      notificar('Não foi possível salvar o lead — tente de novo.', 'erro');
     } finally { setSaving(false); }
   }
 

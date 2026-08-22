@@ -15,6 +15,7 @@ import {
 import { getAuthSession, type AuthSession } from '@/lib/auth-store';
 import { useClients } from '@/lib/client-store';
 import { ClientAvatar } from '@/components/client-avatar';
+import { notificar } from '@/components/ui/toast';
 import { cn } from '@/lib/utils';
 import type { Client } from '@/lib/mock-data';
 import {
@@ -554,17 +555,26 @@ function DetalheModal({ client, agenda, me, onClose, onAgendaChange, onRegistrar
     const novo = raw === '' ? null : Math.min(90, Math.max(1, Math.floor(Number(raw)) || 0)) || null;
     if (novo === atual) return;
     onAgendaChange(client.id, canal, novo);
-    await fetch('/api/otimizacoes/agenda', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ client_id: client.id, canal, frequencia_dias: novo }),
-    }).catch(() => {});
+    try {
+      const res = await fetch('/api/otimizacoes/agenda', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ client_id: client.id, canal, frequencia_dias: novo }),
+      });
+      if (!res.ok) throw new Error(String(res.status));
+    } catch {
+      // Reverte o otimismo: sem isso a tela mostraria uma programação que não existe.
+      onAgendaChange(client.id, canal, atual);
+      setFreqDraft((p) => ({ ...p, [canal]: atual === null ? '' : String(atual) }));
+      notificar('Não foi possível salvar a programação — o valor anterior foi mantido.', 'erro');
+    }
   }
 
   async function excluir(r: Registro) {
     if (!window.confirm('Excluir este registro do histórico?')) return;
     const res = await fetch(`/api/otimizacoes?id=${encodeURIComponent(r.id)}`, { method: 'DELETE' }).catch(() => null);
     if (res?.ok) setRegistros((prev) => (prev ?? []).filter((x) => x.id !== r.id));
+    else notificar('Não foi possível excluir o registro — tente de novo.', 'erro');
   }
 
   const podeExcluir = (r: Registro) =>
@@ -701,6 +711,9 @@ export default function OtimizacoesPage() {
   const [agenda, setAgenda] = useState<AgendaRow[]>([]);
   const [contagens, setContagens] = useState<Record<string, number>>({});
   const [carregando, setCarregando] = useState(true);
+  // Overview falhou → sem "última ação" de ninguém, TODA a carteira apareceria
+  // "Nunca registrado". Melhor dizer que não carregou do que mentir o estado.
+  const [erroCarga, setErroCarga] = useState(false);
 
   const [escopo, setEscopo] = useState<'meus' | 'todos' | null>(null);
   const [busca, setBusca] = useState('');
@@ -716,7 +729,7 @@ export default function OtimizacoesPage() {
   const loadOverview = useCallback(async () => {
     try {
       const res = await fetch('/api/otimizacoes/overview');
-      if (!res.ok) return;
+      if (!res.ok) { setErroCarga(true); return; }
       const data = await res.json() as {
         ultimas?: UltimaPorCanal[]; agenda?: AgendaRow[];
         contagens?: { client_id: string; total: number }[];
@@ -724,6 +737,9 @@ export default function OtimizacoesPage() {
       setUltimas(data.ultimas ?? []);
       setAgenda(data.agenda ?? []);
       setContagens(Object.fromEntries((data.contagens ?? []).map((c) => [c.client_id, c.total])));
+      setErroCarga(false);
+    } catch {
+      setErroCarga(true);
     } finally {
       setCarregando(false);
     }
@@ -920,6 +936,16 @@ export default function OtimizacoesPage() {
 
       {carregando && clients.length === 0 ? (
         <p className="py-12 text-center text-sm text-muted-foreground">Carregando…</p>
+      ) : erroCarga ? (
+        <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed border-border py-12 text-center text-sm text-muted-foreground">
+          <p>Não foi possível carregar o histórico — sem ele, todas as contas apareceriam como “Nunca registrado”.</p>
+          <button
+            onClick={() => { setCarregando(true); void loadOverview(); }}
+            className="rounded-md border border-border px-3 py-1.5 text-xs text-foreground hover:bg-muted/30"
+          >
+            Tentar de novo
+          </button>
+        </div>
       ) : visiveis.length === 0 ? (
         <div className="rounded-lg border border-dashed border-border py-12 text-center text-sm text-muted-foreground">
           {escopo === 'meus'

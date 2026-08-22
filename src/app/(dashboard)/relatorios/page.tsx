@@ -18,6 +18,7 @@ import { cn } from '@/lib/utils';
 import { exportReportToPdf } from '@/lib/export-report-pdf';
 import { REPORT_SECTIONS } from '@/lib/report-sections';
 import { useIsMobile } from '@/lib/use-is-mobile';
+import { notificar } from '@/components/ui/toast';
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -226,9 +227,16 @@ export default function RelatoriosPage() {
     setGenCsvFiles(prev => prev.filter((_, i) => i !== index));
   }
 
+  // Datas invertidas / comparação personalizada incompleta bloqueiam o Gerar.
+  const genDatesInvalid = Boolean(genForm.from && genForm.to && genForm.from > genForm.to);
+  const genCompareMissing = genForm.compareMode === 'custom' && (!genForm.compareFrom || !genForm.compareTo);
+
   async function generateReport() {
     if (!genForm.clientId || !genForm.from || !genForm.to) return;
+    if (genDatesInvalid || genCompareMissing) return;
     setGenerating(true);
+    // Abre a aba DENTRO do gesto do usuário — window.open depois do await é bloqueado pelo popup blocker.
+    const win = window.open('', '_blank');
     try {
       const payload: Record<string, unknown> = {
         clientId: genForm.clientId,
@@ -263,16 +271,25 @@ export default function RelatoriosPage() {
       const data = await res.json().catch(() => ({ error: `Erro ${res.status} — tente novamente.` })) as { public_token?: string; id?: string; error?: string; avisos?: string[] };
       if (data.public_token) {
         setShowGenModal(false);
-        // window.open must be called before any await to avoid popup blocker
-        window.open(`/relatorio/${data.public_token}`, '_blank');
+        const url = `/relatorio/${data.public_token}`;
+        if (win) {
+          win.location.href = url;
+        } else {
+          // Popup bloqueado pelo navegador — mostra o caminho pro usuário abrir na mão.
+          notificar(`Relatório gerado. Abra em: ${publicReportUrl(data.public_token)}`, 'aviso');
+        }
         if (data.avisos?.length) {
           alert(`Relatório gerado, mas algumas planilhas não puderam ser interpretadas:\n\n${data.avisos.join('\n')}`);
         }
         const rows = await fetch('/api/reports').then(r => r.ok ? r.json() : []) as DiagnosticReport[];
         setDiagnostics(rows);
       } else {
+        win?.close();
         alert(data.error ?? 'Erro ao gerar relatório. Tente novamente.');
       }
+    } catch {
+      win?.close();
+      notificar('Erro de rede ao gerar o relatório. Tente novamente.', 'erro');
     } finally {
       setGenerating(false);
     }
@@ -282,7 +299,7 @@ export default function RelatoriosPage() {
     setSavingConfig(true);
     try {
       if (editingConfig) {
-        await fetch(`/api/reports/configs/${editingConfig.id}`, {
+        const res = await fetch(`/api/reports/configs/${editingConfig.id}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -293,6 +310,11 @@ export default function RelatoriosPage() {
             template: configForm.template,
           }),
         });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({})) as { error?: string };
+          notificar(data.error ?? 'Erro ao salvar a automação. Tente novamente.', 'erro');
+          return;
+        }
         setConfigs(prev => prev.map(c => c.id === editingConfig.id
           ? { ...c, name: configForm.name, whatsapp_group: configForm.whatsappGroup || null, zapi_client_id: configForm.zapiClientId || null, send_day: configForm.sendDay, template: configForm.template, zapi_name: zapiClients.find(z => z.id === configForm.zapiClientId)?.name ?? null }
           : c));
@@ -322,6 +344,8 @@ export default function RelatoriosPage() {
       }
       setShowConfigForm(false);
       setEditingConfig(null);
+    } catch {
+      notificar('Erro de rede ao salvar a automação. Tente novamente.', 'erro');
     } finally {
       setSavingConfig(false);
     }
@@ -329,19 +353,31 @@ export default function RelatoriosPage() {
 
   async function runConfig(cfg: ReportConfig) {
     setRunningId(cfg.id);
+    // Abre a aba DENTRO do gesto do usuário — window.open depois do await é bloqueado pelo popup blocker.
+    const win = window.open('', '_blank');
     try {
       const res = await fetch(`/api/reports/run/${cfg.id}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({}),
       });
-      const data = await res.json() as { public_token?: string };
+      const data = await res.json().catch(() => ({})) as { public_token?: string; error?: string };
       if (data.public_token) {
         setConfigs(prev => prev.map(c => c.id === cfg.id
           ? { ...c, last_token: data.public_token ?? null, last_run_at: new Date().toISOString(), report_count: (c.report_count || 0) + 1 }
           : c));
-        window.open(`/relatorio/${data.public_token}`, '_blank');
+        if (win) {
+          win.location.href = `/relatorio/${data.public_token}`;
+        } else {
+          notificar(`Relatório gerado. Abra em: ${publicReportUrl(data.public_token)}`, 'aviso');
+        }
+      } else {
+        win?.close();
+        notificar(data.error ?? 'Falha ao gerar.', 'erro');
       }
+    } catch {
+      win?.close();
+      notificar('Erro de rede ao gerar o relatório. Tente novamente.', 'erro');
     } finally {
       setRunningId(null);
     }
@@ -499,6 +535,8 @@ export default function RelatoriosPage() {
       setDiagnostics(rows);
       const cfgs = await fetch('/api/reports/configs').then(r => r.ok ? r.json() : []) as ReportConfig[];
       setConfigs(cfgs);
+    } catch {
+      notificar('Erro de rede ao disparar os relatórios pendentes. Tente novamente.', 'erro');
     } finally {
       setSendingAllPending(false);
     }
@@ -1098,7 +1136,11 @@ export default function RelatoriosPage() {
                   <input
                     type="number" min={1} max={28}
                     value={configForm.sendDay}
-                    onChange={e => setConfigForm(f => ({ ...f, sendDay: Number(e.target.value) }))}
+                    onChange={e => {
+                      // Campo vazio/lixo viraria NaN e corromperia o payload — clampa 1-28.
+                      const n = Number(e.target.value);
+                      setConfigForm(f => ({ ...f, sendDay: Number.isFinite(n) && e.target.value !== '' ? Math.min(28, Math.max(1, Math.trunc(n))) : 1 }));
+                    }}
                     className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg text-foreground focus:outline-none focus:ring-1 focus:ring-violet-500/50"
                   />
                 </div>
@@ -1428,6 +1470,9 @@ export default function RelatoriosPage() {
                   />
                 </div>
               </div>
+              {genDatesInvalid && (
+                <p className="text-[11px] font-medium text-red-400">Data final anterior à inicial.</p>
+              )}
               {/* Resumo legível do período selecionado */}
               {genForm.from && genForm.to && (() => {
                 const d1 = new Date(genForm.from + 'T12:00:00');
@@ -1744,7 +1789,7 @@ export default function RelatoriosPage() {
                     onClick={() => setGenStep(s => s + 1)}
                     disabled={
                       (genStep === 0 && !genForm.clientId) ||
-                      (genStep === 1 && (!genForm.from || !genForm.to))
+                      (genStep === 1 && (!genForm.from || !genForm.to || genDatesInvalid || genCompareMissing))
                     }
                     className="bg-violet-600 hover:bg-violet-700 text-white gap-2 text-sm min-w-[110px]"
                   >
@@ -1757,7 +1802,9 @@ export default function RelatoriosPage() {
                       generating ||
                       !genForm.clientId ||
                       !genForm.from ||
-                      !genForm.to
+                      !genForm.to ||
+                      genDatesInvalid ||
+                      genCompareMissing
                     }
                     className={cn(
                       'text-white gap-2 text-sm min-w-[120px]',

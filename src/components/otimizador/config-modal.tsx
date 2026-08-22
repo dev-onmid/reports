@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { Check, Loader2, Pencil, Plus, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { DictateButton } from '@/components/ui/dictate-button';
+import { notificar } from '@/components/ui/toast';
 import { callerHeaders } from '@/lib/auth-store';
 import type { OptimizerModo } from '@/lib/optimizer';
 import {
@@ -21,6 +22,9 @@ export function ConfigModal({ clientId, clientName, onClose }: { clientId: strin
     observacoes_fixas: null, ativo: true,
   });
   const [loading, setLoading] = useState(true);
+  // GET falhou → o form está com os DEFAULTS, não com a config real do cliente.
+  // Salvar nesse estado gravaria os padrões por cima do que existe no banco.
+  const [loadError, setLoadError] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
@@ -60,6 +64,9 @@ export function ConfigModal({ clientId, clientName, onClose }: { clientId: strin
       try {
         const res = await fetch(`/api/otimizador/config/${encodeURIComponent(clientId)}`);
         if (res.ok) setConfig(await res.json() as ClientConfig);
+        else setLoadError(true);
+      } catch {
+        setLoadError(true);
       } finally { setLoading(false); }
     })();
   }, [clientId]);
@@ -67,13 +74,19 @@ export function ConfigModal({ clientId, clientName, onClose }: { clientId: strin
   async function save() {
     setSaving(true); setSaved(false);
     try {
-      await fetch(`/api/otimizador/config/${encodeURIComponent(clientId)}`, {
+      const res = await fetch(`/api/otimizador/config/${encodeURIComponent(clientId)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...callerHeaders() },
         body: JSON.stringify(config),
       });
+      if (!res.ok) {
+        notificar('Não foi possível salvar a configuração — tente de novo.', 'erro');
+        return;
+      }
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
+    } catch {
+      notificar('Erro de rede ao salvar a configuração.', 'erro');
     } finally { setSaving(false); }
   }
 
@@ -100,6 +113,12 @@ export function ConfigModal({ clientId, clientName, onClose }: { clientId: strin
           <div className="flex h-48 items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
         ) : (
           <div className="space-y-5 p-4">
+            {loadError && (
+              <div className="rounded-[var(--radius)] border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+                Não foi possível carregar a configuração deste cliente — os valores abaixo são os padrões, não a config salva.
+                Salvar está desabilitado para não gravar por cima da config real. Feche e tente de novo.
+              </div>
+            )}
             <label className="flex cursor-pointer items-start justify-between gap-3 rounded-[var(--radius)] border border-border bg-background px-3 py-2.5">
               <div>
                 <p className="text-sm font-medium text-foreground">Otimizador ativo para este cliente</p>
@@ -234,7 +253,7 @@ export function ConfigModal({ clientId, clientName, onClose }: { clientId: strin
             <div className="flex items-center justify-end gap-2 pt-2">
               {saved && <span className="text-xs text-primary">Configuração salva!</span>}
               <Button variant="outline" onClick={onClose}>Cancelar</Button>
-              <Button onClick={save} disabled={saving}>
+              <Button onClick={save} disabled={saving || loadError}>
                 {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
                 Salvar
               </Button>

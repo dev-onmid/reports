@@ -11,6 +11,7 @@ import {
   Sparkles, ShieldCheck, Users, CalendarClock, RotateCcw, ChevronRight,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { notificar } from '@/components/ui/toast';
 import { exportReportToPdf, renderReportPdf } from '@/lib/export-report-pdf';
 
 type Role = string | undefined;
@@ -328,8 +329,11 @@ function TasksModal({ onClose }: { onClose: () => void }) {
     if (!id || id === sendInstance?.id) return;
     setSavingInstance(true);
     try {
-      await fetch('/api/agent/tasks', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ zapi_client_id: id }) });
+      const res = await fetch('/api/agent/tasks', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ zapi_client_id: id }) });
+      if (!res.ok) notificar('Não foi possível trocar a instância de envio — tente de novo.', 'erro');
       load();
+    } catch {
+      notificar('Erro de rede ao trocar a instância de envio.', 'erro');
     } finally { setSavingInstance(false); }
   }
 
@@ -337,9 +341,13 @@ function TasksModal({ onClose }: { onClose: () => void }) {
     if (action === 'delete' && !confirm('Apagar esta tarefa e todo o histórico dela?')) return;
     setBusy(id);
     try {
-      if (action === 'delete') await fetch(`/api/agent/tasks?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
-      else await fetch('/api/agent/tasks', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, action }) });
+      const res = action === 'delete'
+        ? await fetch(`/api/agent/tasks?id=${encodeURIComponent(id)}`, { method: 'DELETE' })
+        : await fetch('/api/agent/tasks', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, action }) });
+      if (!res.ok) notificar('Não foi possível executar a ação na tarefa — tente de novo.', 'erro');
       load();
+    } catch {
+      notificar('Erro de rede ao executar a ação na tarefa.', 'erro');
     } finally { setBusy(null); }
   }
 
@@ -984,6 +992,19 @@ export default function AgentePage() {
     const history = [...messages, userMsg].map(m => ({ role: m.role as 'user' | 'assistant', content: m.content }));
     const assistantId = crypto.randomUUID();
 
+    // Cria/atualiza a mensagem do assistente em posição fixa (pelo id) — é o que
+    // permite o texto aparecer INCREMENTALMENTE a cada evento `text`, em vez de
+    // só no `done` (e de perder tudo se a conexão cair no meio).
+    const upsertAssistant = (patch: Partial<ChatMessage> & { content: string }) =>
+      setMessages(prev => {
+        const i = prev.findIndex(m => m.id === assistantId);
+        if (i === -1) return [...prev, { id: assistantId, role: 'assistant', toolsUsed: [], ...patch }];
+        const next = [...prev];
+        next[i] = { ...next[i], ...patch };
+        return next;
+      });
+    let accText = '';
+
     try {
       const res = await fetch('/api/agent/chat', {
         method: 'POST',
@@ -997,7 +1018,6 @@ export default function AgentePage() {
       let buffer = '';
       const toolsUsed: string[] = [];
       let currentActive: string[] = [];
-      let accText = '';
       const accAttachments: FileAttachment[] = [];
       const pendingRenders: PendingRender[] = [];
       let messageAdded = false;
@@ -1015,6 +1035,7 @@ export default function AgentePage() {
             const event = JSON.parse(line.slice(6)) as StreamEvent;
             if (event.type === 'text') {
               accText += event.text;
+              upsertAssistant({ content: accText });
             } else if (event.type === 'file_attachment') {
               accAttachments.push({ url: event.url, filename: event.filename, label: event.label });
             } else if (event.type === 'report_link') {
@@ -1033,25 +1054,25 @@ export default function AgentePage() {
               setActiveTools([...currentActive]);
             } else if (event.type === 'done') {
               messageAdded = true;
-              setMessages(prev => [...prev, {
-                id: assistantId, role: 'assistant', content: accText, toolsUsed,
+              upsertAssistant({
+                content: accText, toolsUsed,
                 attachments: accAttachments.length > 0 ? accAttachments : undefined,
                 usage: event.usage,
-              }]);
+              });
               setActiveTools([]);
             } else if (event.type === 'error') {
               messageAdded = true;
-              setMessages(prev => [...prev, { id: assistantId, role: 'assistant', content: `Erro: ${event.message}`, toolsUsed: [] }]);
+              upsertAssistant({ content: `Erro: ${event.message}`, toolsUsed: [] });
             }
           } catch { /* ignore */ }
         }
       }
 
       if (!messageAdded && accText) {
-        setMessages(prev => [...prev, {
-          id: assistantId, role: 'assistant', content: accText, toolsUsed,
+        upsertAssistant({
+          content: accText, toolsUsed,
           attachments: accAttachments.length > 0 ? accAttachments : undefined,
-        }]);
+        });
       }
 
       // Renderiza no navegador os PDFs pedidos pela Luna (mesmo pipeline da tela Relatórios).
@@ -1060,7 +1081,9 @@ export default function AgentePage() {
         await processReportRender(r);
       }
     } catch {
-      setMessages(prev => [...prev, { id: assistantId, role: 'assistant', content: 'Desculpe, ocorreu um erro. Tente novamente.', toolsUsed: [] }]);
+      // Conexão caiu no meio: o que já chegou vale mais que uma desculpa genérica.
+      if (accText) upsertAssistant({ content: `${accText}\n\n_(resposta interrompida — conexão caiu)_` });
+      else upsertAssistant({ content: 'Desculpe, ocorreu um erro. Tente novamente.', toolsUsed: [] });
     } finally {
       setLoading(false);
       setActiveTools([]);
