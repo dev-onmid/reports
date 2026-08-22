@@ -38,6 +38,7 @@ export type NegocioAgendor = {
   motivoPerda: string | null;
   pessoa: { id: string | null; nome: string | null; email: string | null };
   organizacao: string | null;
+  organizacaoId: string | null;
   descricao: string | null;
   criadoEm: string | null;
 };
@@ -121,6 +122,7 @@ export function normalizarNegocio(d: Obj): NegocioAgendor | null {
       email: str(pessoa?.email),
     },
     organizacao: str(obj(d.organization)?.name),
+    organizacaoId: str(obj(d.organization)?.id),
     descricao: str(d.description),
     criadoEm: str(d.createdAt),
   };

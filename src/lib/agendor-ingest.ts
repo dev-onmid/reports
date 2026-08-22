@@ -74,6 +74,23 @@ export async function buscarPessoaAgendor(
   }
 }
 
+/**
+ * Ficha da EMPRESA (organização) do negócio. O shape do OrganizationEntity é
+ * o mesmo vocabulário da pessoa (name/contact/leadOrigin/address), então o
+ * normalizador é reaproveitado. Falha → null.
+ */
+export async function buscarOrganizacaoAgendor(
+  apiToken: string, orgId: string,
+): Promise<PessoaAgendor | null> {
+  try {
+    const r = await agendorFetch<{ data?: Record<string, unknown> }>(
+      apiToken, `${AGENDOR_API}/organizations/${encodeURIComponent(orgId)}`);
+    return r?.data ? normalizarPessoa(r.data) : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Filtros salvos na conexão, prontos pra `passaFiltros`. */
 export function filtrosDaConexao(conn: ConexaoAgendor): FiltrosImportacao {
   return { funis: parseFiltro(conn.filtro_funis), origens: parseFiltro(conn.filtro_origens) };
@@ -89,7 +106,7 @@ export function filtrosDaConexao(conn: ConexaoAgendor): FiltrosImportacao {
 export async function conferirFiltros(
   conn: ConexaoAgendor, negocio: NegocioAgendor, pessoa: PessoaAgendor | null,
   pessoaFalhou = false,
-): Promise<{ negocio: NegocioAgendor; bloqueado: string | null }> {
+): Promise<{ negocio: NegocioAgendor; bloqueado: string | null; pessoa: PessoaAgendor | null }> {
   const filtros = filtrosDaConexao(conn);
   let n = negocio;
   if (filtros.funis && filtros.funis.length > 0 && n.funilId === null && conn.api_token) {
@@ -100,8 +117,29 @@ export async function conferirFiltros(
       if (completo?.funilId) n = { ...n, funilId: completo.funilId, funilNome: completo.funilNome };
     } catch { /* segue com o que tem — passaFiltros é permissivo no desconhecido */ }
   }
-  const { passa, motivo } = passaFiltros(filtros, n, pessoa, { origemDesconhecida: pessoaFalhou });
-  return { negocio: n, bloqueado: passa ? null : motivo };
+  // ⚠️ B2B (caso Incorpast): o negócio fica pendurado na EMPRESA, sem pessoa —
+  // e a origem (Google/Instagram/...) mora na ficha da ORGANIZAÇÃO. Sem este
+  // fallback, todo negócio de empresa era "sem origem" e o filtro barrava o
+  // funil inteiro. Só busca quando o filtro de origem realmente precisa.
+  let p = pessoa;
+  let origemDesconhecida = pessoaFalhou;
+  if (
+    filtros.origens && filtros.origens.length > 0 &&
+    !p?.origemLeadId && n.organizacaoId && conn.api_token
+  ) {
+    const org = await buscarOrganizacaoAgendor(conn.api_token, n.organizacaoId);
+    if (org?.origemLeadId) {
+      // Telefone da empresa NÃO entra: o upsert casa lead por telefone, e o
+      // número da empresa fundiria todos os negócios dela num lead só.
+      p = p
+        ? { ...p, origemLead: org.origemLead, origemLeadId: org.origemLeadId }
+        : { ...org, telefone: null, telefoneBruto: null };
+    } else if (org === null) {
+      origemDesconhecida = true; // fetch falhou (429?) — desconhecido passa
+    }
+  }
+  const { passa, motivo } = passaFiltros(filtros, n, p, { origemDesconhecida });
+  return { negocio: n, bloqueado: passa ? null : motivo, pessoa: p };
 }
 
 export type ResultadoIngestao = {

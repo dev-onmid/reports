@@ -141,3 +141,20 @@ console.log(`✓ ${n} asserts (com filtros)`);
      'pessoa BUSCADA sem origem → barra (o filtro pediu origens específicas)');
 }
 console.log(`✓ ${n} asserts (com tolerância a 429)`);
+
+// ---- organizacaoId (caso Incorpast, B2B: negócio pendurado na EMPRESA) ----
+{
+  const neg = normalizarNegocio({ id: 9, title: 'P7292 - NORPAVE', value: 100,
+    dealStatus: { name: 'Em andamento' }, organization: { id: 555, name: 'NORPAVE' } });
+  assert.equal(neg.organizacaoId, '555');
+  assert.equal(neg.organizacao, 'NORPAVE');
+  const semOrg = normalizarNegocio({ id: 10, title: 'x', dealStatus: { name: 'Em andamento' } });
+  assert.equal(semOrg.organizacaoId, null);
+  // normalizarPessoa serve pra ORGANIZAÇÃO (mesmo vocabulário do OrganizationEntity)
+  const org = normalizarPessoa({ id: 555, name: 'NORPAVE',
+    leadOrigin: { id: 2123707, name: 'Google' }, contact: { work: '4333334444' } });
+  assert.equal(org.origemLeadId, '2123707');
+  assert.equal(org.origemLead, 'Google');
+  assert.equal(org.nome, 'NORPAVE');
+}
+console.log('✓ +6 asserts (organização como fonte de origem)');

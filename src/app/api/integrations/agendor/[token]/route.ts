@@ -64,7 +64,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ token: str
 
     // Filtros de importação do cliente (funil/origem escolhidos no card).
     // pessoaFalhou: origem desconhecida por erro passa (não barrar por 429).
-    const { negocio, bloqueado } = await conferirFiltros(
+    const { negocio, bloqueado, pessoa: pessoaEfetiva } = await conferirFiltros(
       conn, evento.negocio, pessoa, tentouPessoa && pessoa === null);
     if (bloqueado) {
       await registrarLogAgendor(pool, {
@@ -73,7 +73,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ token: str
       return Response.json({ ok: true, resultado: 'filtrado' });
     }
 
-    const r = await ingerirNegocioAgendor(pool, conn.client_id, negocio, pessoa);
+    const r = await ingerirNegocioAgendor(pool, conn.client_id, negocio, pessoaEfetiva ?? pessoa);
     await posProcessarIngestao(pool, conn, negocio, pessoa, r, raw,
       r.criado ? 'criado' : 'atualizado');
 
