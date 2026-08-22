@@ -185,6 +185,15 @@ Pedidos do Matheus: (1) o que é feito na conta do cliente (Meta/Google) — ant
 - **⚠️⚠️ RÉGUA PROTEGIDA**: o overview EXCLUI `origem='resumo'` da "última ação" — resumo é observação, não otimização; sem isso toda conta ficaria eternamente "em dia" e o alerta de atraso morreria. Registro novo automático no Histórico = decidir se conta na régua.
 - ✅ Validado em produção (dry): 18/08 → 6 clientes com ação real compilada ("Status da campanha ×4 — Leticia Ribeiro", orçamentos, programação de conjunto com nomes de campanha). ⚠️ Não verificado no browser: a seção nova da aba do cliente (só build); caminho Google ainda sem evento capturado em produção (mesmo código do log ao vivo). 1º registro real: amanhã 08h40.
 
+## Faturamento por Canal — `canal` guarda a ORIGEM, não a porta de entrada (2026-08-22)
+
+Print do Matheus: o donut mostrava **84% "sem canal registrado"** (só R$ 5.435 de Google) enquanto o painel do Agendor tinha as origens preenchidas (Google R$ 37 mil). Não era o Agendor: a ingestão gravava `canal = 'agendor'` — de onde o dado ENTROU — e a origem real (`leadOrigin`) ia só como texto na observação (`Origem no Agendor: Google`).
+
+- O `CANAL_SQL` de `/api/crm/faturamento-origem` já tinha um fallback lendo essa substring, mas ele falha em dois casos comuns: observação **fill-blanks** (lead que já tinha texto nunca recebe a linha da origem) e negócio **B2B** (sem pessoa, então nem origem havia até o fix da ficha da empresa).
+- **Correção**: `canalDoLead = pessoa?.origemLead ?? 'agendor'` no INSERT; no UPDATE o canal só é sobrescrito **enquanto for a porta de entrada** (`canal IS NULL OR lower(canal) IN ('', 'agendor')`) — canal digitado pelo gestor ou vindo de outra fonte nunca é perdido. O fallback por observação vira rede de segurança dos leads antigos.
+- Fixup em produção: 36 leads tiveram o canal preenchido a partir da observação; o resto (B2B) se preenche na reimportação.
+- ⚠️ **Não force rodadas manuais do sync-cron em sequência** — foi o que rebloqueou a conta com 429 (o catálogo é perdido a cada deploy e precisa recarregar). Deixar o cron de 15 min trabalhar.
+
 ## Agendor — o filtro tinha uma peneira furada, e o 429 era VOLUME (2026-08-22)
 
 Print do Matheus: faturamento da Londrigifts "totalmente equivocado" (R$ 329 mil só em agosto). Diagnóstico: dos 748 negócios importados, **701 entraram SEM verificação de origem** — R$ 462 mil de negócios fora do filtro. Duas causas encadeadas:
