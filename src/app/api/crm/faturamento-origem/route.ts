@@ -29,7 +29,7 @@ export type FaturamentoPorOrigem = {
   ticket: number | null;
 };
 
-/** Rótulos legíveis das origens gravadas pela atribuição. */
+/** Rótulos legíveis para os canais que chegam em vocabulário de máquina. */
 const ROTULO: Record<string, string> = {
   meta: 'Meta Ads',
   google: 'Google Ads',
@@ -39,21 +39,63 @@ const ROTULO: Record<string, string> = {
   tiktok: 'TikTok',
   organic: 'Orgânico / Direto',
   organico: 'Orgânico / Direto',
-  indicacao: 'Indicação',
 };
 
+/**
+ * O CANAL do faturamento, em ordem de força da evidência.
+ *
+ * ⚠️ NÃO usa `origin`. Levantamento em produção: `origin` guarda de onde o lead
+ * foi IMPORTADO ('Agendor', 'Datalytics') ou o default 'organic' — nunca o
+ * canal. Quem guarda o canal de verdade é **`canal`**: 'Indicação', 'TV',
+ * 'Fachada/Passou em Frente', 'Facebook - WhatsApp'… (vem da coluna de origem
+ * do próprio export do CRM do cliente). Agrupar por `origin` respondia "por
+ * qual porta o dado entrou no sistema", não "o que trouxe a venda".
+ *
+ * Os click ids vêm ANTES do texto: são prova direta de anúncio, enquanto
+ * `canal` é o que alguém digitou.
+ */
+const CANAL_SQL = `CASE
+  WHEN NULLIF(ctwa_clid, '') IS NOT NULL OR NULLIF(fbclid, '') IS NOT NULL THEN 'Meta Ads'
+  WHEN NULLIF(gclid, '') IS NOT NULL OR NULLIF(wbraid, '') IS NOT NULL
+    OR NULLIF(gbraid, '') IS NOT NULL THEN 'Google Ads'
+  WHEN NULLIF(btrim(canal), '') IS NOT NULL
+   AND lower(btrim(canal)) NOT IN ('agendor', 'datalytics', 'planilha', 'importacao', 'crm')
+    THEN btrim(canal)
+  -- Leads do Agendor: a ingestão grava canal='agendor' e joga a origem real
+  -- ("Origem no Agendor: Google") só dentro da observação. Enquanto ela não
+  -- gravar isso em coluna própria, é daqui que o canal sai.
+  WHEN observacao LIKE '%Origem no Agendor: %'
+    THEN btrim(substring(observacao from 'Origem no Agendor: ([^·]+)'))
+  WHEN NULLIF(btrim(utm_source), '') IS NOT NULL THEN btrim(utm_source)
+  ELSE NULL
+END`;
+
+/**
+ * Funde variações do mesmo canal ('Google' e 'Google ', 'Facebook' e
+ * 'facebook') mantendo o rótulo da variante que mais faturou — sem isso o mesmo
+ * canal aparece duas vezes no gráfico e nenhuma fatia bate com a realidade.
+ */
 function normalizar(rows: LinhaBruta[], semRotulo: string): FaturamentoPorOrigem[] {
-  return rows.map((r) => {
+  const porChave = new Map<string, FaturamentoPorOrigem>();
+  for (const r of rows) {
     const cru = r.label?.trim();
+    const label = cru ? (ROTULO[cru.toLowerCase()] ?? cru) : semRotulo;
+    const chave = label.toLowerCase();
     const receita = Number(r.receita) || 0;
     const vendas = Number(r.vendas) || 0;
-    return {
-      label: cru ? (ROTULO[cru.toLowerCase()] ?? cru) : semRotulo,
-      receita,
-      vendas,
-      ticket: vendas > 0 ? receita / vendas : null,
-    };
-  });
+    const atual = porChave.get(chave);
+    if (atual) {
+      // Rótulo de quem mais faturou vence, para não trocar 'Google' por 'Google '.
+      if (receita > atual.receita) atual.label = label;
+      atual.receita += receita;
+      atual.vendas += vendas;
+    } else {
+      porChave.set(chave, { label, receita, vendas, ticket: null });
+    }
+  }
+  return [...porChave.values()]
+    .map((o) => ({ ...o, ticket: o.vendas > 0 ? o.receita / o.vendas : null }))
+    .sort((a, b) => b.receita - a.receita);
 }
 
 export async function GET(req: NextRequest) {
@@ -78,14 +120,14 @@ export async function GET(req: NextRequest) {
 
     const [origens, campanhas, totalRows] = await Promise.all([
       pool.query<LinhaBruta>(
-        `SELECT origin AS label,
+        `SELECT ${CANAL_SQL} AS label,
                 COALESCE(SUM(${VALOR}), 0)::float AS receita,
                 COUNT(*) FILTER (WHERE ${VALOR} > 0 OR fechou = TRUE)::int AS vendas
            ${BASE}
-          GROUP BY origin
+          GROUP BY 1
          HAVING COALESCE(SUM(${VALOR}), 0) > 0
           ORDER BY receita DESC
-          LIMIT 10`,
+          LIMIT 12`,
         params,
       ),
       pool.query<LinhaBruta>(
@@ -101,12 +143,7 @@ export async function GET(req: NextRequest) {
       ),
       pool.query<{ total: number; sem_atribuicao: number }>(
         `SELECT COALESCE(SUM(${VALOR}), 0)::float AS total,
-                COALESCE(SUM(${VALOR}) FILTER (WHERE
-                  NULLIF(campaign_name, '') IS NULL
-                  AND NULLIF(utm_campaign, '') IS NULL
-                  AND NULLIF(ctwa_clid, '') IS NULL
-                  AND NULLIF(gclid, '') IS NULL
-                ), 0)::float AS sem_atribuicao
+                COALESCE(SUM(${VALOR}) FILTER (WHERE ${CANAL_SQL} IS NULL), 0)::float AS sem_atribuicao
            ${BASE}`,
         params,
       ),
@@ -116,18 +153,13 @@ export async function GET(req: NextRequest) {
       ok: true,
       // "Sem origem" entra na lista de propósito: esconder faz a soma das
       // barras não fechar com o total e parecer que falta dinheiro.
-      origens: normalizar(origens.rows, 'Sem origem identificada'),
+      origens: normalizar(origens.rows, 'Canal não informado'),
       campanhas: normalizar(campanhas.rows, 'Sem campanha'),
       total: Number(totalRows.rows[0]?.total ?? 0),
       /**
-       * ⚠️ Receita SEM nenhum identificador de campanha (nem campaign_name, nem
-       * utm, nem ctwa_clid, nem gclid).
-       *
-       * Levantamento em produção: hoje isso é quase TODO o faturamento — o valor
-       * chega pelo Agendor/planilha, que não carrega a campanha, enquanto quem
-       * carrega atribuição são os leads de WhatsApp/anúncio, que raramente têm
-       * valor gravado. Sem expor isso, o painel mostraria "100% Orgânico" e o
-       * gestor leria como conclusão de marketing em vez de lacuna de rastreio.
+       * ⚠️ Receita cujo CANAL não dá para saber — nem click id, nem `canal`
+       * preenchido, nem origem no Agendor, nem utm. É a fatia que o gestor
+       * precisa enxergar como lacuna de cadastro, não como "orgânico".
        */
       semAtribuicao: Number(totalRows.rows[0]?.sem_atribuicao ?? 0),
     });
