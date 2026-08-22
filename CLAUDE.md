@@ -26,6 +26,16 @@ Pedido do Matheus: dashboard própria para restaurante/delivery e, depois, um **
   - ⚠️ Ocultar um elemento deixa o BURACO no lugar (a compactação do RGL é vertical, não horizontal). É reposicionar na mão — comportamento do grid, não bug.
 - **⚠️ DEPLOY**: `main` **não** era "no ar". O `build-image.yml` só gerava artefato; publicar era manual (scp + `deploy-recv.sh`). Isso fez uma remoção de tela parecer não feita **duas vezes**. Agora o workflow publica por SSH e faz smoke test externo — segredos `VPS_HOST`/`VPS_USER`/`VPS_SSH_KEY`, e o passo é pulado se não existirem.
 
+## Dashboard — período personalizado: série um dia atrás + seletor minúsculo (2026-08-16)
+
+Print do Matheus: "esse calendário da dashboard para período personalizado não funciona direito, deixa maior".
+
+- **⚠️ BUG REAL de fuso**: `periodToDateRange('custom')` fazia `new Date('2026-08-01')`, que é **meia-noite UTC**, enquanto TODOS os presets montam meia-noite LOCAL (`new Date(y,m,d)`) — e `dateKeysInRange` normaliza com `setHours(0,0,0,0)`, que é local. No Brasil (UTC-3) isso jogava a série do período personalizado **um dia para trás**: pedir 01/08–05/08 devolvia 31/07–04/08 (reproduzido em node com `TZ=America/Sao_Paulo`). Corrigido com `parseLocalDate` (lê 'YYYY-MM-DD' como data local); presets intocados.
+- **Datas invertidas** viravam intervalo vazio e zeravam a tela sem explicar — agora `periodToDateRange` troca as pontas, e os inputs ganharam `min`/`max` cruzados (+ `max` = hoje), então o próprio navegador impede a combinação inválida.
+- **⚠️ Entrar em "personalizado" com os campos VAZIOS travava a tela**: `customReady` só libera com as duas datas completas (10 chars), então nada acontecia e ficava a impressão de que o botão não funcionava — e os dados na tela eram os do período ANTERIOR, sem aviso. O chip agora pré-preenche com os últimos 30 dias.
+- **Tamanho e visibilidade**: campos de 36px → **44px de altura × 172px**, `text-sm`, com rótulos DE/ATÉ e resumo legível ao lado (`01/08/2026 a 22/08/2026 · 22 dias`). **`[color-scheme:dark]` não é enfeite**: sem ele o Chrome desenha o seletor nativo em tema claro e o ícone do calendário some no fundo escuro — parte grande do "não funciona". O chip mostra "Personalizado" quando ativo, em vez de só o ícone.
+- ✅ Verificado: correção de fuso reproduzida e conferida em node (`TZ=America/Sao_Paulo`, 5 dias pedidos = 5 dias certos, invertido vira faixa válida); harness no browser — campos 44×172, ícone branco visível, pré-preenchimento nos últimos 30 dias, `min`/`max` cruzados, resumo recalculando ao vivo (22 dias após mudar o "De"); tsc + `next build` limpos.
+
 ## Instagram no dashboard — Seguidores ganhou evolução vs período anterior (2026-08-16)
 
 Print do Matheus: no painel de Instagram do dashboard, **Seguidores era o único card sem variação** (13.622 seco, enquanto Alcance/Cliques/Engajamento mostravam −53,6%, −50,4%…). Não era bug de UI: `InstagramPageData.followers` vem de **`followers_count`**, que **ignora `since`/`until`** — a chamada da janela atual e a da anterior devolviam o MESMO número, então qualquer comparação daria 0%. O comentário no código já dizia isso e escondia a variação de propósito.

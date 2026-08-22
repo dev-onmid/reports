@@ -226,6 +226,28 @@ function readPlanningFromStorage(clientId: string): PlanningConfig {
   }
 }
 
+/**
+ * Lê 'YYYY-MM-DD' como data LOCAL.
+ *
+ * ⚠️ `new Date('2026-08-01')` é meia-noite UTC, enquanto os presets montam
+ * meia-noite LOCAL — e `dateKeysInRange` normaliza com `setHours(0,0,0,0)`,
+ * que é local. No Brasil (UTC-3) a mistura jogava a série do período
+ * personalizado UM DIA PARA TRÁS: pedir 01/08–05/08 devolvia 31/07–04/08.
+ */
+function parseLocalDate(iso?: string): Date | null {
+  if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return null;
+  const [y, m, d] = iso.split('-').map(Number);
+  const dt = new Date(y, m - 1, d);
+  return Number.isNaN(dt.getTime()) ? null : dt;
+}
+
+/** Formata uma Date para o `value` de um <input type="date">, sem passar por UTC. */
+function toInputDate(d: Date): string {
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${mm}-${dd}`;
+}
+
 function periodToDateRange(
   period: Period,
   customFrom?: string,
@@ -242,7 +264,13 @@ function periodToDateRange(
     case 'last_30d': { const f = new Date(today); f.setDate(f.getDate() - 29); return { from: f, to: today }; }
     case 'this_month': return { from: new Date(now.getFullYear(), now.getMonth(), 1), to: new Date(now.getFullYear(), now.getMonth() + 1, 0) };
     case 'last_month': return { from: new Date(now.getFullYear(), now.getMonth() - 1, 1), to: new Date(now.getFullYear(), now.getMonth(), 0) };
-    case 'custom': return { from: customFrom ? new Date(customFrom) : today, to: customTo ? new Date(customTo) : today };
+    case 'custom': {
+      const f = parseLocalDate(customFrom) ?? today;
+      const t = parseLocalDate(customTo) ?? today;
+      // Datas invertidas viram um intervalo válido em vez de um período vazio
+      // que faria a tela inteira zerar sem explicar por quê.
+      return f <= t ? { from: f, to: t } : { from: t, to: f };
+    }
     default: return { from: today, to: today };
   }
 }
@@ -6127,13 +6155,25 @@ export default function GeneralDashboard() {
               <button
                 key={p.value}
                 type="button"
-                onClick={() => setPeriod(p.value)}
+                onClick={() => {
+                  // Entrar em "personalizado" com os campos vazios travava a tela:
+                  // `customReady` só libera com as duas datas completas, então
+                  // nada acontecia e parecia quebrado. Começa nos últimos 30 dias.
+                  if (p.value === 'custom' && !(customDateFrom && customDateTo)) {
+                    const inicial = periodToDateRange('last_30d');
+                    setCustomDateFrom(toInputDate(inicial.from));
+                    setCustomDateTo(toInputDate(inicial.to));
+                  }
+                  setPeriod(p.value);
+                }}
                 className={cn(
-                  'rounded-md px-3 py-2 text-xs font-bold transition-colors',
+                  'flex items-center gap-1.5 rounded-md px-3 py-2 text-xs font-bold transition-colors',
                   period === p.value ? 'bg-[#6cff2f] text-black' : 'text-[#a7b0b6] hover:text-white'
                 )}
               >
-                {p.value === 'custom' ? <Calendar className="inline h-3.5 w-3.5" /> : p.label}
+                {p.value === 'custom' ? (
+                  <><Calendar className="h-4 w-4" />{period === 'custom' ? 'Personalizado' : ''}</>
+                ) : p.label}
               </button>
             ))}
           </div>
@@ -6163,13 +6203,50 @@ export default function GeneralDashboard() {
             </AvatarFallback>
           </Avatar>
         </div>
-        {period === 'custom' && (
-          <div className="mt-3 flex items-center gap-3">
-            <input type="date" value={customDateFrom} onChange={e => setCustomDateFrom(e.target.value)} className="h-9 rounded-lg border border-white/[0.08] bg-[#0b1216] px-3 text-xs text-[#f4f7f8] outline-none focus:border-[#6cff2f]" />
-            <span className="text-xs text-[#9aa4aa]">até</span>
-            <input type="date" value={customDateTo} onChange={e => setCustomDateTo(e.target.value)} className="h-9 rounded-lg border border-white/[0.08] bg-[#0b1216] px-3 text-xs text-[#f4f7f8] outline-none focus:border-[#6cff2f]" />
-          </div>
-        )}
+        {period === 'custom' && (() => {
+          const hoje = toInputDate(new Date());
+          const faixa = periodToDateRange('custom', customDateFrom, customDateTo);
+          const completo = customDateFrom.length === 10 && customDateTo.length === 10;
+          const dias = Math.round((faixa.to.getTime() - faixa.from.getTime()) / 86400000) + 1;
+          const br = (d: Date) => d.toLocaleDateString('pt-BR');
+          // ⚠️ `[color-scheme:dark]` não é enfeite: sem ele o Chrome desenha o
+          // seletor nativo em tema claro e o ícone do calendário fica quase
+          // invisível sobre o fundo escuro — a razão de "não funciona direito".
+          const campo = 'h-11 w-[172px] rounded-[10px] border border-white/[0.10] bg-[#0b1216] px-3 text-sm font-semibold text-[#f4f7f8] outline-none [color-scheme:dark] focus:border-[#6cff2f]';
+          return (
+            <div className="mt-3 flex flex-wrap items-end gap-3">
+              <label className="flex flex-col gap-1">
+                <span className="text-[10px] font-black uppercase tracking-[0.08em] text-[#9aa4aa]">De</span>
+                <input
+                  type="date"
+                  value={customDateFrom}
+                  max={customDateTo || hoje}
+                  onChange={e => setCustomDateFrom(e.target.value)}
+                  className={campo}
+                />
+              </label>
+              <span className="pb-3 text-xs text-[#9aa4aa]">até</span>
+              <label className="flex flex-col gap-1">
+                <span className="text-[10px] font-black uppercase tracking-[0.08em] text-[#9aa4aa]">Até</span>
+                <input
+                  type="date"
+                  value={customDateTo}
+                  min={customDateFrom || undefined}
+                  max={hoje}
+                  onChange={e => setCustomDateTo(e.target.value)}
+                  className={campo}
+                />
+              </label>
+              {/* Resumo legível: sem ele não dá para saber se a janela pedida é
+                  a que a tela está mostrando. */}
+              <span className="pb-3 text-xs text-[#9aa4aa]">
+                {completo
+                  ? `${br(faixa.from)} a ${br(faixa.to)} · ${dias} ${dias === 1 ? 'dia' : 'dias'}`
+                  : 'preencha as duas datas para atualizar'}
+              </span>
+            </div>
+          );
+        })()}
       </div>
 
       <div className="px-5 py-6 xl:px-8">
