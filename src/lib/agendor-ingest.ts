@@ -188,6 +188,13 @@ export async function ingerirNegocioAgendor(
       existentes.find(e => e.external_id === externalId) ??
       (telefone
         ? existentes.find(e => chaveTelefone(e.numero) === telefone || chaveTelefone(e.phone) === telefone)
+        : undefined) ??
+      // Número INTERNACIONAL (+351, +44, +1…): chaveTelefone é BR e devolve
+      // null, o casamento por chave não acontece e o 2º negócio da mesma
+      // pessoa estourava a unique (client_id, numero) de produção — visto ao
+      // vivo na Londrigifts. Igualdade de texto cru cobre esse caso.
+      (pessoa?.telefoneBruto
+        ? existentes.find(e => e.numero === pessoa.telefoneBruto)
         : undefined) ?? null;
 
     // sinais monotônicos: etapa dá agendou/compareceu; ganho dá fechou.
