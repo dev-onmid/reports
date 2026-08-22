@@ -64,6 +64,7 @@ import { cn, formatCurrencyBRL } from '@/lib/utils';
 import { ClientAvatar } from '@/components/client-avatar';
 import type { TopCreative } from '@/app/api/meta/top-creatives/route';
 import type { PageInsightsResult, InstagramPageData } from '@/app/api/meta/page-insights/route';
+import type { FaturamentoPorOrigem } from '@/app/api/crm/faturamento-origem/route';
 import type { CampaignPerformance } from '@/app/api/campaigns/route';
 import type { GoogleKeyword } from '@/app/api/google/keywords/route';
 import type { AudienceBreakdowns, AudienceResponse, AudienceSlice } from '@/app/api/audience/route';
@@ -4469,6 +4470,78 @@ function QuickMetricCard({ title, value, change, icon: Icon, inverseChange, esti
   );
 }
 
+/**
+ * Faturamento por origem — responde "de onde vem o DINHEIRO", que é diferente
+ * de "de onde vem o lead" (o Resumo por Canal ao lado). Um canal pode trazer
+ * muito lead barato e pouca venda, e é aqui que isso aparece.
+ *
+ * ⚠️ A soma das barras fecha com o card de Faturamento porque a rota usa a
+ * mesma régua de data (mês do GANHO) e o mesmo campo de valor.
+ */
+function RevenueBySourceCard({ origens, total, semAtribuicao }: {
+  origens: FaturamentoPorOrigem[]; total: number; semAtribuicao: number;
+}) {
+  const maior = origens[0]?.receita ?? 0;
+  const fatiaSemAtribuicao = total > 0 ? (semAtribuicao / total) * 100 : 0;
+  return (
+    <PremiumPanel className="p-4">
+      <div className="mb-3 flex items-baseline justify-between gap-2">
+        <h3 className="flex items-center gap-2 text-sm font-black uppercase tracking-[0.07em] text-[#f4f7f8]">
+          <DollarSign className="h-4 w-4 text-[#6cff2f]" /> Faturamento por Origem
+        </h3>
+        {total > 0 && (
+          <span className="text-xs font-semibold text-[#9aa4aa]">{premiumValue(total, 'currency')} no período</span>
+        )}
+      </div>
+      {origens.length === 0 ? (
+        <p className="py-6 text-center text-xs text-[#9aa4aa]">
+          Nenhuma venda com valor no período. O faturamento aparece aqui quando o negócio é
+          marcado como ganho no CRM.
+        </p>
+      ) : (
+        <div className="space-y-2.5">
+          {origens.map((o) => {
+            const fatia = total > 0 ? (o.receita / total) * 100 : 0;
+            return (
+              <div key={o.label}>
+                <div className="flex items-baseline justify-between gap-3">
+                  <span className="min-w-0 flex-1 truncate text-xs font-semibold text-[#dce4e8]">{o.label}</span>
+                  <span className="shrink-0 font-heading text-base leading-none text-[#f4f7f8]">
+                    {premiumValue(o.receita, 'currency')}
+                  </span>
+                </div>
+                {/* Barra proporcional ao MAIOR, não ao total: com uma origem
+                    dominante as demais viram fios invisíveis e o ranking some. */}
+                <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-white/[0.06]">
+                  <div
+                    className="h-full rounded-full bg-[#6cff2f]"
+                    style={{ width: `${maior > 0 ? Math.max((o.receita / maior) * 100, 2) : 0}%` }}
+                  />
+                </div>
+                <p className="mt-1 text-[10px] text-[#9aa4aa]">
+                  {fatia.toFixed(1).replace('.', ',')}% do total · {o.vendas} {o.vendas === 1 ? 'venda' : 'vendas'}
+                  {o.ticket !== null && ` · ticket ${premiumValue(o.ticket, 'currency')}`}
+                </p>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {/* ⚠️ Sem este aviso o painel mostraria "100% Orgânico" para quase todo
+          cliente e seria lido como conclusão de marketing. A verdade é outra: o
+          valor entra pelo Agendor/planilha, que não carrega campanha, enquanto
+          quem carrega atribuição (CTWA/gclid) raramente tem valor gravado. */}
+      {origens.length > 0 && fatiaSemAtribuicao >= 50 && (
+        <p className="mt-3 border-t border-white/[0.07] pt-2.5 text-[10px] leading-snug text-amber-300/80">
+          {fatiaSemAtribuicao >= 99.5 ? 'Todo o faturamento' : `${fatiaSemAtribuicao.toFixed(0)}% do faturamento`} do
+          período está <strong>sem campanha vinculada</strong>. O valor chega pelo CRM (Agendor/planilha), que não
+          carrega a origem — só o negócio criado a partir de um lead de anúncio (CTWA ou gclid) chega aqui com canal.
+        </p>
+      )}
+    </PremiumPanel>
+  );
+}
+
 function MiniPlatformMetric({ label, value, sub, subRuim, icon: Icon, logo, change, inverseChange }: {
   label: string;
   value: string;
@@ -5037,6 +5110,9 @@ export default function GeneralDashboard() {
   const [metaPanelsLayout, setMetaPanelsLayout] = useState<RglLayout[]>(DEFAULT_META_PANELS_LAYOUT);
   const [googlePanelsLayout, setGooglePanelsLayout] = useState<RglLayout[]>(DEFAULT_GOOGLE_PANELS_LAYOUT);
   const [socialKpiLayout, setSocialKpiLayout] = useState<RglLayout[]>(DEFAULT_SOCIAL_KPI_LAYOUT);
+  const [faturamentoOrigem, setFaturamentoOrigem] = useState<{
+    origens: FaturamentoPorOrigem[]; total: number; semAtribuicao: number;
+  }>({ origens: [], total: 0, semAtribuicao: 0 });
   const [pageInsights, setPageInsights] = useState<PageInsightsResult[]>([]);
   const [prevPageInsights, setPrevPageInsights] = useState<PageInsightsResult[]>([]);
   const [pageInsightsLoading, setPageInsightsLoading] = useState(false);
@@ -5469,6 +5545,24 @@ export default function GeneralDashboard() {
       .catch(() => setAiInsights([]));
   }, [selectedIds, period, customDateFrom, customDateTo, customReady]);
 
+  // Faturamento por origem — de onde vem o dinheiro, não de onde vem o lead.
+  useEffect(() => {
+    let cancelado = false;
+    const vazio = { origens: [], total: 0, semAtribuicao: 0 };
+    if (selectedIds.size === 0 || !customReady) { setFaturamentoOrigem(vazio); return () => { cancelado = true; }; }
+    const { from, to } = periodToDateRange(period, customDateFrom, customDateTo);
+    const params = new URLSearchParams({
+      clientIds: [...selectedIds].join(','),
+      from: toInputDate(from),
+      to: toInputDate(to),
+    });
+    fetch(`/api/crm/faturamento-origem?${params}`)
+      .then(r => (r.ok ? r.json() as Promise<typeof vazio> : vazio))
+      .then(j => { if (!cancelado) setFaturamentoOrigem({ origens: j.origens ?? [], total: j.total ?? 0, semAtribuicao: j.semAtribuicao ?? 0 }); })
+      .catch(() => { if (!cancelado) setFaturamentoOrigem(vazio); });
+    return () => { cancelado = true; };
+  }, [selectedIds, period, customDateFrom, customDateTo, customReady]);
+
   // Fetch page/profile insights (Facebook Page + Instagram organic)
   useEffect(() => {
     let cancelled = false;
@@ -5759,6 +5853,7 @@ export default function GeneralDashboard() {
   const prevTotalSpend = prevMetaSpend + prevGoogleCost;
   const prevCpl = prevTotalLeads > 0 ? prevTotalSpend / prevTotalLeads : 0;
   const prevRoi = prevTotalSpend > 0 ? prevRevenue / prevTotalSpend : 0;
+  const prevTicket = prevCrmSales > 0 ? prevRevenue / prevCrmSales : 0;
   const prevMetaCtr = prevMetaImpressions > 0 ? (prevMetaClicks / prevMetaImpressions) * 100 : 0;
   const prevAvgCpl = prevMetaLeads > 0 ? prevMetaSpend / prevMetaLeads : 0;
   const prevGoogleCpc = prevGoogleClicks > 0 ? prevGoogleCost / prevGoogleClicks : 0;
@@ -5923,7 +6018,10 @@ export default function GeneralDashboard() {
   const quickMetrics = [
     { title: 'Investimento Total', value: premiumValue(totalSpend, 'currency'), change: pctChange(totalSpend, prevTotalSpend), icon: CreditCard },
     { title: 'CPL Médio', value: totalCostPerLead > 0 ? premiumValue(totalCostPerLead, 'currency') : '—', change: pctChange(totalCostPerLead, prevCpl), icon: Tag, inverseChange: true },
-    { title: 'Conversas', value: premiumValue(metaConversations || metaSiteLeads || 0), change: null, icon: MessageCircle },
+    // Ticket médio = faturamento ÷ VENDAS do CRM (não ÷ conversions, que cai em
+    // fallback de funil/Google e daria um ticket calculado sobre um denominador
+    // que não é o mesmo que gerou a receita). 0 vendas → "—", nunca R$ 0,00.
+    { title: 'Ticket Médio', value: avgCrmTicket > 0 ? premiumValue(avgCrmTicket, 'currency') : '—', change: prevTicket > 0 && avgCrmTicket > 0 ? pctChange(avgCrmTicket, prevTicket) : null, icon: Receipt },
     { title: 'Agendamentos', value: premiumValue(appointments), change: null, icon: Calendar },
     { title: 'ROI', value: roi > 0 ? premiumValue(roi, 'times') : '—', change: pctChange(roi, prevRoi), icon: TrendingUp },
     { title: 'Conversão Geral', value: conversionRate > 0 ? premiumValue(conversionRate, 'percent') : '—', change: previousConversionRate !== null ? pctChange(conversionRate, previousConversionRate) : null, icon: Target },
@@ -6445,6 +6543,15 @@ export default function GeneralDashboard() {
                 )}
                 <ChannelSummaryTable rows={channelRows} />
               </div>
+            )}
+
+            {/* ── Faturamento por origem ──
+                Fica ao lado do Resumo por Canal de propósito: aquele mostra o
+                CUSTO por canal (investimento, leads, CPL) e este mostra o
+                RETORNO. Em food só aparece quando há venda com valor no CRM —
+                a receita de delivery já tem painel próprio na grade. */}
+            {(!modoFood || faturamentoOrigem.origens.length > 0) && (
+              <RevenueBySourceCard {...faturamentoOrigem} />
             )}
 
             {/* ── Instagram — logo abaixo do funil ──

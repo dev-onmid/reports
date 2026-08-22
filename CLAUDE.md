@@ -26,6 +26,19 @@ Pedido do Matheus: dashboard própria para restaurante/delivery e, depois, um **
   - ⚠️ Ocultar um elemento deixa o BURACO no lugar (a compactação do RGL é vertical, não horizontal). É reposicionar na mão — comportamento do grid, não bug.
 - **⚠️ DEPLOY**: `main` **não** era "no ar". O `build-image.yml` só gerava artefato; publicar era manual (scp + `deploy-recv.sh`). Isso fez uma remoção de tela parecer não feita **duas vezes**. Agora o workflow publica por SSH e faz smoke test externo — segredos `VPS_HOST`/`VPS_USER`/`VPS_SSH_KEY`, e o passo é pulado se não existirem.
 
+## Dashboard — Faturamento por Origem + Ticket médio no lugar de Conversas (2026-08-16)
+
+Pedido do Matheus: "Canais / Origens com Maior Faturamento" na dashboard, e trocar **Conversas** por **Ticket médio** na faixa de KPIs.
+
+- **Ticket médio = `revenue ÷ crmSales`**, não `÷ conversions`. `conversions` cai em fallback (`funilCrm.fechamentos || crmSales || googleConv`), e dividir a receita do CRM por um denominador que pode vir do Google daria um ticket sobre bases diferentes. `avgCrmTicket` já existia calculado e sem uso — agora tem dono. Sem venda → `—`, nunca R$ 0,00. Comparativo vs período anterior por `prevRevenue ÷ prevCrmSales`.
+- **`GET /api/crm/faturamento-origem?clientIds=&from=&to=`** (nova): agrupa por `origin` e por campanha. ⚠️ **A régua de data e a expressão de valor são cópia literal de `/api/clients/[id]/metrics`** (receita pelo mês do GANHO — `COALESCE(fechado_em, lead_date, data)` — e "data NULL fica dentro"). Divergir faria a soma das barras não fechar com o card de Faturamento **na mesma tela**. `time_interno` também NÃO é filtrado, pelo mesmo motivo. ✅ Conferido em produção: Incorpast julho → metrics R$ 84.303,70/14 vendas e o breakdown soma exatamente R$ 84.303,70.
+- **⚠️⚠️ DESCOBERTA QUE MUDA A LEITURA DO PAINEL**: hoje, em produção, a receita quase não tem atribuição. Varredura de 120 dias: `origin` só assume **`organic` (R$ 3,3 mi, 23 clientes)**, `Agendor` (R$ 256 mil) e `Datalytics` (R$ 15 mil) — e **`campaign_name` é NULL em 100% do faturamento**. Motivo: o valor entra pelo Agendor/planilha, que não carrega campanha, enquanto quem carrega atribuição (CTWA/gclid) raramente tem `valor_rs` gravado. Um painel cru mostraria **"100% Orgânico"** para quase todo cliente e seria lido como conclusão de marketing em vez de lacuna de rastreio.
+- Por isso a rota devolve **`semAtribuicao`** (receita sem `campaign_name`/`utm_campaign`/`ctwa_clid`/`gclid`) e o painel exibe um aviso âmbar quando isso passa de 50% do total, explicando de onde vem o dinheiro e por que o canal não aparece. **Não remover esse aviso sem antes fechar o elo de atribuição** — ele é o que impede o número de mentir.
+- Barra proporcional ao MAIOR item, não ao total: com uma origem dominante as demais viram fios invisíveis e o ranking some. "Sem origem" entra na lista de propósito (esconder faria a soma não fechar).
+- Em food o painel só aparece quando há venda com valor no CRM — a receita de delivery já tem painel próprio na grade.
+- ✅ Verificado: tsc + `next build` limpos (rota registrada); SQL conferido contra produção (soma bate com o card); harness no browser com 3 cenários (caso real da Incorpast com o aviso, cenário com atribuição funcionando e ranking Meta/Google/Orgânico, e sem venda no período) e a faixa de KPIs com Ticket Médio no lugar de Conversas.
+- ⚠️ `react-hooks/set-state-in-effect` no efeito novo: é o MESMO padrão dos outros 18 efeitos de fetch do arquivo (resetar o estado no guard evita mostrar dado do cliente anterior). Consistência escolhida sobre a regra.
+
 ## Dashboard — período personalizado: série um dia atrás + seletor minúsculo (2026-08-16)
 
 Print do Matheus: "esse calendário da dashboard para período personalizado não funciona direito, deixa maior".
