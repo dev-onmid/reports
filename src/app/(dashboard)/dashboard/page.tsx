@@ -6328,11 +6328,14 @@ export default function GeneralDashboard() {
               </div>
             )}
 
-            {/* ── Instagram — logo abaixo do funil ── */}
+            {/* ── Instagram — logo abaixo do funil ──
+                ⚠️ Vale para food TAMBÉM. Este painel já sumiu no modo food uma
+                vez, sob o argumento de que o Instagram aparecia no capítulo
+                Tráfego da DeliveryView — mas aquele capítulo foi REMOVIDO a
+                pedido do Matheus, e a justificativa morreu junto: food ficou sem
+                Instagram nenhum. É o mesmo painel do modo lead-gen, no mesmo
+                lugar. */}
             {(() => {
-              // Em food, o Instagram já aparece dentro da DeliveryView (capítulo
-              // Tráfego) — este painel duplicaria. Some no modo food.
-              if (modoFood && dadosFood) return null;
               const allIg = pageInsights.filter(p => p.instagram).map(p => p.instagram!);
               const prevIg = prevPageInsights.filter(p => p.instagram).map(p => p.instagram!);
               if (allIg.length === 0 && !pageInsightsLoading) return null;
