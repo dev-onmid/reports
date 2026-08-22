@@ -1581,7 +1581,8 @@ export default function ConfiguracoesPage() {
                       <p className="text-sm font-bold">Análise de IA do CRM</p>
                       <p className="text-xs text-muted-foreground mt-0.5 max-w-xl">
                         Interruptor geral da IA que analisa as conversas e move os leads de etapa/temperatura no Kanban.
-                        Desligado, nenhum cliente é analisado. Para desligar só um cliente, use a coluna &quot;IA&quot; na tabela abaixo.
+                        A IA vem <span className="font-bold">desligada por padrão</span> em todos os clientes — ligue por cliente
+                        na coluna &quot;IA&quot; da tabela abaixo (todos os clientes ativos aparecem no mês atual).
                       </p>
                     </div>
                     <label className="flex items-center gap-2 cursor-pointer">
@@ -1665,12 +1666,12 @@ export default function ConfiguracoesPage() {
                             <label className="flex items-center gap-1.5 cursor-pointer" title="Liga/desliga a análise de IA (mudança de etapa/temperatura) para este cliente">
                               <input
                                 type="checkbox"
-                                checked={row.ia_ativa !== false}
+                                checked={row.ia_ativa === true}
                                 onChange={(e) => void toggleCrmAiClient(row.client_id, e.target.checked)}
                                 className="h-4 w-4 rounded border-border accent-primary"
                               />
-                              <span className={cn('text-[11px] font-semibold', row.ia_ativa === false ? 'text-red-400' : 'text-muted-foreground')}>
-                                {row.ia_ativa === false ? 'Off' : 'On'}
+                              <span className={cn('text-[11px] font-semibold', row.ia_ativa === true ? 'text-muted-foreground' : 'text-red-400')}>
+                                {row.ia_ativa === true ? 'On' : 'Off'}
                               </span>
                             </label>
                           </td>

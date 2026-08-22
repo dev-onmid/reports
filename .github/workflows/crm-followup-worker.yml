@@ -6,12 +6,13 @@ name: CRM Follow-up Worker
 # "Processar agora" na tela — o worker existia mas nada o chamava (auditoria
 # 2026-07-16). Mesmo padrão dos demais crons via GitHub Actions.
 
+# ⚠️ AGENDAMENTO DESLIGADO (2026-08-22). O GitHub Actions throttleia os crons
+# deste repo pra ~1 execução a cada 1,5-3h — follow-up de "10 minutos" saía
+# horas depois. A chamada confiável agora é a linha # onmid-cron na crontab da
+# VPS (*/5, janela 07h-20h BRT preservada). Para religar, descomente o schedule.
 on:
-  schedule:
-    # A cada 5 min, das 10h às 23h UTC (07h às 20h BRT), todos os dias.
-    # Fora dessa janela nada envia (follow-up de madrugada é má prática);
-    # o que vencer à noite sai na primeira rodada das 07h BRT.
-    - cron: '*/5 10-23 * * *'
+  # schedule:
+  #   - cron: '*/5 10-23 * * *'
   workflow_dispatch: {}   # permite rodar manualmente pelo botão "Run workflow"
 
 jobs:

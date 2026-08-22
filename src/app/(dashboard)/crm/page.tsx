@@ -19,7 +19,7 @@ import {
 import { ChatView } from './chat-view';
 import { PortalLinkModal } from './portal-link-modal';
 import { FollowupTab, useActiveFollowups, FollowupBadge } from './followup-tab';
-import { DisparosTab } from './disparos-tab';
+import Link from 'next/link';
 import { CaptureLinksTab } from '../clientes/[id]/capture-links-tab';
 import { CreativeLibrary } from '@/components/creative-library';
 import { useClients } from '@/lib/client-store';
@@ -2980,11 +2980,12 @@ export default function CrmPage({ lockedClientId, embedded = false }: CrmPagePro
               crmView === 'attendance' ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground')}>
             <BarChart3 className="h-3.5 w-3.5" /> Atendimento
           </button>
-          <button type="button" onClick={() => setCrmView('disparos')}
-            className={cn('flex items-center gap-1.5 h-8 px-3 rounded-md text-xs font-semibold transition-colors',
-              crmView === 'disparos' ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground')}>
-            <Send className="h-3.5 w-3.5" /> Disparos
-          </button>
+          {/* ⚠️ Aba "Disparos" do CRM ESCONDIDA (auditoria 2026-08-22): o motor
+              dela (crm_disparo_campaigns) não tem cron nenhum E não tem o pacote
+              anti-ban (piso 90s, teto diário) — campanha criada aqui ficava
+              "Agendada 0%" pra sempre, e ligar o motor como está arriscaria ban.
+              Disparos de verdade: tela Disparos. Fase 2 da Fidelidade nasce do
+              motor bom (/api/disparos/worker), aí esta aba volta. */}
           <button type="button" onClick={() => setCrmView('ads')}
             className={cn('flex items-center gap-1.5 h-8 px-3 rounded-md text-xs font-semibold transition-colors',
               crmView === 'ads' ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground')}>
@@ -3175,8 +3176,14 @@ export default function CrmPage({ lockedClientId, embedded = false }: CrmPagePro
       )}
 
       {clientId && crmView === 'disparos' && (
-        <div className="flex-1 min-h-0 overflow-y-auto">
-          <DisparosTab clientId={clientId} />
+        <div className="flex-1 min-h-0 overflow-y-auto p-6">
+          <div className="mx-auto max-w-lg rounded-xl border border-amber-400/25 bg-amber-400/5 p-5 text-sm text-amber-200">
+            <p className="font-bold">Os disparos saíram do CRM.</p>
+            <p className="mt-1 text-xs text-amber-200/80">
+              Campanhas criadas aqui não eram processadas. Use a tela <Link href="/disparos" className="font-bold underline">Disparos</Link>,
+              que tem o motor completo (intervalo seguro, teto diário e validação de números).
+            </p>
+          </div>
         </div>
       )}
 

@@ -6,10 +6,15 @@ import { sendInstagramDM } from '@/lib/instagram-dm';
 import { injectTracking } from '@/lib/email-tracking';
 import { getFreshMetaToken } from '@/lib/meta-token';
 
-// Vercel Cron: runs every minute
+// Chamado pela crontab da VPS a cada 1 min (linha # onmid-cron).
+// ⚠️ Este worker ficou ÓRFÃO por meses: nenhum cron o chamava e ainda exigia
+// só CRON_SECRET (write-only na Vercel) — automações ficavam "Ativas" sem
+// nunca enviar nada. Aceita a família de secrets, padrão dos demais crons.
 export async function GET(request: NextRequest) {
   const secret = request.nextUrl.searchParams.get('secret');
-  if (secret !== process.env.CRON_SECRET) {
+  const validos = [process.env.CRON_SECRET, process.env.REPORTS_CRON_SECRET, process.env.CRM_CRON_SECRET]
+    .filter(Boolean);
+  if (!secret || !validos.includes(secret)) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
