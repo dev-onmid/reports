@@ -3,7 +3,7 @@ import { makeServerPool } from '@/lib/server-db';
 import { parseIsoDateRange } from '@/lib/optimizer-period-range';
 
 /**
- * Faturamento por ORIGEM (canal) e por CAMPANHA — de onde vem o dinheiro.
+ * Faturamento e LEADS por CANAL — de onde vem o dinheiro e de onde vem o lead.
  *
  * ⚠️ A régua de data é a MESMA de `/api/clients/[id]/metrics`: receita conta
  * pelo mês do GANHO (`COALESCE(fechado_em, lead_date, data)`), e lead sem data
@@ -14,6 +14,12 @@ import { parseIsoDateRange } from '@/lib/optimizer-period-range';
  * ⚠️ E o valor só existe no negócio GANHO: a ingestão do Agendor grava
  * `valor_rs` apenas no ganho (caso Incorpast), então somar a coluna não mistura
  * pipeline aberto com faturamento.
+ *
+ * ⚠️ São DUAS réguas de data, e é de propósito (mesma decisão da rota de
+ * métricas, caso Incorpast): FATURAMENTO conta pelo mês do GANHO e LEAD conta
+ * pelo mês em que foi CRIADO. Um negócio criado em junho e fechado em julho é
+ * lead de junho e faturamento de julho. Usar uma régua só faria um dos dois
+ * cards não bater com o total ao lado.
  *
  * `time_interno` NÃO é filtrado, também por consistência com a rota de métricas.
  */
@@ -28,6 +34,8 @@ export type FaturamentoPorOrigem = {
   /** Receita ÷ vendas. `null` sem venda — nunca R$ 0,00. */
   ticket: number | null;
 };
+
+export type LeadsPorCanal = { label: string; leads: number };
 
 /** Rótulos legíveis para os canais que chegam em vocabulário de máquina. */
 const ROTULO: Record<string, string> = {
@@ -98,6 +106,25 @@ function normalizar(rows: LinhaBruta[], semRotulo: string): FaturamentoPorOrigem
     .sort((a, b) => b.receita - a.receita);
 }
 
+/** Mesma fusão de variantes do `normalizar`, contando leads em vez de receita. */
+function normalizarLeads(rows: Array<{ label: string | null; leads: number }>): LeadsPorCanal[] {
+  const porChave = new Map<string, LeadsPorCanal>();
+  for (const r of rows) {
+    const cru = r.label?.trim();
+    const label = cru ? (ROTULO[cru.toLowerCase()] ?? cru) : 'Canal não informado';
+    const chave = label.toLowerCase();
+    const leads = Number(r.leads) || 0;
+    const atual = porChave.get(chave);
+    if (atual) {
+      if (leads > atual.leads) atual.label = label;
+      atual.leads += leads;
+    } else {
+      porChave.set(chave, { label, leads });
+    }
+  }
+  return [...porChave.values()].filter((l) => l.leads > 0).sort((a, b) => b.leads - a.leads);
+}
+
 export async function GET(req: NextRequest) {
   const clientIds = (req.nextUrl.searchParams.get('clientIds') ?? '')
     .split(',').map((s) => s.trim()).filter(Boolean);
@@ -105,7 +132,7 @@ export async function GET(req: NextRequest) {
     req.nextUrl.searchParams.get('from'), req.nextUrl.searchParams.get('to'),
   );
   if (clientIds.length === 0 || !range) {
-    return Response.json({ ok: false, origens: [], campanhas: [], total: 0, semAtribuicao: 0 });
+    return Response.json({ ok: false, origens: [], campanhas: [], total: 0, semAtribuicao: 0, leads: [], leadsTotal: 0, leadsSemCanal: 0 });
   }
 
   const pool = makeServerPool();
@@ -118,7 +145,13 @@ export async function GET(req: NextRequest) {
                   WHERE client_id = ANY($1) AND ${JANELA}`;
     const params = [clientIds, range.from, range.to];
 
-    const [origens, campanhas, totalRows] = await Promise.all([
+    // ⚠️ Régua PRÓPRIA dos leads: data de criação, não a do ganho.
+    const JANELA_LEAD = `(COALESCE(lead_date, data) IS NULL
+                          OR COALESCE(lead_date, data) BETWEEN $2 AND $3)`;
+    const BASE_LEAD = `FROM public.crm_leads
+                       WHERE client_id = ANY($1) AND ${JANELA_LEAD}`;
+
+    const [origens, campanhas, totalRows, leadsRows, leadsTotalRows] = await Promise.all([
       pool.query<LinhaBruta>(
         `SELECT ${CANAL_SQL} AS label,
                 COALESCE(SUM(${VALOR}), 0)::float AS receita,
@@ -127,7 +160,7 @@ export async function GET(req: NextRequest) {
           GROUP BY 1
          HAVING COALESCE(SUM(${VALOR}), 0) > 0
           ORDER BY receita DESC
-          LIMIT 12`,
+          LIMIT 40`,
         params,
       ),
       pool.query<LinhaBruta>(
@@ -147,6 +180,20 @@ export async function GET(req: NextRequest) {
            ${BASE}`,
         params,
       ),
+      pool.query<{ label: string | null; leads: number }>(
+        `SELECT ${CANAL_SQL} AS label, COUNT(*)::int AS leads
+           ${BASE_LEAD}
+          GROUP BY 1
+          ORDER BY leads DESC
+          LIMIT 40`,
+        params,
+      ),
+      pool.query<{ total: number; sem_canal: number }>(
+        `SELECT COUNT(*)::int AS total,
+                COUNT(*) FILTER (WHERE ${CANAL_SQL} IS NULL)::int AS sem_canal
+           ${BASE_LEAD}`,
+        params,
+      ),
     ]);
 
     return Response.json({
@@ -162,11 +209,15 @@ export async function GET(req: NextRequest) {
        * precisa enxergar como lacuna de cadastro, não como "orgânico".
        */
       semAtribuicao: Number(totalRows.rows[0]?.sem_atribuicao ?? 0),
+      // Leads pela régua de CRIAÇÃO — ver a nota das duas réguas no topo.
+      leads: normalizarLeads(leadsRows.rows),
+      leadsTotal: Number(leadsTotalRows.rows[0]?.total ?? 0),
+      leadsSemCanal: Number(leadsTotalRows.rows[0]?.sem_canal ?? 0),
     });
   } catch (err) {
     // Degrada para vazio: o painel some, o resto do dashboard continua de pé.
     console.error('[faturamento-origem]', err);
-    return Response.json({ ok: false, origens: [], campanhas: [], total: 0, semAtribuicao: 0 });
+    return Response.json({ ok: false, origens: [], campanhas: [], total: 0, semAtribuicao: 0, leads: [], leadsTotal: 0, leadsSemCanal: 0 });
   } finally {
     await pool.end();
   }

@@ -91,7 +91,7 @@ export type ClientStatus = 'Ativo' | 'Alerta' | 'Arquivado' | 'Inativo';
 
 // 'food' = restaurante/delivery. Troca o perfil do dashboard (KPIs, rótulos e
 // blocos) via src/lib/dashboard-segmento.ts — não é uma tela nova.
-export type DashboardType = 'leads' | 'branding' | 'conversao' | 'food';
+export type DashboardType = 'leads' | 'branding' | 'conversao' | 'food' | 'clinicas';
 
 export type Client = {
   id: string;

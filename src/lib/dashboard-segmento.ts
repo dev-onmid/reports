@@ -12,11 +12,13 @@
  * que JÁ EXISTIA. Não criar campo novo.
  */
 
-export type SegmentoDashboard = 'leads' | 'food';
+export type SegmentoDashboard = 'leads' | 'food' | 'clinicas';
 
 /** Valores legados de `dashboard_type` que continuam caindo no perfil lead-gen. */
 export function normalizarSegmento(v: unknown): SegmentoDashboard {
-  return v === 'food' || v === 'delivery' ? 'food' : 'leads';
+  if (v === 'food' || v === 'delivery') return 'food';
+  if (v === 'clinicas' || v === 'clinica') return 'clinicas';
+  return 'leads';
 }
 
 // ─────────────────────────────────────────────────────────── Blocos da tela
@@ -184,9 +186,34 @@ const PERFIL_FOOD: PerfilSegmento = {
   ],
 };
 
+/**
+ * Clínicas — nasce como CÓPIA do lead-gen (pedido do Matheus), com identidade
+ * própria para poder divergir sem mexer no perfil de todo mundo.
+ *
+ * ⚠️ É por isso que ele existe mesmo idêntico: clínica e lead-gen genérico
+ * compartilham o esqueleto hoje, mas o modelo editável é POR SEGMENTO — separar
+ * agora significa que arrumar a tela da clínica não vai reordenar o painel dos
+ * outros clientes depois.
+ *
+ * Divergências naturais quando chegarem: comparecimento vira etapa de primeira
+ * classe (hoje só existe no funil), e "Leads" tende a virar "Pacientes".
+ */
+const PERFIL_CLINICAS: PerfilSegmento = {
+  segmento: 'clinicas',
+  rotuloSegmento: 'Clínicas',
+  // ⚠️ Cópia das LISTAS, não `...PERFIL_LEADS`. Spread é raso: os arrays
+  // continuariam sendo os mesmos do lead-gen, e a primeira customização de
+  // clínicas mudaria o painel de todo cliente de lead-gen junto — em silêncio,
+  // que é justamente o oposto do motivo de o perfil existir separado.
+  kpisTopo: [...PERFIL_LEADS.kpisTopo],
+  metasSugeridas: [...PERFIL_LEADS.metasSugeridas],
+  blocos: PERFIL_LEADS.blocos.map((b) => ({ ...b })),
+};
+
 const PERFIS: Record<SegmentoDashboard, PerfilSegmento> = {
   leads: PERFIL_LEADS,
   food: PERFIL_FOOD,
+  clinicas: PERFIL_CLINICAS,
 };
 
 export function perfilDoSegmento(segmento: SegmentoDashboard): PerfilSegmento {
@@ -200,7 +227,12 @@ export function perfilDoSegmento(segmento: SegmentoDashboard): PerfilSegmento {
  * selecionados são food.
  */
 export function perfilDaSelecao(segmentos: SegmentoDashboard[]): PerfilSegmento {
-  if (segmentos.length > 0 && segmentos.every((s) => s === 'food')) return PERFIL_FOOD;
+  if (segmentos.length === 0) return PERFIL_LEADS;
+  // Só assume um perfil quando TODOS os selecionados são dele. Seleção mista
+  // cai no lead-gen: somar recorrência de pedidos com funil de leads produz um
+  // agregado que não descreve nenhum dos dois.
+  if (segmentos.every((s) => s === 'food')) return PERFIL_FOOD;
+  if (segmentos.every((s) => s === 'clinicas')) return PERFIL_CLINICAS;
   return PERFIL_LEADS;
 }
 

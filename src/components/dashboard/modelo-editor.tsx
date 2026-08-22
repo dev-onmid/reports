@@ -27,7 +27,7 @@ import {
   caminhoDoElemento, elementosVisiveis, mesclarModelo, modeloPadrao,
   type ElementoNoModelo, type ModeloDashboard,
 } from '@/lib/dashboard-modelo';
-import type { SegmentoDashboard } from '@/lib/dashboard-segmento';
+import { perfilDoSegmento, type SegmentoDashboard } from '@/lib/dashboard-segmento';
 import { useIsMobile } from '@/lib/use-is-mobile';
 import { cn } from '@/lib/utils';
 
@@ -204,7 +204,7 @@ export function ModeloEditor({ modelo, render, editando, onSair, onSalvou }: Pro
         <div className="sticky top-16 z-[80] mb-3 flex flex-wrap items-center gap-2 rounded-[var(--radius)] border border-primary/40 bg-primary/10 px-3 py-2">
           <GripVertical className="h-4 w-4 text-primary" />
           <span className="text-[12px] font-semibold text-foreground">
-            Editando o modelo de <strong>{rascunho.segmento === 'food' ? 'Food / Delivery' : rascunho.segmento}</strong>
+            Editando o modelo de <strong>{perfilDoSegmento(rascunho.segmento).rotuloSegmento}</strong>
           </span>
           <span className="text-[11px] text-muted-foreground">
             · passe o mouse sobre qualquer métrica para mover, editar ou ocultar · vale para TODOS os clientes deste segmento

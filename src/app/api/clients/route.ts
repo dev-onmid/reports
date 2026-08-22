@@ -129,7 +129,7 @@ export async function PATCH(req: NextRequest) {
     if (body.gestor_id      !== undefined) { sets.push(`gestor_id = $${idx++}`);      vals.push(body.gestor_id); }
     if (body.category_id    !== undefined) { sets.push(`category_id = $${idx++}`);    vals.push(body.category_id); }
     if (body.dashboard_type !== undefined) {
-      if (!['leads', 'branding', 'conversao', 'food'].includes(body.dashboard_type)) {
+      if (!['leads', 'branding', 'conversao', 'food', 'clinicas'].includes(body.dashboard_type)) {
         return Response.json({ error: 'dashboard_type inválido' }, { status: 400 });
       }
       sets.push(`dashboard_type = $${idx++}`); vals.push(body.dashboard_type);

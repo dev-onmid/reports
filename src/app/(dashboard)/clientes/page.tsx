@@ -18,6 +18,25 @@ import { normalizeClientName } from '@/lib/client-name';
 import { getAuthSession, verifyUserCredentials } from '@/lib/auth-store';
 import { useInvestmentPayments } from '@/lib/payment-store';
 import type { ClientStatus, DashboardType } from '@/lib/mock-data';
+
+/**
+ * Rótulo e cor do selo de tipo de dashboard.
+ *
+ * ⚠️ Antes era um encadeado de ternários com fallback em "Conversão", então
+ * QUALQUER tipo novo aparecia como "Conversão" na lista — o cliente de food já
+ * vinha rotulado errado. Mapa explícito para o próximo segmento não repetir.
+ */
+const DASH_TYPE_ROTULO: Record<string, string> = {
+  leads: 'Leads', branding: 'Branding', conversao: 'Conversão',
+  food: 'Food', clinicas: 'Clínicas',
+};
+const DASH_TYPE_BADGE: Record<string, string> = {
+  leads: 'bg-violet-500/15 text-violet-400 hover:bg-violet-500/30',
+  branding: 'bg-blue-500/15 text-blue-400 hover:bg-blue-500/30',
+  conversao: 'bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/30',
+  food: 'bg-orange-500/15 text-orange-400 hover:bg-orange-500/30',
+  clinicas: 'bg-cyan-500/15 text-cyan-400 hover:bg-cyan-500/30',
+};
 import { LinkAccountsDialog } from '@/components/link-accounts-dialog';
 import { PlatformIconButton, ALL_PLATFORMS, type PlatformId } from '@/components/platform-icons';
 import { ClientAvatar } from '@/components/client-avatar';
@@ -638,6 +657,7 @@ export default function ClientesPage() {
                             <option value="branding">Branding</option>
                             <option value="conversao">Conversão</option>
                             <option value="food">Food / Delivery</option>
+                <option value="clinicas">Clínicas</option>
                           </select>
                         ) : (
                           <button
@@ -645,13 +665,11 @@ export default function ClientesPage() {
                             onClick={() => setInlineEdit({ id: cliente.id, field: 'dashtype' })}
                             className={cn(
                               'rounded px-1.5 py-0.5 text-[10px] font-bold uppercase transition-colors',
-                              cliente.dashboard_type === 'leads' ? 'bg-violet-500/15 text-violet-400 hover:bg-violet-500/30' :
-                              cliente.dashboard_type === 'branding' ? 'bg-blue-500/15 text-blue-400 hover:bg-blue-500/30' :
-                              'bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/30'
+                              DASH_TYPE_BADGE[cliente.dashboard_type ?? 'leads'] ?? DASH_TYPE_BADGE.conversao,
                             )}
                             title="Clique para alterar tipo de dashboard"
                           >
-                            {cliente.dashboard_type === 'leads' ? 'Leads' : cliente.dashboard_type === 'branding' ? 'Branding' : 'Conversão'}
+                            {DASH_TYPE_ROTULO[cliente.dashboard_type ?? 'leads'] ?? 'Conversão'}
                           </button>
                         )}
 
@@ -1074,6 +1092,7 @@ export default function ClientesPage() {
                 <option value="branding">Branding</option>
                 <option value="conversao">Conversão</option>
                 <option value="food">Food / Delivery</option>
+                <option value="clinicas">Clínicas</option>
               </select>
               <button
                 onClick={bulkSetDashType}

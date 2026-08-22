@@ -64,7 +64,7 @@ import { cn, formatCurrencyBRL } from '@/lib/utils';
 import { ClientAvatar } from '@/components/client-avatar';
 import type { TopCreative } from '@/app/api/meta/top-creatives/route';
 import type { PageInsightsResult, InstagramPageData } from '@/app/api/meta/page-insights/route';
-import type { FaturamentoPorOrigem } from '@/app/api/crm/faturamento-origem/route';
+import type { FaturamentoPorOrigem, LeadsPorCanal } from '@/app/api/crm/por-canal/route';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip } from 'recharts';
 import { progressoVisual } from '@/lib/progresso-cor';
 import type { CampaignPerformance } from '@/app/api/campaigns/route';
@@ -4518,17 +4518,27 @@ const CORES_CANAL = ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#00
 const CINZA_CANAL = '#6b7478';
 const MAX_FATIAS = 7;
 
+/** Não são canal: ficam em cinza e não consomem tom da paleta. */
+function canalNeutro(label: string): boolean {
+  return label.startsWith('Outros') || label === 'Canal não informado';
+}
+
 /**
  * Cor por NOME do canal, não por posição no ranking.
  *
  * Trocar o período reordena a lista; se a cor viesse do rank, "Indicação"
- * mudaria de cor a cada filtro e a leitura entre dois períodos ficaria
- * impossível. Colisão de hash é resolvida caindo no próximo tom livre.
+ * mudaria de cor a cada filtro e comparar dois períodos seria impossível.
+ *
+ * ⚠️ A atribuição percorre os rótulos em ordem ALFABÉTICA, não na ordem em que
+ * chegaram. O hash escolhe o tom preferido, mas colisão cai no próximo livre —
+ * e resolver isso na ordem do ranking fazia a cor depender do ranking de novo,
+ * pela porta dos fundos: nos dois donuts lado a lado o mesmo "Facebook" saía
+ * violeta num e salmão no outro.
  */
 function coresPorCanal(labels: string[]): Record<string, string> {
   const usados = new Set<number>();
   const out: Record<string, string> = {};
-  for (const label of labels) {
+  for (const label of [...labels].filter(l => !canalNeutro(l)).sort()) {
     let h = 0;
     for (let i = 0; i < label.length; i++) h = (h * 31 + label.charCodeAt(i)) >>> 0;
     let slot = h % CORES_CANAL.length;
@@ -4539,61 +4549,67 @@ function coresPorCanal(labels: string[]): Record<string, string> {
   return out;
 }
 
+type FatiaCanal = { label: string; valor: number; nota?: string };
+
 /**
- * Faturamento por canal — responde "de onde vem o DINHEIRO", que é diferente
- * de "de onde vem o lead" (o Resumo por Canal ao lado). Um canal pode trazer
- * muito lead barato e pouca venda, e é aqui que isso aparece.
- *
- * ⚠️ A soma das fatias fecha com o card de Faturamento porque a rota usa a
- * mesma régua de data (mês do GANHO) e o mesmo campo de valor.
+ * Donut de composição por canal. Serve tanto ao faturamento quanto aos leads:
+ * a diferença entre os dois é só o que se soma — a leitura, a paleta e o
+ * tratamento do "sem canal" são os mesmos, e duplicar o componente faria os
+ * dois divergirem na primeira mudança.
  */
-function RevenueBySourceCard({ origens, total, semAtribuicao }: {
-  origens: FaturamentoPorOrigem[]; total: number; semAtribuicao: number;
+function CanalDonutCard({ titulo, fatiasBrutas, total, semCanal, formato, aviso }: {
+  titulo: string;
+  fatiasBrutas: FatiaCanal[];
+  total: number;
+  semCanal: number;
+  formato: PremiumMetricFormat;
+  /** Texto do rodapé quando a fatia sem canal é grande. */
+  aviso: string;
 }) {
-  const fatiaSemAtribuicao = total > 0 ? (semAtribuicao / total) * 100 : 0;
+  const pctSemCanal = total > 0 ? (semCanal / total) * 100 : 0;
   // Acima de 8 canais o donut vira confete e nenhuma fatia é comparável: a
-  // cauda vira "Outros" (que continua somando no total, então nada some).
+  // cauda vira "Outros".
+  //
+  // ⚠️ E "Outros" ABSORVE a diferença para o total: o total vem de uma query
+  // própria, sem LIMIT, enquanto a lista de canais é limitada. Sem esta
+  // reconciliação a soma das fatias não fechava com o número do miolo — medido
+  // na Sorrifácil Londrina: 350 nas fatias contra 355 no total.
   const fatias = (() => {
-    if (origens.length <= CORES_CANAL.length) return origens;
-    const cabeca = origens.slice(0, MAX_FATIAS);
-    const cauda = origens.slice(MAX_FATIAS);
-    return [...cabeca, {
-      label: `Outros (${cauda.length})`,
-      receita: cauda.reduce((s, o) => s + o.receita, 0),
-      vendas: cauda.reduce((s, o) => s + o.vendas, 0),
-      ticket: null,
-    }];
+    const cabem = fatiasBrutas.length <= CORES_CANAL.length;
+    const cabeca = cabem ? fatiasBrutas : fatiasBrutas.slice(0, MAX_FATIAS);
+    const cauda = cabem ? [] : fatiasBrutas.slice(MAX_FATIAS);
+    const somaCabeca = cabeca.reduce((s, o) => s + o.valor, 0);
+    const resto = Math.max(0, total - somaCabeca);
+    if (resto <= 0) return cabeca;
+    const nomes = cauda.length > 0 ? ` (${cauda.length}+)` : '';
+    return [...cabeca, { label: `Outros${nomes}`, valor: resto }];
   })();
   const cores = coresPorCanal(fatias.map(f => f.label));
-  const corDe = (label: string) =>
-    label.startsWith('Outros') || label === 'Canal não informado' ? CINZA_CANAL : cores[label];
+  const corDe = (label: string) => (canalNeutro(label) ? CINZA_CANAL : cores[label]);
 
   return (
     <PremiumPanel className="p-4">
       <div className="mb-3 flex items-baseline justify-between gap-2">
         <h3 className="flex items-center gap-2 text-sm font-black uppercase tracking-[0.07em] text-[#f4f7f8]">
-          <DollarSign className="h-4 w-4 text-[#6cff2f]" /> Faturamento por Canal
+          <DollarSign className="h-4 w-4 text-[#6cff2f]" /> {titulo}
         </h3>
         {total > 0 && (
           <span className="text-xs font-semibold text-[#9aa4aa]">{fatias.length} {fatias.length === 1 ? 'canal' : 'canais'}</span>
         )}
       </div>
       {fatias.length === 0 ? (
-        <p className="py-6 text-center text-xs text-[#9aa4aa]">
-          Nenhuma venda com valor no período. O faturamento aparece aqui quando o negócio é
-          marcado como ganho no CRM.
-        </p>
+        <p className="py-6 text-center text-xs text-[#9aa4aa]">Sem dado no período.</p>
       ) : (
-        <div className="grid gap-5 md:grid-cols-[220px_1fr]">
-          <div className="relative mx-auto h-[220px] w-[220px]">
+        <div className="grid gap-4 md:grid-cols-[180px_1fr]">
+          <div className="relative mx-auto h-[180px] w-[180px]">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <Pie
                   data={fatias}
-                  dataKey="receita"
+                  dataKey="valor"
                   nameKey="label"
-                  innerRadius={62}
-                  outerRadius={100}
+                  innerRadius={50}
+                  outerRadius={82}
                   paddingAngle={0}
                   // Anel da própria superfície entre as fatias: sem ele, dois
                   // tons vizinhos encostam e a fronteira some.
@@ -4607,7 +4623,7 @@ function RevenueBySourceCard({ origens, total, semAtribuicao }: {
                   contentStyle={{ background: '#0b1216', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 10, fontSize: 12 }}
                   labelStyle={{ color: '#f4f7f8' }}
                   itemStyle={{ color: '#dce4e8' }}
-                  formatter={(v) => premiumValue(Number(v), 'currency')}
+                  formatter={(v) => premiumValue(Number(v), formato)}
                 />
               </PieChart>
             </ResponsiveContainer>
@@ -4615,37 +4631,33 @@ function RevenueBySourceCard({ origens, total, semAtribuicao }: {
                 de estar legível sem passar o mouse. */}
             <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
               <span className="text-[10px] font-black uppercase tracking-[0.08em] text-[#9aa4aa]">Total</span>
-              <span className="font-heading text-xl leading-tight text-[#f4f7f8]">{premiumValue(total, 'currency')}</span>
+              <span className="font-heading text-lg leading-tight text-[#f4f7f8]">{premiumValue(total, formato)}</span>
             </div>
           </div>
 
           {/* Lista com os valores exatos — o donut dá a proporção, ela dá o número. */}
           <div className="min-w-0 space-y-1.5">
-            {fatias.map((o) => {
-              const fatia = total > 0 ? (o.receita / total) * 100 : 0;
-              return (
-                <div key={o.label} className="flex items-baseline gap-2">
-                  <span className="mt-1 h-2.5 w-2.5 shrink-0 rounded-sm" style={{ backgroundColor: corDe(o.label) }} />
-                  <span className="min-w-0 flex-1 truncate text-xs font-semibold text-[#dce4e8]">{o.label}</span>
-                  <span className="shrink-0 text-[10px] text-[#9aa4aa]">
-                    {fatia.toFixed(1).replace('.', ',')}% · {o.vendas} {o.vendas === 1 ? 'venda' : 'vendas'}
-                    {o.ticket !== null && ` · ${premiumValue(o.ticket, 'currency')}`}
-                  </span>
-                  <span className="shrink-0 text-xs font-bold text-[#f4f7f8]">{premiumValue(o.receita, 'currency')}</span>
-                </div>
-              );
-            })}
+            {fatias.map((o) => (
+              <div key={o.label} className="flex items-baseline gap-2">
+                <span className="mt-1 h-2.5 w-2.5 shrink-0 rounded-sm" style={{ backgroundColor: corDe(o.label) }} />
+                <span className="min-w-0 flex-1 truncate text-xs font-semibold text-[#dce4e8]">{o.label}</span>
+                <span className="shrink-0 text-[10px] text-[#9aa4aa]">
+                  {(total > 0 ? (o.valor / total) * 100 : 0).toFixed(1).replace('.', ',')}%
+                  {o.nota ? ` · ${o.nota}` : ''}
+                </span>
+                <span className="shrink-0 text-xs font-bold text-[#f4f7f8]">{premiumValue(o.valor, formato)}</span>
+              </div>
+            ))}
           </div>
         </div>
       )}
       {/* ⚠️ Sem este aviso a fatia cinza seria lida como um canal chamado
-          "não informado". A verdade é que o CRM não registrou de onde veio a
-          venda — é lacuna de cadastro, não canal. */}
-      {fatias.length > 0 && fatiaSemAtribuicao >= 20 && (
+          "não informado". A verdade é que o CRM não registrou de onde veio —
+          é lacuna de cadastro, não canal. */}
+      {fatias.length > 0 && pctSemCanal >= 20 && (
         <p className="mt-3 border-t border-white/[0.07] pt-2.5 text-[10px] leading-snug text-amber-300/80">
-          {fatiaSemAtribuicao >= 99.5 ? 'Todo o faturamento' : `${fatiaSemAtribuicao.toFixed(0)}% do faturamento`} do
-          período está <strong>sem canal registrado</strong> no CRM. Preencher a origem no cadastro do negócio
-          (ou entrar por lead de anúncio, que já traz o canal) é o que move esse valor para uma fatia de verdade.
+          {pctSemCanal >= 99.5 ? 'Tudo' : `${pctSemCanal.toFixed(0)}%`} do período está{' '}
+          <strong>sem canal registrado</strong> no CRM. {aviso}
         </p>
       )}
     </PremiumPanel>
@@ -5220,9 +5232,10 @@ export default function GeneralDashboard() {
   const [metaPanelsLayout, setMetaPanelsLayout] = useState<RglLayout[]>(DEFAULT_META_PANELS_LAYOUT);
   const [googlePanelsLayout, setGooglePanelsLayout] = useState<RglLayout[]>(DEFAULT_GOOGLE_PANELS_LAYOUT);
   const [socialKpiLayout, setSocialKpiLayout] = useState<RglLayout[]>(DEFAULT_SOCIAL_KPI_LAYOUT);
-  const [faturamentoOrigem, setFaturamentoOrigem] = useState<{
+  const [porCanal, setPorCanal] = useState<{
     origens: FaturamentoPorOrigem[]; total: number; semAtribuicao: number;
-  }>({ origens: [], total: 0, semAtribuicao: 0 });
+    leads: LeadsPorCanal[]; leadsTotal: number; leadsSemCanal: number;
+  }>({ origens: [], total: 0, semAtribuicao: 0, leads: [], leadsTotal: 0, leadsSemCanal: 0 });
   const [pageInsights, setPageInsights] = useState<PageInsightsResult[]>([]);
   const [prevPageInsights, setPrevPageInsights] = useState<PageInsightsResult[]>([]);
   const [pageInsightsLoading, setPageInsightsLoading] = useState(false);
@@ -5655,21 +5668,27 @@ export default function GeneralDashboard() {
       .catch(() => setAiInsights([]));
   }, [selectedIds, period, customDateFrom, customDateTo, customReady]);
 
-  // Faturamento por origem — de onde vem o dinheiro, não de onde vem o lead.
+  // Faturamento e leads por canal — de onde vem o dinheiro e de onde vem o lead.
   useEffect(() => {
     let cancelado = false;
-    const vazio = { origens: [], total: 0, semAtribuicao: 0 };
-    if (selectedIds.size === 0 || !customReady) { setFaturamentoOrigem(vazio); return () => { cancelado = true; }; }
+    const vazio = { origens: [], total: 0, semAtribuicao: 0, leads: [], leadsTotal: 0, leadsSemCanal: 0 };
+    if (selectedIds.size === 0 || !customReady) { setPorCanal(vazio); return () => { cancelado = true; }; }
     const { from, to } = periodToDateRange(period, customDateFrom, customDateTo);
     const params = new URLSearchParams({
       clientIds: [...selectedIds].join(','),
       from: toInputDate(from),
       to: toInputDate(to),
     });
-    fetch(`/api/crm/faturamento-origem?${params}`)
+    fetch(`/api/crm/por-canal?${params}`)
       .then(r => (r.ok ? r.json() as Promise<typeof vazio> : vazio))
-      .then(j => { if (!cancelado) setFaturamentoOrigem({ origens: j.origens ?? [], total: j.total ?? 0, semAtribuicao: j.semAtribuicao ?? 0 }); })
-      .catch(() => { if (!cancelado) setFaturamentoOrigem(vazio); });
+      .then(j => {
+        if (cancelado) return;
+        setPorCanal({
+          origens: j.origens ?? [], total: j.total ?? 0, semAtribuicao: j.semAtribuicao ?? 0,
+          leads: j.leads ?? [], leadsTotal: j.leadsTotal ?? 0, leadsSemCanal: j.leadsSemCanal ?? 0,
+        });
+      })
+      .catch(() => { if (!cancelado) setPorCanal(vazio); });
     return () => { cancelado = true; };
   }, [selectedIds, period, customDateFrom, customDateTo, customReady]);
 
@@ -6660,8 +6679,30 @@ export default function GeneralDashboard() {
                 CUSTO por canal (investimento, leads, CPL) e este mostra o
                 RETORNO. Em food só aparece quando há venda com valor no CRM —
                 a receita de delivery já tem painel próprio na grade. */}
-            {(!modoFood || faturamentoOrigem.origens.length > 0) && (
-              <RevenueBySourceCard {...faturamentoOrigem} />
+            {(!modoFood || porCanal.origens.length > 0 || porCanal.leads.length > 0) && (
+              <div className="grid gap-4 xl:grid-cols-2">
+                <CanalDonutCard
+                  titulo="Faturamento por Canal"
+                  fatiasBrutas={porCanal.origens.map(o => ({
+                    label: o.label,
+                    valor: o.receita,
+                    nota: `${o.vendas} ${o.vendas === 1 ? 'venda' : 'vendas'}`
+                      + (o.ticket !== null ? ` · ${premiumValue(o.ticket, 'currency')}` : ''),
+                  }))}
+                  total={porCanal.total}
+                  semCanal={porCanal.semAtribuicao}
+                  formato="currency"
+                  aviso="Preencher a origem no cadastro do negócio (ou entrar por lead de anúncio, que já traz o canal) é o que move esse valor para uma fatia de verdade."
+                />
+                <CanalDonutCard
+                  titulo="Leads por Canal"
+                  fatiasBrutas={porCanal.leads.map(l => ({ label: l.label, valor: l.leads }))}
+                  total={porCanal.leadsTotal}
+                  semCanal={porCanal.leadsSemCanal}
+                  formato="number"
+                  aviso="São os leads do CRM contados pela data de criação — número diferente do card de Leads acima, que conta resultado de anúncio."
+                />
+              </div>
             )}
 
             {/* ── Instagram — logo abaixo do funil ──

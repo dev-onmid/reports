@@ -26,6 +26,22 @@ Pedido do Matheus: dashboard própria para restaurante/delivery e, depois, um **
   - ⚠️ Ocultar um elemento deixa o BURACO no lugar (a compactação do RGL é vertical, não horizontal). É reposicionar na mão — comportamento do grid, não bug.
 - **⚠️ DEPLOY**: `main` **não** era "no ar". O `build-image.yml` só gerava artefato; publicar era manual (scp + `deploy-recv.sh`). Isso fez uma remoção de tela parecer não feita **duas vezes**. Agora o workflow publica por SSH e faz smoke test externo — segredos `VPS_HOST`/`VPS_USER`/`VPS_SSH_KEY`, e o passo é pulado se não existirem.
 
+## Dashboard — Leads por Canal ao lado do Faturamento + segmento Clínicas (2026-08-16)
+
+Dois pedidos do Matheus na mesma rodada: um donut de **Leads por canal** ao lado do de Faturamento, e **criar o segmento "Clínicas"** copiando o de leads.
+
+- **Rota renomeada** `/api/crm/faturamento-origem` → **`/api/crm/por-canal`**: agora devolve receita E leads, o nome antigo mentia duas vezes (não é "origem", e não é só faturamento).
+- **⚠️ DUAS RÉGUAS DE DATA na mesma rota, de propósito** (mesma decisão do caso Incorpast): faturamento conta pelo mês do **GANHO** (`COALESCE(fechado_em, lead_date, data)`), lead conta pelo mês da **CRIAÇÃO** (`COALESCE(lead_date, data)`). Negócio criado em junho e fechado em julho é lead de junho e faturamento de julho. Régua única faria um dos dois cards não bater com o total ao lado. ✅ Medido: Sorrifácil Londrina julho → 355 leads pela régua de criação, e o mesmo recorte pela régua de ganho dá outro número.
+- **⚠️ "Outros" ABSORVE a diferença até o total.** O total vem de query própria sem `LIMIT`, a lista de canais é limitada — sem reconciliar, a soma das fatias não fechava com o número do miolo (medido: 350 nas fatias contra 355 no total). O componente calcula o resto e o joga em "Outros"; a rota subiu de `LIMIT 12` para 40.
+- **⚠️ Cor do canal deixou de depender do RANKING pela porta dos fundos**: o hash escolhe o tom, mas colisão cai no próximo livre — e resolver isso na ordem de chegada fazia o mesmo "Facebook" sair violeta num donut e salmão no outro (visto lado a lado no harness). A atribuição agora percorre os rótulos em ordem ALFABÉTICA, e "Outros"/"Canal não informado" não consomem tom. ⚠️ Resta uma diferença legítima: conjuntos de canais diferentes entre os dois donuts podem resolver uma colisão de formas diferentes — inevitável com 8 tons.
+- **`CanalDonutCard` é UM componente para os dois** (recebe `formato: 'currency' | 'number'`). Duplicar faria os dois divergirem na primeira mudança.
+- **Segmento `clinicas`**: `SegmentoDashboard` ganhou o valor, `PERFIL_CLINICAS` nasce como cópia do lead-gen com rótulo próprio ("Clínicas"), e `perfilDaSelecao` só assume o perfil quando TODOS os selecionados são dele (mista continua caindo em lead-gen).
+  - **⚠️ Cópia das LISTAS, não `...PERFIL_LEADS`** — spread é raso e os arrays continuariam compartilhados: a primeira customização de clínicas mudaria o painel de todo cliente de lead-gen, em silêncio. **Assert pegou isso** antes de subir.
+  - **⚠️ Exposto nos 4 seletores** (`clientes/novo`, detalhe, lista e ajuste em massa) + validação da rota `/api/clients`. É a lição do modo food, que subiu uma vez sem opção em tela nenhuma e pareceu não existir.
+  - **Bug pré-existente corrigido de passagem**: o selo de tipo na lista de clientes era um encadeado de ternários com fallback em "Conversão" — cliente **food aparecia rotulado como "Conversão"**. Virou mapa explícito (`DASH_TYPE_ROTULO`/`DASH_TYPE_BADGE`), então o próximo segmento não repete.
+- ✅ Verificado: **41 asserts** novos (`scratchpad/test-segmento.mjs`) + 497 + 384; tsc + `next build` limpos (rota `/api/crm/por-canal` registrada); SQL de leads conferido em produção (Whatsapp 132, Indicação 60, Facebook 29, TV 29, Google 17, Instagram 16); browser com os dois donuts lado a lado, incluindo "Outros" fechando com o total e o caso de fatia grande sem canal.
+- ⚠️ O donut de leads conta **leads do CRM**, número diferente do card de Leads do topo, que conta resultado de anúncio. O rodapé do card diz isso.
+
 ## Dashboard — barra de meta muda de cor por faixa (2026-08-16)
 
 Pedido do Matheus: 0–30% vermelho, 31–50% amarelo, 51–80% azul, 81–100% verde, acima de 100% verde com brilho pulsante ("estourou a meta com força") — "**mas tem que ser um degradê de cores na hora de trocar**".
