@@ -66,6 +66,7 @@ import type { TopCreative } from '@/app/api/meta/top-creatives/route';
 import type { PageInsightsResult, InstagramPageData } from '@/app/api/meta/page-insights/route';
 import type { FaturamentoPorOrigem } from '@/app/api/crm/faturamento-origem/route';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip } from 'recharts';
+import { progressoVisual } from '@/lib/progresso-cor';
 import type { CampaignPerformance } from '@/app/api/campaigns/route';
 import type { GoogleKeyword } from '@/app/api/google/keywords/route';
 import type { AudienceBreakdowns, AudienceResponse, AudienceSlice } from '@/app/api/audience/route';
@@ -4348,6 +4349,11 @@ function GoalProgressCard({
   // largura da barra — clampar o rótulo travava "100,00%" pra quem fez 250%.
   const rawProgress = base > 0 ? Math.max(0, (value / base) * 100) : 0;
   const progress = Math.min(100, rawProgress);
+  // Cor por faixa: vermelho → amarelo → azul → verde, com degradê na troca.
+  const visual = progressoVisual(rawProgress);
+  // O rótulo fica centrado: só está por cima da barra quando ela passa da
+  // metade. Antes disso está sobre o fundo escuro e precisa de texto claro.
+  const escuro = progress >= 52 && visual.textoEscuro;
   const iconSize = estilo.tamanhoIcone ?? 40;
   return (
     <PremiumPanel className={cn('relative overflow-hidden p-5', className)}>
@@ -4376,16 +4382,34 @@ function GoalProgressCard({
           <div className="mt-5">
             <div className="relative h-7 overflow-hidden rounded-md border border-white/10 bg-[#081014]">
               <div
-                className="absolute inset-y-0 left-0 rounded-md transition-all"
+                className={cn('absolute inset-y-0 left-0 rounded-md', visual.estourou && 'meta-estourada')}
                 style={{
                   width: `${progress}%`,
-                  backgroundColor: '#6cff2f',
+                  backgroundColor: visual.cor,
                   backgroundImage: 'repeating-linear-gradient(45deg,rgba(255,255,255,0.12) 0 12px,transparent 12px 24px)',
-                  boxShadow: '0 0 16px rgba(108,255,47,0.55)',
+                  // Glow da PRÓPRIA cor da barra — fixo em verde, o vermelho
+                  // ganhava um halo verde e a faixa deixava de comunicar risco.
+                  ...(visual.estourou ? {} : { boxShadow: `0 0 16px ${visual.cor}8c` }),
+                  // ⚠️ É daqui que vem o "degradê na hora de trocar": a cor é
+                  // ANIMADA entre uma faixa e outra, em vez de saltar. A rampa
+                  // por percentual sozinha não bastaria — amarelo e azul são
+                  // quase opostos e não têm meio-termo honesto.
+                  transition: 'width 600ms ease, background-color 700ms ease, box-shadow 700ms ease',
                 }}
               />
               <div className="absolute inset-0 flex items-center justify-center">
-                <span className="text-sm font-black text-black drop-shadow-sm">{rawProgress > 0 ? premiumValue(rawProgress, 'percent') : '—'}</span>
+                {/* Cor do rótulo decidida pela luminância da barra: preto sobre
+                    o azul ou o vermelho é ilegível, e com progresso baixo o
+                    rótulo nem está por cima da barra. */}
+                <span
+                  className={cn('text-sm font-black', escuro ? 'text-black' : 'text-[#f4f7f8]')}
+                  // Contorno na cor oposta: no meio da barra o rótulo fica em
+                  // cima da parte preenchida E da vazia ao mesmo tempo, então
+                  // uma cor só sempre some numa das duas metades.
+                  style={{ textShadow: escuro ? '0 1px 2px rgba(255,255,255,0.45)' : '0 1px 3px rgba(0,0,0,0.9)' }}
+                >
+                  {rawProgress > 0 ? premiumValue(rawProgress, 'percent') : '—'}
+                </span>
               </div>
             </div>
             <div className="mt-2 flex justify-between text-xs text-[#a7b0b6]">

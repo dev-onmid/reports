@@ -217,6 +217,32 @@
   animation: accent-flash 0.4s ease-out forwards;
 }
 
+/* ── Meta estourada — barra de progresso acima de 100% ────────────────────── */
+/* Pulso de brilho para "estourou a meta com força" (pedido do Matheus). O
+   brilho pulsa; a COR não, para a barra continuar sendo lida como verde. */
+@keyframes meta-estourada {
+  0%, 100% {
+    box-shadow: 0 0 14px 0 rgba(108, 245, 47, 0.45), inset 0 0 0 1px rgba(255, 255, 255, 0.18);
+    filter: brightness(1);
+  }
+  50% {
+    box-shadow: 0 0 30px 6px rgba(108, 245, 47, 0.85), inset 0 0 0 1px rgba(255, 255, 255, 0.4);
+    filter: brightness(1.18);
+  }
+}
+
+.meta-estourada {
+  animation: meta-estourada 1.4s ease-in-out infinite;
+}
+
+/* Quem pediu menos movimento não recebe o pulso — o brilho forte fica fixo. */
+@media (prefers-reduced-motion: reduce) {
+  .meta-estourada {
+    animation: none;
+    box-shadow: 0 0 26px 4px rgba(108, 245, 47, 0.7);
+  }
+}
+
 /* ── Corner square — NVIDIA-inspired decorative motif ────────────────────── */
 .corner-square::before {
   content: '';

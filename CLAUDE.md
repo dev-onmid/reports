@@ -26,6 +26,19 @@ Pedido do Matheus: dashboard própria para restaurante/delivery e, depois, um **
   - ⚠️ Ocultar um elemento deixa o BURACO no lugar (a compactação do RGL é vertical, não horizontal). É reposicionar na mão — comportamento do grid, não bug.
 - **⚠️ DEPLOY**: `main` **não** era "no ar". O `build-image.yml` só gerava artefato; publicar era manual (scp + `deploy-recv.sh`). Isso fez uma remoção de tela parecer não feita **duas vezes**. Agora o workflow publica por SSH e faz smoke test externo — segredos `VPS_HOST`/`VPS_USER`/`VPS_SSH_KEY`, e o passo é pulado se não existirem.
 
+## Dashboard — barra de meta muda de cor por faixa (2026-08-16)
+
+Pedido do Matheus: 0–30% vermelho, 31–50% amarelo, 51–80% azul, 81–100% verde, acima de 100% verde com brilho pulsante ("estourou a meta com força") — "**mas tem que ser um degradê de cores na hora de trocar**".
+
+- **`src/lib/progresso-cor.ts` (pura, client-safe, 384 asserts)**: `progressoVisual(pct)` → `{cor, estourou, textoEscuro}`. Conversão sRGB⇄OKLab escrita à mão (`misturarOklab`) — sem dependência nova.
+- **⚠️ "0 a 30 vermelho" e "degradê na troca" se contradizem na fronteira.** Degradê centrado no 30 deixaria a barra LARANJA justo aos 30%, quebrando a faixa especificada. Solução: o degradê acontece **depois** do limite (30→36 vermelho→amarelo), então cada faixa vale inteira e a troca continua suave.
+- **⚠️⚠️ Amarelo→azul NÃO tem degradê — e a decisão veio de OLHAR a barra renderizada**: aos 53% ela saía **cinza (#9c9c9c)**, com cara de desativada. Amarelo e azul são quase opostos e nenhuma cor do meio é honesta: linha reta cai no cinza, girar o matiz pelo caminho curto passa pelo **verde** (a cor de meta batida — a 53% seria mentira) e pelo caminho longo passa pelo **vermelho** (a faixa de risco). Essa troca é direta; a suavidade vem da **transição de CSS** (`background-color 700ms`), que atravessa a mudança em menos de um segundo. Vermelho→amarelo (laranja) e azul→verde (verde-água) mantêm o degradê porque têm meio-termo natural. Assert registra a exceção — se alguém reintroduzir o degradê no 50, o teste cai.
+- **Brilho de estouro**: classe `.meta-estourada` (keyframes em `globals.css`) pulsa `box-shadow` + `brightness`. **A COR não pulsa** — só o brilho, para a barra continuar sendo lida como verde. Respeita `prefers-reduced-motion` (brilho forte fixo, sem animação).
+- **Glow normal usa a cor da PRÓPRIA barra** (`0 0 16px ${cor}8c`): estava fixo em verde, o que dava halo verde numa barra vermelha e anulava o aviso de risco.
+- **Rótulo legível nas duas metades**: cor decidida pela luminância da barra (preto sobre azul/vermelho é ilegível) e só quando o preenchimento passa do centro; `textShadow` na cor oposta cobre o caso do rótulo ficar metade sobre a barra, metade sobre o vazio.
+- ✅ Verificado: 384 asserts; tsc + `next build` limpos; **browser** com a rampa completa 0–110% e 15 percentuais isolados — nenhum ponto lavado, 33% laranja, 53% azul limpo, 84% verde-água, 179% e 221% com a classe de pulso aplicada (e só elas).
+- ⚠️ Achado de brinde NÃO corrigido: no print do Matheus o "Realizado" de LEADS aparece como **376,998** — número fracionário. Leads tem de ser inteiro; a soma vem de `metricsByClient[].crm.leads`/Meta e alguém está entregando fração.
+
 ## Dashboard — Faturamento por Canal (donut) + Ticket médio no lugar de Conversas (2026-08-16)
 
 Pedido do Matheus: "Canais / Origens com Maior Faturamento" na dashboard, e trocar **Conversas** por **Ticket médio** na faixa de KPIs.
