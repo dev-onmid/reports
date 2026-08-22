@@ -4,7 +4,8 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import {
   Copy, Check, Trash2, Plus, RefreshCw, Eye, EyeOff,
   Settings2, MessageCircle, ShoppingCart, X, TrendingUp, Wifi, WifiOff, QrCode,
-  HelpCircle, Zap, AlertCircle, Globe, BarChart3, Search, Webhook,
+  HelpCircle, Zap, AlertCircle, Globe, BarChart3, Search,
+  Database, Building2, Store, Flame,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ConversaoTile, GuideStepModal } from './conversao-guias';
@@ -555,10 +556,10 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
         {([
           { id: 'whatsapp'  as const, label: 'WhatsApp',   icon: Wifi },
           { id: 'conversoes' as const, label: 'Conversões', icon: Zap },
-          { id: 'datalytics' as const, label: 'Datalytics', icon: Webhook },
-          { id: 'agendor' as const, label: 'Agendor', icon: Webhook },
-          { id: 'delivery' as const, label: 'Delivery', icon: Webhook },
-          { id: 'heatmap' as const, label: 'Mapa de Calor', icon: Webhook },
+          { id: 'datalytics' as const, label: 'Datalytics', icon: Database },
+          { id: 'agendor' as const, label: 'Agendor', icon: Building2 },
+          { id: 'delivery' as const, label: 'Delivery', icon: Store },
+          { id: 'heatmap' as const, label: 'Mapa de Calor', icon: Flame },
           { id: 'log'       as const, label: 'Log',         icon: BarChart3 },
         ]).map(({ id, label, icon: Icon }) => (
           <button key={id} onClick={() => setActiveTab(id)} className={cn(

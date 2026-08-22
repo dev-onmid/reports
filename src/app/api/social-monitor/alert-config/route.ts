@@ -47,13 +47,22 @@ export async function POST(req: NextRequest) {
   } | null;
   if (!body) return Response.json({ error: 'Body inválido' }, { status: 400 });
 
+  const ativo = body.ativo === true;
+  const zapiClientId = body.zapiClientId?.trim() || null;
+  const groupId = body.groupId?.trim() || null;
+  // Aviso ativo sem instância/grupo salvava "ligado" e devolvia ok — o cron nunca
+  // teria destino e o silêncio pareceria sucesso.
+  if (ativo && (!zapiClientId || !groupId)) {
+    return Response.json({ error: 'Escolha a instância e o grupo antes de ativar o aviso.' }, { status: 400 });
+  }
+
   const pool = makeServerPool();
   try {
     const userId = req.headers.get('x-onmid-user-id') ?? undefined;
     await saveSocialAlertConfig(pool, {
-      ativo: body.ativo === true,
-      zapiClientId: body.zapiClientId?.trim() || null,
-      groupId: body.groupId?.trim() || null,
+      ativo,
+      zapiClientId,
+      groupId,
       groupName: body.groupName?.trim() || null,
     }, userId);
 

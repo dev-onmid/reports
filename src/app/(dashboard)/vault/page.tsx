@@ -1,11 +1,11 @@
 "use client";
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import Link from 'next/link';
 import { Input } from '@/components/ui/input';
 import { VaultCard, VaultEntry, VAULT_CATEGORIES, CATEGORY_COLORS } from '@/components/vault-tab';
 import {
-  Search, ShieldCheck, Loader2, Users, ChevronRight, Tag, X,
+  Search, ShieldCheck, Loader2, Users, ChevronRight, Tag, X, AlertTriangle, RefreshCw,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ClientAvatar } from '@/components/client-avatar';
@@ -21,14 +21,25 @@ export default function VaultPage() {
   const [loading, setLoading]       = useState(true);
   const [search, setSearch]         = useState('');
   const [catFilter, setCatFilter]   = useState('all');
+  // Falha de servidor NÃO pode virar "nenhuma credencial cadastrada" — são
+  // estados diferentes e a diferença muda o que a pessoa faz em seguida.
+  const [loadError, setLoadError]   = useState(false);
 
-  useEffect(() => {
+  const buscar = useCallback(() => {
     fetch('/api/vault')
-      .then(r => r.ok ? r.json() as Promise<VaultEntry[]> : [])
+      .then(async r => {
+        if (!r.ok) throw new Error('falha');
+        return await r.json() as VaultEntry[];
+      })
       .then(data => setAllEntries(Array.isArray(data) ? data : []))
-      .catch(() => setAllEntries([]))
+      .catch(() => { setAllEntries([]); setLoadError(true); })
       .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => { buscar(); }, [buscar]);
+
+  // Retry: vem de clique, então pode mexer no estado direto.
+  const recarregar = () => { setLoading(true); setLoadError(false); buscar(); };
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
@@ -142,13 +153,29 @@ export default function VaultPage() {
           <Loader2 className="w-6 h-6 animate-spin" />
           <span>Carregando credenciais...</span>
         </div>
+      ) : loadError ? (
+        <div className="flex flex-col items-center justify-center py-24 gap-5">
+          <AlertTriangle className="w-14 h-14 text-amber-400/40" />
+          <div className="text-center">
+            <p className="text-lg font-semibold text-muted-foreground">Não foi possível carregar o cofre</p>
+            <p className="text-sm text-muted-foreground/60 mt-1">
+              O servidor não respondeu. Isso não significa que não há credenciais cadastradas.
+            </p>
+          </div>
+          <button
+            onClick={recarregar}
+            className="flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm text-foreground hover:bg-muted transition-colors"
+          >
+            <RefreshCw className="w-4 h-4" /> Tentar de novo
+          </button>
+        </div>
       ) : allEntries.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-24 gap-5">
           <ShieldCheck className="w-14 h-14 text-muted-foreground/20" />
           <div className="text-center">
             <p className="text-lg font-semibold text-muted-foreground">Nenhuma credencial cadastrada</p>
             <p className="text-sm text-muted-foreground/60 mt-1">
-              Acesse um cliente e vá até a aba <strong>Links</strong> para adicionar.
+              Abra um cliente e use <strong>⚙️ Configurar → Links &amp; Senhas</strong> para adicionar.
             </p>
           </div>
           <Link

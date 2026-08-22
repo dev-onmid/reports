@@ -1,7 +1,6 @@
 "use client";
 
-import Link from 'next/link';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
@@ -10,23 +9,53 @@ import { Label } from '@/components/ui/label';
 import { Sparkles } from 'lucide-react';
 import { authenticateUser } from '@/lib/auth-store';
 
+/**
+ * Só caminho interno vira destino pós-login — "//evil.com" e "/\evil.com" são
+ * lidos como URL absoluta pelo navegador e virariam redirecionamento aberto.
+ */
+function destinoSeguro(valor: string | null): string {
+  if (!valor || !valor.startsWith('/') || valor.startsWith('//') || valor.startsWith('/\\')) return '/inicio';
+  return valor;
+}
+
 export default function LoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [expirado, setExpirado] = useState(false);
+  const [destino, setDestino] = useState('/inicio');
+
+  // auditoria 2026-08-22: lido do window (e não de useSearchParams) pra não
+  // exigir Suspense nesta página, que é a raiz do app.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    setExpirado(params.get('expirado') === '1');
+    setDestino(destinoSeguro(params.get('next')));
+  }, []);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const session = await authenticateUser(email, password);
+    if (loading) return;
 
-    if (!session) {
-      setError('E-mail ou senha inválidos, ou usuário inativo.');
+    setLoading(true);
+    setError('');
+    const resultado = await authenticateUser(email, password);
+    setLoading(false);
+
+    if (!resultado.ok) {
+      setExpirado(false);
+      setError(
+        resultado.motivo === 'servidor'
+          ? 'Não foi possível conectar ao servidor. Tente de novo.'
+          : 'E-mail ou senha inválidos, ou usuário inativo.',
+      );
       return;
     }
 
-    setError('');
-    router.push('/inicio');
+    // Volta pra tela em que a sessão expirou, não pro início fixo.
+    router.push(destino);
   }
 
   return (
@@ -49,6 +78,12 @@ export default function LoginPage() {
           <p className="text-sm text-muted-foreground mt-2 font-medium">Plataforma de Relatórios Estratégicos</p>
         </div>
 
+        {expirado && (
+          <div className="mb-5 rounded-lg border border-primary/30 bg-primary/10 px-3 py-2 text-sm text-primary">
+            Sua sessão expirou — entre de novo.
+          </div>
+        )}
+
         <form onSubmit={handleSubmit} className="space-y-5">
           <div className="space-y-2">
             <Label htmlFor="email" className="text-foreground/80 uppercase text-xs tracking-wider">E-mail corporativo</Label>
@@ -62,9 +97,10 @@ export default function LoginPage() {
             />
           </div>
           <div className="space-y-2">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-2">
               <Label htmlFor="password" className="text-foreground/80 uppercase text-xs tracking-wider">Senha</Label>
-              <Link href="#" className="text-xs text-primary hover:underline transition-all">Esqueci minha senha</Link>
+              {/* Não existe fluxo de recuperação — o link ia pra "#" e não fazia nada. */}
+              <span className="text-xs text-muted-foreground">Esqueceu a senha? Fale com um administrador.</span>
             </div>
             <Input
               id="password"
@@ -83,10 +119,10 @@ export default function LoginPage() {
           
           <Button
             type="submit"
-            disabled={!email.trim() || !password.trim()}
+            disabled={loading || !email.trim() || !password.trim()}
             className="w-full h-12 mt-8 bg-primary text-primary-foreground hover:bg-primary/90 font-bold uppercase tracking-wider shadow-[0_0_15px_rgba(85,245,47,0.3)] hover:shadow-[0_0_25px_rgba(85,245,47,0.5)] transition-all rounded-lg border-none"
           >
-            Entrar
+            {loading ? 'Entrando...' : 'Entrar'}
           </Button>
         </form>
       </div>

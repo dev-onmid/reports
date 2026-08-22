@@ -250,6 +250,17 @@ export default function ResultadosPage() {
   const [planningByClient, setPlanningByClient] = useState<Record<string, ClientPlanningConfig>>({});
   const [loadingMetrics, setLoadingMetrics] = useState(false);
 
+  // useClients() não expõe flag de carregamento: sem isto o cabeçalho da tabela
+  // fica flutuando sozinho enquanto /api/clients responde. Considera carregado
+  // assim que chega o 1º cliente e, no máximo, após a janela do fetch inicial —
+  // senão carteira genuinamente vazia nunca mostraria o estado vazio.
+  const [loadingClients, setLoadingClients] = useState(true);
+  useEffect(() => { if (clients.length > 0) setLoadingClients(false); }, [clients]);
+  useEffect(() => {
+    const t = setTimeout(() => setLoadingClients(false), 4000);
+    return () => clearTimeout(t);
+  }, []);
+
   // Load goals and planning: localStorage first, then DB
   useEffect(() => {
     if (clients.length === 0) return;
@@ -424,26 +435,32 @@ export default function ResultadosPage() {
             <thead>
               <tr className="border-b border-border">
                 {[
-                  { label: 'CLIENTE', info: false },
-                  { label: 'META', info: false },
-                  { label: 'RESULTADO', info: false },
-                  { label: '%', info: false },
-                  { label: 'LEADS', info: false },
-                  { label: 'CPL', info: true },
-                  { label: 'CAC', info: true },
-                  { label: 'FUNIL', info: false },
-                  { label: 'INVESTIMENTO', info: true },
-                  { label: '', info: false },
+                  { label: 'CLIENTE', info: '' },
+                  { label: 'META', info: '' },
+                  { label: 'RESULTADO', info: '' },
+                  { label: '%', info: '' },
+                  { label: 'LEADS', info: '' },
+                  { label: 'CPL', info: 'CPL — custo por lead no período: investimento ÷ leads. Menor = melhor.' },
+                  { label: 'CAC', info: 'CAC — custo por venda no período: investimento ÷ vendas fechadas. Menor = melhor.' },
+                  { label: 'FUNIL', info: '' },
+                  { label: 'INVESTIMENTO', info: 'Investimento — total previsto no período; abaixo, o quanto já foi enviado às plataformas.' },
+                  { label: '', info: '' },
                 ].map((col) => (
                   <th key={col.label} className="sticky top-0 z-10 bg-card px-4 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-muted-foreground whitespace-nowrap after:absolute after:inset-x-0 after:bottom-0 after:border-b after:border-border">
                     {col.info ? (
-                      <span className="flex items-center gap-1">{col.label} <Info className="w-3 h-3 opacity-50" /></span>
+                      <span className="flex items-center gap-1" title={col.info}>{col.label} <Info className="w-3 h-3 opacity-50" /></span>
                     ) : col.label}
                   </th>
                 ))}
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
+              {loadingClients && (
+                <tr><td colSpan={10} className="px-4 py-12 text-center text-sm text-muted-foreground">Carregando clientes…</td></tr>
+              )}
+              {!loadingClients && rows.length === 0 && (
+                <tr><td colSpan={10} className="px-4 py-12 text-center text-sm text-muted-foreground">Nenhum cliente encontrado.</td></tr>
+              )}
               {rows.map((row) => {
                 const resultC = pctColors(row.pctResult);
                 const leadsC = pctColors(row.pctLeads);
@@ -516,7 +533,14 @@ export default function ResultadosPage() {
                       <p className="text-[11px] text-muted-foreground mt-0.5 whitespace-nowrap">{formatCurrencyBRL(row.dispatchedInvest)} enviado</p>
                     </td>
                     <td className="px-2 py-3">
-                      <ChevronRight className="w-4 h-4 text-muted-foreground/30" />
+                      <Link
+                        href={`/clientes/${row.client.id}`}
+                        aria-label={`Abrir ${row.client.name}`}
+                        title={`Abrir ${row.client.name}`}
+                        className="flex h-8 w-8 items-center justify-center text-muted-foreground/40 transition-colors hover:text-foreground"
+                      >
+                        <ChevronRight className="w-4 h-4" />
+                      </Link>
                     </td>
                   </tr>
                 );

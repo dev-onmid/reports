@@ -9,11 +9,11 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { useSortable, SortableContext, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable';
 import {
-  Plus, Search, MoreVertical, Download, Settings2,
+  Plus, Search, MoreVertical, Settings2, RefreshCw,
   Users, CalendarDays, HeartHandshake, CircleDollarSign,
   ChevronLeft, ChevronRight, ChevronDown, SlidersHorizontal,
   AlignJustify, Trash2, Pencil, Sparkles, Clock3, LayoutGrid, List, ArrowUpDown,
-  BarChart3, Plug, UserRound, MessageCircle, X, Send, GripVertical, Layers, WifiOff, Link2,
+  BarChart3, UserRound, MessageCircle, X, Send, GripVertical, Layers, WifiOff, Link2,
   Globe2, Clapperboard,
 } from 'lucide-react';
 import { ChatView } from './chat-view';
@@ -2053,9 +2053,6 @@ function ClientChoiceCard({
             {recentLabel}
           </span>
         )}
-        <button type="button" className="ml-auto rounded-lg p-0.5 text-muted-foreground hover:bg-white/5 hover:text-foreground" aria-label="Mais opções">
-          <MoreVertical className="h-3.5 w-3.5" />
-        </button>
       </div>
 
       <div className="relative mt-8 flex items-center gap-3">
@@ -2082,16 +2079,6 @@ function ClientChoiceCard({
           Abrir CRM
           <ChevronRight className="h-3.5 w-3.5" style={{ color: theme.accent }} />
         </button>
-        {[
-          { icon: UserRound, label: 'Leads' },
-          { icon: BarChart3, label: 'Resultados' },
-          { icon: Plug, label: 'Integrações' },
-          { icon: Pencil, label: 'Editar' },
-        ].map(({ icon: Icon, label }) => (
-          <button key={label} type="button" className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 bg-black/20 text-muted-foreground transition-colors hover:text-foreground" title={label}>
-            <Icon className="h-3.5 w-3.5" />
-          </button>
-        ))}
       </div>
     </article>
   );
@@ -2132,6 +2119,7 @@ export default function CrmPage({ lockedClientId, embedded = false }: CrmPagePro
 
   const [leads, setLeads]           = useState<CrmLead[]>([]);
   const [loading, setLoading]       = useState(false);
+  const [leadsErro, setLeadsErro]   = useState(false);
   const [search, setSearch]         = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [temperatureFilter, setTemperatureFilter] = useState('');
@@ -2307,10 +2295,15 @@ export default function CrmPage({ lockedClientId, embedded = false }: CrmPagePro
       return;
     }
     if (!options?.silent) setLoading(true);
+    setLeadsErro(false);
     fetch(`/api/crm?clientId=${clientId}&funnelId=${selectedFunnelId}`)
-      .then(r => r.ok ? r.json() as Promise<CrmLead[]> : [])
+      .then(async r => {
+        if (!r.ok) throw new Error('falha');
+        return await r.json() as CrmLead[];
+      })
       .then(data => setLeads(data))
-      .catch(() => setLeads([]))
+      // Falha de servidor não pode virar "nenhum lead" — a lista vazia mentiria.
+      .catch(() => { setLeads([]); setLeadsErro(true); })
       .finally(() => {
         if (!options?.silent) setLoading(false);
       });
@@ -3229,6 +3222,19 @@ export default function CrmPage({ lockedClientId, embedded = false }: CrmPagePro
       {clientId && !loading && crmView === 'leads' && (
         <div className="flex flex-col flex-1 min-h-0 rounded-[var(--radius)] border border-border bg-card overflow-hidden">
 
+          {/* Erro de carregamento — distinto de "nenhum lead". */}
+          {leadsErro && (
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-red-500/30 bg-red-500/10 px-4 py-2.5 text-xs text-red-400 shrink-0">
+              <span>Não foi possível carregar os leads — a lista abaixo pode estar incompleta.</span>
+              <button
+                onClick={() => refreshLeads()}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-red-500/40 px-2.5 py-1 font-bold text-red-300 hover:bg-red-500/10 transition-colors"
+              >
+                <RefreshCw className="h-3 w-3" /> Tentar de novo
+              </button>
+            </div>
+          )}
+
           {/* Table toolbar */}
           <div className="flex items-center justify-between px-4 py-2.5 border-b border-border shrink-0">
             <div className="flex items-center gap-2">
@@ -3255,9 +3261,6 @@ export default function CrmPage({ lockedClientId, embedded = false }: CrmPagePro
                       Limpar filtros
                     </button>
                   )}
-                  <button className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors">
-                    <Download className="h-3.5 w-3.5" /> Exportar <ChevronDown className="h-3 w-3" />
-                  </button>
                   <div className="relative">
                     <button
                       type="button"

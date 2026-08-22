@@ -67,11 +67,13 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const [allowed, setAllowed] = useState(false);
+  const [indisponivel, setIndisponivel] = useState(false);
+  const [tentativa, setTentativa] = useState(0);
 
   useEffect(() => {
     const session = getAuthSession();
     if (!session) {
-      router.replace('/');
+      router.replace(`/?next=${encodeURIComponent(pathname)}`);
       return;
     }
 
@@ -84,19 +86,28 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
     // O localStorage não é mais autoridade: ele sobrevive à expiração do cookie
     // e a um logout feito em outra aba. Sem esta checagem, o usuário veria a
     // interface montada com todas as chamadas de API devolvendo 401.
+    //
+    // auditoria 2026-08-22: só o 401 desloga. Erro de infraestrutura (503/5xx
+    // ou rede) mostra aviso com "tentar de novo" — antes qualquer piscada do
+    // banco expulsava o usuário com a sessão ainda válida.
+    setIndisponivel(false);
     void fetch('/api/auth/me')
       .then((res) => {
         if (!active) return;
         if (res.status === 401) {
           clearAuthSession();
-          router.replace('/');
+          router.replace(`/?expirado=1&next=${encodeURIComponent(pathname)}`);
+          return;
         }
+        if (!res.ok) setIndisponivel(true);
       })
-      .catch(() => {});
+      .catch(() => { if (active) setIndisponivel(true); });
 
     const role = session.role as Role;
     const allowedRoles = getAllowedRoles(pathname);
     if (!allowedRoles.includes(role)) {
+      // Fechar ANTES de navegar: senão a tela proibida monta e dispara fetches.
+      setAllowed(false);
       router.replace('/inicio');
       return cleanup;
     }
@@ -133,15 +144,36 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
       .catch(() => { if (active) router.replace('/inicio'); });
 
     return cleanup;
-  }, [router, pathname]);
+  }, [router, pathname, tentativa]);
+
+  const avisoIndisponivel = (
+    <span className="flex items-center gap-3">
+      Não foi possível falar com o servidor. Sua sessão continua ativa.
+      <button
+        onClick={() => setTentativa((n) => n + 1)}
+        className="rounded-md border border-border px-2 py-1 text-xs font-semibold text-foreground hover:bg-card"
+      >
+        Tentar de novo
+      </button>
+    </span>
+  );
 
   if (!allowed) {
     return (
-      <div className="flex h-screen items-center justify-center bg-background text-sm text-muted-foreground">
-        Validando acesso...
+      <div className="flex h-screen items-center justify-center bg-background px-4 text-center text-sm text-muted-foreground">
+        {indisponivel ? avisoIndisponivel : 'Validando acesso...'}
       </div>
     );
   }
 
-  return children;
+  return (
+    <>
+      {children}
+      {indisponivel && (
+        <div className="fixed bottom-4 left-1/2 z-50 -translate-x-1/2 rounded-lg border border-amber-400/40 bg-card px-3 py-2 text-xs text-muted-foreground shadow-md">
+          {avisoIndisponivel}
+        </div>
+      )}
+    </>
+  );
 }

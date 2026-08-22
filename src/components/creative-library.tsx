@@ -77,6 +77,10 @@ export function CreativeLibrary({ clientId }: { clientId?: string }) {
   const [rows, setRows] = useState<CreativeRow[]>([]);
   const [enrich, setEnrich] = useState<EnrichMap>({});
   const [loading, setLoading] = useState(true);
+  const [erro, setErro] = useState(false);
+  // Gasto/CPL/thumb vêm do enrich (Graph API), depois da lista. Sem este estado a
+  // lista se reordenava embaixo do usuário nas ordenações por gasto/CPL.
+  const [enriching, setEnriching] = useState(false);
   const [search, setSearch] = useState('');
   const [clientFilter, setClientFilter] = useState('');
   const [segmentFilter, setSegmentFilter] = useState('');
@@ -89,8 +93,11 @@ export function CreativeLibrary({ clientId }: { clientId?: string }) {
       const qs = new URLSearchParams({ days: String(days) });
       if (clientId) qs.set('clientId', clientId);
       const res = await fetch(`/api/creative-library?${qs}`);
+      // Sem checar res.ok, erro do backend virava "nenhum criativo no período".
+      if (!res.ok) { setErro(true); setRows([]); return; }
       const json = await res.json().catch(() => null) as { creatives?: CreativeRow[] } | null;
       const creatives = json?.creatives ?? [];
+      setErro(false);
       setRows(creatives);
 
       // Enriquecimento (gasto + thumbnail) — best-effort, não bloqueia a lista
@@ -102,6 +109,7 @@ export function CreativeLibrary({ clientId }: { clientId?: string }) {
         byClient.set(c.client_id, list);
       }
       if (byClient.size > 0) {
+        setEnriching(true);
         fetch('/api/creative-library/enrich', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -112,8 +120,12 @@ export function CreativeLibrary({ clientId }: { clientId?: string }) {
         })
           .then(r => r.json())
           .then((j: { enrich?: EnrichMap }) => { if (j?.enrich) setEnrich(prev => ({ ...prev, ...j.enrich })); })
-          .catch(() => null);
+          .catch(() => null)
+          .finally(() => setEnriching(false));
       }
+    } catch {
+      setErro(true);
+      setRows([]);
     } finally {
       setLoading(false);
     }
@@ -162,6 +174,9 @@ export function CreativeLibrary({ clientId }: { clientId?: string }) {
           b.leads - a.leads,
       );
     }
+    // Enquanto o gasto não chega, ordenar por ele reordenaria tudo de novo quando
+    // chegasse — segura no padrão (leads) até o enrich terminar.
+    if (enriching && (sortBy === 'gasto' || sortBy === 'cpl')) return sortByAxis(list, 'leads');
     if (sortBy === 'gasto') return [...list].sort((a, b) => (spendOf(b) ?? -1) - (spendOf(a) ?? -1));
     if (sortBy === 'cpl') {
       // Menor CPL primeiro (melhor); sem gasto vai pro fim
@@ -173,7 +188,7 @@ export function CreativeLibrary({ clientId }: { clientId?: string }) {
       return sortByAxis(list, sortBy);
     }
     return list;
-  }, [rows, search, clientFilter, segmentFilter, redeFilter, sortBy, enrich]);
+  }, [rows, search, clientFilter, segmentFilter, redeFilter, sortBy, enrich, enriching]);
 
   const totals = useMemo(() => ({
     criativos: filtered.length,
@@ -258,8 +273,8 @@ export function CreativeLibrary({ clientId }: { clientId?: string }) {
           <option value="taxa_conversa">Maior taxa de conversa</option>
           <option value="vendas">Mais vendas</option>
           <option value="receita">Mais receita</option>
-          <option value="cpl">Menor CPL</option>
-          <option value="gasto">Maior gasto</option>
+          <option value="cpl" disabled={enriching}>Menor CPL{enriching ? ' (carregando gasto…)' : ''}</option>
+          <option value="gasto" disabled={enriching}>Maior gasto{enriching ? ' (carregando…)' : ''}</option>
           {etapas.map(e => <option key={e} value={`etapa:${e}`}>Mais “{e}”</option>)}
         </select>
       </div>
@@ -276,6 +291,17 @@ export function CreativeLibrary({ clientId }: { clientId?: string }) {
       {/* Lista */}
       {loading ? (
         <div className="py-16 text-center text-sm text-muted-foreground">Carregando criativos…</div>
+      ) : erro ? (
+        <div className="rounded-md border border-border bg-card py-16 text-center">
+          <Clapperboard className="mx-auto mb-2 h-8 w-8 text-muted-foreground/40" />
+          <p className="text-sm text-muted-foreground">Não foi possível carregar os criativos.</p>
+          <button
+            onClick={() => void load()}
+            className="mt-3 rounded-md border border-border px-3 py-1.5 text-xs font-bold text-foreground transition-colors hover:border-primary/50"
+          >
+            Tentar de novo
+          </button>
+        </div>
       ) : filtered.length === 0 ? (
         <div className="rounded-md border border-border bg-card py-16 text-center">
           <Clapperboard className="mx-auto mb-2 h-8 w-8 text-muted-foreground/40" />
@@ -333,8 +359,18 @@ export function CreativeLibrary({ clientId }: { clientId?: string }) {
                   </div>
                   <div><p className="truncate text-[11px] font-black tracking-tight">{r.vendas}</p><p className="text-[9px] uppercase text-muted-foreground">Vendas</p></div>
                   <div><p className="truncate text-[11px] font-black tracking-tight text-primary" title={r.receita > 0 ? fmtBRL(r.receita) : ''}>{r.receita > 0 ? fmtBRL(r.receita) : '—'}</p><p className="text-[9px] uppercase text-muted-foreground">Receita</p></div>
-                  <div><p className="truncate text-[11px] font-black tracking-tight" title={spend !== null ? fmtBRL(spend) : ''}>{spend !== null ? fmtBRL(spend) : '—'}</p><p className="text-[9px] uppercase text-muted-foreground">Gasto</p></div>
-                  <div><p className="truncate text-[11px] font-black tracking-tight" title={cpl !== null ? fmtBRL(cpl) : ''}>{cpl !== null ? fmtBRL(cpl) : '—'}</p><p className="text-[9px] uppercase text-muted-foreground">CPL</p></div>
+                  <div>
+                    {enriching && spend === null
+                      ? <span className="mx-auto block h-3 w-10 animate-pulse rounded bg-muted/50" />
+                      : <p className="truncate text-[11px] font-black tracking-tight" title={spend !== null ? fmtBRL(spend) : ''}>{spend !== null ? fmtBRL(spend) : '—'}</p>}
+                    <p className="text-[9px] uppercase text-muted-foreground">Gasto</p>
+                  </div>
+                  <div>
+                    {enriching && cpl === null
+                      ? <span className="mx-auto block h-3 w-10 animate-pulse rounded bg-muted/50" />
+                      : <p className="truncate text-[11px] font-black tracking-tight" title={cpl !== null ? fmtBRL(cpl) : ''}>{cpl !== null ? fmtBRL(cpl) : '—'}</p>}
+                    <p className="text-[9px] uppercase text-muted-foreground">CPL</p>
+                  </div>
                 </div>
 
                 {topStatus.length > 0 && (

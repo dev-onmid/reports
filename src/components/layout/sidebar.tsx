@@ -70,7 +70,9 @@ export function Sidebar({
     });
   }
 
-  const showConfiguracoes = role === 'Administrador' && !isMobile;
+  // auditoria 2026-08-22: o `&& !isMobile` escondia o ÚNICO caminho pra
+  // Configurações no celular — admin ficava sem acesso à tela.
+  const showConfiguracoes = role === 'Administrador';
   const isCollapsed = !isMobile && collapsed;
 
   const isHomeActive = pathname === '/inicio' || pathname.startsWith('/inicio/');

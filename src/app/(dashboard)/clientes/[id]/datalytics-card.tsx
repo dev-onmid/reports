@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Card de configuração da integração Datalytics (CRM externo) — aba Rastreio.
+ * Card de configuração da integração Datalytics (CRM externo) — aba Integrações.
  *
  * O usuário copia a URL daqui e cola no "Nova integração" do Datalytics.
  * O log mostra o payload CRU de cada recepção — é assim que se descobre o

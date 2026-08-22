@@ -6,6 +6,7 @@ import {
   RefreshCw, Search, Users, WifiOff, X,
 } from 'lucide-react';
 import { callerHeaders } from '@/lib/auth-store';
+import { notificar } from '@/components/ui/toast';
 import { useClients } from '@/lib/client-store';
 import { ClientAvatar } from '@/components/client-avatar';
 import { ResultsTabs } from '@/components/results-tabs';
@@ -104,6 +105,9 @@ export default function RedesSociaisPage() {
   const [catFilter, setCatFilter] = useState('todas');
   const [sortBy, setSortBy] = useState<SortKey>('dias');
   const [showHidden, setShowHidden] = useState(false);
+  // Thumb da Meta expira: sem isto o onError escondia a <img> e a célula ficava
+  // VAZIA, matando o link do post que existe em lastPostPermalink.
+  const [thumbFailed, setThumbFailed] = useState<Set<string>>(new Set());
 
   // ── Aviso WhatsApp (Z-API) ──
   const [alertOpen, setAlertOpen] = useState(false);
@@ -157,8 +161,17 @@ export default function RedesSociaisPage() {
     }
   }
 
-  async function saveRuler(clientId: string, value: number) {
-    if (!Number.isInteger(value) || value < 1 || value > 90) return;
+  // O input da régua é uncontrolled: valor fora de 1–90 (ou vazio) ficava na tela
+  // e nunca chegava ao banco. Clampa, reescreve o campo e avisa quando corrigiu.
+  async function saveRuler(clientId: string, raw: string, input: HTMLInputElement) {
+    const atual = snapshots[clientId]?.redAfterDays ?? 2;
+    const parsed = Math.round(Number(raw));
+    const valido = raw.trim() !== '' && Number.isFinite(parsed);
+    const value = valido ? Math.min(90, Math.max(1, parsed)) : atual;
+    input.value = String(value);
+    if (!valido) notificar(`Valor inválido — régua mantida em ${value} dia(s).`, 'aviso');
+    else if (value !== parsed) notificar(`Régua ajustada para ${value} dia(s) — o limite é de 1 a 90.`, 'aviso');
+    if (value === atual) return;
     setSnapshots(prev => {
       const existing = prev[clientId];
       if (!existing) return prev;
@@ -298,6 +311,16 @@ export default function RedesSociaisPage() {
   const noAccount = activeRows.filter(r => r.sev === 'sem');
   const daysList = monitored.map(r => r.days).filter((d): d is number => d !== null);
   const avgDays = daysList.length ? Math.round(daysList.reduce((s, d) => s + d, 0) / daysList.length * 10) / 10 : null;
+
+  // Aviso ATIVO sem instância/grupo salva "ligado" e nunca envia nada — o servidor
+  // recusa (400) e a tela explica antes, em vez de dizer que deu certo.
+  const alertBloqueio = alertCfg.ativo
+    ? (!alertCfg.zapiClientId
+        ? 'Escolha a instância de WhatsApp para ativar o aviso.'
+        : !alertCfg.groupId
+          ? 'Escolha o grupo de destino para ativar o aviso.'
+          : null)
+    : null;
 
   const hasAnySnapshot = Object.keys(snapshots).length > 0;
   const selectClass = 'h-10 rounded-[var(--radius)] border border-border bg-card px-3 text-sm font-semibold text-foreground outline-none focus:border-primary/60';
@@ -473,24 +496,37 @@ export default function RedesSociaisPage() {
                       {fmt(snap?.posts30d ?? null)} posts 30d · {fmt(snap?.followers ?? null)} seg. · alcance {fmt(snap?.reach28d ?? null)}
                     </p>
                   </div>
-                  <button
-                    onClick={() => void refreshOne(client.id)}
-                    disabled={refreshing || refreshingAll}
-                    title="Atualizar este cliente agora"
-                    className="shrink-0 flex h-8 w-8 items-center justify-center rounded-[var(--radius)] border border-border text-muted-foreground transition-colors hover:border-primary/50 hover:text-foreground disabled:opacity-50"
-                  >
-                    <RefreshCw className={cn('h-3.5 w-3.5', refreshing && 'animate-spin')} />
-                  </button>
+                  <div className="shrink-0 flex items-center gap-1.5">
+                    <button
+                      onClick={() => void refreshOne(client.id)}
+                      disabled={refreshing || refreshingAll}
+                      title="Atualizar este cliente agora"
+                      className="flex h-8 w-8 items-center justify-center rounded-[var(--radius)] border border-border text-muted-foreground transition-colors hover:border-primary/50 hover:text-foreground disabled:opacity-50"
+                    >
+                      <RefreshCw className={cn('h-3.5 w-3.5', refreshing && 'animate-spin')} />
+                    </button>
+                    <button
+                      onClick={() => void saveMonitored(client.id, showHidden)}
+                      title={showHidden
+                        ? 'Voltar a monitorar este cliente'
+                        : 'Ocultar do monitor (só tráfego pago — postagem não é nossa)'}
+                      className="flex h-8 w-8 items-center justify-center rounded-[var(--radius)] border border-border text-muted-foreground transition-colors hover:border-primary/50 hover:text-foreground"
+                    >
+                      {showHidden ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
+                    </button>
+                  </div>
                 </div>
               );
             })}
           </div>
-          <div className="hidden md:block overflow-x-auto">
+          {/* Um único container com overflow-auto (x+y): overflow-x-auto isolado vira
+              scroll-container próprio e o sticky do thead não gruda em nada. */}
+          <div className="hidden md:block max-h-[70vh] overflow-auto">
             <table className="min-w-[1150px] w-full">
               <thead>
-                <tr className="border-b border-border bg-muted/20">
+                <tr className="border-b border-border">
                   {['CLIENTE', 'ÚLTIMO POST', 'RÉGUA (DIAS)', 'POSTS 30D', 'SEGUIDORES', 'ALCANCE 28D', 'ENGAJ. MÉDIO/POST', 'PUBLICAÇÃO', ''].map((label, i) => (
-                    <th key={i} className="px-4 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-muted-foreground whitespace-nowrap">
+                    <th key={i} className="sticky top-0 z-10 bg-card px-4 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-muted-foreground whitespace-nowrap after:absolute after:inset-x-0 after:bottom-0 after:border-b after:border-border">
                       {label}
                     </th>
                   ))}
@@ -546,7 +582,7 @@ export default function RedesSociaisPage() {
                           type="number" min={1} max={90}
                           defaultValue={snap?.redAfterDays ?? 2}
                           key={`${client.id}-${snap?.redAfterDays ?? 2}`}
-                          onBlur={e => void saveRuler(client.id, Number(e.target.value))}
+                          onBlur={e => void saveRuler(client.id, e.target.value, e.target)}
                           title="Dias sem post para o cliente ficar vermelho"
                           className="h-8 w-16 rounded-[var(--radius)] border border-border bg-background px-2 text-center text-sm font-bold outline-none focus:border-primary/60"
                         />
@@ -573,14 +609,14 @@ export default function RedesSociaisPage() {
                         ) : <span className="text-sm text-muted-foreground/40">—</span>}
                       </td>
                       <td className="px-4 py-3">
-                        {snap?.lastPostThumbnail && snap.lastPostPermalink ? (
+                        {snap?.lastPostThumbnail && snap.lastPostPermalink && !thumbFailed.has(client.id) ? (
                           <a href={snap.lastPostPermalink} target="_blank" rel="noreferrer" className="group relative inline-block">
                             {/* eslint-disable-next-line @next/next/no-img-element */}
                             <img
                               src={snap.lastPostThumbnail}
                               alt="Último post"
                               className="h-12 w-12 rounded-md object-cover border border-border"
-                              onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                              onError={() => setThumbFailed(prev => new Set(prev).add(client.id))}
                             />
                             <ExternalLink className="absolute -right-1.5 -top-1.5 h-3.5 w-3.5 rounded-full bg-card p-0.5 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
                           </a>
@@ -716,6 +752,9 @@ export default function RedesSociaisPage() {
               {alertFeedback && (
                 <p className="text-sm font-semibold text-foreground">{alertFeedback}</p>
               )}
+              {alertBloqueio && (
+                <p className="text-sm font-semibold text-amber-300">{alertBloqueio}</p>
+              )}
 
               <div className="flex items-center justify-end gap-3 pt-2">
                 <button
@@ -727,7 +766,8 @@ export default function RedesSociaisPage() {
                 </button>
                 <button
                   onClick={() => void saveAlert(false)}
-                  disabled={savingAlert}
+                  disabled={savingAlert || alertBloqueio !== null}
+                  title={alertBloqueio ?? undefined}
                   className="h-10 rounded-[var(--radius)] bg-primary px-5 text-sm font-bold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
                 >
                   Salvar

@@ -6,9 +6,10 @@ import {
   ToggleLeft, ToggleRight, Clock, MessageSquare, Zap,
   ArrowRight, AlertCircle, CheckCircle2, Timer, Send,
   Upload, Mic, Square, Loader2, Users,
-  CalendarDays, MoreVertical, Paperclip, ExternalLink,
+  CalendarDays, MoreVertical, Paperclip,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { notificar } from '@/components/ui/toast';
 import { DictateButton } from '@/components/ui/dictate-button';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -106,39 +107,6 @@ const STATUS_LABEL: Record<string, string> = {
   expirado:            'Expirado',
   cancelado:           'Cancelado',
 };
-
-function MiniSparkline({
-  color,
-  values,
-}: {
-  color: string;
-  values: number[];
-}) {
-  const width = 180;
-  const height = 28;
-  const max = Math.max(...values, 1);
-  const min = Math.min(...values, 0);
-  const range = Math.max(max - min, 1);
-  const points = values.map((value, index) => {
-    const x = (index / Math.max(values.length - 1, 1)) * width;
-    const y = height - ((value - min) / range) * (height - 4) - 2;
-    return `${x.toFixed(1)},${y.toFixed(1)}`;
-  }).join(' ');
-
-  return (
-    <svg viewBox={`0 0 ${width} ${height}`} className="mt-3 h-7 w-full" aria-hidden="true">
-      <polyline
-        points={points}
-        fill="none"
-        stroke={color}
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        opacity="0.9"
-      />
-    </svg>
-  );
-}
 
 // ── File upload helper ────────────────────────────────────────────────────────
 
@@ -826,13 +794,33 @@ export function FollowupTab({
 
   async function handleProcessNow() {
     setProcessing(true);
-    await fetch('/api/crm/followup/processar', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ clientId }),
-    }).catch(() => null);
-    setProcessing(false);
-    loadExecSummary();
+    try {
+      const res = await fetch('/api/crm/followup/processar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clientId }),
+      });
+      const data = res.ok
+        ? await res.json().catch(() => null) as { sent?: number; expired?: number } | null
+        : null;
+      if (!data) {
+        notificar('Não foi possível processar as regras agora — tente de novo.', 'erro');
+      } else {
+        const enviadas = data.sent ?? 0;
+        const expiradas = data.expired ?? 0;
+        notificar(
+          enviadas === 0 && expiradas === 0
+            ? 'Nada para processar agora — nenhuma execução vencida.'
+            : `${enviadas} mensagem${enviadas === 1 ? '' : 's'} enviada${enviadas === 1 ? '' : 's'} · ${expiradas} expirada${expiradas === 1 ? '' : 's'}.`,
+          'ok',
+        );
+      }
+    } catch {
+      notificar('Não foi possível processar as regras agora — tente de novo.', 'erro');
+    } finally {
+      setProcessing(false);
+      loadExecSummary();
+    }
   }
 
   async function handleCreate() {
@@ -871,7 +859,6 @@ export function FollowupTab({
       color: '#55f52f',
       bg: 'bg-primary/10',
       border: 'border-primary/20',
-      values: [2, 2, 3, 3, 4, regrasAtivas, regras.length, regrasAtivas + 1, regras.length],
     },
     {
       label: 'Mensagens enviadas',
@@ -881,7 +868,6 @@ export function FollowupTab({
       color: '#60a5fa',
       bg: 'bg-blue-500/10',
       border: 'border-blue-500/20',
-      values: [0, 1, 1, 2, 3, mensagensEnviadas * 0.4, mensagensEnviadas * 0.7, mensagensEnviadas],
     },
     {
       label: 'Leads impactados',
@@ -891,7 +877,6 @@ export function FollowupTab({
       color: '#a855f7',
       bg: 'bg-purple-500/10',
       border: 'border-purple-500/20',
-      values: [0, 1, 2, leadsImpactados * 0.35, leadsImpactados * 0.5, leadsImpactados * 0.8, leadsImpactados],
     },
     {
       label: 'Taxa de engajamento',
@@ -901,7 +886,6 @@ export function FollowupTab({
       color: '#eab308',
       bg: 'bg-yellow-500/10',
       border: 'border-yellow-500/20',
-      values: [8, 12, 10, 18, 16, 24, taxaEngajamento],
     },
   ];
 
@@ -919,7 +903,7 @@ export function FollowupTab({
   return (
     <div className="space-y-4">
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        {kpis.map(({ label, value, sub, Icon, color, bg, border, values }) => (
+        {kpis.map(({ label, value, sub, Icon, color, bg, border }) => (
           <div key={label} className={cn('overflow-hidden rounded-[var(--radius)] border bg-card p-4', border)}>
             <div className="flex items-start gap-3">
               <div className={cn('flex h-10 w-10 shrink-0 items-center justify-center rounded-[var(--radius)] border', bg, border)}>
@@ -931,7 +915,6 @@ export function FollowupTab({
                 <p className="mt-1 text-xs text-muted-foreground">{sub}</p>
               </div>
             </div>
-            <MiniSparkline color={color} values={values} />
           </div>
         ))}
       </div>
@@ -1083,9 +1066,6 @@ export function FollowupTab({
                   </p>
                 </div>
               </div>
-              <button className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-[var(--radius)] border border-border bg-background px-4 text-xs font-semibold text-foreground hover:bg-muted">
-                Ver guia completo <ExternalLink className="h-3.5 w-3.5" />
-              </button>
             </div>
           </div>
         </>

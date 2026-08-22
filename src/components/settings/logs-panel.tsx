@@ -14,9 +14,9 @@ import {
 import {
   type ActivityEntry,
   type ActivityType,
-  clearActivityLog,
   readActivityLog,
 } from '@/lib/activity-log-store';
+import { notificar } from '@/components/ui/toast';
 import { cn } from '@/lib/utils';
 
 type FilterType = ActivityType | 'Todos';
@@ -77,13 +77,15 @@ const FILTER_DOT: Record<string, string> = {
   client_status_updated: 'bg-purple-400',
 };
 
-// Avatar config per actor name
-function getActorMeta(actor: string): { initial: string; color: string; email: string } {
+// Avatar config per actor name.
+// O e-mail NÃO é derivado do nome: o registro guarda só quem agiu, e adivinhar
+// o endereço pintava a pessoa errada embaixo do nome certo.
+function getActorMeta(actor: string): { initial: string; color: string } {
   const lower = actor.toLowerCase();
   if (lower.includes('leticia') || lower.includes('letícia')) {
-    return { initial: 'L', color: 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30', email: 'leticia@onreport.com' };
+    return { initial: 'L', color: 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' };
   }
-  return { initial: actor.charAt(0).toUpperCase(), color: 'bg-violet-500/20 text-violet-400 border border-violet-500/30', email: 'matheus.onmid@gmail.com' };
+  return { initial: actor.charAt(0).toUpperCase(), color: 'bg-violet-500/20 text-violet-400 border border-violet-500/30' };
 }
 
 function formatTimestamp(iso: string): { date: string; time: string } {
@@ -119,9 +121,13 @@ export function LogsPanel() {
   const [filter, setFilter] = useState<FilterType>('Todos');
   const [confirmClear, setConfirmClear] = useState(false);
   const [page, setPage] = useState(1);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    readActivityLog().then(setEntries).catch(() => {});
+    readActivityLog()
+      .then(setEntries)
+      .catch(() => {})
+      .finally(() => setLoading(false));
   }, []);
 
   // Reset to page 1 when filter changes
@@ -147,9 +153,17 @@ export function LogsPanel() {
       setConfirmClear(true);
       return;
     }
-    await clearActivityLog().catch(() => {});
-    setEntries([]);
+    const ok = await fetch('/api/activity-logs', { method: 'DELETE' })
+      .then((res) => res.ok)
+      .catch(() => false);
     setConfirmClear(false);
+    if (!ok) {
+      // Sem confirmação do servidor a lista fica como está — esvaziar a tela
+      // faria parecer apagado o que continua gravado.
+      notificar('Não foi possível limpar os logs — tente de novo.', 'erro');
+      return;
+    }
+    setEntries([]);
     setPage(1);
   }
 
@@ -241,7 +255,21 @@ export function LogsPanel() {
 
       {/* TABLE */}
       <div className="bg-card border border-border rounded-[var(--radius)] overflow-hidden">
-        {filtered.length === 0 ? (
+        {loading ? (
+          <div className="divide-y divide-border" aria-busy="true">
+            <p className="px-5 py-3 text-xs text-muted-foreground">Carregando…</p>
+            {Array.from({ length: 4 }, (_, i) => (
+              <div key={i} className="flex items-center gap-4 px-5 py-4">
+                <div className="w-10 h-10 rounded-full bg-muted/40 animate-pulse shrink-0" />
+                <div className="flex-1 space-y-2">
+                  <div className="h-3 w-2/5 rounded bg-muted/40 animate-pulse" />
+                  <div className="h-2.5 w-1/5 rounded bg-muted/30 animate-pulse" />
+                </div>
+                <div className="h-3 w-24 rounded bg-muted/30 animate-pulse" />
+              </div>
+            ))}
+          </div>
+        ) : filtered.length === 0 ? (
           <div className="py-20 text-center">
             <ClipboardList className="w-8 h-8 text-muted-foreground/40 mx-auto mb-3" />
             <p className="font-semibold text-muted-foreground">Nenhum registro encontrado</p>
@@ -304,7 +332,6 @@ export function LogsPanel() {
                       </div>
                       <div className="min-w-0">
                         <p className="text-sm font-semibold leading-tight truncate">{entry.actor}</p>
-                        <p className="text-[11px] text-muted-foreground truncate">{actor.email}</p>
                       </div>
                     </div>
 

@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import {
-  Plus, Trash2, ExternalLink, Users2, Shield, User, Mail,
-  Edit2, Search, Filter, Download, Eye, ChevronLeft, ChevronRight,
+  Plus, Trash2, ExternalLink, Users2, Shield, User,
+  Edit2, Search, Eye,
   Sparkles, Bell, DollarSign, MessageCircle,
   LayoutDashboard, Users, TableProperties, FileText, BarChart3,
   WalletCards, Bot, ShieldCheck, Zap, Plug, ClipboardList, WandSparkles,
@@ -133,18 +133,6 @@ type ZapiOption = {
   instance_id: string;
   active: boolean;
 };
-
-// Mock registration dates per id for display purposes
-const MOCK_DATES: Record<string, string> = {
-  '1': '10/01/2025',
-  '4': '12/01/2025',
-  '2': '18/01/2025',
-  '3': '05/05/2026',
-};
-
-function getRegDate(id: string): string {
-  return MOCK_DATES[id] ?? new Date().toLocaleDateString('pt-BR');
-}
 
 // Avatar color per first letter
 function avatarColor(name: string): string {
@@ -849,7 +837,6 @@ export default function ConfiguracoesPage() {
   const totalUsers = users.length;
   const admins = users.filter((u) => u.role === 'Administrador').length;
   const activeUsers = users.filter((u) => u.status === 'Ativo').length;
-  const pendingInvites = 1; // mocked
 
   const filteredUsers = users.filter(
     (u) =>
@@ -922,7 +909,7 @@ export default function ConfiguracoesPage() {
       {activeTab === 'usuarios' && (
         <div className="space-y-6">
           {/* ── KPI CARDS ── */}
-          <div className="grid grid-cols-4 gap-4">
+          <div className="grid grid-cols-3 gap-4">
             {/* Card 1: Total */}
             <div className="bg-card border border-border rounded-[var(--radius)] p-5 space-y-3">
               <div className="w-12 h-12 rounded-full bg-violet-500/15 border border-violet-500/25 flex items-center justify-center">
@@ -931,10 +918,6 @@ export default function ConfiguracoesPage() {
               <div>
                 <p className="text-xl font-bold leading-none">{totalUsers}</p>
                 <p className="text-xs text-muted-foreground mt-1">Total de usuários</p>
-              </div>
-              <div>
-                <span className="text-xs text-emerald-400 font-medium">↑ 33%</span>
-                <p className="text-[11px] text-muted-foreground mt-0.5">+1 nos últimos 30 dias</p>
               </div>
             </div>
 
@@ -947,10 +930,6 @@ export default function ConfiguracoesPage() {
                 <p className="text-xl font-bold leading-none">{admins}</p>
                 <p className="text-xs text-muted-foreground mt-1">Administradores</p>
               </div>
-              <div>
-                <span className="text-xs text-muted-foreground font-medium">— 0%</span>
-                <p className="text-[11px] text-muted-foreground mt-0.5">Sem alteração</p>
-              </div>
             </div>
 
             {/* Card 3: Ativos */}
@@ -962,26 +941,8 @@ export default function ConfiguracoesPage() {
                 <p className="text-xl font-bold leading-none">{activeUsers}</p>
                 <p className="text-xs text-muted-foreground mt-1">Usuários ativos</p>
               </div>
-              <div>
-                <span className="text-xs text-emerald-400 font-medium">↑ 50%</span>
-                <p className="text-[11px] text-muted-foreground mt-0.5">+1 nos últimos 30 dias</p>
-              </div>
             </div>
 
-            {/* Card 4: Convites */}
-            <div className="bg-card border border-border rounded-[var(--radius)] p-5 space-y-3">
-              <div className="w-12 h-12 rounded-full bg-violet-500/15 border border-violet-500/25 flex items-center justify-center">
-                <Mail className="w-5 h-5 text-violet-400" />
-              </div>
-              <div>
-                <p className="text-xl font-bold leading-none">{pendingInvites}</p>
-                <p className="text-xs text-muted-foreground mt-1">Convite pendente</p>
-              </div>
-              <div>
-                <span className="text-xs text-muted-foreground font-medium">— 0%</span>
-                <p className="text-[11px] text-muted-foreground mt-0.5">Sem alteração</p>
-              </div>
-            </div>
           </div>
 
           {/* ── USUÁRIOS CADASTRADOS CARD ── */}
@@ -1006,18 +967,6 @@ export default function ConfiguracoesPage() {
                     className="pl-8 pr-3 h-8 text-xs bg-background border border-border rounded-lg text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-emerald-500 w-44"
                   />
                 </div>
-                {/* Filter button */}
-                <button className="flex items-center gap-1.5 h-8 px-3 text-xs text-muted-foreground bg-background border border-border rounded-lg hover:text-foreground transition-colors">
-                  <Filter className="w-3.5 h-3.5" />
-                  Filtrar
-                  <svg className="w-3 h-3 ml-0.5" viewBox="0 0 12 12" fill="currentColor">
-                    <path d="M2 4l4 4 4-4" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" />
-                  </svg>
-                </button>
-                {/* Download */}
-                <button className="h-8 w-8 flex items-center justify-center text-muted-foreground bg-background border border-border rounded-lg hover:text-foreground transition-colors">
-                  <Download className="w-3.5 h-3.5" />
-                </button>
               </div>
             </div>
 
@@ -1052,9 +1001,6 @@ export default function ConfiguracoesPage() {
                           </div>
                           <div>
                             <p className="font-semibold text-sm">{user.name}</p>
-                            <p className="text-[11px] text-muted-foreground">
-                              Cadastrado em {getRegDate(user.id)}
-                            </p>
                           </div>
                         </div>
                       </td>
@@ -1144,22 +1090,11 @@ export default function ConfiguracoesPage() {
               </tbody>
             </table>
 
-            {/* Card footer / pagination */}
-            <div className="flex items-center justify-between px-6 py-4 border-t border-border">
+            {/* Card footer — a lista não é paginada: mostra todos os usuários */}
+            <div className="flex items-center px-6 py-4 border-t border-border">
               <p className="text-xs text-muted-foreground">
-                Mostrando 1 a {filteredUsers.length} de {filteredUsers.length} usuários
+                {filteredUsers.length} {filteredUsers.length === 1 ? 'usuário' : 'usuários'}
               </p>
-              <div className="flex items-center gap-1">
-                <button className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors">
-                  <ChevronLeft className="w-4 h-4" />
-                </button>
-                <button className="w-7 h-7 flex items-center justify-center rounded-lg bg-emerald-500 text-white text-xs font-semibold">
-                  1
-                </button>
-                <button className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors">
-                  <ChevronRight className="w-4 h-4" />
-                </button>
-              </div>
             </div>
           </div>
 

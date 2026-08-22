@@ -237,7 +237,7 @@ export function LandingPagesTab({ clientId }: { clientId: string }) {
               <Activity className="h-5 w-5 text-primary" />
             </div>
             <div>
-              <h3 className="font-heading text-2xl uppercase leading-none tracking-wide text-foreground">Radar de LP</h3>
+              <h3 className="font-heading text-2xl uppercase leading-none tracking-wide text-foreground">Mapa de Calor</h3>
               <p className="mt-1 text-xs text-muted-foreground">
                 Comportamento da massa de visitantes nas landing pages: onde clicam, até onde rolam, quanto tempo ficam.
               </p>
@@ -248,7 +248,7 @@ export function LandingPagesTab({ clientId }: { clientId: string }) {
             onClick={() => { setShowForm(true); setFormError(null); }}
             className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-xs font-bold uppercase tracking-wide text-black transition-opacity hover:opacity-90"
           >
-            <Plus className="h-4 w-4" /> Nova LP
+            <Plus className="h-4 w-4" /> Nova página
           </button>
         </div>
       </div>
@@ -297,7 +297,25 @@ export function LandingPagesTab({ clientId }: { clientId: string }) {
       )}
 
       {error && (
-        <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-400">{error}</div>
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-400">
+          <span>{error}</span>
+          <button
+            type="button"
+            onClick={() => void load()}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-red-500/40 px-2.5 py-1.5 text-xs font-bold text-red-300 transition-colors hover:bg-red-500/10"
+          >
+            <RefreshCw className="h-3.5 w-3.5" /> Tentar de novo
+          </button>
+        </div>
+      )}
+
+      {/* Carregando — sem isto a tela fica só com o cabeçalho entre o clique e a resposta. */}
+      {loading && !error && (
+        <div className="grid gap-2 md:grid-cols-2">
+          {[0, 1].map(i => (
+            <div key={i} className="h-[76px] animate-pulse rounded-xl border border-border bg-muted/30" />
+          ))}
+        </div>
       )}
 
       {/* Empty state */}
@@ -312,7 +330,7 @@ export function LandingPagesTab({ clientId }: { clientId: string }) {
       )}
 
       {/* Lista de LPs */}
-      {lps.length > 0 && (
+      {!loading && lps.length > 0 && (
         <div className="grid gap-2 md:grid-cols-2">
           {lps.map((lp) => {
             const age = relativeAge(lp.last_session_at);

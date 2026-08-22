@@ -112,6 +112,8 @@ export default function SorteadorPage() {
   const [historicoAberto, setHistoricoAberto] = useState(false);
   const [historico, setHistorico] = useState<RegistroHistorico[]>([]);
   const [loadingHistorico, setLoadingHistorico] = useState(false);
+  // Erro de servidor não pode virar "nenhum sorteio registrado".
+  const [historicoErro, setHistoricoErro] = useState(false);
 
   async function carregarPosts(id: string) {
     setClientId(id);
@@ -328,13 +330,20 @@ export default function SorteadorPage() {
 
   async function abrirHistorico() {
     setHistoricoAberto(true);
+    await carregarHistorico();
+  }
+
+  async function carregarHistorico() {
     setLoadingHistorico(true);
+    setHistoricoErro(false);
     try {
       const res = await fetch(`/api/sorteios${clientId ? `?clientId=${encodeURIComponent(clientId)}` : ''}`);
+      if (!res.ok) throw new Error('falha');
       const data = await res.json();
       setHistorico(Array.isArray(data.registros) ? data.registros : []);
     } catch {
       setHistorico([]);
+      setHistoricoErro(true);
     } finally {
       setLoadingHistorico(false);
     }
@@ -797,7 +806,18 @@ export default function SorteadorPage() {
                 <Loader2 className="h-4 w-4 animate-spin" /> Carregando…
               </div>
             )}
-            {!loadingHistorico && historico.length === 0 && (
+            {!loadingHistorico && historicoErro && (
+              <div className="flex flex-col items-center gap-3 py-8 text-center">
+                <p className="text-sm text-muted-foreground">Não foi possível carregar o histórico.</p>
+                <button
+                  onClick={() => void carregarHistorico()}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-bold text-foreground hover:bg-muted"
+                >
+                  <RefreshCw className="h-3.5 w-3.5" /> Tentar de novo
+                </button>
+              </div>
+            )}
+            {!loadingHistorico && !historicoErro && historico.length === 0 && (
               <div className="py-8 text-center text-sm text-muted-foreground">
                 Nenhum sorteio registrado{clientId ? ' para este cliente' : ''} ainda.
               </div>

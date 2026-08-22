@@ -191,7 +191,7 @@ export function ClientFidelidadeTab({ clientId }: { clientId: string }) {
             <p className="text-sm text-muted-foreground">
               As campanhas de fidelidade falam com quem já comprou — o público sai dos
               pedidos do Cardápio Web ou do Anota AI. Conecte uma das plataformas na aba
-              <strong className="text-foreground"> Delivery</strong> e volte aqui.
+              <strong className="text-foreground"> Integrações → Delivery</strong> e volte aqui.
             </p>
           </div>
         </div>
@@ -242,7 +242,7 @@ export function ClientFidelidadeTab({ clientId }: { clientId: string }) {
             </>
           ) : (
             <p className="mt-1 text-xs text-[#facc15]">
-              Nenhuma instância vinculada — sem ela nada poderá ser enviado. Vincule na aba Rastreio.
+              Nenhuma instância vinculada — sem ela nada poderá ser enviado. Vincule em Integrações → WhatsApp.
             </p>
           )}
         </Card>

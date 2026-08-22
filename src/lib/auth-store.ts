@@ -24,9 +24,16 @@ export type AuthSession = {
  *
  * O localStorage segue guardando a sessão só para a UI (nome, papel). Quem
  * autoriza de verdade é o cookie HttpOnly, que o JS não lê nem forja.
+ *
+ * auditoria 2026-08-22: o retorno deixou de ser `session | null` porque a tela
+ * culpava a senha do usuário quando o servidor é que estava fora do ar.
  */
-export async function authenticateUser(email: string, password: string): Promise<AuthSession | null> {
-  if (typeof window === 'undefined') return null;
+export type LoginResult =
+  | { ok: true; session: AuthSession }
+  | { ok: false; motivo: 'credencial' | 'servidor' };
+
+export async function authenticateUser(email: string, password: string): Promise<LoginResult> {
+  if (typeof window === 'undefined') return { ok: false, motivo: 'servidor' };
 
   try {
     const res = await fetch('/api/auth/login', {
@@ -34,9 +41,10 @@ export async function authenticateUser(email: string, password: string): Promise
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password }),
     });
-    if (!res.ok) return null;
+    // 401/403 = credencial; 5xx e afins = infraestrutura.
+    if (!res.ok) return { ok: false, motivo: res.status >= 500 ? 'servidor' : 'credencial' };
     const data = await res.json() as Partial<AuthSession>;
-    if (!data?.userId) return null;
+    if (!data?.userId) return { ok: false, motivo: 'credencial' };
 
     const session: AuthSession = {
       userId: data.userId,
@@ -46,9 +54,10 @@ export async function authenticateUser(email: string, password: string): Promise
       team: (data.team as Team) ?? 'onmid',
     };
     window.localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
-    return session;
+    return { ok: true, session };
   } catch {
-    return null;
+    // Rede caída / resposta ilegível — nunca é "senha errada".
+    return { ok: false, motivo: 'servidor' };
   }
 }
 

@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Card de configuração da integração Agendor — aba Rastreio.
+ * Card de configuração da integração Agendor — aba Integrações.
  *
  * Diferente do Datalytics (onde o usuário cola NOSSA URL no painel deles),
  * aqui o fluxo é invertido: o usuário cola o TOKEN DO AGENDOR do cliente e o

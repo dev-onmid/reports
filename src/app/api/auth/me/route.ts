@@ -28,8 +28,10 @@ export async function GET(req: Request) {
       userId: String(user.id), name: user.name, email: user.email, role: user.role, team: user.team,
     });
   } catch {
-    // Falha de banco não pode virar sessão válida.
-    return Response.json({ error: 'Não autenticado.' }, { status: 401 });
+    // auditoria 2026-08-22: falha de banco NÃO é sessão inválida. Devolver 401
+    // aqui deslogava todo mundo sempre que o Postgres piscava; 503 deixa o
+    // cliente distinguir "indisponível" (tentar de novo) de "expirou" (relogar).
+    return Response.json({ error: 'indisponivel' }, { status: 503 });
   } finally {
     await pool.end();
   }
