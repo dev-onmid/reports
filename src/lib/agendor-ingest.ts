@@ -79,15 +79,32 @@ export async function buscarPessoaAgendor(
  * o mesmo vocabulário da pessoa (name/contact/leadOrigin/address), então o
  * normalizador é reaproveitado. Falha → null.
  */
+/**
+ * Cache de empresas por processo. Duas coisas o justificam: a MESMA empresa
+ * aparece em vários negócios, e Incorpast/Londrigifts usam o MESMO token do
+ * Agendor — sem cache, a conta leva o dobro de consultas e toma 429.
+ * TTL curto: origem de lead praticamente não muda dentro de uma execução.
+ */
+const cacheOrgs = new Map<string, { em: number; valor: PessoaAgendor | null }>();
+const TTL_ORG_MS = 10 * 60_000;
+
 export async function buscarOrganizacaoAgendor(
   apiToken: string, orgId: string,
 ): Promise<PessoaAgendor | null> {
+  const chave = `${apiToken.slice(0, 8)}:${orgId}`;
+  const cache = cacheOrgs.get(chave);
+  if (cache && Date.now() - cache.em < TTL_ORG_MS) return cache.valor;
+  // Mesmo ritmo da busca de pessoa (~100 req/min): sem isto, o fallback de
+  // empresa dobrava a cadência e derrubava a importação inteira com 429.
+  await new Promise(res => setTimeout(res, 600));
   try {
     const r = await agendorFetch<{ data?: Record<string, unknown> }>(
       apiToken, `${AGENDOR_API}/organizations/${encodeURIComponent(orgId)}`);
-    return r?.data ? normalizarPessoa(r.data) : null;
+    const valor = r?.data ? normalizarPessoa(r.data) : null;
+    cacheOrgs.set(chave, { em: Date.now(), valor });
+    return valor;
   } catch {
-    return null;
+    return null;   // falha NÃO entra no cache: a próxima passada tenta de novo
   }
 }
 

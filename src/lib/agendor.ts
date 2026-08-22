@@ -219,7 +219,17 @@ export function passaFiltros(
     }
   }
   if (filtros.origens && filtros.origens.length > 0) {
-    if (opts?.origemDesconhecida) return { passa: true, motivo: null };
+    // ⚠️ Origem NÃO verificada (a busca da pessoa/empresa falhou, tipicamente
+    // 429 do Agendor) não pode entrar quando há filtro de origem. A regra
+    // anterior deixava passar "pra não perder negócio por um 429 passageiro" —
+    // mas nestas contas o 429 é SISTEMÁTICO, então a peneira virava um buraco:
+    // 701 dos 748 negócios da Londrigifts entraram sem verificação nenhuma e
+    // o faturamento da dashboard subiu R$ 462 mil (auditoria 2026-08-22).
+    // O negócio não é descartado pra sempre: a página é refeita quando há
+    // muitas falhas e a reconciliação por updatedAtGt volta a vê-lo.
+    if (opts?.origemDesconhecida) {
+      return { passa: false, motivo: 'origem não verificada (limite de requisições) — será tentado de novo' };
+    }
     const id = pessoa?.origemLeadId ?? null;
     // Origem conhecida e fora da lista → barra. Pessoa sem origem cadastrada
     // no Agendor conta como "fora" quando há filtro — origem específica foi

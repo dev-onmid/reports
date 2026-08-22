@@ -135,7 +135,16 @@ console.log(`✓ ${n} asserts (com filtros)`);
 {
   const soSite = { funis: null, origens: ['5'] };
   const neg = { idExterno: '1', funilId: null, funilNome: null, pessoa: { id: '9' } };
-  ok(passaFiltros(soSite, neg, null, { origemDesconhecida: true }).passa, 'falha na busca → passa (não perder por 429)');
+  // ⚠️ REGRA INVERTIDA em 2026-08-22 (caso Londrigifts): origem não verificada
+  // NÃO entra quando há filtro de origem. O 429 nessas contas é sistemático, e
+  // "passa no escuro" tinha deixado R$ 462 mil de negócios não-filtrados na base.
+  ok(!passaFiltros(soSite, neg, null, { origemDesconhecida: true }).passa,
+    'falha na busca da origem → NÃO passa quando há filtro de origem');
+  ok(/não verificada/.test(passaFiltros(soSite, neg, null, { origemDesconhecida: true }).motivo ?? ''),
+    'motivo diz que a origem não foi verificada (é adiamento, não rejeição definitiva)');
+  // sem filtro de origem, desconhecida continua entrando (nada a filtrar)
+  ok(passaFiltros({ funis: null, origens: null }, neg, null, { origemDesconhecida: true }).passa,
+    'sem filtro de origem, negócio entra mesmo sem origem verificada');
   ok(!passaFiltros(soSite, neg, null).passa, 'sem pessoa e sem flag → barra como antes');
   ok(!passaFiltros(soSite, neg, { origemLeadId: null, origemLead: null }, { origemDesconhecida: false }).passa,
      'pessoa BUSCADA sem origem → barra (o filtro pediu origens específicas)');
