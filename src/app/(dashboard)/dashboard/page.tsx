@@ -4301,7 +4301,17 @@ function premiumValue(value: number | null | undefined, format: PremiumMetricFor
   if (format === 'currency') return formatCurrencyBRL(value);
   if (format === 'percent') return `${value.toFixed(digits).replace('.', ',')}%`;
   if (format === 'times') return `${value.toFixed(2).replace('.', ',')}x`;
-  return value.toLocaleString('pt-BR');
+  // ⚠️ Arredonda: o formato 'number' desta tela é sempre CONTAGEM (leads,
+  // cliques, impressões, alcance, pedidos) e contagem não tem casa decimal.
+  //
+  // O Google Ads devolve `metrics.conversions` como DOUBLE de propósito —
+  // atribuição não-último-clique divide o crédito de uma conversão entre os
+  // pontos de contato, então uma campanha fica com uma fração dela. Medido em
+  // produção na Londrigifts: 253,998318 + 139,166666 + 6 + 26,331404 + 2 =
+  // 427,496388. Somado ao Meta, o card de Leads mostrava "376,998" como se
+  // fosse gente. O número é REAL; o que não fazia sentido era exibi-lo assim.
+  // A precisão continua inteira em tudo que é conta (CPL, taxas, séries).
+  return Math.round(value).toLocaleString('pt-BR');
 }
 
 function PremiumPanel({ children, className = '', style }: { children: ReactNode; className?: string; style?: React.CSSProperties }) {
@@ -4779,7 +4789,7 @@ function SimpleFunnel({ steps, totalRate, fonteLabel, onStageClick }: {
               <p className={cn(
                 'mt-1 font-heading text-lg leading-none text-[#f4f7f8]',
                 clicavel && 'underline decoration-white/20 decoration-dotted underline-offset-4',
-              )}>{step.actual.toLocaleString('pt-BR')}</p>
+              )}>{Math.round(step.actual).toLocaleString('pt-BR')}</p>
               {actualPct !== null && (
                 <div className="mt-1">
                   <span className={cn('text-[10px] font-black', isBottleneck ? 'text-red-400' : 'text-[#6cff2f]')}>
