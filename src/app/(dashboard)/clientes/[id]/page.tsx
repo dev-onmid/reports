@@ -51,7 +51,6 @@ import { HistoricoTab } from '@/components/historico-tab';
 import { VaultTab } from '@/components/vault-tab';
 import CrmWorkspace from '@/app/(dashboard)/crm/page';
 import { ClientTrackingTab } from './tracking-tab';
-import { LandingPagesTab } from './landing-pages-tab';
 import { ClientDemandasTab } from './demandas-tab';
 import { ClientReunioesTab } from './reunioes-tab';
 import { ClientFidelidadeTab } from './fidelidade-tab';
@@ -4456,16 +4455,13 @@ function SheetsResultsTab({ clientId }: { clientId: string }) {
 }
 
 // ── Page ───────────────────────────────────────────────────────────────────────
-const TABS = ['planejamento', 'demandas', 'reunioes', 'crm', 'rastreio', 'pagamentos', 'fidelidade', 'lps', 'dna', 'historico', 'mapa'] as const;
+const TABS = ['planejamento', 'demandas', 'reunioes', 'crm', 'rastreio', 'pagamentos', 'fidelidade', 'historico'] as const;
 type Tab = typeof TABS[number];
-// Abas operacionais sempre visíveis na barra; o resto (referência) vai pro menu "Mais".
+// Todas as abas visíveis direto na barra — o menu "Mais" morreu em 2026-08-21
+// (pedido do Matheus): Landing Pages virou "Mapa de Calor" dentro da aba
+// Integrações, DNA e Mapa Mental saíram, e Histórico subiu pra barra.
+// `fidelidade` entra condicionalmente (só cliente com o interruptor ligado).
 const PRIMARY_TABS: Tab[] = ['planejamento', 'demandas', 'reunioes', 'crm', 'rastreio', 'pagamentos'];
-// `delivery` fica no overflow porque só interessa a cliente de cardápio digital.
-// A aba aparece para todos de propósito: é por ela que se CONECTA uma loja nova
-// (sem conexão, ela mostra o formulário em vez do painel).
-// `fidelidade` acompanha `delivery`: as duas só fazem sentido para cliente com
-// cardápio digital, e a de fidelidade lê exatamente a base que a outra conecta.
-const MORE_TABS: Tab[] = ['fidelidade', 'lps', 'dna', 'historico', 'mapa'];
 
 function readSavedDashboardBlocks(clientId: string): ClientDashboardWidget[] {
   if (typeof window === 'undefined') return [];
@@ -4536,13 +4532,12 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
   const [tab, setTab] = useState<Tab>(() => {
     if (typeof window === 'undefined') return 'planejamento';
     const t = new URLSearchParams(window.location.search).get('tab');
-    // A aba Delivery virou sub-aba da Integrações (2026-08-21) — link antigo
-    // ?tab=delivery (ex.: card do dashboard) cai no lugar novo, não no default.
-    if (t === 'delivery') return 'rastreio';
+    // Delivery e Landing Pages viraram sub-abas da Integrações (2026-08-21) —
+    // links antigos caem no lugar novo, não no default.
+    if (t === 'delivery' || t === 'lps') return 'rastreio';
     return TABS.includes(t as Tab) ? (t as Tab) : 'planejamento';
   });
   const [configOpen, setConfigOpen] = useState(false);
-  const [moreOpen, setMoreOpen] = useState(false);
   const [linkDialogOpen, setLinkDialogOpen] = useState(false);
   const [statusDialogOpen, setStatusDialogOpen] = useState(false);
   const [pendingStatus, setPendingStatus] = useState<ClientStatus | null>(null);
@@ -4581,9 +4576,6 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
   }, [storedClient?.category_id, storedClient?.dashboard_type, storedClient?.funil_fonte_topo,
       storedClient?.fidelidade_ativa]);
 
-  // A aba Fidelidade só entra no menu "Mais" quando o cliente está ligado —
-  // cliente cujo cardápio já faz campanha por dentro não vê a aba existir.
-  const moreTabs = MORE_TABS.filter(t => t !== 'fidelidade' || clientFidelidade);
 
   async function patchClient(patch: Record<string, unknown>) {
     await fetch(`/api/clients?id=${id}`, {
@@ -4743,12 +4735,9 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
     planejamento: 'Planejamento',
     demandas:     'Demandas',
     reunioes:     'Reuniões',
-    mapa:         'Mapa Mental',
     historico:    'Histórico',
     rastreio:     'Integrações',
-    lps:          'Landing Pages',
     pagamentos:   'Pagamentos',
-    dna:          'DNA do Cliente',
     crm:          'CRM',
     fidelidade:   'Fidelidade',
   };
@@ -4978,7 +4967,7 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
 
       {/* Tabs nav */}
       <div className="flex gap-1 bg-card border border-border p-1 rounded-xl w-fit flex-wrap">
-        {PRIMARY_TABS.map((t) => (
+        {[...PRIMARY_TABS, ...(clientFidelidade ? (['fidelidade'] as Tab[]) : []), 'historico' as Tab].map((t) => (
           <button key={t} onClick={() => setTab(t)}
             className={cn(
               'px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-colors',
@@ -4989,39 +4978,6 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
             {tabLabel[t]}
           </button>
         ))}
-
-        {/* Overflow "Mais" — abas de referência */}
-        <div className="relative">
-          <button
-            onClick={() => setMoreOpen(o => !o)}
-            className={cn(
-              'flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-colors',
-              moreTabs.includes(tab)
-                ? 'bg-primary/20 text-primary shadow-[0_0_10px_rgba(85,245,47,0.15)]'
-                : 'text-muted-foreground hover:text-foreground'
-            )}>
-            {moreTabs.includes(tab) ? tabLabel[tab] : 'Mais'}
-            <ChevronDown className={cn('w-3.5 h-3.5 transition-transform', moreOpen && 'rotate-180')} />
-          </button>
-          {moreOpen && (
-            <>
-              <div className="fixed inset-0 z-40" onClick={() => setMoreOpen(false)} />
-              <div className="absolute left-0 top-full z-50 mt-1 w-48 rounded-xl border border-border bg-card p-1 shadow-xl">
-                {moreTabs.map((t) => (
-                  <button key={t} onClick={() => { setTab(t); setMoreOpen(false); }}
-                    className={cn(
-                      'w-full text-left px-3 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-colors',
-                      tab === t
-                        ? 'bg-primary/20 text-primary'
-                        : 'text-muted-foreground hover:text-foreground hover:bg-background'
-                    )}>
-                    {tabLabel[t]}
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
-        </div>
       </div>
 
       {/* Tab content */}
@@ -5036,15 +4992,9 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
       {tab === 'reunioes' && <ClientReunioesTab clientId={id} />}
       {tab === 'fidelidade' && <ClientFidelidadeTab clientId={id} />}
 
-      {tab === 'mapa' && <ClientMindMapTab clientId={id} clientName={client.name} />}
-
       {tab === 'historico' && <HistoricoTab clientId={id} />}
 
       {tab === 'rastreio' && <ClientTrackingTab clientId={id} />}
-
-      {tab === 'lps' && <LandingPagesTab clientId={id} />}
-
-      {tab === 'dna' && <ClientDnaTab clientId={id} clientName={client.name} />}
 
       {tab === 'pagamentos' && <InvestmentPaymentsTab clientId={id} clientName={client.name} />}
 

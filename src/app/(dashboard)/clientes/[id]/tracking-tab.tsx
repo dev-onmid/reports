@@ -11,6 +11,7 @@ import { ConversaoTile, GuideStepModal } from './conversao-guias';
 import { DatalyticsCard } from './datalytics-card';
 import { AgendorCard } from './agendor-card';
 import { ClientDeliveryTab } from './delivery-tab';
+import { LandingPagesTab } from './landing-pages-tab';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -212,7 +213,7 @@ function SectionHeader({ icon: Icon, title, subtitle, color = 'text-muted-foregr
 export function ClientTrackingTab({ clientId }: { clientId: string }) {
 
   // ── Sub-tab ────────────────────────────────────────────────────────────
-  const [activeTab, setActiveTab] = useState<'whatsapp' | 'conversoes' | 'datalytics' | 'agendor' | 'delivery' | 'log'>('whatsapp');
+  const [activeTab, setActiveTab] = useState<'whatsapp' | 'conversoes' | 'datalytics' | 'agendor' | 'delivery' | 'heatmap' | 'log'>('whatsapp');
 
   // ── Legacy tracking ────────────────────────────────────────────────────
   const [config, setConfig] = useState<TrackingConfig>({
@@ -557,6 +558,7 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
           { id: 'datalytics' as const, label: 'Datalytics', icon: Webhook },
           { id: 'agendor' as const, label: 'Agendor', icon: Webhook },
           { id: 'delivery' as const, label: 'Delivery', icon: Webhook },
+          { id: 'heatmap' as const, label: 'Mapa de Calor', icon: Webhook },
           { id: 'log'       as const, label: 'Log',         icon: BarChart3 },
         ]).map(({ id, label, icon: Icon }) => (
           <button key={id} onClick={() => setActiveTab(id)} className={cn(
@@ -1075,6 +1077,8 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
       {activeTab === 'agendor' && <AgendorCard clientId={clientId} />}
 
       {activeTab === 'delivery' && <ClientDeliveryTab clientId={clientId} />}
+
+      {activeTab === 'heatmap' && <LandingPagesTab clientId={clientId} />}
 
       {/* ══════════ TAB: Log ══════════ */}
       {activeTab === 'log' && (
