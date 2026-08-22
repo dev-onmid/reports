@@ -4511,10 +4511,12 @@ function QuickMetricCard({ title, value, change, icon: Icon, inverseChange, esti
   );
 }
 
-function MiniPlatformMetric({ label, value, sub, icon: Icon, logo, change, inverseChange }: {
+function MiniPlatformMetric({ label, value, sub, subRuim, icon: Icon, logo, change, inverseChange }: {
   label: string;
   value: string;
   sub?: string;
+  /** Pinta o `sub` de vermelho. Sem isto, perder seguidores no período sairia em verde. */
+  subRuim?: boolean;
   icon?: React.ElementType;
   logo?: ReactNode;
   change?: number | null;
@@ -4528,7 +4530,7 @@ function MiniPlatformMetric({ label, value, sub, icon: Icon, logo, change, inver
         <span className="text-[10px] font-black uppercase tracking-[0.08em] text-[#a7b0b6]">{label}</span>
       </div>
       <p className="font-heading text-xl leading-none text-[#f4f7f8]">{value}</p>
-      {sub && <p className="mt-1 text-xs font-semibold text-[#78d957]">{sub}</p>}
+      {sub && <p className={cn('mt-1 text-xs font-semibold', subRuim ? 'text-red-400' : 'text-[#78d957]')}>{sub}</p>}
       {change != null && (
         <p className={cn('mt-1 text-[10px] font-bold', isPositive ? 'text-[#6cff2f]' : 'text-red-400')}>
           {change >= 0 ? '+' : ''}{change.toFixed(1)}%
@@ -6022,13 +6024,16 @@ export default function GeneralDashboard() {
   const igFood = (() => {
     const cur = pageInsights.filter(p => p.instagram).map(p => p.instagram!);
     if (cur.length === 0) return null;
-    const s = (k: 'followers' | 'reach' | 'totalInteractions' | 'saves' | 'profileViews') =>
+    const s = (k: 'followers' | 'followersGained' | 'reach' | 'totalInteractions' | 'saves' | 'profileViews') =>
       cur.reduce((acc, d) => acc + (d[k] ?? 0), 0);
     const alcance = s('reach');
     const interacoes = s('totalInteractions');
+    const ganho = s('followersGained');
     return {
       seguidores: s('followers') || null,
-      novosSeguidores: null,
+      // Ganho do período (follower_count). Zero fica `null` porque não dá para
+      // distinguir "nenhum seguidor novo" de "conta sem a métrica".
+      novosSeguidores: ganho || null,
       alcance: alcance || null,
       interacoes: interacoes || null,
       salvamentos: s('saves') || null,
@@ -6336,6 +6341,10 @@ export default function GeneralDashboard() {
               const chg = (cur: number, prev: number): number | null =>
                 prev > 0 ? ((cur - prev) / prev) * 100 : null;
               const igFollow   = sum(allIg, 'followers');
+              // Seguidores GANHOS no período (metric follower_count) — o total
+              // (followers_count) é snapshot e vem igual nas duas janelas.
+              const igFollowGain   = sum(allIg, 'followersGained');
+              const prevFollowGain = sum(prevIg, 'followersGained');
               const igReach    = sum(allIg, 'reach');
               const igClicks   = sum(allIg, 'websiteClicks');
               const igEngaged  = sum(allIg, 'accountsEngaged');
@@ -6363,8 +6372,29 @@ export default function GeneralDashboard() {
                   </div>
                   <div className="px-4 pb-4">
                     <div className="grid gap-2 sm:grid-cols-4 lg:grid-cols-8">
-                      {/* Seguidores é um snapshot do total atual (followers_count), não uma métrica de período — comparar com o "anterior" daria sempre 0%, então não mostramos variação. */}
-                      <MiniPlatformMetric label="Seguidores" value={pageInsightsLoading ? '…' : igFollow > 0 ? premiumValue(igFollow) : '—'} icon={Users} />
+                      {/* ⚠️ O valor grande é o TOTAL de seguidores (snapshot), mas a
+                          evolução é a do GANHO no período contra o ganho do período
+                          anterior — mesma semântica dos vizinhos desta linha. Comparar
+                          o total daria sempre 0%: `followers_count` ignora a janela de
+                          datas e volta igual nas duas. O `sub` diz a que o % se refere.
+                          Sem sinal do metric nas duas janelas, não inventa: fica sem
+                          linha de apoio e sem variação. */}
+                      <MiniPlatformMetric
+                        label="Seguidores"
+                        value={pageInsightsLoading ? '…' : igFollow > 0 ? premiumValue(igFollow) : '—'}
+                        icon={Users}
+                        sub={pageInsightsLoading || (igFollowGain === 0 && prevFollowGain === 0)
+                          ? undefined
+                          : `${igFollowGain >= 0 ? '+' : ''}${premiumValue(igFollowGain)} no período`
+                            // Base anterior ≤ 0 (a conta perdeu seguidores antes, ou
+                            // não tinha a métrica): a porcentagem seria indefinida ou
+                            // absurda, então o comparativo vira texto em vez de sumir.
+                            + (chg(igFollowGain, prevFollowGain) === null && prevFollowGain !== 0
+                              ? ` · antes ${prevFollowGain >= 0 ? '+' : ''}${premiumValue(prevFollowGain)}`
+                              : '')}
+                        subRuim={igFollowGain < 0}
+                        change={chg(igFollowGain, prevFollowGain)}
+                      />
                       <MiniPlatformMetric label="Alcance" value={pageInsightsLoading ? '…' : igReach > 0 ? premiumValue(igReach) : '—'} icon={Eye} change={chg(igReach, prevReach)} />
                       <MiniPlatformMetric label="Cliques Bio" value={pageInsightsLoading ? '…' : igClicks > 0 ? premiumValue(igClicks) : '—'} icon={ExternalLink} change={chg(igClicks, prevClicks)} />
                       <MiniPlatformMetric label="Engajamento" value={pageInsightsLoading ? '…' : igEngaged > 0 ? premiumValue(igEngaged) : '—'} icon={Heart} change={chg(igEngaged, prevEngaged)} />

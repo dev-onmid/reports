@@ -25,7 +25,17 @@ export type InstagramPageData = {
   igUserId: string;
   username: string;
   picture: string | null;
+  /** Total de seguidores AGORA (followers_count) — snapshot, não é métrica de período. */
   followers: number;
+  /**
+   * Seguidores GANHOS no período (metric `follower_count`, soma dos dias).
+   *
+   * ⚠️ É esta a métrica que permite comparar Instagram com o período anterior.
+   * `followers` vem de `followers_count`, que ignora `since`/`until` e devolve o
+   * mesmo número nas duas janelas — comparar aquilo daria sempre 0%, que foi por
+   * onde o card ficou sem evolução.
+   */
+  followersGained: number;
   reach: number;
   views: number;
   profileViews: number;
@@ -239,11 +249,15 @@ async function fetchIgPage(
     //    impressions is not in the valid metric list — views is the correct one)
     const [
       profileRes,
+      followerGainRes,
       reachRes, viewsRes, profileViewsRes, websiteClicksRes,
       accountsEngagedRes, totalInteractionsRes, likesRes, savesRes,
       dailyMap,
     ] = await Promise.all([
       fetch(`https://graph.facebook.com/v21.0/${ig.id}?fields=followers_count&access_token=${pageToken}`),
+      // Sem metric_type: `follower_count` só responde como série diária — é a mesma
+      // receita já usada no gerador de relatórios, o caminho comprovado destas contas.
+      fetchIgMetricChunked(ig.id, 'follower_count',     since, until, pageToken),
       fetchIgMetricChunked(ig.id, 'reach',              since, until, pageToken),
       fetchIgMetricChunked(ig.id, 'views',              since, until, pageToken, 'total_value'),
       fetchIgMetricChunked(ig.id, 'profile_views',      since, until, pageToken, 'total_value'),
@@ -265,6 +279,7 @@ async function fetchIgPage(
       username: ig.username ?? (ig.name ?? ig.id),
       picture: ig.profile_picture_url ?? null,
       followers: profileData.followers_count ?? 0,
+      followersGained:   followerGainRes.total,
       reach:             reachRes.total,
       views:             viewsRes.total,
       profileViews:      profileViewsRes.total,
