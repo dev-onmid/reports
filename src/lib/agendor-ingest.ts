@@ -38,6 +38,7 @@ async function ensureColunasLead(pool: Pool) {
       ADD COLUMN IF NOT EXISTS agendou BOOLEAN DEFAULT FALSE,
       ADD COLUMN IF NOT EXISTS compareceu BOOLEAN DEFAULT FALSE,
       ADD COLUMN IF NOT EXISTS fechou BOOLEAN DEFAULT FALSE,
+      ADD COLUMN IF NOT EXISTS fechado_em DATE,
       ADD COLUMN IF NOT EXISTS external_id TEXT
   `).catch(() => {});
 }
@@ -123,6 +124,14 @@ export async function ingerirNegocioAgendor(
   // rótulo canônico de venda do sistema ('Fechado' — o que a importação grava).
   const labelEtapa = negocio.etapa ?? (negocio.status === 'ganho' ? 'Fechado' : null);
   const ganhou = negocio.status === 'ganho';
+  // ⚠️ Valor SÓ entra quando o negócio é GANHO. No Agendor todo negócio aberto
+  // carrega valor estimado; gravar isso em valor_rs quebra o invariante do
+  // sistema inteiro ("tem valor = vendeu") e inflava Faturamento/Funil com
+  // pipeline aberto. fechado_em é a data do ganho — é a régua do Faturamento.
+  const valorVenda = ganhou ? negocio.valor : null;
+  const fechadoEm = ganhou
+    ? ((negocio.ganhoEm ?? new Date().toISOString()).slice(0, 10))
+    : null;
 
   await pool.query('BEGIN');
   try {
@@ -163,6 +172,7 @@ export async function ingerirNegocioAgendor(
            fechou = COALESCE(fechou, FALSE) OR $5,
            valor_rs = COALESCE($6, valor_rs),
            revenue = COALESCE($6, revenue),
+           fechado_em = COALESCE(fechado_em, $13::date),
            nome = COALESCE(NULLIF(nome, ''), $7),
            email = COALESCE(NULLIF(email, ''), $8),
            numero = COALESCE(NULLIF(numero, ''), $9),
@@ -173,9 +183,9 @@ export async function ingerirNegocioAgendor(
          WHERE id = $1::uuid`,
         [
           match.id, labelEtapa, sinais.agendou, sinais.compareceu, fechou,
-          negocio.valor, pessoa?.nome ?? negocio.pessoa.nome ?? negocio.titulo,
+          valorVenda, pessoa?.nome ?? negocio.pessoa.nome ?? negocio.titulo,
           pessoa?.email ?? negocio.pessoa.email, pessoa?.telefoneBruto,
-          observacao, externalId, funnelId,
+          observacao, externalId, funnelId, fechadoEm,
         ],
       );
       if (labelEtapa) await espelharEtapa(pool, clientId, leadFunnel, labelEtapa);
@@ -192,8 +202,8 @@ export async function ingerirNegocioAgendor(
     const { rows: [novo] } = await pool.query<{ id: string }>(
       `INSERT INTO public.crm_leads
          (client_id, mes, data, nome, numero, canal, origin, observacao, status,
-          funnel_id, email, valor_rs, revenue, agendou, compareceu, fechou, external_id)
-       VALUES ($1, $2, $3, $4, $5, 'agendor', 'Agendor', $6, $7, $8, $9, $10, $10, $11, $12, $13, $14)
+          funnel_id, email, valor_rs, revenue, agendou, compareceu, fechou, fechado_em, external_id)
+       VALUES ($1, $2, $3, $4, $5, 'agendor', 'Agendor', $6, $7, $8, $9, $10, $10, $11, $12, $13, $14::date, $15)
        RETURNING id`,
       [
         clientId,
@@ -205,10 +215,11 @@ export async function ingerirNegocioAgendor(
         status,
         funnelId,
         pessoa?.email ?? negocio.pessoa.email,
-        negocio.valor,
+        valorVenda,
         s2.agendou,
         s2.compareceu,
         s2.fechou || ganhou,
+        fechadoEm,
         externalId,
       ],
     );

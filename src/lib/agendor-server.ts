@@ -184,17 +184,24 @@ export async function garantirAssinaturasAgendor(
     atuais = Array.isArray(r) ? r : (r?.data ?? []);
   } catch { /* lista indisponível → tenta criar; duplicata é o custo raro */ }
 
+  // Casa por PREFIXO: as assinaturas levam a mesma rota com query string
+  // diferente por evento (ver urlDoEvento abaixo), e as antigas eram a URL crua.
   const jaTem = new Set(
-    atuais.filter(s => s.target_url === targetUrl).map(s => String(s.event ?? '')),
+    atuais.filter(s => (s.target_url ?? '').startsWith(targetUrl)).map(s => String(s.event ?? '')),
   );
   const criadas: string[] = [];
   const erros: string[] = [];
+  // ⚠️ O Agendor exige target_url ÚNICA por assinatura (validação de unicidade
+  // do lado deles → 422 genérico em HTML). Descoberto ao vivo em 2026-08-21:
+  // o 1º evento com a URL crua passava e os outros 3 eram rejeitados. A saída é
+  // a MESMA rota com uma query string distinta por evento — o receptor ignora.
+  const urlDoEvento = (ev: string) => `${targetUrl}?ev=${ev.replace('on_deal_', '')}`;
   for (const evento of EVENTOS_ASSINADOS) {
     if (jaTem.has(evento)) continue;
     try {
       await agendorFetch(apiToken, AGENDOR_SUBS, {
         method: 'POST',
-        body: JSON.stringify({ target_url: targetUrl, event: evento }),
+        body: JSON.stringify({ target_url: urlDoEvento(evento), event: evento }),
       });
       criadas.push(evento);
     } catch (err) {

@@ -290,7 +290,8 @@ async function ensureCrmMetricsColumns(pool: ReturnType<typeof makeServerPool>) 
       ADD COLUMN IF NOT EXISTS data DATE,
       ADD COLUMN IF NOT EXISTS nome TEXT,
       ADD COLUMN IF NOT EXISTS valor_rs NUMERIC,
-      ADD COLUMN IF NOT EXISTS fechou BOOLEAN DEFAULT FALSE
+      ADD COLUMN IF NOT EXISTS fechou BOOLEAN DEFAULT FALSE,
+      ADD COLUMN IF NOT EXISTS fechado_em DATE
   `);
 }
 
@@ -331,18 +332,33 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     googleConns = g;
     metaConns = m;
 
+    // ⚠️ Duas janelas de data de propósito (pedido do Matheus, caso Incorpast):
+    //  - LEADS contam pelo mês em que o lead foi CRIADO (topo do funil);
+    //  - RECEITA/VENDAS contam pelo mês do GANHO (fechado_em, gravado pela
+    //    ingestão do Agendor) — negócio criado em junho e fechado em julho é
+    //    faturamento de JULHO, igual ao painel do CRM externo. Lead sem
+    //    fechado_em (planilha, WhatsApp) continua caindo na data do lead.
+    // "Data NULL fica dentro" preservado nas duas janelas.
     const crmRows = await safeRows(
       pool,
       `SELECT
-          COALESCE(SUM(COALESCE(NULLIF(revenue, 0), valor_rs, 0)), 0)::float AS revenue,
-          COUNT(*) FILTER (WHERE COALESCE(NULLIF(revenue, 0), valor_rs, 0) > 0 OR fechou = TRUE)::int AS sales,
-          COUNT(*)::int AS leads
-         FROM public.crm_leads
-        WHERE client_id = $1
-          AND (
+          COALESCE(SUM(COALESCE(NULLIF(revenue, 0), valor_rs, 0)) FILTER (WHERE
+            COALESCE(fechado_em, lead_date, data) IS NULL
+            OR COALESCE(fechado_em, lead_date, data) BETWEEN $2 AND $3
+          ), 0)::float AS revenue,
+          COUNT(*) FILTER (WHERE
+            (COALESCE(NULLIF(revenue, 0), valor_rs, 0) > 0 OR fechou = TRUE)
+            AND (
+              COALESCE(fechado_em, lead_date, data) IS NULL
+              OR COALESCE(fechado_em, lead_date, data) BETWEEN $2 AND $3
+            )
+          )::int AS sales,
+          COUNT(*) FILTER (WHERE
             COALESCE(lead_date, data) IS NULL
             OR COALESCE(lead_date, data) BETWEEN $2 AND $3
-          )`,
+          )::int AS leads
+         FROM public.crm_leads
+        WHERE client_id = $1`,
       [clientId, crmPeriod.from, crmPeriod.to],
     );
     const crm = crmRows[0];
@@ -356,20 +372,37 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         ticket: sales > 0 ? revenue / sales : 0,
       };
     }
-    crmDailyRows = await safeRows(
-      pool,
-      `SELECT
-          COALESCE(lead_date, data)::text AS date,
-          COALESCE(SUM(COALESCE(NULLIF(revenue, 0), valor_rs, 0)), 0)::float AS revenue,
-          COUNT(*) FILTER (WHERE COALESCE(NULLIF(revenue, 0), valor_rs, 0) > 0 OR fechou = TRUE)::int AS sales,
-          COUNT(*)::int AS leads
-         FROM public.crm_leads
-        WHERE client_id = $1
-          AND COALESCE(lead_date, data) BETWEEN $2 AND $3
-        GROUP BY COALESCE(lead_date, data)
-        ORDER BY COALESCE(lead_date, data)`,
-      [clientId, crmPeriod.from, crmPeriod.to],
-    ) as CrmDailyRow[];
+    // Série diária com as mesmas duas réguas do total: uma query por régua,
+    // mescladas por dia (leads no dia da criação; receita/vendas no dia do ganho).
+    const [leadsDia, vendasDia] = await Promise.all([
+      safeRows(
+        pool,
+        `SELECT COALESCE(lead_date, data)::text AS date, COUNT(*)::int AS leads
+           FROM public.crm_leads
+          WHERE client_id = $1 AND COALESCE(lead_date, data) BETWEEN $2 AND $3
+          GROUP BY 1`,
+        [clientId, crmPeriod.from, crmPeriod.to],
+      ) as Promise<Array<{ date: string; leads: number }>>,
+      safeRows(
+        pool,
+        `SELECT COALESCE(fechado_em, lead_date, data)::text AS date,
+                COALESCE(SUM(COALESCE(NULLIF(revenue, 0), valor_rs, 0)), 0)::float AS revenue,
+                COUNT(*) FILTER (WHERE COALESCE(NULLIF(revenue, 0), valor_rs, 0) > 0 OR fechou = TRUE)::int AS sales
+           FROM public.crm_leads
+          WHERE client_id = $1 AND COALESCE(fechado_em, lead_date, data) BETWEEN $2 AND $3
+          GROUP BY 1`,
+        [clientId, crmPeriod.from, crmPeriod.to],
+      ) as Promise<Array<{ date: string; revenue: number; sales: number }>>,
+    ]);
+    const porDia = new Map<string, CrmDailyRow>();
+    for (const r of leadsDia) porDia.set(r.date, { date: r.date, revenue: 0, sales: 0, leads: Number(r.leads ?? 0) });
+    for (const r of vendasDia) {
+      const atual = porDia.get(r.date) ?? { date: r.date, revenue: 0, sales: 0, leads: 0 };
+      atual.revenue = Number(r.revenue ?? 0);
+      atual.sales = Number(r.sales ?? 0);
+      porDia.set(r.date, atual);
+    }
+    crmDailyRows = [...porDia.values()].sort((a, b) => a.date.localeCompare(b.date));
 
     const legacyMeta = legacyMetaIntegration[0];
     if (legacyMeta?.access_token) {
