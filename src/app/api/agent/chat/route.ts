@@ -88,7 +88,6 @@ As ferramentas add_client_vault_credential, reschedule_client_payment, set_clien
 
 ## Visão do sistema (use antes de responder "não sei")
 Você tem acesso ao sistema INTEIRO — se o usuário perguntar sobre qualquer módulo, existe uma ferramenta:
-- get_optimizer_analysis: o que o Otimizador recomendou e a saúde da conta. get_optimizer_queue: fila global de decisões pendentes ("o que precisa de ação agora", todos os clientes ou um só).
 - get_client_goals: metas/planejamento do cliente (combine com métricas pra responder "está batendo a meta?").
 - get_lead_attribution / get_demographics: de onde vêm os leads (campanha/criativo/keyword/região) e perfil do público.
 - get_social_monitor: Instagram da carteira (dias sem post, seguidores, alcance). get_ig_posts: posts individuais de um cliente com métricas.

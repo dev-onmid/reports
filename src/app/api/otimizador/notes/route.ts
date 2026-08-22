@@ -1,6 +1,6 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
-import { ensureOptimizerManualNotesTable, normalizeNoteStatus } from '@/lib/optimizer';
+import { ensureOptimizerManualNotesTable, normalizeNoteStatus } from '@/lib/otimizador-legado';
 import { getSession, unauthorized } from '@/lib/api-auth';
 
 // Observações manuais do gestor por nível (cliente/campanha/conjunto/criativo). Registro

@@ -83,8 +83,6 @@ const CRON_PREFIXES = [
   '/api/disparos/worker',
   '/api/email/worker',
   '/api/leadlovers/worker',
-  '/api/otimizador/daily',
-  '/api/otimizador/weekly',
   '/api/reports/cron-monthly',
   '/api/social-monitor/refresh',
 ];

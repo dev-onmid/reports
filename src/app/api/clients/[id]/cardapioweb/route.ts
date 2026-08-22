@@ -6,7 +6,7 @@ import { ensureAnotaAiSchema, listarLojas, garantirWebhookToken } from '@/lib/an
 import { lerPedidosDelivery } from '@/lib/delivery-orders';
 import { optimizerDateRangeForPeriod } from '@/lib/optimizer-period-range';
 import { autoPreviousPeriod } from '@/lib/delivery-report-builder';
-import type { OptimizerPeriodKey } from '@/lib/optimizer';
+import type { OptimizerPeriodKey } from '@/lib/otimizador-legado';
 import {
   agruparPorCliente, agregarFunil, sugerirRegua, normalizarRegua, normalizarTelefoneBR,
   resumoPeriodo, agregarCupons, variacao, funilEm, limitesBRT, noPeriodo,

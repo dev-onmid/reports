@@ -21,14 +21,14 @@ const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const HEADLESS_READ_TOOLS = new Set([
   'list_clients', 'get_client_accounts', 'get_crm_data', 'get_meta_campaigns', 'get_google_campaigns',
   'get_monthly_history', 'get_account_balances', 'list_zapi_clients', 'list_users', 'list_client_payments',
-  'get_meta_structure', 'get_google_structure', 'get_google_search_terms', 'get_optimizer_analysis', 'get_client_goals', 'get_lead_attribution',
+  'get_meta_structure', 'get_google_structure', 'get_google_search_terms', 'get_client_goals', 'get_lead_attribution',
   'get_demographics', 'get_social_monitor', 'get_ai_costs', 'search_crm_leads', 'get_lead_conversation',
   'get_crm_stats', 'generate_report_pdf', 'send_report_pdf_whatsapp', 'list_luna_tasks',
   // Cobertura total do sistema (leitura)
   'list_reports', 'get_report_configs', 'list_disparos_campaigns', 'get_whatsapp_instances',
   'get_crm_inbox', 'get_followup_status', 'list_automations', 'list_email_campaigns',
   'list_leadlovers_campaigns', 'get_lp_analytics', 'get_link_redirects', 'get_ig_posts',
-  'get_optimizer_queue', 'get_activity_logs', 'list_client_assets',
+  'get_activity_logs', 'list_client_assets',
 ]);
 const HEADLESS_ACTION_TOOLS = new Set([
   'execute_ad_action', 'update_meta_campaign_status', 'duplicate_meta_campaign', 'move_crm_lead',

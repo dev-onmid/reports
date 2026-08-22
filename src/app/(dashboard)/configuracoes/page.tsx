@@ -46,7 +46,7 @@ const MODULES: { key: keyof Permission; label: string; icon: React.ElementType }
   { key: 'radar', label: 'Radar', icon: BarChart3 },
   { key: 'pagamentos', label: 'Pagamentos', icon: WalletCards },
   { key: 'disparos', label: 'Disparos', icon: MessageCircle },
-  { key: 'otimizador', label: 'Otimizador', icon: WandSparkles },
+  { key: 'otimizador', label: 'Histórico', icon: WandSparkles }, // a flag herdada gate o /otimizacoes
   { key: 'luna_ia', label: 'Luna IA', icon: Bot },
   { key: 'cofre', label: 'Cofre', icon: ShieldCheck },
   { key: 'automacoes', label: 'Automações', icon: Zap },
@@ -549,7 +549,6 @@ export default function ConfiguracoesPage() {
   const [aiUsageLoading, setAiUsageLoading] = useState(false);
   // null = ainda carregando (evita "piscar" o toggle antes de saber o estado real)
   const [crmAiGlobal, setCrmAiGlobal] = useState<boolean | null>(null);
-  const [otimizadorGlobal, setOtimizadorGlobal] = useState<boolean | null>(null);
   // Mês selecionado no histórico de uso de IA ('' = mais recente disponível)
   const [aiMonth, setAiMonth] = useState('');
   const [aiBilling, setAiBilling] = useState<AiBillingSettings>({
@@ -647,14 +646,6 @@ export default function ConfiguracoesPage() {
     }
   }
 
-  async function toggleOtimizadorGlobal(next: boolean) {
-    setOtimizadorGlobal(next);
-    await fetch('/api/otimizador/global-config', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...callerHeaders() },
-      body: JSON.stringify({ ativo: next }),
-    }).catch(() => undefined);
-  }
 
   async function saveAiBilling() {
     setAiBillingSaving(true);
@@ -871,7 +862,7 @@ export default function ConfiguracoesPage() {
     { key: 'permissoes' as const, label: 'Permissões' },
     { key: 'ia' as const, label: 'Uso IA' },
     { key: 'instancias' as const, label: 'Instâncias' },
-    { key: 'otimizador' as const, label: 'Otimizador' },
+    { key: 'otimizador' as const, label: 'Alertas WhatsApp' }, // ex-aba Otimizador: sobrou só o destino dos alertas
     { key: 'integracoes' as const, label: 'Integrações' },
     { key: 'logs' as const, label: 'Logs' },
     { key: 'legal' as const, label: 'Legal' },
@@ -883,10 +874,6 @@ export default function ConfiguracoesPage() {
     void fetch('/api/otimizador/whatsapp-config')
       .then((res) => res.ok ? res.json() as Promise<OtimizadorWaConfig> : null)
       .then((data) => { if (data) setOtimizadorWa(data); })
-      .catch(() => {});
-    void fetch('/api/otimizador/global-config', { headers: callerHeaders() })
-      .then((res) => res.ok ? res.json() as Promise<{ ativo: boolean }> : null)
-      .then((data) => { if (data) setOtimizadorGlobal(data.ativo); })
       .catch(() => {});
   }, [activeTab]);
 
@@ -1779,37 +1766,10 @@ export default function ConfiguracoesPage() {
 
       {activeTab === 'otimizador' && (
         <div className="space-y-6">
-          <div className={cn(
-            'rounded-[var(--radius)] border bg-card p-5',
-            otimizadorGlobal === false ? 'border-red-500/40' : 'border-border',
-          )}>
-            <div className="flex flex-wrap items-center justify-between gap-4">
-              <div>
-                <p className="text-sm font-semibold text-foreground">Análises automáticas do Otimizador</p>
-                <p className="text-xs text-muted-foreground mt-0.5 max-w-xl">
-                  Interruptor geral do rodízio semanal (cron). Desligado, nenhuma análise automática roda — e nenhum custo de IA é gerado.
-                  Análises manuais pela tela do Otimizador continuam funcionando. Para tirar só um cliente do rodízio, use o toggle na Config do cliente (tela do Otimizador → engrenagem).
-                </p>
-              </div>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={otimizadorGlobal ?? true}
-                  disabled={otimizadorGlobal === null}
-                  onChange={(e) => void toggleOtimizadorGlobal(e.target.checked)}
-                  className="h-4 w-4 rounded border-border accent-primary"
-                />
-                <span className={cn('text-sm font-semibold', otimizadorGlobal === false ? 'text-red-400' : 'text-foreground')}>
-                  {otimizadorGlobal === null ? '...' : otimizadorGlobal ? 'Ativadas' : 'Desativadas'}
-                </span>
-              </label>
-            </div>
-          </div>
-
           <div className="rounded-[var(--radius)] border border-border bg-card p-5 space-y-5">
             <div>
-              <p className="text-sm font-semibold text-foreground">Relatórios via WhatsApp</p>
-              <p className="text-xs text-muted-foreground mt-0.5">Após cada análise semanal, o sistema envia um resumo para o grupo configurado abaixo.</p>
+              <p className="text-sm font-semibold text-foreground">Grupo de alertas no WhatsApp</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Instância e grupo que recebem os alertas do sistema (instância Evolution desconectada, avisos automáticos).</p>
             </div>
 
             <div className="grid gap-4 sm:grid-cols-2">

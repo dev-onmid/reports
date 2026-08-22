@@ -11,12 +11,12 @@ import { sendEvolutionText } from '@/lib/evolution-api';
 import { getFreshMetaToken } from '@/lib/meta-token';
 import { resolveMetaPeriod, resolveGaqlPeriod, applyMetaDateToUrl } from '@/lib/period-utils';
 import { countMetaResults } from '@/lib/meta-results';
-import { ensureOptimizerClientConfigTable } from '@/lib/optimizer';
+import { ensureOptimizerClientConfigTable } from '@/lib/otimizador-legado';
 import { executeOptimizerAction } from '@/lib/optimizer-execucao';
 import { dispararEventosPorStatus } from '@/lib/conversions';
 import { sanitizeGoogleKeywords, parsePartialFailure, cityNameVariants, type PartialFailureResult } from '@/lib/google-campaign-utils';
 import { salvarAssetDeUrl, salvarVideoUrl, listarAssets, obterAssetImagem } from '@/lib/client-assets';
-import type { OptimizerAcaoTipo, OptimizerObjetoTipo } from '@/lib/optimizer';
+import type { OptimizerAcaoTipo, OptimizerObjetoTipo } from '@/lib/otimizador-legado';
 
 // ─── Agendamento (luna_tasks) ────────────────────────────────────────────────
 
@@ -999,15 +999,6 @@ Sempre confirme com o usuário antes de remover; pausar é reversível, remover 
   },
   // ── Pacote C: cérebro do sistema ──────────────────────────────────────────
   {
-    name: 'get_optimizer_analysis',
-    description: 'Última análise do Otimizador de Campanhas para um cliente (Meta e Google): estado da conta (SAUDAVEL/ATENCAO/CRISE), resumo executivo e recomendações da IA. Use para responder "o que o otimizador recomendou", "como está a saúde da conta".',
-    input_schema: {
-      type: 'object',
-      properties: { client_id: { type: 'string', description: 'ID do cliente' } },
-      required: ['client_id'],
-    },
-  },
-  {
     name: 'get_client_goals',
     description: 'Metas e planejamento de um cliente: meta de faturamento/leads, CPL meta, ticket médio (tkm) e funil planejado por etapa. Combine com get_meta_campaigns/get_monthly_history para responder "está batendo a meta?".',
     input_schema: {
@@ -1259,15 +1250,6 @@ Sempre confirme com o usuário antes de remover; pausar é reversível, remover 
         limit: { type: 'number', description: 'Máx de posts (padrão 12)' },
       },
       required: ['client_id'],
-    },
-  },
-  {
-    name: 'get_optimizer_queue',
-    description: 'Fila global de decisões do Otimizador: recomendações pendentes por conta (o que precisa de ação agora). Sem client_id retorna a fila de todos.',
-    input_schema: {
-      type: 'object' as const,
-      properties: { client_id: { type: 'string', description: 'Filtrar por cliente (opcional)' } },
-      required: [],
     },
   },
   {
@@ -2193,14 +2175,6 @@ export async function execSystemTool(
       );
       if (!data) return 'Não consegui buscar os posts do Instagram (conta não vinculada ou erro na Graph).';
       return JSON.stringify(data).slice(0, 20000);
-    }
-
-    if (name === 'get_optimizer_queue') {
-      const qs = input.client_id ? `?clientId=${encodeURIComponent(input.client_id as string)}` : '';
-      const data = await fetchInternal(`/api/otimizador/fila${qs}`);
-      if (!data) return 'Não consegui consultar a fila do Otimizador.';
-      const recs = Array.isArray(data.recs) ? data.recs.slice(0, 20) : [];
-      return JSON.stringify({ contas: data.contas ?? [], decisoes_pendentes: recs, gerado_em: data.generated_at ?? null });
     }
 
     if (name === 'get_activity_logs') {
@@ -3690,33 +3664,6 @@ export async function execSystemTool(
       return `✅ Anúncio RSA ${adId} (grupo "${alvo.adGroup?.name ?? adGroupId}") atualizado: ${partes.join(' · ')}.\n   ⚠️ A edição reenvia o anúncio para revisão do Google (algumas horas fora do ar até aprovar).`;
     }
 
-    if (name === 'get_optimizer_analysis') {
-      const clientId = input.client_id as string;
-      const { rows } = await pool.query(
-        `SELECT DISTINCT ON (COALESCE(conta_plataforma, 'meta'))
-                cliente_nome, conta_plataforma, semana_analise, estado_da_conta, resumo_executivo, resultado, created_at
-           FROM public.optimizer_ai_logs
-          WHERE cliente_id = $1 AND erro IS NULL
-          ORDER BY COALESCE(conta_plataforma, 'meta'), created_at DESC`,
-        [clientId]
-      ).catch(() => ({ rows: [] as Record<string, unknown>[] }));
-      if (rows.length === 0) return 'Nenhuma análise do Otimizador encontrada para esse cliente.';
-      const out = rows.map(r => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const resultado: any = typeof r.resultado === 'string' ? JSON.parse(r.resultado as string) : r.resultado;
-        return {
-          plataforma: r.conta_plataforma ?? 'meta',
-          semana: r.semana_analise,
-          data: r.created_at,
-          estado_da_conta: r.estado_da_conta,
-          resumo_executivo: r.resumo_executivo,
-          cruzamento_com_metas: resultado?.cruzamento_com_metas ?? null,
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          acoes: (resultado?.acoes_automaticas ?? []).slice(0, 8).map((a: any) => ({ acao: a.acao_tipo ?? a.acao, objeto: a.objeto_nome ?? a.nome, status: a.status, motivo: (a.justificativa ?? a.motivo ?? '').slice(0, 200) })),
-        };
-      });
-      return JSON.stringify(out).slice(0, 8000);
-    }
 
     if (name === 'get_client_goals') {
       const clientId = input.client_id as string;

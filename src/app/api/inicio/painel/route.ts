@@ -3,7 +3,7 @@ import { makeServerPool } from '@/lib/server-db';
 import { getSession, unauthorized } from '@/lib/api-auth';
 import { listar, contadores, ensureNotificacoesSchema, type NotificacaoRow } from '@/lib/notificacoes';
 import { eventosDeHoje, type AgendaEvento } from '@/lib/agenda-intake';
-import { ensureOptimizerManualNotesTable } from '@/lib/optimizer';
+import { ensureOptimizerManualNotesTable } from '@/lib/otimizador-legado';
 import {
   normalizarFeed, agruparPorConta, separarCarteira, montarQuadro, avisosCobertura,
   type ClienteRef, type NotaBruta,

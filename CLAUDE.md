@@ -154,6 +154,14 @@ Pedidos do Matheus: (1) o que é feito na conta do cliente (Meta/Google) — ant
 - **⚠️⚠️ RÉGUA PROTEGIDA**: o overview EXCLUI `origem='resumo'` da "última ação" — resumo é observação, não otimização; sem isso toda conta ficaria eternamente "em dia" e o alerta de atraso morreria. Registro novo automático no Histórico = decidir se conta na régua.
 - ✅ Validado em produção (dry): 18/08 → 6 clientes com ação real compilada ("Status da campanha ×4 — Leticia Ribeiro", orçamentos, programação de conjunto com nomes de campanha). ⚠️ Não verificado no browser: a seção nova da aba do cliente (só build); caminho Google ainda sem evento capturado em produção (mesmo código do log ao vivo). 1º registro real: amanhã 08h40.
 
+## OTIMIZADOR REMOVIDO do sistema (2026-08-22)
+
+Decisão do Matheus: "perdeu sentido, agora otimizo todas as campanhas com claudecode. Pode excluir do código". Removidos: as 4 telas (`/otimizador` + visao-geral/briefing/apresentacao), `src/components/otimizador/*`, as libs `optimizer.ts`/`optimizer-ui`/`optimizer-windows`/`optimizer-benchmarks`/`optimizer-whatsapp`, 14 rotas de `/api/otimizador/*`, o workflow `optimizer-weekly.yml`, o cron do vercel.json, as 2 tools da Luna (`get_optimizer_analysis`/`get_optimizer_queue`) e o item do menu.
+
+- **⚠️ SOBREVIVENTES (usados por OUTROS módulos — não deletar):** `src/lib/otimizador-legado.ts` (novo: tipos de ação + `ensureOptimizerManualNotesTable`/`ensureOptimizerClientConfigTable`/`normalizeNoteStatus` extraídos do optimizer.ts), `src/lib/optimizer-execucao.ts` (a Luna executa pausar/ativar/orçamento por ele — `execute_ad_action`), `src/lib/optimizer-period-range.ts` (tracking/creative-library/cardapioweb), e as rotas `/api/otimizador/notes` (Quadro do Gestor no Início), `/api/otimizador/whatsapp-config` e `/whatsapp-groups` (destino/pickers dos ALERTAS — evolution desconectada usa a tabela `optimizer_whatsapp_config`).
+- A aba "Otimizador" de Configurações virou **"Alertas WhatsApp"** (mesma key `otimizador` pra deep-link): só o card de instância+grupo; o interruptor de análises automáticas morreu com a rota. A flag de permissão `otimizador` CONTINUA (gate do Histórico `/otimizacoes`); o rótulo na tela de permissões virou "Histórico".
+- Tabelas do banco NÃO foram dropadas (optimizer_ai_logs etc. ficam como histórico morto).
+
 ## Faturamento do CRM — só negócio GANHO, no mês do GANHO (caso Incorpast, 2026-08-21)
 
 Print do Matheus: dashboard da Incorpast em "Mês passado" mostrava Realizado R$ 13.489,60 enquanto o painel do Agendor mostrava R$ 11,7k (Instagram) + R$ 18,1k (Google). Diagnóstico cruzando os 11 leads importados um a um contra a API do Agendor — eram TRÊS causas somadas:

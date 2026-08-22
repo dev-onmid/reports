@@ -1,4 +1,4 @@
-import type { OptimizerPeriodKey } from '@/lib/optimizer';
+import type { OptimizerPeriodKey } from '@/lib/otimizador-legado';
 
 export const OPTIMIZER_TIME_ZONE = 'America/Sao_Paulo';
 

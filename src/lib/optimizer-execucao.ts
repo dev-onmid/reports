@@ -1,7 +1,7 @@
 import type { Pool } from 'pg';
 import { makeServerPool } from '@/lib/server-db';
 import { getFreshMetaToken } from '@/lib/meta-token';
-import type { OptimizerAcaoTipo, OptimizerObjetoTipo } from '@/lib/optimizer';
+import type { OptimizerAcaoTipo, OptimizerObjetoTipo } from '@/lib/otimizador-legado';
 
 // Camada única de execução de ações do Otimizador (Meta + Google) + workflow por recomendação.
 // Reusada por executar / lote / desfazer para não duplicar mutação e log.
