@@ -75,6 +75,10 @@ export async function GET(req: NextRequest) {
         ORDER BY c.created_at DESC`,
       [scope.unrestricted, scope.userId],
     );
+    // ⚠️ Nunca devolver o Bearer Token cru ao navegador (achado da auditoria):
+    // mascara preservando os 4 últimos pra identificação. O PATCH trata valor
+    // mascarado como "manter o atual".
+    for (const r of rows) { if (r.auth_key) r.auth_key = `••••${String(r.auth_key).slice(-4)}`; }
     return Response.json(rows);
   } finally {
     await pool.end();

@@ -38,6 +38,8 @@ export async function GET(req: NextRequest) {
         ORDER BY created_at DESC`,
       params,
     );
+    // Token nunca sai cru (auditoria 2026-08-22) — mascarado com os 4 últimos.
+    for (const r of rows) { if (r.auth_key) r.auth_key = `••••${String(r.auth_key).slice(-4)}`; }
     return Response.json(rows);
   } finally {
     await pool.end();

@@ -1,5 +1,6 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
+import { getSession, requireAdmin, unauthorized } from '@/lib/api-auth';
 import { PERMISSION_KEYS, defaultPermission, type Permission } from '@/lib/mock-data';
 
 type Pool = ReturnType<typeof makeServerPool>;
@@ -47,11 +48,20 @@ async function ensureSchema(pool: Pool) {
   `).catch(() => {});
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  // Não-admin só enxerga a PRÓPRIA permissão (é tudo que o useMyPermissions
+  // precisa); o mapa completo é da tela de Configurações, que é de admin.
+  const session = getSession(req);
+  if (!session) return unauthorized();
   const pool = makeServerPool();
   try {
     await ensureSchema(pool);
-    const { rows } = await pool.query('SELECT * FROM public.user_permissions');
+    const { rows: me } = await pool.query(
+      'SELECT role FROM public.users WHERE id = $1 LIMIT 1', [session.uid]);
+    const ehAdmin = me[0]?.role === 'Administrador';
+    const { rows } = ehAdmin
+      ? await pool.query('SELECT * FROM public.user_permissions')
+      : await pool.query('SELECT * FROM public.user_permissions WHERE user_id = $1', [session.uid]);
     const map: Record<string, Permission> = {};
     for (const r of rows) {
       const perm = { ...defaultPermission };
@@ -69,6 +79,10 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  // ⚠️ Sem este gate, QUALQUER sessão válida podia conceder permissão total a
+  // si mesma com um fetch — achado da auditoria de 2026-08-22.
+  const gate = await requireAdmin(req);
+  if (!gate.ok) return gate.response;
   const body = await req.json() as { userId: string } & Partial<Permission>;
   if (!body.userId) return Response.json({ error: 'userId obrigatório' }, { status: 400 });
 

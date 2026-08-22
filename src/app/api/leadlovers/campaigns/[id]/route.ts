@@ -50,7 +50,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (body.machine_code !== undefined)        { sets.push(`machine_code = $${idx++}`);        vals.push(body.machine_code); }
     if (body.email_sequence_code !== undefined) { sets.push(`email_sequence_code = $${idx++}`); vals.push(body.email_sequence_code); }
     if (body.sequence_level_code !== undefined) { sets.push(`sequence_level_code = $${idx++}`); vals.push(body.sequence_level_code); }
-    if (body.auth_key !== undefined)            { sets.push(`auth_key = $${idx++}`);            vals.push(body.auth_key); }
+    // Valor mascarado (veio do GET) = usuário não trocou o token → manter.
+    if (body.auth_key !== undefined && !String(body.auth_key ?? '').includes('••••')) {
+      sets.push(`auth_key = $${idx++}`); vals.push(body.auth_key);
+    }
     if (body.status !== undefined)              { sets.push(`status = $${idx++}`);              vals.push(body.status); }
 
     if (sets.length === 1) return Response.json({ error: 'Nada para atualizar' }, { status: 400 });
