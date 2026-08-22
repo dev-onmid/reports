@@ -18,7 +18,6 @@ const routeRoles: Record<string, Role[]> = {
   '/resultados':  ['Administrador', 'Usuário'],
   '/ferramentas': ['Administrador', 'Usuário'],
   '/pagamentos':  ['Administrador', 'Usuário'],
-  '/biblioteca':  ['Administrador', 'Usuário'],
   '/disparos':    ['Administrador', 'Usuário'],
   '/otimizacoes': ['Administrador', 'Usuário'],
   '/agente':      ['Administrador', 'Usuário'],

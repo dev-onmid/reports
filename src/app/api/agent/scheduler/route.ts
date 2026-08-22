@@ -26,7 +26,7 @@ const HEADLESS_READ_TOOLS = new Set([
   'get_crm_stats', 'generate_report_pdf', 'send_report_pdf_whatsapp', 'list_luna_tasks',
   // Cobertura total do sistema (leitura)
   'list_reports', 'get_report_configs', 'list_disparos_campaigns', 'get_whatsapp_instances',
-  'get_crm_inbox', 'get_followup_status', 'list_automations', 'list_email_campaigns',
+  'get_crm_inbox', 'get_followup_status', 'list_automations',
   'list_leadlovers_campaigns', 'get_lp_analytics', 'get_link_redirects', 'get_ig_posts',
   'get_activity_logs', 'list_client_assets',
 ]);

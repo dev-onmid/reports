@@ -81,7 +81,6 @@ const CRON_PREFIXES = [
   '/api/crm/sync-cron',
   '/api/google/search-terms-cron',
   '/api/disparos/worker',
-  '/api/email/worker',
   '/api/leadlovers/worker',
   '/api/reports/cron-monthly',
   '/api/social-monitor/refresh',

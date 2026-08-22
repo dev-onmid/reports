@@ -63,7 +63,7 @@ import { useClients } from '@/lib/client-store';
 import { cn, formatCurrencyBRL } from '@/lib/utils';
 import { ClientAvatar } from '@/components/client-avatar';
 import type { TopCreative } from '@/app/api/meta/top-creatives/route';
-import type { PageInsightsResult, FacebookPageData, InstagramPageData } from '@/app/api/meta/page-insights/route';
+import type { PageInsightsResult, InstagramPageData } from '@/app/api/meta/page-insights/route';
 import type { CampaignPerformance } from '@/app/api/campaigns/route';
 import type { GoogleKeyword } from '@/app/api/google/keywords/route';
 import type { AudienceBreakdowns, AudienceResponse, AudienceSlice } from '@/app/api/audience/route';
@@ -4058,103 +4058,6 @@ function CreativeCarouselCard({ creative, idx, sortBy, onPreview }: {
           ))}
         </div>
       </div>
-    </div>
-  );
-}
-
-// ── Social Page Cards ─────────────────────────────────────────────────────────
-function numK(n: number) {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-  return n.toLocaleString('pt-BR');
-}
-
-function SocialMetricRow({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="flex items-center justify-between gap-2 text-xs">
-      <span className="text-foreground/55">{label}</span>
-      <span className="font-bold tabular-nums text-foreground">{numK(value)}</span>
-    </div>
-  );
-}
-
-function FbCard({ data }: { data: FacebookPageData }) {
-  const FB = '#1877F2';
-  return (
-    <div className="relative overflow-hidden rounded-xl border bg-[#070B14] p-4" style={{ borderColor: `${FB}55`, boxShadow: `0 0 28px ${FB}18` }}>
-      <div className="pointer-events-none absolute inset-0" style={{ background: `radial-gradient(circle at 88% 10%, ${FB}30, transparent 46%)` }} />
-      <div className="relative flex items-center gap-3 mb-3">
-        {data.picture
-          ? <img src={data.picture} alt={data.pageName} className="h-10 w-10 rounded-full object-cover border-2" style={{ borderColor: `${FB}88` }} />
-          : <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-2 text-white text-lg" style={{ borderColor: `${FB}88`, background: `${FB}33` }}>f</span>
-        }
-        <div className="min-w-0">
-          <p className="truncate text-[11px] font-bold uppercase tracking-widest" style={{ color: FB }}>Facebook</p>
-          <p className="truncate text-sm font-semibold text-foreground">{data.pageName}</p>
-        </div>
-      </div>
-      <div className="relative">
-        <p className="text-[10px] font-bold uppercase tracking-widest text-foreground/50 mb-0.5">Curtidas / Seguidores</p>
-        <p className="font-heading text-xl leading-none font-normal mb-3" style={{ color: FB }}>{numK(data.fans)}</p>
-        <div className="space-y-1.5 border-t border-white/10 pt-2">
-          {data.fanAdds > 0 && <SocialMetricRow label="Novas curtidas no período" value={data.fanAdds} />}
-          <SocialMetricRow label="Alcance" value={data.reach} />
-          <SocialMetricRow label="Impressões" value={data.impressions} />
-          <SocialMetricRow label="Engajamentos" value={data.engagements} />
-          <SocialMetricRow label="Visitas à página" value={data.pageViews} />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function IgCard({ data }: { data: InstagramPageData }) {
-  const IG = '#E1306C';
-  return (
-    <div className="relative overflow-hidden rounded-xl border bg-[#070B14] p-4" style={{ borderColor: `${IG}55`, boxShadow: `0 0 28px ${IG}18` }}>
-      <div className="pointer-events-none absolute inset-0" style={{ background: `radial-gradient(circle at 88% 10%, ${IG}28, transparent 46%)` }} />
-      <div className="relative flex items-center gap-3 mb-3">
-        {data.picture
-          ? <img src={data.picture} alt={data.username} className="h-10 w-10 rounded-full object-cover border-2" style={{ borderColor: `${IG}88` }} />
-          : <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-2 text-white text-lg" style={{ borderColor: `${IG}88`, background: `${IG}33` }}>ig</span>
-        }
-        <div className="min-w-0">
-          <p className="truncate text-[11px] font-bold uppercase tracking-widest" style={{ color: IG }}>Instagram</p>
-          <p className="truncate text-sm font-semibold text-foreground">{data.username}</p>
-        </div>
-      </div>
-      <div className="relative">
-        <p className="text-[10px] font-bold uppercase tracking-widest text-foreground/50 mb-0.5">Seguidores</p>
-        <p className="font-heading text-xl leading-none font-normal mb-3" style={{ color: IG }}>{numK(data.followers)}</p>
-        <div className="space-y-1.5 border-t border-white/10 pt-2">
-          <SocialMetricRow label="Alcance" value={data.reach} />
-          <SocialMetricRow label="Visualizações" value={data.views} />
-          <SocialMetricRow label="Visitas ao perfil" value={data.profileViews} />
-          {data.websiteClicks > 0 && <SocialMetricRow label="Cliques no site" value={data.websiteClicks} />}
-          {data.accountsEngaged > 0 && <SocialMetricRow label="Contas engajadas" value={data.accountsEngaged} />}
-          {data.totalInteractions > 0 && <SocialMetricRow label="Interações" value={data.totalInteractions} />}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function SocialPageCards({
-  clientName, showClientName, facebook, instagram,
-}: {
-  clientName?: string;
-  showClientName?: boolean;
-  facebook: FacebookPageData | null;
-  instagram: InstagramPageData | null;
-}) {
-  if (!facebook && !instagram) return null;
-  return (
-    <div className="contents">
-      {showClientName && (facebook ?? instagram) && (
-        <p className="col-span-full text-[10px] font-bold uppercase tracking-widest text-foreground/50 mt-1">{clientName}</p>
-      )}
-      {facebook && <FbCard data={facebook} />}
-      {instagram && <IgCard data={instagram} />}
     </div>
   );
 }

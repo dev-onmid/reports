@@ -1208,11 +1208,6 @@ Sempre confirme com o usuário antes de remover; pausar é reversível, remover 
     input_schema: { type: 'object' as const, properties: {}, required: [] },
   },
   {
-    name: 'list_email_campaigns',
-    description: 'Lista as campanhas de e-mail marketing com status e métricas básicas.',
-    input_schema: { type: 'object' as const, properties: {}, required: [] },
-  },
-  {
     name: 'list_leadlovers_campaigns',
     description: 'Lista as campanhas de envio de contatos ao Leadlovers com progresso (enviados/pendentes/erros).',
     input_schema: { type: 'object' as const, properties: {}, required: [] },
@@ -2124,12 +2119,6 @@ export async function execSystemTool(
         webhooks_de_entrada: webhooks,
         automacoes_meta: metaAuto.map(a => stripFields(a as Record<string, unknown>, [])),
       });
-    }
-
-    if (name === 'list_email_campaigns') {
-      const data = await fetchInternal('/api/email/campaigns');
-      if (!Array.isArray(data) || data.length === 0) return 'Nenhuma campanha de e-mail encontrada.';
-      return JSON.stringify((data as Record<string, unknown>[]).map(c => stripFields(c, ['html', 'body', 'content'])));
     }
 
     if (name === 'list_leadlovers_campaigns') {
