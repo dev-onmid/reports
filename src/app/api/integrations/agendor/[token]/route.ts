@@ -73,7 +73,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ token: str
       return Response.json({ ok: true, resultado: 'filtrado' });
     }
 
-    const r = await ingerirNegocioAgendor(pool, conn.client_id, negocio, pessoaEfetiva ?? pessoa);
+    const r = await ingerirNegocioAgendor(pool, conn.client_id, negocio, pessoaEfetiva ?? pessoa, { apiToken: conn.api_token });
     await posProcessarIngestao(pool, conn, negocio, pessoa, r, raw,
       r.criado ? 'criado' : 'atualizado');
 

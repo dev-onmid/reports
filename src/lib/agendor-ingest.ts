@@ -239,10 +239,28 @@ export type ResultadoIngestao = {
   telefone: string | null;
 };
 
+/**
+ * Ficha da empresa que JÁ está no catálogo em memória (carregado pelo filtro).
+ * Não faz requisição: é só para o lead B2B não ficar sem nome nem origem —
+ * nesses negócios o Agendor não vincula pessoa, só organização.
+ */
+function fichaDaEmpresaEmMemoria(apiToken: string | null, orgId: string | null): PessoaAgendor | null {
+  if (!apiToken || !orgId) return null;
+  const cat = catalogos.get(apiToken.slice(0, 12));
+  if (!cat || Date.now() - cat.em >= TTL_CATALOGO_MS) return null;
+  const ficha = cat.orgs.get(orgId);
+  // Telefone da empresa NUNCA entra: o upsert casa por telefone e fundiria
+  // todos os negócios dela num lead só.
+  return ficha ? { ...ficha, telefone: null, telefoneBruto: null } : null;
+}
+
 export async function ingerirNegocioAgendor(
   pool: Pool, clientId: string, negocio: NegocioAgendor, pessoa: PessoaAgendor | null,
+  opts?: { apiToken?: string | null },
 ): Promise<ResultadoIngestao> {
   await ensureColunasLead(pool);
+  // Negócio B2B (sem pessoa): usa a ficha da empresa para nome e origem.
+  pessoa = pessoa ?? fichaDaEmpresaEmMemoria(opts?.apiToken ?? null, negocio.organizacaoId);
 
   const externalId = `agendor:${negocio.idExterno}`;
   const telefone = pessoa?.telefone ?? null;
