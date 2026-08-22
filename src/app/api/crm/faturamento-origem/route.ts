@@ -61,9 +61,9 @@ const CANAL_SQL = `CASE
   WHEN NULLIF(btrim(canal), '') IS NOT NULL
    AND lower(btrim(canal)) NOT IN ('agendor', 'datalytics', 'planilha', 'importacao', 'crm')
     THEN btrim(canal)
-  -- Leads do Agendor: a ingestão grava canal='agendor' e joga a origem real
-  -- ("Origem no Agendor: Google") só dentro da observação. Enquanto ela não
-  -- gravar isso em coluna própria, é daqui que o canal sai.
+  -- Rede de segurança para leads do Agendor importados ANTES de 2026-08-22:
+  -- naquela versão a ingestão gravava canal='agendor' (a porta de entrada) e a
+  -- origem real ia só para a observação. Hoje o canal já vem preenchido acima.
   WHEN observacao LIKE '%Origem no Agendor: %'
     THEN btrim(substring(observacao from 'Origem no Agendor: ([^·]+)'))
   WHEN NULLIF(btrim(utm_source), '') IS NOT NULL THEN btrim(utm_source)

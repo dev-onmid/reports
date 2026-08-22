@@ -278,6 +278,13 @@ export async function ingerirNegocioAgendor(
     ? ((negocio.ganhoEm ?? new Date().toISOString()).slice(0, 10))
     : null;
 
+  // ⚠️ `canal` guarda a ORIGEM DO NEGÓCIO ("Google", "Instagram", "Indicação"),
+  // não a porta de entrada. Gravar 'agendor' aqui — como era antes — fazia o
+  // gráfico de Faturamento por Canal mostrar 84% "sem canal registrado" mesmo
+  // com o Agendor tendo a origem preenchida (o canal ficava só num texto na
+  // observação). Sem origem, 'agendor' continua como marca da fonte.
+  const canalDoLead = pessoa?.origemLead?.trim() || 'agendor';
+
   await pool.query('BEGIN');
   try {
     await pool.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`agendor:${clientId}:${negocio.idExterno}`]);
@@ -329,6 +336,11 @@ export async function ingerirNegocioAgendor(
            email = COALESCE(NULLIF(email, ''), $8),
            numero = COALESCE(NULLIF(numero, ''), $9),
            observacao = COALESCE(NULLIF(observacao, ''), $10),
+           -- canal só é sobrescrito enquanto for a porta de entrada: canal
+           -- digitado pelo gestor (ou vindo de outra fonte) nunca é perdido.
+           canal = CASE
+             WHEN $14 <> 'agendor' AND (canal IS NULL OR lower(btrim(canal)) IN ('', 'agendor'))
+               THEN $14 ELSE canal END,
            external_id = COALESCE(external_id, $11),
            funnel_id = COALESCE(funnel_id, $12),
            updated_at = NOW()
@@ -337,7 +349,7 @@ export async function ingerirNegocioAgendor(
           match.id, labelEtapa, sinais.agendou, sinais.compareceu, fechou,
           valorVenda, pessoa?.nome ?? negocio.pessoa.nome ?? negocio.titulo,
           pessoa?.email ?? negocio.pessoa.email, pessoa?.telefoneBruto,
-          observacao, externalId, funnelId, fechadoEm,
+          observacao, externalId, funnelId, fechadoEm, canalDoLead,
         ],
       );
       if (labelEtapa) await espelharEtapa(pool, clientId, leadFunnel, labelEtapa);
@@ -355,7 +367,7 @@ export async function ingerirNegocioAgendor(
       `INSERT INTO public.crm_leads
          (client_id, mes, data, nome, numero, canal, origin, observacao, status,
           funnel_id, email, valor_rs, revenue, agendou, compareceu, fechou, fechado_em, external_id)
-       VALUES ($1, $2, $3, $4, $5, 'agendor', 'Agendor', $6, $7, $8, $9, $10, $10, $11, $12, $13, $14::date, $15)
+       VALUES ($1, $2, $3, $4, $5, $16, 'Agendor', $6, $7, $8, $9, $10, $10, $11, $12, $13, $14::date, $15)
        RETURNING id`,
       [
         clientId,
@@ -373,6 +385,7 @@ export async function ingerirNegocioAgendor(
         s2.fechou || ganhou,
         fechadoEm,
         externalId,
+        canalDoLead,
       ],
     );
     if (labelEtapa) await espelharEtapa(pool, clientId, funnelId, labelEtapa);
