@@ -65,6 +65,14 @@ async function espelharEtapa(pool: Pool, clientId: string, funnelId: string, lab
 export async function buscarPessoaAgendor(
   apiToken: string, pessoaId: string,
 ): Promise<PessoaAgendor | null> {
+  // O catálogo em lote já traz a ficha inteira (origem + telefone) — consultar
+  // aqui evita a requisição individual que estourava o limite do Agendor.
+  const cat = catalogos.get(apiToken.slice(0, 12));
+  if (cat && Date.now() - cat.em < TTL_CATALOGO_MS) {
+    const ficha = cat.pessoas.get(pessoaId);
+    if (ficha) return ficha;
+    if (cat.completo) return null;   // catálogo íntegro e não tem: pessoa não existe
+  }
   try {
     const r = await agendorFetch<{ data?: Record<string, unknown> }>(
       apiToken, `${AGENDOR_API}/people/${encodeURIComponent(pessoaId)}`);
@@ -79,6 +87,49 @@ export async function buscarPessoaAgendor(
  * o mesmo vocabulário da pessoa (name/contact/leadOrigin/address), então o
  * normalizador é reaproveitado. Falha → null.
  */
+/**
+ * Catálogo de origens carregado em LOTE.
+ *
+ * ⚠️ Motivo: buscar a origem negócio a negócio (`/people/{id}`) custa 1
+ * requisição por negócio — com ~3.600 negócios a conta batia no limite do
+ * Agendor e a importação parava com 429 já na primeira chamada. A listagem
+ * paginada devolve 100 fichas por requisição, então o mesmo trabalho cai de
+ * ~3.600 para ~40 requisições. Carregado uma vez por token e reaproveitado.
+ */
+type Catalogo = { em: number; pessoas: Map<string, PessoaAgendor>; orgs: Map<string, PessoaAgendor>; completo: boolean };
+const catalogos = new Map<string, Catalogo>();
+const TTL_CATALOGO_MS = 30 * 60_000;
+const MAX_PAGINAS_CATALOGO = 60;   // 6.000 fichas por tipo — teto de segurança
+
+async function carregarCatalogo(apiToken: string): Promise<Catalogo> {
+  const chave = apiToken.slice(0, 12);
+  const atual = catalogos.get(chave);
+  if (atual && Date.now() - atual.em < TTL_CATALOGO_MS) return atual;
+
+  const cat: Catalogo = { em: Date.now(), pessoas: new Map(), orgs: new Map(), completo: true };
+  for (const [recurso, destino] of [['people', cat.pessoas], ['organizations', cat.orgs]] as const) {
+    for (let pagina = 1; pagina <= MAX_PAGINAS_CATALOGO; pagina++) {
+      let lote: Record<string, unknown>[] = [];
+      try {
+        const r = await agendorFetch<{ data?: Record<string, unknown>[] }>(
+          apiToken, `${AGENDOR_API}/${recurso}?page=${pagina}&per_page=100`);
+        lote = r?.data ?? [];
+      } catch {
+        cat.completo = false;   // catálogo parcial: quem faltar cai na busca individual
+        break;
+      }
+      for (const bruto of lote) {
+        const f = normalizarPessoa(bruto);
+        if (f.id) destino.set(f.id, f);   // ficha completa: origem E telefone
+      }
+      if (lote.length < 100) break;
+      await new Promise(res => setTimeout(res, 400));
+    }
+  }
+  catalogos.set(chave, cat);
+  return cat;
+}
+
 /**
  * Cache de empresas por processo. Duas coisas o justificam: a MESMA empresa
  * aparece em vários negócios, e Incorpast/Londrigifts usam o MESMO token do
@@ -140,9 +191,30 @@ export async function conferirFiltros(
   // funil inteiro. Só busca quando o filtro de origem realmente precisa.
   let p = pessoa;
   let origemDesconhecida = pessoaFalhou;
+
+  // 1) catálogo em lote — resolve a origem sem gastar uma requisição por negócio
+  if (filtros.origens && filtros.origens.length > 0 && !p?.origemLeadId && conn.api_token) {
+    const cat = await carregarCatalogo(conn.api_token);
+    const ficha = (n.pessoa.id ? cat.pessoas.get(n.pessoa.id) : null)
+      ?? (n.organizacaoId ? cat.orgs.get(n.organizacaoId) : null);
+    if (ficha?.origemLeadId) {
+      // ⚠️ Telefone da EMPRESA nunca vira telefone do lead (o upsert casa por
+      // telefone e fundiria todos os negócios dela num lead só).
+      p = p
+        ? { ...p, origemLead: ficha.origemLead, origemLeadId: ficha.origemLeadId }
+        : { ...ficha, telefone: null, telefoneBruto: null };
+      origemDesconhecida = false;
+    } else if (cat.completo && (n.pessoa.id || n.organizacaoId)) {
+      // catálogo íntegro e a ficha não tem origem → é ausência de verdade,
+      // não falha de rede: decide agora, sem gastar requisição.
+      origemDesconhecida = false;
+    }
+  }
+
+  // 2) fallback individual (catálogo parcial ou ficha ausente)
   if (
     filtros.origens && filtros.origens.length > 0 &&
-    !p?.origemLeadId && n.organizacaoId && conn.api_token
+    !p?.origemLeadId && origemDesconhecida !== false && n.organizacaoId && conn.api_token
   ) {
     const org = await buscarOrganizacaoAgendor(conn.api_token, n.organizacaoId);
     if (org?.origemLeadId) {
