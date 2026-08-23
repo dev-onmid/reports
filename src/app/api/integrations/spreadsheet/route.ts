@@ -893,7 +893,14 @@ export async function POST(req: NextRequest) {
         // A identidade do ledger é o `sintetizarIdVenda`, que distingue linha a
         // linha — não o número do orçamento.
         if (dealIdCol && tipoPlanilha !== 'venda') {
-          const d = dedupLote(clientRows, r => String(r[dealIdCol] ?? '').trim() || JSON.stringify(r));
+          // ⚠️ `idExterno`, não `String().trim()`: o export escreve "-" quando o
+          // lead ainda não tem orçamento, e "-" é um valor NÃO-VAZIO — todos os
+          // leads sem orçamento caíam na MESMA chave e viravam um só. Medido na
+          // Sorrifácil ingleses (DetalhamentoLeads (16), agosto/2026): 473 leads
+          // do filtro viraram 84, porque 390 tinham "-". A queda é silenciosa e
+          // some com o topo do funil inteiro. Sem id de verdade, a chave é a
+          // linha (linha idêntica ainda deduplica; lead distinto sobrevive).
+          const d = dedupLote(clientRows, r => idExterno(r[dealIdCol]) ?? JSON.stringify(r));
           duplicadasNoLote += d.duplicadas;
           clientRows = d.unicas;
         }

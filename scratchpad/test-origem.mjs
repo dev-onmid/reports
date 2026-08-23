@@ -183,6 +183,37 @@ eq(dedupLote([{id:1},{id:2}], l => String(l.id)).duplicadas, 0, 'sem duplicata')
   eq(dedupPorTelefone([r('11911112222'), r('11933334444')]).length, 2, 'numeros distintos ficam');
 }
 
+// ------------------------------------------- placeholder de id no dedupe
+//
+// Bug real (Sorrifácil ingleses, DetalhamentoLeads (16), agosto/2026): o export
+// escreve "-" em NUMERO ORCAMENTO quando o lead ainda não tem orçamento. Como
+// "-" não é vazio, a chave crua colapsava TODOS esses leads num só: 473 viraram
+// 84. A chave tem que passar por `idExterno`.
+{
+  const leads = [
+    { id: '-', nome: 'A' }, { id: '-', nome: 'B' }, { id: '-', nome: 'C' },
+    { id: '2080050', nome: 'D' }, { id: '2080050', nome: 'D2' },
+  ];
+  const cru = dedupLote(leads, r => String(r.id ?? '').trim() || JSON.stringify(r));
+  eq(cru.unicas.length, 2, 'chave crua junta todo lead sem orçamento — é o bug');
+
+  const certo = dedupLote(leads, r => idExterno(r.id) ?? JSON.stringify(r));
+  eq(certo.unicas.length, 4, 'com idExterno, só o id REAL repetido deduplica');
+  eq(certo.unicas.map(r => r.nome), ['A', 'B', 'C', 'D2'], 'os sem orçamento sobrevivem inteiros');
+
+  // Os outros marcadores de "ainda não tem" caem na mesma regra.
+  for (const marca of ['', '-', '--', '0', 'N/A', 'null', 'sem número']) {
+    const l = [{ id: marca, nome: 'x' }, { id: marca, nome: 'y' }];
+    eq(dedupLote(l, r => idExterno(r.id) ?? JSON.stringify(r)).unicas.length, 2,
+      `marcador "${marca}" não funde leads distintos`);
+  }
+  // Linha byte a byte idêntica ainda deduplica — o de-para é o mesmo arquivo
+  // enviado duas vezes, não dois leads.
+  const iguais = [{ id: '-', nome: 'z' }, { id: '-', nome: 'z' }];
+  eq(dedupLote(iguais, r => idExterno(r.id) ?? JSON.stringify(r)).unicas.length, 1,
+    'linha idêntica continua deduplicando');
+}
+
 // ---------------------------------------------------- ledger de faturamento
 //
 // Bug real (Sorrifácil ingleses, agosto/2026): o relatório de faturamento tem
