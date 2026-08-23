@@ -1476,6 +1476,7 @@ function SpreadsheetImportPanel() {
     origens_fora?: { origem: string; linhas: number }[];
     duplicadas_no_lote?: number;
     receita_descartada?: number;
+    data_trocada?: { de: string; para: string } | null;
   } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -1668,6 +1669,7 @@ function SpreadsheetImportPanel() {
         arquivos: [] as { nome: string; linhas: number }[], linhas_lidas: 0,
         origem_descartadas: 0, receita_descartada: 0, duplicadas_no_lote: 0,
         origens_fora: [] as { origem: string; linhas: number }[],
+        data_trocada: null as { de: string; para: string } | null,
       };
 
       const lotes = formatos
@@ -1708,6 +1710,7 @@ function SpreadsheetImportPanel() {
           arquivos?: { nome: string; linhas: number }[]; linhas_lidas?: number;
           origem_descartadas?: number; origens_fora?: { origem: string; linhas: number }[];
           duplicadas_no_lote?: number; receita_descartada?: number;
+          data_trocada?: { de: string; para: string } | null;
         };
         if (!res.ok || data.error) {
           // Diz QUAL arquivo falhou: com dois relatórios no mesmo envio, um erro
@@ -1722,6 +1725,7 @@ function SpreadsheetImportPanel() {
         acc.receita_descartada += data.receita_descartada ?? 0;
         acc.duplicadas_no_lote += data.duplicadas_no_lote ?? 0;
         acc.origens_fora.push(...(data.origens_fora ?? []));
+        if (data.data_trocada) acc.data_trocada = data.data_trocada;
       }
 
       // Junta as origens descartadas dos formatos numa lista só.
@@ -2138,6 +2142,14 @@ function SpreadsheetImportPanel() {
                   <p className="text-muted-foreground">
                     <strong className="text-foreground">{relatorio.duplicadas_no_lote}</strong>{' '}
                     linha(s) duplicada(s) entre as planilhas — ficou a versão mais recente de cada.
+                  </p>
+                )}
+                {relatorio.data_trocada && (
+                  <p className="text-amber-400">
+                    Numa planilha de Vendas o mês é o do faturamento: usei{' '}
+                    <strong>{relatorio.data_trocada.para}</strong> no lugar de{' '}
+                    <strong>{relatorio.data_trocada.de}</strong>. Orçamento antigo faturado agora
+                    entraria no mês errado.
                   </p>
                 )}
                 {(relatorio.origem_descartadas ?? 0) > 0 && (

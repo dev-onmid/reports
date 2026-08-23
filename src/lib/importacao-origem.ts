@@ -229,6 +229,29 @@ export function dedupPorTelefone<T extends {
   return [...porChave.values(), ...semChave];
 }
 
+/**
+ * Numera as repetições de uma mesma chave, na ORDEM do arquivo.
+ *
+ * Existe para o ledger de faturamento, onde duas linhas podem ser idênticas em
+ * tudo que a chave sintética enxerga (mesmo paciente, mesma data, mesmo valor,
+ * mesmo tratamento) e ainda assim serem lançamentos DIFERENTES — entrada e
+ * parcela do mesmo orçamento. Caso real: Sorrifácil ingleses, 19/08/2026,
+ * R$ 3.114,50 lançados duas vezes (uma como entrada, outra a prazo).
+ *
+ * A primeira ocorrência recebe 0, e quem usa a numeração mantém a chave
+ * histórica nesse caso — mudar a chave de todas as linhas faria a próxima
+ * importação inserir o ledger inteiro de novo.
+ */
+export function indexarOcorrencias<T>(linhas: T[], chaveDe: (l: T) => string): { linha: T; ocorrencia: number }[] {
+  const vistas = new Map<string, number>();
+  return linhas.map(linha => {
+    const k = chaveDe(linha);
+    const ocorrencia = vistas.get(k) ?? 0;
+    vistas.set(k, ocorrencia + 1);
+    return { linha, ocorrencia };
+  });
+}
+
 export function sinaisDoStatus(status: unknown): SinaisDeEtapa {
   const s = normalizarOrigem(status); // reaproveita: sem acento, sem caixa
 

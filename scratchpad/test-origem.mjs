@@ -8,7 +8,7 @@
 
 import assert from 'node:assert';
 import { origemIntegravel, normalizarOrigem, resumirOrigens, dedupLote, dedupPorTelefone, ORIGENS_INTEGRAVEIS,
-  idExterno, chaveTelefone, sinaisDoStatus }
+  idExterno, chaveTelefone, sinaisDoStatus, indexarOcorrencias }
   from './build/importacao-origem.mjs';
 let n=0; const eq=(a,b,m)=>{assert.deepStrictEqual(a,b,m);n++;}; const ok=(c,m)=>{assert.ok(c,m);n++;};
 
@@ -181,6 +181,47 @@ eq(dedupLote([{id:1},{id:2}], l => String(l.id)).duplicadas, 0, 'sem duplicata')
 
   // numeros diferentes nao se tocam
   eq(dedupPorTelefone([r('11911112222'), r('11933334444')]).length, 2, 'numeros distintos ficam');
+}
+
+// ---------------------------------------------------- ledger de faturamento
+//
+// Bug real (Sorrifácil ingleses, agosto/2026): o relatório de faturamento tem
+// UMA linha por lançamento, não por orçamento. Deduplicar pelo número do
+// orçamento apagou R$ 43.118,70 de R$ 110.694,52 do mês — entrada e parcela do
+// mesmo orçamento viravam uma linha só.
+{
+  // Duas linhas do MESMO orçamento com valores diferentes: são lançamentos
+  // distintos e o dedupe por id do negócio junta as duas (por isso o tipo
+  // Venda não pode passar por ele).
+  const ledger = [
+    { orc: '2078771', paciente: 'A', valor: 1199.99 },
+    { orc: '2078771', paciente: 'A', valor: 9000.60 },
+    { orc: '2082509', paciente: 'B', valor: 3114.50 }, // entrada
+    { orc: '2082509', paciente: 'B', valor: 3114.50 }, // a prazo — idêntica
+  ];
+  const d = dedupLote(ledger, r => r.orc);
+  eq(d.unicas.length, 2, 'dedupLote por orçamento colapsa lançamentos — é o bug');
+  eq(Number(d.unicas.reduce((s, r) => s + r.valor, 0).toFixed(2)), 12115.1,
+    'e o que sobra soma menos que o faturamento real');
+
+  // A régua do ledger é a linha, não o orçamento: numerar as repetições
+  // preserva as 4.
+  const chave = r => [r.paciente, r.valor].join('|');
+  const idx = indexarOcorrencias(ledger, chave);
+  eq(idx.length, 4, 'nenhuma linha do ledger se perde');
+  eq(idx.map(x => x.ocorrencia), [0, 0, 0, 1], 'só a linha REPETIDA ganha índice');
+  eq(new Set(idx.map(x => chave(x.linha) + '|' + x.ocorrencia)).size, 4, 'ids finais distintos');
+}
+{
+  // Idempotência: o mesmo arquivo reimportado gera os mesmos índices, então o
+  // upsert atualiza em vez de duplicar. É o que a chave sintética existe pra
+  // garantir — mudar isso dobraria o faturamento a cada importação.
+  const arq = [{ k: 'x' }, { k: 'y' }, { k: 'x' }, { k: 'x' }];
+  const a = indexarOcorrencias(arq, r => r.k).map(x => x.ocorrencia);
+  const b = indexarOcorrencias(arq, r => r.k).map(x => x.ocorrencia);
+  eq(a, b, 'mesma entrada, mesma numeração');
+  eq(a, [0, 0, 1, 2], 'a numeração segue a ordem do arquivo');
+  eq(indexarOcorrencias([], r => r.k), [], 'lote vazio não quebra');
 }
 
 console.log(`✓ ${n} asserts de origem/dedupe passaram`);

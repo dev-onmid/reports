@@ -2,7 +2,7 @@ import type { NextRequest } from 'next/server';
 import { createHash } from 'node:crypto';
 import { makeServerPool } from '@/lib/server-db';
 
-import { origemIntegravel, resumirOrigens, dedupLote, dedupPorTelefone, idExterno, chaveTelefone, sinaisDoStatus } from '@/lib/importacao-origem';
+import { origemIntegravel, resumirOrigens, dedupLote, dedupPorTelefone, idExterno, chaveTelefone, sinaisDoStatus, indexarOcorrencias } from '@/lib/importacao-origem';
 
 /** Tipo da planilha, escolhido na importação. Ver comentário em LeadParaFunil. */
 export type TipoPlanilha = 'lead' | 'venda' | 'hibrido';
@@ -21,9 +21,20 @@ function normalizarTipoPlanilha(v: unknown): TipoPlanilha {
 function sintetizarIdVenda(
   clientId: string,
   r: { leadName: string | null; dataFechamento: string | null; revenue: number; notes: string | null },
+  ocorrencia = 0,
 ): string {
   const base = [clientId, (r.leadName ?? '').trim().toLowerCase(), r.dataFechamento ?? '', r.revenue, (r.notes ?? '').slice(0, 60)].join('|');
-  return 'venda:' + createHash('sha1').update(base).digest('hex').slice(0, 32);
+  // ⚠️ O sufixo só entra a partir da SEGUNDA ocorrência, de propósito: mudar a
+  // chave de todas as linhas faria a próxima importação inserir o ledger
+  // inteiro de novo — exatamente o bug que esta função existe pra evitar.
+  // Assim a 1ª linha mantém o id histórico e só a repetição ganha id próprio.
+  //
+  // Existe repetição legítima: entrada e parcela do MESMO orçamento, no mesmo
+  // minuto, com o mesmo valor (visto na Sorrifácil ingleses, 19/08/2026 —
+  // R$ 3.114,50 lançados como entrada e como a prazo). Sem o sufixo, uma das
+  // duas sumia.
+  const chave = ocorrencia > 0 ? `${base}|#${ocorrencia}` : base;
+  return 'venda:' + createHash('sha1').update(chave).digest('hex').slice(0, 32);
 }
 
 /** Um grupo de arquivos com o MESMO cabeçalho — mesmo mapeamento serve pros dois. */
@@ -777,7 +788,17 @@ export async function POST(req: NextRequest) {
     const mappings: SpreadsheetMapping[] = JSON.parse(mappingsRaw);
     const clinicCol = clinicColumnOverride || null;
     const revenueCol = revenueColumnOverride || null;
-    const dateCol = dateColumnOverride || null;
+    // ⚠️ Num relatório de FATURAMENTO a data que importa é a do FATURAMENTO, não
+    // a do orçamento — o orçamento pode ser de meses antes (visto ao vivo: um
+    // tratamento orçado em 01/06 e faturado em 21/08 caía em JUNHO). A
+    // detecção automática pega a PRIMEIRA coluna que casa com /data/, que nesse
+    // export é "DATA ORCAMENTO", e ninguém percebe. Só no tipo Venda, e só
+    // quando existe uma coluna de data claramente de faturamento.
+    const dataDeFaturamento = tipoPlanilha === 'venda'
+      ? findHeader(headers, [/data.*(faturamento|fatura|recebimento|pagamento)/i]) : null;
+    const dateCol = (dataDeFaturamento ?? dateColumnOverride) || null;
+    const dataTrocada = dataDeFaturamento && dateColumnOverride && dataDeFaturamento !== dateColumnOverride
+      ? { de: dateColumnOverride, para: dataDeFaturamento } : null;
     const nameCol = nameColumnOverride || null;
     const channelCol = channelColumnOverride || findHeader(headers, [/como\s+nos\s+conheceu/i, /canal/i, /origem/i, /source/i, /m[ií]dia/i]);
     const phoneCol = phoneColumnOverride || null;
@@ -861,7 +882,17 @@ export async function POST(req: NextRequest) {
         // Dedupe do lote quando há ID do negócio: importar meses diferentes faz
         // a mesma linha aparecer várias vezes, e vale a versão MAIS RECENTE —
         // ficar com a primeira congelaria o negócio numa etapa antiga.
-        if (dealIdCol) {
+        //
+        // ⚠️ NUNCA no tipo Venda. Num relatório de LEADS o id do negócio é único
+        // por linha; num LEDGER DE FATURAMENTO o mesmo orçamento gera VÁRIAS
+        // linhas (entrada + parcelas, tratamentos faturados em datas
+        // diferentes), e colapsá-las por esse id apaga faturamento real.
+        // Medido no caso que trouxe este bug (Sorrifácil ingleses, agosto/2026,
+        // `dealId` mapeado como "ORCAMENTO"): 13 orçamentos com 2 linhas cada,
+        // R$ 43.118,70 descartados em silêncio de R$ 110.694,52 do mês.
+        // A identidade do ledger é o `sintetizarIdVenda`, que distingue linha a
+        // linha — não o número do orçamento.
+        if (dealIdCol && tipoPlanilha !== 'venda') {
           const d = dedupLote(clientRows, r => String(r[dealIdCol] ?? '').trim() || JSON.stringify(r));
           duplicadasNoLote += d.duplicadas;
           clientRows = d.unicas;
@@ -948,9 +979,12 @@ export async function POST(req: NextRequest) {
           // deveria"). Dedupe dentro do lote pelo mesmo id (ON CONFLICT não pode
           // tocar a mesma linha 2x num INSERT).
           const porId = new Map<string, ReturnType<typeof toRow> & { externalId: string; stage: string | null; updatedAtExternal: string | null }>();
-          for (const row of groupedRows) {
-            const r = toRow(row);
-            const externalId = sintetizarIdVenda(clientId, r);
+          // Quantas linhas idênticas já apareceram, por chave base. A ordem do
+          // arquivo é a régua: o mesmo arquivo reimportado gera os mesmos
+          // índices, então o upsert continua idempotente.
+          const linhas = groupedRows.map(toRow);
+          for (const { linha: r, ocorrencia } of indexarOcorrencias(linhas, l => sintetizarIdVenda(clientId, l))) {
+            const externalId = sintetizarIdVenda(clientId, r, ocorrencia);
             porId.set(externalId, { ...r, externalId, stage: null, updatedAtExternal: r.dataFechamento });
           }
           const batchVendas = [...porId.values()];
@@ -1023,6 +1057,9 @@ export async function POST(req: NextRequest) {
       origens_fora: resumoOrigem.origens.slice(0, 10),
       receita_descartada: receitaDescartada,
       duplicadas_no_lote: duplicadasNoLote,
+      // Troca de coluna de data no ledger de Vendas. Vai pra resposta porque
+      // corrigir em silêncio é a mesma doença de descartar em silêncio.
+      data_trocada: dataTrocada,
     });
     } finally {
       await pool.end();
