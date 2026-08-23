@@ -124,12 +124,48 @@ export type ContagemFunil = {
   /** Contagem PARALELA — perdido não é degrau; quem perdeu segue contando nas etapas que alcançou. */
   perdidos: number;
   receita: number;
+  /**
+   * Quebra da distância entre AGENDAMENTOS e COMPARECIMENTOS.
+   *
+   * ⚠️ O buraco entre os dois degraus junta duas coisas MUITO diferentes: quem
+   * ainda vai vir (consulta marcada para depois de hoje) e quem furou. Sem
+   * separar, o funil parecia dizer que 27 pessoas faltaram quando boa parte só
+   * tem data futura.
+   *
+   * Os três somam exatamente `agendamentos - comparecimentos`.
+   */
+  aComparecer: number;
+  faltaram: number;
+  /** Agendou, não veio, e não há data para julgar. Não é falta nem promessa. */
+  agendamentoSemData: number;
 };
 
 export const FUNIL_VAZIO: ContagemFunil = {
   contatos: 0, qualificados: 0, agendamentos: 0, comparecimentos: 0,
   fechamentos: 0, perdidos: 0, receita: 0,
+  aComparecer: 0, faltaram: 0, agendamentoSemData: 0,
 };
+
+/** Reconhece o rótulo de ausência — a mesma família que `classificarEtapa` já isola. */
+const RE_FALTOU = /no show|nao compareceu|com falta|faltou/;
+
+/**
+ * Extrai 'YYYY-MM-DD' do que o banco devolveu.
+ *
+ * ⚠️ `data_agendada` é DATE: dependendo do driver chega como 'YYYY-MM-DD' ou
+ * como texto de `Date` ("Wed Aug 20 2026 …"). Comparar as duas formas como
+ * string daria resultado aleatório, então normaliza antes.
+ */
+export function diaISO(v: string | null | undefined): string | null {
+  if (!v) return null;
+  const s = String(v);
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+  const d = new Date(s);
+  if (Number.isNaN(d.getTime())) return null;
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${mm}-${dd}`;
+}
 
 /**
  * Conta o funil CUMULATIVO: cada etapa conta quem CHEGOU nela, não quem está
@@ -199,8 +235,16 @@ export function etapaDoLead(lead: LeadParaFunil, mapa: MapaEtapas): PostoDoLead 
   return { etapaStatus, posto: Math.max(0, posto), perdido: etapaStatus === 'perdido' };
 }
 
-export function contarFunil(leads: LeadParaFunil[], stages: EtapaDeStage[]): ContagemFunil {
+/**
+ * @param hoje Referência para separar "ainda vai vir" de "faltou", em
+ *   'YYYY-MM-DD'. Parâmetro em vez de `new Date()` interno para a função
+ *   continuar pura e testável — a data de hoje é entrada, não ambiente.
+ */
+export function contarFunil(
+  leads: LeadParaFunil[], stages: EtapaDeStage[], hoje?: string,
+): ContagemFunil {
   const mapa = construirMapaEtapas(stages);
+  const ref = hoje ?? diaISO(new Date().toISOString()) ?? '';
 
   const c: ContagemFunil = { ...FUNIL_VAZIO };
   for (const lead of leads) {
@@ -220,6 +264,16 @@ export function contarFunil(leads: LeadParaFunil[], stages: EtapaDeStage[]): Con
     if (posto >= 1) c.qualificados++;
     if (posto >= 2) c.agendamentos++;
     if (posto >= 3) c.comparecimentos++;
+    // Agendou e ainda NÃO veio: separa promessa de falta.
+    if (posto === 2) {
+      const dia = diaISO(lead.dataAgendada);
+      // Falta explícita no status vence a data: "No-Show" marcado é falta mesmo
+      // que a data ainda não tenha chegado (remarcação não confirmada).
+      if (RE_FALTOU.test(normalizarEtiqueta(lead.status))) c.faltaram++;
+      else if (dia === null) c.agendamentoSemData++;
+      else if (dia >= ref) c.aComparecer++;
+      else c.faltaram++;
+    }
     if (posto >= 4) {
       c.fechamentos++;
       // 'lead' alimenta só o funil: o R$ FECHADO dele não vira faturamento
@@ -259,6 +313,9 @@ export function somarFunis(funis: ContagemFunil[]): ContagemFunil {
     total.fechamentos += f.fechamentos;
     total.perdidos += f.perdidos;
     total.receita += f.receita;
+    total.aComparecer += f.aComparecer;
+    total.faltaram += f.faltaram;
+    total.agendamentoSemData += f.agendamentoSemData;
   }
   return total;
 }

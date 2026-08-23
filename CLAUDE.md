@@ -26,6 +26,22 @@ Pedido do Matheus: dashboard própria para restaurante/delivery e, depois, um **
   - ⚠️ Ocultar um elemento deixa o BURACO no lugar (a compactação do RGL é vertical, não horizontal). É reposicionar na mão — comportamento do grid, não bug.
 - **⚠️ DEPLOY**: `main` **não** era "no ar". O `build-image.yml` só gerava artefato; publicar era manual (scp + `deploy-recv.sh`). Isso fez uma remoção de tela parecer não feita **duas vezes**. Agora o workflow publica por SSH e faz smoke test externo — segredos `VPS_HOST`/`VPS_USER`/`VPS_SSH_KEY`, e o passo é pulado se não existirem.
 
+## Funil — o buraco entre Agendamentos e Comparecimentos virou duas coisas (2026-08-23)
+
+Pedido do Matheus: "agendamento e comparecimento existe aqueles que ainda vão vir, ou seja, não faltaram… quantidade de pessoas que faltam comparecer e que realmente faltaram".
+
+- **⚠️ O problema era de LEITURA, não de número**: a queda de 65 agendamentos para 38 comparecimentos parecia dizer "27 furaram", quando boa parte só tem consulta marcada para depois de hoje. Duas realidades opostas somadas no mesmo buraco.
+- **`ContagemFunil` ganhou 3 campos** (`aComparecer`, `faltaram`, `agendamentoSemData`), preenchidos em `contarFunil` para quem tem `posto === 2` (agendou e não avançou):
+  - falta EXPLÍCITA no status (`no show|nao compareceu|com falta|faltou`) vence a data — no-show marcado com data futura é remarcação não confirmada, não promessa;
+  - senão, `data_agendada >= hoje` → **a comparecer** (hoje inclusive); `< hoje` → **faltaram**;
+  - sem data legível → **sem data**, que não é falta nem promessa.
+- **⚠️ Invariante coberta por assert**: os três somam EXATAMENTE `agendamentos - comparecimentos`. Sem isso a quebra viraria mais um número que não fecha com o card ao lado.
+- **⚠️ `contarFunil` recebe `hoje` como PARÂMETRO** (default: data de hoje). Chamar `new Date()` lá dentro tornaria a função impura e o teste dependente do relógio.
+- **`diaISO`**: `data_agendada` é DATE e chega ora como `'YYYY-MM-DD'`, ora como texto de `Date` ("Wed Aug 20 2026 …") dependendo do driver — comparar as duas formas como string daria resultado aleatório. Normaliza antes; lixo vira "sem data".
+- **UI**: dois chips pequenos sob AGENDAMENTOS (verde "N a comparecer", vermelho "N faltaram", cinza "N sem data"). `SimpleFunnel.steps` ganhou `detalhes?`. Some quando não há pendência — funil sem agendamento aberto fica exatamente como era.
+- ✅ Verificado: **15 asserts novos** (100 no total em `test-funil-etapas.mjs`: data de hoje conta como "ainda vem", no-show com data futura é falta, quem compareceu/fechou sai da quebra, texto de `Date` entendido, lixo em "sem data", `somarFunis` carregando os três); tsc + `next build` limpos; browser com os 3 cenários. **Medido em produção (60d)**: Sorrifácil ingleses 294 agendados → 8 a comparecer e 135 faltaram; **Cost Odonto 47 agendados, TODOS sem data** — é o caso que justifica o terceiro balde: sem ele os 47 apareceriam como falta.
+- ⚠️ O modal de leads por etapa (`/api/crm/funil-leads`) ainda não filtra por "a comparecer"/"faltou" — clicar em Agendamentos lista os dois juntos.
+
 ## Dashboard — Leads por Canal ao lado do Faturamento + segmento Clínicas (2026-08-16)
 
 Dois pedidos do Matheus na mesma rodada: um donut de **Leads por canal** ao lado do de Faturamento, e **criar o segmento "Clínicas"** copiando o de leads.

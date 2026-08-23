@@ -4713,7 +4713,11 @@ function IgMark({ className }: { className?: string }) {
 const FUNNEL_STEP_COLORS = ['#6cff2f', '#0ea5e9', '#7b2cff', '#f97316', '#ec4899', '#f59e0b', '#84cc16'];
 
 function SimpleFunnel({ steps, totalRate, fonteLabel, onStageClick }: {
-  steps: Array<{ label: string; actual: number; planned: number; color: string }>;
+  steps: Array<{
+    label: string; actual: number; planned: number; color: string;
+    /** Quebra explicativa sob o número (ex: quantos ainda vêm × quantos furaram). */
+    detalhes?: Array<{ texto: string; tom: 'bom' | 'ruim' | 'neutro' }>;
+  }>;
   totalRate: string;
   /** De onde vem o topo ("fonte: CRM" / "estimado por anúncios" / mistas). */
   fonteLabel?: string;
@@ -4811,6 +4815,26 @@ function SimpleFunnel({ steps, totalRate, fonteLabel, onStageClick }: {
                     <span className="ml-1 text-[9px] text-[#9aa4aa]">/ {plannedPct.toFixed(0)}%p</span>
                   )}
                   {isBottleneck && <span className="ml-1 text-[8px] font-black text-red-400">⚠</span>}
+                </div>
+              )}
+              {/* Quebra explicativa: no degrau de agendamentos, separa quem
+                  ainda vai vir de quem furou — sem isso a queda até
+                  comparecimentos parecia toda falta. */}
+              {step.detalhes && step.detalhes.length > 0 && (
+                <div className="mt-1.5 flex flex-col items-center gap-0.5">
+                  {step.detalhes.map((d) => (
+                    <span
+                      key={d.texto}
+                      className={cn(
+                        'rounded px-1 py-px text-[9px] font-bold leading-tight',
+                        d.tom === 'bom' ? 'bg-[#6cff2f]/12 text-[#6cff2f]'
+                          : d.tom === 'ruim' ? 'bg-red-400/12 text-red-400'
+                          : 'bg-white/[0.06] text-[#9aa4aa]',
+                      )}
+                    >
+                      {d.texto}
+                    </span>
+                  ))}
                 </div>
               )}
             </div>
@@ -6275,11 +6299,27 @@ export default function GeneralDashboard() {
   // funil que começa em contatos — dois números sem relação na mesma caixa.
   const funnelTaxa = funnelTopo > 0 ? (conversions / funnelTopo) * 100 : 0;
   const actualFunnelVolumes = [funnelTopo, qualified, appointments, showUps, conversions];
+  // Quebra do degrau de AGENDAMENTOS (índice 2): dos agendados que ainda não
+  // compareceram, quantos têm data futura e quantos furaram de fato.
+  const detalhesAgendamento: Array<{ texto: string; tom: 'bom' | 'ruim' | 'neutro' }> = [];
+  if (funilCrm.aComparecer > 0) {
+    detalhesAgendamento.push({ texto: `${funilCrm.aComparecer} a comparecer`, tom: 'bom' });
+  }
+  if (funilCrm.faltaram > 0) {
+    detalhesAgendamento.push({ texto: `${funilCrm.faltaram} faltaram`, tom: 'ruim' });
+  }
+  if (funilCrm.agendamentoSemData > 0) {
+    detalhesAgendamento.push({ texto: `${funilCrm.agendamentoSemData} sem data`, tom: 'neutro' });
+  }
   const funnelStepsNew = firstPlanningForFunnel.stages.map((stage, i) => ({
     label: cleanFunnelLabel(stage.name),
     actual: actualFunnelVolumes[i] ?? 0,
     planned: plannedFunnelAgg[i] ?? 0,
     color: FUNNEL_STEP_COLORS[i % FUNNEL_STEP_COLORS.length],
+    // Só no degrau de agendamentos. Vale mesmo com topo estimado por anúncio:
+    // agendamentos e comparecimentos vêm do CRM nos dois casos (só o TOPO muda
+    // de fonte), então a quebra sempre fecha com os números exibidos.
+    detalhes: i === 2 ? detalhesAgendamento : undefined,
   }));
   const channelRows = [
     {

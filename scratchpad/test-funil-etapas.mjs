@@ -188,3 +188,70 @@ for (const e of ETAPAS_PADRAO) {
 }
 
 console.log(`OK — ${n} asserts`);
+
+// ── Quebra do degrau de AGENDAMENTOS: quem ainda vem × quem furou ───────────
+//
+// ⚠️ O buraco entre agendamentos e comparecimentos juntava duas coisas muito
+// diferentes. Sem separar, o funil dizia "27 nao compareceram" quando boa parte
+// so tem consulta marcada para depois.
+{
+  const HOJE = '2026-08-20';
+  const stages = [];
+  const lead = (o) => ({
+    status: null, funnelId: null, compareceu: false, fechou: false,
+    agendou: false, dataAgendada: null, receita: 0, ...o,
+  });
+
+  const base = [
+    lead({ agendou: true, dataAgendada: '2026-08-25' }),               // futuro -> vem
+    lead({ agendou: true, dataAgendada: '2026-08-20' }),               // hoje -> ainda vem
+    lead({ agendou: true, dataAgendada: '2026-08-19' }),               // passou -> faltou
+    lead({ agendou: true, dataAgendada: '2026-08-30', status: 'No-Show' }), // marcado -> faltou
+    lead({ agendou: true, dataAgendada: null }),                       // sem data
+    lead({ agendou: true, dataAgendada: '2026-08-01', compareceu: true }), // veio: fora da quebra
+    lead({ fechou: true }),                                            // fechou: fora da quebra
+  ];
+  const c = contarFunil(base, stages, HOJE);
+  eq(c.aComparecer, 2, 'data hoje ou futura = ainda vai comparecer');
+  eq(c.faltaram, 2, 'data passada OU no-show explicito = faltou');
+  eq(c.agendamentoSemData, 1, 'sem data nao vira falta nem promessa');
+
+  // ⚠️ A invariante que impede a quebra de mentir: os tres somam exatamente a
+  // distancia entre os dois degraus.
+  eq(c.aComparecer + c.faltaram + c.agendamentoSemData, c.agendamentos - c.comparecimentos,
+     'a quebra fecha com o buraco do funil');
+
+  // Falta explicita vence a data futura (remarcacao nao confirmada).
+  const soNoShow = contarFunil([lead({ agendou: true, dataAgendada: '2027-01-01', status: 'No-Show' })], stages, HOJE);
+  eq(soNoShow.faltaram, 1, 'no-show marcado com data futura ainda e falta');
+  eq(soNoShow.aComparecer, 0, 'e nao conta como "ainda vem"');
+
+  // Quem ja compareceu ou fechou NUNCA entra na quebra.
+  const avancados = contarFunil([
+    lead({ agendou: true, dataAgendada: '2026-08-01', compareceu: true }),
+    lead({ agendou: true, dataAgendada: '2026-08-01', fechou: true }),
+  ], stages, HOJE);
+  eq(avancados.aComparecer + avancados.faltaram + avancados.agendamentoSemData, 0,
+     'quem avancou saiu da quebra');
+
+  // Data em formato de Date (o driver as vezes devolve assim) tem de funcionar.
+  const comDate = contarFunil([lead({ agendou: true, dataAgendada: 'Wed Aug 25 2026 00:00:00 GMT-0300' })], stages, HOJE);
+  eq(comDate.aComparecer, 1, 'texto de Date tambem e entendido como data futura');
+  const comDatePassada = contarFunil([lead({ agendou: true, dataAgendada: 'Mon Aug 10 2026 00:00:00 GMT-0300' })], stages, HOJE);
+  eq(comDatePassada.faltaram, 1, 'texto de Date passado conta como falta');
+
+  // Lixo em data_agendada nao pode virar falta nem promessa.
+  const lixo = contarFunil([lead({ agendou: true, dataAgendada: 'amanha' })], stages, HOJE);
+  eq(lixo.agendamentoSemData, 1, 'data ilegivel cai em "sem data"');
+
+  // somarFunis leva a quebra junto — senao o dashboard multi-cliente zeraria.
+  const soma = somarFunis([c, c]);
+  eq(soma.aComparecer, 4, 'somarFunis soma a comparecer');
+  eq(soma.faltaram, 4, 'somarFunis soma faltaram');
+  eq(soma.agendamentoSemData, 2, 'somarFunis soma sem data');
+
+  eq(FUNIL_VAZIO.aComparecer, 0, 'funil vazio comeca zerado');
+  eq(FUNIL_VAZIO.faltaram, 0, 'idem faltaram');
+}
+
+console.log(`OK (com a quebra de agendamentos) — ${n} asserts`);
