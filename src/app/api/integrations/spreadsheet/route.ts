@@ -517,6 +517,10 @@ async function upsertPorTelefone(
     budget: number; payment: string | null; neighborhood: string | null;
     notes: string | null; revenue: number; closed: boolean; raw: string;
     negocioExternoId?: string | null;
+    /** Data da última atualização NA FONTE — a régua de "quem é mais novo". */
+    updatedAtExternal?: string | null;
+    /** Planilha de Leads não escreve receita (o valor mora no ledger de Vendas). */
+    escreveReceita?: boolean;
     compareceu?: boolean; agendou?: boolean;
     registroTipo?: TipoPlanilha; dataFechamento?: string | null;
   }>,
@@ -553,24 +557,41 @@ async function upsertPorTelefone(
     const id = k ? existentes.get(k) : undefined;
     if (!id) { novos.push(r); continue; }
 
-    // Só STATUS. Nome, telefone, canal, origem, campanha e criativo ficam como
-    // estão — quem viu o lead chegar sabe disso melhor que a planilha.
+    // ⚠️ Três classes de campo, e a diferença entre elas é o que impede perda:
+    //  • IDENTIDADE/ATRIBUIÇÃO (nome, telefone, canal, origem, campanha,
+    //    criativo) — não são tocados aqui. Quem viu o lead CHEGAR sabe disso
+    //    melhor que a planilha.
+    //  • CHAVE DE NEGÓCIO — só preenche; é identidade, vale mesmo vindo de um
+    //    export antigo, e é a ponte entre a planilha de Leads e a de Vendas.
+    //  • ESTADO (status, valor, orçamento) — a planilha manda, MAS só se o
+    //    export for pelo menos tão novo quanto o que está gravado.
+    //    ⚠️ Sem essa régua, reimportar um arquivo de meses atrás REGREDIA o
+    //    status do lead em silêncio. O caminho por ID do negócio sempre teve a
+    //    trava; o caminho por telefone não tinha.
+    // Booleanos ficam FORA da régua: só avançam, então export velho não desfaz
+    // venda, presença nem agendamento.
+    const maisNovo = `(public.crm_leads.updated_at_external IS NULL
+                       OR $15::date IS NULL
+                       OR $15::date >= public.crm_leads.updated_at_external)`;
     await pool.query(
       `UPDATE public.crm_leads SET
-         status = COALESCE($2, status),
-         status_raw = COALESCE($3, status_raw),
-         status_category = COALESCE($4, status_category),
-         -- fechou, compareceu e agendou só AVANÇAM: um export posterior com
-         -- status diferente não desfaz venda, presença nem agendamento.
+         status = CASE WHEN ${maisNovo} THEN COALESCE($2, status) ELSE status END,
+         status_raw = CASE WHEN ${maisNovo} THEN COALESCE($3, status_raw) ELSE status_raw END,
+         status_category = CASE WHEN ${maisNovo} THEN COALESCE($4, status_category) ELSE status_category END,
          fechou = public.crm_leads.fechou OR $5,
          compareceu = COALESCE(public.crm_leads.compareceu, false) OR $12,
          agendou = COALESCE(public.crm_leads.agendou, false) OR $13,
-         revenue = $6, valor_rs = $6,
-         orcamento = COALESCE($7, orcamento),
+         -- ⚠️ Receita só é escrita por quem tem receita pra escrever. A planilha
+         -- de Leads zera o valor de propósito (o faturamento mora no ledger de
+         -- Vendas) — sem esta guarda, importá-la APAGAVA a receita já gravada.
+         revenue  = CASE WHEN $16 AND ${maisNovo} THEN $6 ELSE public.crm_leads.revenue END,
+         valor_rs = CASE WHEN $16 AND ${maisNovo} THEN $6 ELSE public.crm_leads.valor_rs END,
+         orcamento = CASE WHEN ${maisNovo} THEN COALESCE($7, orcamento) ELSE orcamento END,
          pagamento = COALESCE($8, pagamento),
          data_agendada = COALESCE($9, data_agendada),
          observacao = COALESCE(NULLIF($10, ''), observacao),
          negocio_externo_id = COALESCE(negocio_externo_id, $14),
+         updated_at_external = GREATEST(public.crm_leads.updated_at_external, $15::date),
          upload_id = $11
        WHERE id = $1::uuid`,
       [
@@ -588,6 +609,8 @@ async function upsertPorTelefone(
         r.compareceu ?? false,
         r.agendou ?? false,
         r.negocioExternoId ?? null,
+        r.updatedAtExternal ?? null,
+        r.escreveReceita !== false,
       ],
     );
   }
@@ -1072,6 +1095,9 @@ export async function POST(req: NextRequest) {
             // aparece nos dois, e é por ele que a venda encontra o lead que
             // carrega o rastreio do anúncio. Gravada nos DOIS lados.
             negocioExternoId: dealIdCol ? idExterno(row[dealIdCol]) : null,
+            updatedAtExternal: updatedDateCol ? parseDate(row[updatedDateCol]) : null,
+            // Planilha de Leads não é fonte de faturamento — ver revenue acima.
+            escreveReceita: tipoPlanilha !== 'lead',
             registroTipo: tipoPlanilha,
             // Data de fechamento = a data mapeada no relatório de Vendas
             // (ex.: DATA FATURAMENTO). Só o tipo Venda janela a receita por ela.
