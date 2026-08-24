@@ -217,6 +217,20 @@ Pedidos do Matheus: (1) o que é feito na conta do cliente (Meta/Google) — ant
 - **⚠️⚠️ RÉGUA PROTEGIDA**: o overview EXCLUI `origem='resumo'` da "última ação" — resumo é observação, não otimização; sem isso toda conta ficaria eternamente "em dia" e o alerta de atraso morreria. Registro novo automático no Histórico = decidir se conta na régua.
 - ✅ Validado em produção (dry): 18/08 → 6 clientes com ação real compilada ("Status da campanha ×4 — Leticia Ribeiro", orçamentos, programação de conjunto com nomes de campanha). ⚠️ Não verificado no browser: a seção nova da aba do cliente (só build); caminho Google ainda sem evento capturado em produção (mesmo código do log ao vivo). 1º registro real: amanhã 08h40.
 
+## Agendor B2B — o contato SEMPRE existiu na API; o sistema descartava (2026-08-24)
+
+Pergunta do Matheus: o cruzamento está funcionando na Incorpast (lead pelo WhatsApp, atendimento pelo Agendor)? **Não estava — e a informação de contato existia.**
+
+- **Medido antes**: 1.004 leads da Incorpast → 875 só WhatsApp, 129 só Agendor, **ZERO cruzados**, e **nenhuma duplicata por telefone** (ou seja: não era lead paralelo, era ausência de chave). Dos 129, só 8 tinham telefone e 9 e-mail — 121 são negócios pendurados na EMPRESA, concentrando 29 fechamentos e **R$ 94.537,97** sem canal nem criativo.
+- **⚠️ A causa era uma linha do nosso código, não o Agendor.** Conferido na API deles: **100 de 100 organizações têm telefone** (formato `+5543988619300`) e 50 de 100 têm e-mail; o catálogo do sistema já baixava isso. `fichaDaEmpresaEmMemoria` **zerava o telefone** antes de usar, com o comentário "telefone da empresa NUNCA entra: fundiria todos os negócios dela num lead só".
+  - O medo estava certo para a **GRAVAÇÃO** (escrever em `numero` colide com a unique de produção e junta as linhas). Estava errado como conclusão geral: a conversa que originou aqueles negócios é UMA, e é ela que carrega o criativo.
+- **`vincularAoLeadDeOrigem` (lead-identity.ts)**: mesmo mecanismo da ponte do ledger — aponta `origem_lead_id` e COPIA o rastreio, **mantendo as linhas separadas**. Três negócios da mesma empresa podem apontar para a mesma conversa, que é exatamente a verdade. `telefoneDaEmpresaEmMemoria` devolve o telefone cru só para ACHAR a origem; ele continua fora de `numero`.
+  - ⚠️ `canal`/`origin` com valor `'agendor'`/`'datalytics'` contam como VAZIOS na cópia (é porta de entrada, não canal) — mesma regra de 2026-08-22. Canal digitado por gestor continua intocado.
+  - ⚠️ Achou a si mesmo (negócio COM pessoa, que já casou por telefone no upsert) → não liga.
+- ✅ **Provado ao vivo**: backfill resolveu 94 dos 121 negócios (parou num 429), **93 tinham telefone na ficha** e 2 ligaram a uma conversa real — `9836 - Vinicius - VDR COMERCIO` ↔ conversa `Vinícius - VDR Studio Automotivo`, trazendo **`ad_name: AD4 ANDREIA 2`** e R$ 1.330,80. É o primeiro caso do sistema em que venda do Agendor ganhou criativo.
+- **⚠️ O resto não cruza porque a conversa não existe aqui**: 91 dos 94 têm telefone e não há conversa nossa com aquele número. Os DDDs das duas fontes se sobrepõem (11, 43, 41…), então não é público diferente — é que aqueles negócios entraram por outro caminho (telefone, site, e-mail, ou um WhatsApp que não passa pelo nosso sistema). Nada a corrigir no código.
+- ⚠️ **Pendente**: 27 negócios não foram resolvidos (429 no meio do backfill). A ingestão nova liga sozinha qualquer negócio que MUDE (a reconciliação usa `updatedAtGt`); negócio estático precisa de outra passada do backfill. E ⚠️ **não forçar rodadas em sequência** — foi 429 outra vez.
+
 ## Cruzamento de leads — a venda passa a achar o lead que a originou (2026-08-24)
 
 Pedido do Matheus: "toda vez que uma informação de lead chegar precisa ser visto se já tem esse lead e atualizar. **Origem e rastreio de WhatsApp é soberano**; faturamento, status e dados base podem ser sobrescritos". Objetivo dele: identificar os melhores canais e criativos, sabendo que a informação chega em pedaços e por portas diferentes.
