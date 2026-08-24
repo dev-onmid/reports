@@ -26,6 +26,20 @@ Pedido do Matheus: dashboard própria para restaurante/delivery e, depois, um **
   - ⚠️ Ocultar um elemento deixa o BURACO no lugar (a compactação do RGL é vertical, não horizontal). É reposicionar na mão — comportamento do grid, não bug.
 - **⚠️ DEPLOY**: `main` **não** era "no ar". O `build-image.yml` só gerava artefato; publicar era manual (scp + `deploy-recv.sh`). Isso fez uma remoção de tela parecer não feita **duas vezes**. Agora o workflow publica por SSH e faz smoke test externo — segredos `VPS_HOST`/`VPS_USER`/`VPS_SSH_KEY`, e o passo é pulado se não existirem.
 
+## Funil — a lista de leads ganhou canal, etapa, filtro e detalhe do lead (2026-08-23)
+
+Pedido do Matheus sobre o modal que abre ao clicar num degrau: mostrar o canal ao lado do nome, clicar no nome abrir "o modal igual é no CRM, que mostra todas as infos", e ter um filtro.
+
+- **`src/lib/canal-lead.ts` (nova)**: `canalSql(alias)` + `rotularCanal` — a derivação de canal saiu de dentro da rota do donut e virou lib. ⚠️ Motivo: o gráfico de canais e a lista de leads PRECISAM concordar; dois SQLs parecidos divergiriam na primeira mudança e o gestor veria um canal no donut e outro na lista do MESMO lead.
+- **`/api/crm/funil-leads`** passou a devolver `canal` (derivado) e `dataAgendada`. ✅ Conferido em produção com o alias (`l.`): **7.073 de 7.073 leads da Sorrifácil ingleses têm canal** — Facebook - WhatsApp, Chatwoot - WhatsApp, Instagram - WhatsApp.
+- **Linha do modal virou 3 colunas**: Nome (telefone + data embaixo) · Canal · Etapa do funil. A etapa é a SEMÂNTICA (`etapaAtual`), com o status cru do CRM no `title` — os dois cabiam, mas empilhados viravam ruído. Canal ausente aparece esmaecido como "sem canal": é lacuna de cadastro, não um canal chamado "—".
+- **⚠️ Data formatada**: a lista imprimia a data crua do driver ("Sat Aug 22 2026 00:00:00 GM", truncada). `fmtData` normaliza para dd/mm/aaaa.
+- **Filtro por canal** (`<select>` com a contagem por canal, só aparece com 2+ canais) + a busca agora também casa canal. ⚠️ O filtro é **derivado, não resetado por efeito**: se o canal selecionado não existe no recorte atual (trocou de etapa), ele é ignorado em vez de deixar a lista vazia sem explicação — e isso evita um `useEffect` que só existia para zerar estado.
+- **`GET /api/crm/[id]` (nova)** + **`funil-lead-detalhe.tsx`**: clicar no nome abre o detalhe por cima da lista, com Situação (status, canal, consulta marcada, datas), **Origem do lead** (campanha, conjunto, anúncio, tipo de click id, região, por onde o dado entrou) e observação.
+  - ⚠️ É **LEITURA**, não o `QuickEditModal` do CRM. Replicar a edição criaria dois lugares gravando o mesmo lead com regras que envelheceriam em separado, e salvar dali deixaria a lista e o card do funil desatualizados na tela. O botão "Abrir no CRM" leva para onde a edição mora. Em compensação o detalhe mostra a cadeia de atribuição, que o modal do CRM não junta.
+  - ⚠️ O detalhe é **irmão** do overlay da lista, não filho: dentro dele, clicar no backdrop borbulhava para o `onClose` da lista e fechava os dois.
+- ✅ Verificado: tsc + `next build` limpos; SQL conferido em produção; browser com a rota mockada — 3 colunas, data em dd/mm/aaaa, "sem canal" esmaecido, filtro "Indicação (2)" reduzindo para 2 linhas com o rodapé "Mostrando 2 de 6", detalhe abrindo com campanha/conjunto/anúncio/CTWA e fechando no backdrop sem fechar a lista.
+
 ## Funil — o buraco entre Agendamentos e Comparecimentos virou duas coisas (2026-08-23)
 
 Pedido do Matheus: "agendamento e comparecimento existe aqueles que ainda vão vir, ou seja, não faltaram… quantidade de pessoas que faltam comparecer e que realmente faltaram".
@@ -677,6 +691,21 @@ Decisão do Matheus: mobile cobre SÓ Início, Dashboard, Relatórios, Radar, Pa
 - **Padrão hover-touch**: ações `opacity-0 group-hover:opacity-100` ganham `max-md:opacity-100` (sempre visíveis no touch, desktop intacto) — aplicado em Pagamentos (7) e Dashboard (link do post IG).
 - ✅ Verificado no preview (dev :3000, session forjada, 375px + 1280px): menu mobile com exatamente as 6 + Início/Sair, stepper completo etapa a etapa (com /api/clients mockado), calendário de Pagamentos rolando com "+" visível, Dashboard empilhado; desktop conferido idêntico (sidebar completa, RGL em grid, modal completo sem etapas). tsc + `next build` limpos, zero erros de console.
 - Pendências conhecidas: telas fora do escopo continuam acessíveis por URL direta no celular (só saíram do menu — sem bloqueio/aviso); PWA (manifest/ícone) não feito; `logs` e demais telas fora das 6 seguem sem breakpoints.
+
+## Alerta de saldo cobrava cliente ARQUIVADO/INATIVO (2026-08-03)
+
+Pergunta do Matheus: "pagamento puxa alerta de clientes desativados?". **Puxava** — e as duas pontas discordavam:
+
+- **Tela** (`pagamentos/page.tsx`): filtrava `clients.filter(c => c.status === 'Ativo')`.
+- **Alerta** (`balance-alerts.ts`, queries Meta e Google): só `JOIN clients`, **sem filtro nenhum de status**.
+
+Efeito: cliente arquivado sumia da tela mas continuava sendo cobrado no grupo todo dia. É o tipo de divergência que faz o alerta perder credibilidade — o gestor olha a tela, não acha a conta, e o WhatsApp insiste nela.
+
+- **`CLIENTE_ATIVO_SQL`** (constante única, aplicada nas DUAS queries): `COALESCE(c.status, 'Ativo') NOT IN ('Arquivado', 'Inativo')`.
+- ⚠️ **A régua é "não arquivado", NÃO `= 'Ativo'`**. `ClientStatus` tem **quatro** valores (`Ativo | Alerta | Arquivado | Inativo`) e **'Alerta' é cliente que continua veiculando** — cortá-lo deixaria a campanha de quem já está em situação delicada parar por falta de saldo, sem aviso, que é o oposto do propósito deste alerta. Status novo passa a entrar por padrão: é o lado seguro do erro. O `COALESCE` cobre `status` nulo pela mesma razão.
+- **A TELA foi alinhada junto** — sem isso a divergência só trocava de lado. `useClients()` já devolve `visibleClients` (exclui Arquivado/Inativo), então bastou remover o filtro extra `=== 'Ativo'`, que era o que cortava 'Alerta'. `activeClientIds` agora é `new Set(clients.map(c => c.id))`.
+- ✅ tsc + `next build` limpos; equivalência das duas réguas conferida na fonte (`client-store.ts:36` × `CLIENTE_ATIVO_SQL`). ⚠️ **Não verificado no browser**: o harness de login caiu por recompilação concorrente do dev server e não insisti — a mudança da tela é uma linha cujo insumo (`clients` já filtrado) está provado na fonte. O efeito real depende de `DATABASE_URL`.
+- ⚠️ Régua de status vale só para o alerta de SALDO. Outros crons (monitor social, otimizador) têm filtros próprios — não foram tocados.
 
 ## Calendário de Pagamentos — fim de semana estreito + marcador de exceção (2026-08-03)
 

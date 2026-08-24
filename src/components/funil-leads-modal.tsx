@@ -9,9 +9,9 @@
 // menos linhas que o número clicado pareceria bug toda vez.
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import Link from 'next/link';
-import { X, ExternalLink, Loader2 } from 'lucide-react';
+import { X, Loader2 } from 'lucide-react';
 import { ROTULOS_ETAPA, type EtapaFunil } from '@/lib/funil-etapas';
+import { FunilLeadDetalhe } from './funil-lead-detalhe';
 import { cn } from '@/lib/utils';
 
 export type FunilLeadRow = {
@@ -25,6 +25,10 @@ export type FunilLeadRow = {
   perdido: boolean;
   valor: number;
   data: string | null;
+  /** Canal de origem já rotulado. `null` = o CRM não registrou de onde veio. */
+  canal: string | null;
+  /** Data da consulta marcada ('YYYY-MM-DD'), quando existe. */
+  dataAgendada: string | null;
 };
 
 type Props = {
@@ -44,6 +48,16 @@ type Props = {
 const fmtBRL = (v: number) =>
   v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 });
 
+/** Chave interna do filtro para quem não tem canal — nunca string vazia. */
+const SEM_CANAL = 'Sem canal';
+
+/** 'YYYY-MM-DD' → 'dd/mm/aaaa'. Sem isso a data saía como texto cru de `Date`. */
+function fmtData(iso: string | null): string | null {
+  if (!iso) return null;
+  const [a, m, d] = iso.slice(0, 10).split('-');
+  return a && m && d ? `${d}/${m}/${a}` : null;
+}
+
 export function FunilLeadsModal({
   etapa, tituloEtapa, totalNoCard, clientIds, from, to, topoDeAnuncios, onClose,
 }: Props) {
@@ -52,6 +66,9 @@ export function FunilLeadsModal({
   const [total, setTotal] = useState(0);
   const [erro, setErro] = useState(false);
   const [busca, setBusca] = useState('');
+  const [canalFiltro, setCanalFiltro] = useState('');
+  /** Lead cujo detalhe está aberto por cima da lista. */
+  const [detalhe, setDetalhe] = useState<FunilLeadRow | null>(null);
 
   const semLista = etapa === 'contato' && topoDeAnuncios;
   // ⚠️ Dependa do VALOR, não da referência: o pai passa `[...selectedIds]`, um
@@ -85,13 +102,33 @@ export function FunilLeadsModal({
     return () => { alive = false; };
   }, [etapa, modo, from, to, clientKey, semLista]);
 
+  /** Canais presentes na lista, para o filtro só oferecer o que existe. */
+  const canais = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const r of rows ?? []) {
+      const k = r.canal ?? SEM_CANAL;
+      m.set(k, (m.get(k) ?? 0) + 1);
+    }
+    return [...m.entries()].sort((a, b) => b[1] - a[1]);
+  }, [rows]);
+
   const filtradas = useMemo(() => {
     const q = busca.trim().toLowerCase();
-    if (!q || !rows) return rows ?? [];
-    return rows.filter(r =>
-      `${r.nome ?? ''} ${r.numero ?? ''} ${r.status ?? ''} ${r.clientName ?? ''}`.toLowerCase().includes(q),
-    );
-  }, [rows, busca]);
+    let out = rows ?? [];
+    // ⚠️ Só aplica o filtro se o canal ainda EXISTE no recorte atual. Trocar de
+    // etapa com um canal selecionado deixava a lista vazia sem explicação —
+    // resolver derivando evita o efeito que só existia para "resetar".
+    if (canalFiltro && canais.some(([c]) => c === canalFiltro)) {
+      out = out.filter(r => (r.canal ?? SEM_CANAL) === canalFiltro);
+    }
+    if (q) {
+      out = out.filter(r =>
+        `${r.nome ?? ''} ${r.numero ?? ''} ${r.status ?? ''} ${r.clientName ?? ''} ${r.canal ?? ''}`
+          .toLowerCase().includes(q),
+      );
+    }
+    return out;
+  }, [rows, busca, canalFiltro, canais]);
 
   const multiCliente = useMemo(() => new Set((rows ?? []).map(r => r.clientId)).size > 1, [rows]);
   const stop = useCallback((e: React.MouseEvent) => e.stopPropagation(), []);
@@ -101,6 +138,7 @@ export function FunilLeadsModal({
   const divergente = modo === 'alcancou' && rows !== null && !semLista && total !== totalNoCard;
 
   return (
+    <>
     <div
       className="fixed inset-0 z-[200] flex items-center justify-center bg-black/70 p-4"
       onClick={onClose}
@@ -152,10 +190,20 @@ export function FunilLeadsModal({
                 </button>
               ))}
             </div>
+            {canais.length > 1 && (
+              <select
+                value={canais.some(([c]) => c === canalFiltro) ? canalFiltro : ''}
+                onChange={e => setCanalFiltro(e.target.value)}
+                className="h-8 shrink-0 rounded-lg border border-white/[0.08] bg-[#071014] px-2 text-[11px] font-semibold text-[#f4f7f8] outline-none [color-scheme:dark] focus:border-[#6cff2f]"
+              >
+                <option value="">Todos os canais</option>
+                {canais.map(([c, n]) => <option key={c} value={c}>{c} ({n})</option>)}
+              </select>
+            )}
             <input
               value={busca}
               onChange={e => setBusca(e.target.value)}
-              placeholder="Buscar nome, telefone, status…"
+              placeholder="Buscar nome, telefone, canal…"
               className="h-8 min-w-0 flex-1 rounded-lg border border-white/[0.08] bg-[#071014] px-3 text-xs text-[#f4f7f8] outline-none placeholder:text-[#9aa4aa] focus:border-[#6cff2f]"
             />
           </div>
@@ -184,35 +232,49 @@ export function FunilLeadsModal({
           ) : (
             <div className="divide-y divide-white/[0.06]">
               {filtradas.map(l => (
-                <Link
+                <div
                   key={l.id}
-                  href={`/crm?clientId=${encodeURIComponent(l.clientId)}&lead=${encodeURIComponent(l.id)}`}
-                  className="group flex items-center gap-3 py-2.5 transition-colors hover:bg-white/[0.04]"
+                  className="group grid grid-cols-[1fr_auto] items-center gap-3 py-2.5 sm:grid-cols-[1fr_140px_150px]"
                 >
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-[13px] font-semibold text-[#f4f7f8]">
+                  {/* Nome abre o detalhe; o telefone e o cliente ficam embaixo. */}
+                  <button
+                    type="button"
+                    onClick={() => setDetalhe(l)}
+                    className="min-w-0 text-left"
+                  >
+                    <p className="truncate text-[13px] font-semibold text-[#f4f7f8] underline decoration-white/15 decoration-dotted underline-offset-4 group-hover:decoration-[#6cff2f]">
                       {l.nome?.trim() || l.numero || 'Lead sem nome'}
                     </p>
                     <p className="truncate text-[11px] text-[#9aa4aa]">
-                      {[multiCliente ? l.clientName : null, l.numero, l.data]
+                      {[multiCliente ? l.clientName : null, l.numero, fmtData(l.data)]
                         .filter(Boolean).join(' · ')}
                     </p>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-2">
+                  </button>
+
+                  {/* Canal — `null` é lacuna de cadastro, não um canal chamado "—". */}
+                  <span className={cn(
+                    'hidden truncate rounded px-1.5 py-0.5 text-center text-[10px] font-bold sm:block',
+                    l.canal ? 'bg-white/[0.07] text-[#dce4e8]' : 'bg-white/[0.03] text-[#6b7478]',
+                  )} title={l.canal ?? 'Canal não registrado no CRM'}>
+                    {l.canal ?? 'sem canal'}
+                  </span>
+
+                  <div className="flex shrink-0 items-center justify-end gap-2">
                     {l.valor > 0 && (
                       <span className="text-[11px] font-bold text-[#6cff2f]">{fmtBRL(l.valor)}</span>
                     )}
-                    {l.status && (
-                      <span className={cn(
-                        'rounded px-1.5 py-0.5 text-[10px] font-bold',
-                        l.perdido ? 'bg-red-500/15 text-red-300' : 'bg-white/[0.07] text-[#dce4e8]',
-                      )}>
-                        {l.status}
-                      </span>
-                    )}
-                    <ExternalLink className="h-3.5 w-3.5 text-[#9aa4aa] opacity-0 transition-opacity group-hover:opacity-100" />
+                    {/* Etapa SEMÂNTICA do funil; o status cru do CRM fica no title. */}
+                    <span
+                      title={l.status ?? undefined}
+                      className={cn(
+                        'truncate rounded px-1.5 py-0.5 text-[10px] font-bold',
+                        l.perdido ? 'bg-red-500/15 text-red-300' : 'bg-[#6cff2f]/12 text-[#6cff2f]',
+                      )}
+                    >
+                      {l.etapaAtual}
+                    </span>
                   </div>
-                </Link>
+                </div>
               ))}
             </div>
           )}
@@ -235,6 +297,18 @@ export function FunilLeadsModal({
         )}
       </div>
     </div>
+
+    {/* ⚠️ Irmão do overlay, não filho: dentro dele, clicar no backdrop do
+        detalhe borbulharia para o `onClose` da lista e fecharia os dois. */}
+    {detalhe && (
+      <FunilLeadDetalhe
+        leadId={detalhe.id}
+        clientId={detalhe.clientId}
+        canal={detalhe.canal}
+        onClose={() => setDetalhe(null)}
+      />
+    )}
+    </>
   );
 }
 

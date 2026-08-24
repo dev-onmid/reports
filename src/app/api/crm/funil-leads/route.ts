@@ -1,10 +1,12 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
+import { canalSql, rotularCanal } from '@/lib/canal-lead';
 import {
   construirMapaEtapas,
   etapaDoLead,
   leadNaEtapa,
   ROTULOS_ETAPA,
+  diaISO,
   type EtapaDeStage,
   type EtapaFunil,
   type LeadParaFunil,
@@ -80,7 +82,11 @@ export async function GET(req: NextRequest) {
               l.compareceu,
               (l.fechou OR COALESCE(NULLIF(l.revenue, 0), l.valor_rs, 0) > 0) AS fechou,
               COALESCE(NULLIF(l.revenue, 0), l.valor_rs, 0) AS valor_rs,
-              COALESCE(l.lead_date, l.data, l.created_at::date) AS data_lead
+              COALESCE(l.lead_date, l.data, l.created_at::date) AS data_lead,
+              -- Canal derivado pela MESMA expressão do donut de canais: dois
+              -- SQLs parecidos divergiriam, e o gestor veria um canal no
+              -- gráfico e outro na lista do mesmo lead.
+              ${canalSql('l')} AS canal
          FROM public.crm_leads l
          LEFT JOIN public.clients c ON c.id = l.client_id
         -- Registro de VENDA é ledger de faturamento, não lead: fica fora da
@@ -151,6 +157,10 @@ export async function GET(req: NextRequest) {
         perdido: posto.perdido,
         valor: Number(row.valor_rs) || 0,
         data: row.data_lead ? String(row.data_lead).split('T')[0] : null,
+        /** Canal de origem — `null` quando o CRM não registrou de onde veio. */
+        canal: rotularCanal(row.canal as string | null),
+        /** Data da consulta marcada, para a lista mostrar quem ainda vai vir. */
+        dataAgendada: diaISO(row.data_agendada ? String(row.data_agendada) : null),
       });
     }
 

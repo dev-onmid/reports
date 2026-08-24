@@ -1,6 +1,7 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { parseIsoDateRange } from '@/lib/optimizer-period-range';
+import { CANAL_SQL, ROTULO_CANAL } from '@/lib/canal-lead';
 
 /**
  * Faturamento e LEADS por CANAL — de onde vem o dinheiro e de onde vem o lead.
@@ -37,47 +38,6 @@ export type FaturamentoPorOrigem = {
 
 export type LeadsPorCanal = { label: string; leads: number };
 
-/** Rótulos legíveis para os canais que chegam em vocabulário de máquina. */
-const ROTULO: Record<string, string> = {
-  meta: 'Meta Ads',
-  google: 'Google Ads',
-  instagram: 'Instagram',
-  facebook: 'Facebook',
-  whatsapp: 'WhatsApp',
-  tiktok: 'TikTok',
-  organic: 'Orgânico / Direto',
-  organico: 'Orgânico / Direto',
-};
-
-/**
- * O CANAL do faturamento, em ordem de força da evidência.
- *
- * ⚠️ NÃO usa `origin`. Levantamento em produção: `origin` guarda de onde o lead
- * foi IMPORTADO ('Agendor', 'Datalytics') ou o default 'organic' — nunca o
- * canal. Quem guarda o canal de verdade é **`canal`**: 'Indicação', 'TV',
- * 'Fachada/Passou em Frente', 'Facebook - WhatsApp'… (vem da coluna de origem
- * do próprio export do CRM do cliente). Agrupar por `origin` respondia "por
- * qual porta o dado entrou no sistema", não "o que trouxe a venda".
- *
- * Os click ids vêm ANTES do texto: são prova direta de anúncio, enquanto
- * `canal` é o que alguém digitou.
- */
-const CANAL_SQL = `CASE
-  WHEN NULLIF(ctwa_clid, '') IS NOT NULL OR NULLIF(fbclid, '') IS NOT NULL THEN 'Meta Ads'
-  WHEN NULLIF(gclid, '') IS NOT NULL OR NULLIF(wbraid, '') IS NOT NULL
-    OR NULLIF(gbraid, '') IS NOT NULL THEN 'Google Ads'
-  WHEN NULLIF(btrim(canal), '') IS NOT NULL
-   AND lower(btrim(canal)) NOT IN ('agendor', 'datalytics', 'planilha', 'importacao', 'crm')
-    THEN btrim(canal)
-  -- Rede de segurança para leads do Agendor importados ANTES de 2026-08-22:
-  -- naquela versão a ingestão gravava canal='agendor' (a porta de entrada) e a
-  -- origem real ia só para a observação. Hoje o canal já vem preenchido acima.
-  WHEN observacao LIKE '%Origem no Agendor: %'
-    THEN btrim(substring(observacao from 'Origem no Agendor: ([^·]+)'))
-  WHEN NULLIF(btrim(utm_source), '') IS NOT NULL THEN btrim(utm_source)
-  ELSE NULL
-END`;
-
 /**
  * Funde variações do mesmo canal ('Google' e 'Google ', 'Facebook' e
  * 'facebook') mantendo o rótulo da variante que mais faturou — sem isso o mesmo
@@ -87,7 +47,7 @@ function normalizar(rows: LinhaBruta[], semRotulo: string): FaturamentoPorOrigem
   const porChave = new Map<string, FaturamentoPorOrigem>();
   for (const r of rows) {
     const cru = r.label?.trim();
-    const label = cru ? (ROTULO[cru.toLowerCase()] ?? cru) : semRotulo;
+    const label = cru ? (ROTULO_CANAL[cru.toLowerCase()] ?? cru) : semRotulo;
     const chave = label.toLowerCase();
     const receita = Number(r.receita) || 0;
     const vendas = Number(r.vendas) || 0;
@@ -111,7 +71,7 @@ function normalizarLeads(rows: Array<{ label: string | null; leads: number }>): 
   const porChave = new Map<string, LeadsPorCanal>();
   for (const r of rows) {
     const cru = r.label?.trim();
-    const label = cru ? (ROTULO[cru.toLowerCase()] ?? cru) : 'Canal não informado';
+    const label = cru ? (ROTULO_CANAL[cru.toLowerCase()] ?? cru) : 'Canal não informado';
     const chave = label.toLowerCase();
     const leads = Number(r.leads) || 0;
     const atual = porChave.get(chave);
