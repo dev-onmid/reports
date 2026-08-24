@@ -158,6 +158,8 @@ async function handleLeadCreate(pool: ReturnType<typeof makeServerPool>, data: a
       origin,
       status: data.status ?? null,
       observacao: obs,
+      email,
+      negocioExternoId: data.external_id ?? data.lead_id ?? null,
       sourceUrl: tracking.source_url ?? null,
       utmSource: tracking.utm_source ?? null,
       utmMedium: tracking.utm_medium ?? null,

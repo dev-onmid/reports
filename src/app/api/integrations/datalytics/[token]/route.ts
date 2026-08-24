@@ -1,11 +1,12 @@
 import type { NextRequest } from 'next/server';
 import { createHash } from 'node:crypto';
 import { makeServerPool } from '@/lib/server-db';
+import { resolverLeadExistente } from '@/lib/lead-identity';
 import { extrairLeadDatalytics, type LeadDatalytics } from '@/lib/datalytics';
 import {
   conexaoPorToken, registrarLogDatalytics, ensureDatalyticsSchema,
 } from '@/lib/datalytics-server';
-import { chaveTelefone, sinaisDoStatus } from '@/lib/importacao-origem';
+import { sinaisDoStatus } from '@/lib/importacao-origem';
 import { classificarEtapa, normalizarEtiqueta } from '@/lib/funil-etapas';
 import { ensureDefaultFunnel, getFirstFunnelStageLabel } from '@/lib/crm-conversation-sync';
 import {
@@ -99,23 +100,22 @@ async function upsertLead(
 
     const funnelId = await ensureDefaultFunnel(pool, clientId);
 
-    // Casamento por telefone indexando os DOIS campos (numero E phone) com a
-    // MESMA chave da importação de planilha — instalações antigas gravaram num,
-    // novas no outro, e o Datalytics manda com +55.
-    const { rows: existentes } = await pool.query<{
-      id: string; numero: string | null; phone: string | null;
-      status: string | null; funnel_id: string | null;
-    }>(
-      `SELECT id, numero, phone, status, funnel_id
-         FROM public.crm_leads WHERE client_id = $1`,
-      [clientId],
-    );
-    let match: typeof existentes[number] | null = null;
-    for (const e of existentes) {
-      if (chaveTelefone(e.numero) === lead.telefone || chaveTelefone(e.phone) === lead.telefone) {
-        match = e;
-        break;
-      }
+    // Régua ÚNICA de identidade (lead-identity.ts): telefone (BR e estrangeiro),
+    // id do negócio, e-mail.
+    // ⚠️ Antes isto carregava TODOS os leads do cliente pra memória a cada
+    // webhook e comparava em JS — com 27 mil leads na base, uma varredura
+    // inteira por mensagem recebida.
+    const achado = await resolverLeadExistente(pool, clientId, {
+      telefone: lead.telefoneBruto ?? lead.telefone,
+      negocioExternoId: lead.idExterno,
+      email: lead.email,
+    });
+    let match: { id: string; status: string | null; funnel_id: string | null } | null = null;
+    if (achado) {
+      const { rows: [row] } = await pool.query<{ id: string; status: string | null; funnel_id: string | null }>(
+        `SELECT id, status, funnel_id FROM public.crm_leads WHERE id = $1`, [achado.id],
+      );
+      match = row ?? null;
     }
 
     const labelEtapa = lead.etapa && 'label' in lead.etapa ? lead.etapa.label : null;

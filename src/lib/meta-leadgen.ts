@@ -248,6 +248,9 @@ export async function processLeadgenEvent(
       canal,
       origin,
       observacao,
+      // Formulário quase sempre traz e-mail: é a chave que junta este lead com
+      // o mesmo pessoa que depois chega pelo WhatsApp com outro número.
+      email: fields.email,
       sourceId: adId,
       campaignName,
       adsetName,

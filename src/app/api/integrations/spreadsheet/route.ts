@@ -2,7 +2,8 @@ import type { NextRequest } from 'next/server';
 import { createHash } from 'node:crypto';
 import { makeServerPool } from '@/lib/server-db';
 
-import { origemIntegravel, resumirOrigens, dedupLote, dedupPorTelefone, idExterno, chaveTelefone, sinaisDoStatus, indexarOcorrencias } from '@/lib/importacao-origem';
+import { origemIntegravel, resumirOrigens, dedupLote, dedupPorTelefone, idExterno, sinaisDoStatus, indexarOcorrencias } from '@/lib/importacao-origem';
+import { chavesTelefone } from '@/lib/lead-identity';
 
 /** Tipo da planilha, escolhido na importação. Ver comentário em LeadParaFunil. */
 export type TipoPlanilha = 'lead' | 'venda' | 'hibrido';
@@ -400,6 +401,15 @@ async function ensureTables(pool: ReturnType<typeof makeServerPool>) {
       ON public.crm_leads (client_id, external_id)
       WHERE external_id IS NOT NULL
   `);
+  // Chave de negócio (nº do orçamento): é por ela que a linha de faturamento
+  // acha o lead de origem, e que a régua de identidade casa um lead cujo
+  // telefone mudou. NÃO é única — dois lançamentos do mesmo orçamento são duas
+  // linhas legítimas no ledger.
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS crm_leads_client_negocio_idx
+      ON public.crm_leads (client_id, negocio_externo_id)
+      WHERE negocio_externo_id IS NOT NULL
+  `).catch(() => {});
 }
 
 async function insertLeadBatch(
@@ -534,27 +544,41 @@ async function upsertPorTelefone(
   // inteira. Regras em dedupPorTelefone (importacao-origem.ts).
   rows = dedupPorTelefone(rows);
 
-  const fones = rows.map(r => chaveTelefone(r.phone)).filter((f): f is string => Boolean(f));
+  // Índice de identidade do cliente. Em lote (uma query só) porque a
+  // importação processa milhares de linhas — mas usando as MESMAS chaves da
+  // régua única (lead-identity.ts): telefone BR, telefone cru (estrangeiro, que
+  // a chave BR descartava) e nº do orçamento.
   const existentes = new Map<string, string>();
-  if (fones.length > 0) {
-    const { rows: achados } = await pool.query<{ id: string; numero: string | null; phone: string | null }>(
-      `SELECT id::text, numero, phone FROM public.crm_leads WHERE client_id = $1`,
+  {
+    const { rows: achados } = await pool.query<{
+      id: string; numero: string | null; phone: string | null; negocio: string | null;
+    }>(
+      `SELECT id::text, numero, phone, negocio_externo_id AS negocio
+         FROM public.crm_leads
+        WHERE client_id = $1 AND COALESCE(registro_tipo, 'hibrido') <> 'venda'`,
       [clientId],
     );
     for (const a of achados) {
-      // Indexa pelos dois campos: instalações antigas gravaram em `numero`,
-      // as novas em `phone`.
+      // Indexa os dois campos: instalações antigas gravaram em `numero`, as
+      // novas em `phone`.
       for (const v of [a.numero, a.phone]) {
-        const k = chaveTelefone(v);
-        if (k && !existentes.has(k)) existentes.set(k, a.id);
+        for (const k of chavesTelefone(v)) if (!existentes.has(k)) existentes.set(k, a.id);
       }
+      const neg = idExterno(a.negocio);
+      if (neg && !existentes.has(`neg:${neg}`)) existentes.set(`neg:${neg}`, a.id);
     }
   }
 
   const novos: typeof rows = [];
   for (const r of rows) {
-    const k = chaveTelefone(r.phone);
-    const id = k ? existentes.get(k) : undefined;
+    // Telefone primeiro (chave mais forte que a planilha tem), depois o nº do
+    // orçamento — que casa o lead mesmo quando o número mudou.
+    let id: string | undefined;
+    for (const k of chavesTelefone(r.phone)) { id = existentes.get(k); if (id) break; }
+    if (!id) {
+      const neg = idExterno(r.negocioExternoId);
+      if (neg) id = existentes.get(`neg:${neg}`);
+    }
     if (!id) { novos.push(r); continue; }
 
     // ⚠️ Três classes de campo, e a diferença entre elas é o que impede perda:

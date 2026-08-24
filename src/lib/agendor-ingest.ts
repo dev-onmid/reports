@@ -8,7 +8,7 @@
  * Identidade do lead, em ordem de força:
  *  1. `external_id = agendor:{id do negócio}` — sobrevive a troca de telefone
  *     e é o dedupe natural do backfill (rodar 2x não duplica);
- *  2. telefone (chaveTelefone sobre numero E phone), padrão da planilha.
+ *  2. telefone (régua única de lead-identity.ts: BR e estrangeiro), depois e-mail.
  *
  * ⚠️ Negócio SEM telefone ENTRA mesmo assim (diferente do Datalytics): o
  * Agendor referencia a pessoa sem contato no payload, e descartar seria
@@ -18,9 +18,10 @@
 
 import type { Pool } from 'pg';
 import type { FiltrosImportacao, NegocioAgendor, PessoaAgendor } from '@/lib/agendor';
+import { resolverLeadExistente } from '@/lib/lead-identity';
 import { normalizarNegocio, normalizarPessoa, parseFiltro, passaFiltros } from '@/lib/agendor';
 import { agendorFetch, AGENDOR_API, type ConexaoAgendor, registrarLogAgendor } from '@/lib/agendor-server';
-import { chaveTelefone, sinaisDoStatus } from '@/lib/importacao-origem';
+import { sinaisDoStatus } from '@/lib/importacao-origem';
 import { classificarEtapa, normalizarEtiqueta } from '@/lib/funil-etapas';
 import { ensureDefaultFunnel, getFirstFunnelStageLabel } from '@/lib/crm-conversation-sync';
 import { applyLeadAttribution, recordTrackingEvent } from '@/lib/lead-tracking';
@@ -290,26 +291,23 @@ export async function ingerirNegocioAgendor(
     await pool.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`agendor:${clientId}:${negocio.idExterno}`]);
     const funnelId = await ensureDefaultFunnel(pool, clientId);
 
-    const { rows: existentes } = await pool.query<{
-      id: string; numero: string | null; phone: string | null;
-      status: string | null; funnel_id: string | null; external_id: string | null;
-    }>(
-      `SELECT id, numero, phone, status, funnel_id, external_id
-         FROM public.crm_leads WHERE client_id = $1`,
-      [clientId],
-    );
-    let match =
-      existentes.find(e => e.external_id === externalId) ??
-      (telefone
-        ? existentes.find(e => chaveTelefone(e.numero) === telefone || chaveTelefone(e.phone) === telefone)
-        : undefined) ??
-      // Número INTERNACIONAL (+351, +44, +1…): chaveTelefone é BR e devolve
-      // null, o casamento por chave não acontece e o 2º negócio da mesma
-      // pessoa estourava a unique (client_id, numero) de produção — visto ao
-      // vivo na Londrigifts. Igualdade de texto cru cobre esse caso.
-      (pessoa?.telefoneBruto
-        ? existentes.find(e => e.numero === pessoa.telefoneBruto)
-        : undefined) ?? null;
+    // Régua ÚNICA de identidade (lead-identity.ts): id do negócio no Agendor,
+    // telefone (BR e estrangeiro — número internacional já estourou a unique de
+    // produção na Londrigifts) e e-mail.
+    // ⚠️ Antes isto carregava TODOS os leads do cliente pra memória a cada
+    // negócio ingerido.
+    const achado = await resolverLeadExistente(pool, clientId, {
+      externalId,
+      telefone: pessoa?.telefoneBruto ?? telefone,
+      email: pessoa?.email,
+    });
+    let match: { id: string; status: string | null; funnel_id: string | null; external_id: string | null } | null = null;
+    if (achado) {
+      const { rows: [row] } = await pool.query<{
+        id: string; status: string | null; funnel_id: string | null; external_id: string | null;
+      }>(`SELECT id, status, funnel_id, external_id FROM public.crm_leads WHERE id = $1`, [achado.id]);
+      match = row ?? null;
+    }
 
     // sinais monotônicos: etapa dá agendou/compareceu; ganho dá fechou.
     const sinais = sinaisDoStatus(labelEtapa ?? '');

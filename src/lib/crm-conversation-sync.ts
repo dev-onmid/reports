@@ -1,4 +1,5 @@
 import type { Pool } from 'pg';
+import { resolverLeadExistente } from '@/lib/lead-identity';
 import { ETAPAS_PADRAO } from '@/lib/funil-etapas';
 
 // Fonte única em funil-etapas.ts (com a etapa semântica do Funil de
@@ -231,6 +232,10 @@ export type ConversationLeadInput = {
   adName?: string | null;
   creativeName?: string | null;
   instanceId?: string | null;
+  /** E-mail, quando a fonte tem (formulário, Leadgen). Chave fraca de casamento. */
+  email?: string | null;
+  /** Nº do orçamento/negócio na fonte — ponte com a planilha da clínica. */
+  negocioExternoId?: string | null;
 };
 
 export async function upsertLeadFromConversation(pool: Pool, input: ConversationLeadInput) {
@@ -255,24 +260,18 @@ export async function upsertLeadFromConversation(pool: Pool, input: Conversation
 
     const funnelId = await ensureDefaultFunnel(pool, input.clientId);
     const status = input.status?.trim() || await getFirstFunnelStageLabel(pool, funnelId);
-    const { rows: [existing] } = await pool.query<{ id: string }>(
-      `SELECT id
-         FROM public.crm_leads
-        WHERE client_id = $1
-          AND (
-            ($2::text <> '' AND NULLIF(regexp_replace(COALESCE(numero, ''), '\\D', '', 'g'), '') = $2)
-            OR ($3::text <> '' AND NULLIF(regexp_replace(COALESCE(numero, ''), '\\D', '', 'g'), '') = $3)
-            OR ($3::text <> '' AND whatsapp_lid = $3)
-          )
-        ORDER BY
-          CASE WHEN funnel_id IS NOT NULL THEN 0 ELSE 1 END,
-          COALESCE(updated_at, created_at) DESC,
-          created_at DESC
-        LIMIT 1`,
-      [input.clientId, phone, lid],
-    );
+    // Régua ÚNICA de identidade (ver lead-identity.ts). Aditiva: tenta as
+    // mesmas chaves de antes MAIS o nº do orçamento, o e-mail e o número
+    // estrangeiro — que a régua antiga descartava, fazendo cada mensagem de um
+    // +351/+44 virar um lead novo.
+    const achado = await resolverLeadExistente(pool, input.clientId, {
+      telefone: phone || input.phone,
+      lid,
+      email: input.email,
+      negocioExternoId: input.negocioExternoId,
+    });
 
-    let leadId = existing?.id;
+    let leadId = achado?.id;
     if (leadId) {
       const updated = await pool.query<{ id: string }>(
         `UPDATE public.crm_leads
