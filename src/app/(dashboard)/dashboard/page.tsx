@@ -62,6 +62,7 @@ import { CSS } from '@dnd-kit/utilities';
 import { useClients } from '@/lib/client-store';
 import { cn, formatCurrencyBRL } from '@/lib/utils';
 import { ClientAvatar } from '@/components/client-avatar';
+import { CreativeRevenueStrip, type CriativoReceita } from '@/components/dashboard/creative-revenue-strip';
 import type { TopCreative } from '@/app/api/meta/top-creatives/route';
 import type { PageInsightsResult, InstagramPageData } from '@/app/api/meta/page-insights/route';
 import type { FaturamentoPorOrigem, LeadsPorCanal } from '@/app/api/crm/por-canal/route';
@@ -5234,6 +5235,9 @@ export default function GeneralDashboard() {
   const [balances, setBalances] = useState<AdAccountBalance[]>([]);
   const [clientLinks, setClientLinks] = useState<ClientAccountLink[]>([]);
   const [previewCreative, setPreviewCreative] = useState<TopCreative | null>(null);
+  /** Faturamento por criativo no período — vem do CRM, não do Meta. */
+  const [criativosReceita, setCriativosReceita] = useState<CriativoReceita[]>([]);
+  const [criativosReceitaLoading, setCriativosReceitaLoading] = useState(false);
   /** Degrau do Funil de Performance aberto no modal de leads (índice em ETAPAS_FUNIL). */
   const [funilStageIdx, setFunilStageIdx] = useState<number | null>(null);
   const [campaignSortBy, setCampaignSortBy] = useState<SortKey>('spend');
@@ -6225,6 +6229,81 @@ export default function GeneralDashboard() {
   })();
   const deliveryRange = periodoISO;
 
+  // ── Faturamento por criativo (CRM) ────────────────────────────────────────
+  // Uma busca por cliente selecionado — a rota da biblioteca é por cliente, e
+  // pedir sem cliente traria a carteira inteira só pra descartar quase tudo.
+  useEffect(() => {
+    let cancelado = false;
+    const ids = [...selectedIds];
+    if (ids.length === 0) { setCriativosReceita([]); return () => { cancelado = true; }; }
+    setCriativosReceitaLoading(true);
+    // Zera na troca de período/cliente: sem isso a faixa mostra o recorte
+    // anterior enquanto o novo carrega.
+    setCriativosReceita([]);
+    const dias = Math.max(1, Math.round(
+      (new Date(periodoISO.to).getTime() - new Date(periodoISO.from).getTime()) / 86400000) + 1);
+
+    (async () => {
+      type Linha = {
+        client_id: string; client_name: string | null; ad_key: string; source_id: string | null;
+        ad_name: string | null; creative_name: string | null; campaign_name: string | null;
+        leads: number; vendas: number; receita: number;
+      };
+      const lotes = await Promise.all(ids.map(async id => {
+        const qs = new URLSearchParams({ clientId: id, from: periodoISO.from, to: periodoISO.to });
+        const r = await fetch(`/api/creative-library?${qs}`).catch(() => null);
+        if (!r?.ok) return [] as Linha[];
+        const j = await r.json().catch(() => null) as { creatives?: Linha[] } | null;
+        return j?.creatives ?? [];
+      }));
+      if (cancelado) return;
+
+      const linhas = lotes.flat()
+        .filter(l => Number(l.receita) > 0)
+        .sort((a, b) => Number(b.receita) - Number(a.receita))
+        .slice(0, 12);
+
+      const monta = (thumbs: Record<string, { thumbnail_url: string | null }>): CriativoReceita[] =>
+        linhas.map(l => ({
+          adKey: `${l.client_id}:${l.ad_key}`,
+          adId: l.source_id,
+          adName: l.ad_name || l.creative_name || 'Criativo sem nome',
+          campaignName: l.campaign_name,
+          clientName: ids.length > 1 ? l.client_name : null,
+          leads: Number(l.leads) || 0,
+          vendas: Number(l.vendas) || 0,
+          receita: Number(l.receita) || 0,
+          thumbnail: l.source_id ? thumbs[l.source_id]?.thumbnail_url ?? null : null,
+        }));
+
+      setCriativosReceita(monta({}));
+      setCriativosReceitaLoading(false);
+
+      // Thumbnail vem da Graph, depois da lista — best-effort, não segura a faixa.
+      const porCliente = new Map<string, string[]>();
+      for (const l of linhas) {
+        if (!l.source_id) continue;
+        const atual = porCliente.get(l.client_id) ?? [];
+        atual.push(l.source_id);
+        porCliente.set(l.client_id, atual);
+      }
+      if (porCliente.size === 0) return;
+      const e = await fetch('/api/creative-library/enrich', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          days: dias,
+          items: [...porCliente.entries()].map(([cid, adIds]) => ({ clientId: cid, adIds })),
+        }),
+      }).catch(() => null);
+      if (cancelado || !e?.ok) return;
+      const j = await e.json().catch(() => null) as { enrich?: Record<string, { thumbnail_url: string | null }> } | null;
+      if (!cancelado && j?.enrich) setCriativosReceita(monta(j.enrich));
+    })().catch(() => { if (!cancelado) setCriativosReceitaLoading(false); });
+
+    return () => { cancelado = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedKey, periodoISO.from, periodoISO.to]);
+
   // ── Modo Food / Delivery ──────────────────────────────────────────────────
   // O segmento vem de `clients.dashboard_type` (coluna que já existia). O perfil
   // decide KPIs, rótulos e blocos — a tela é a MESMA, só troca de configuração.
@@ -6853,6 +6932,32 @@ export default function GeneralDashboard() {
                   dateTo={customDateTo}
                 />
               </div>
+
+              {/* Faturamento por Criativo — o que o anúncio TROUXE (CRM), acima
+                  da faixa de desempenho de mídia. Some quando nenhuma venda do
+                  período tem criativo identificado: caixa vazia aqui seria pior
+                  que ausência, porque parece número zerado em vez de dado que
+                  ainda não existe. */}
+              {(criativosReceitaLoading || criativosReceita.length > 0) && (
+                <div className="border-b border-white/[0.06] px-4 pb-4">
+                  <div className="mb-1 flex items-center gap-2 text-xs font-black uppercase tracking-[0.07em] text-[#dce4e8]">
+                    Faturamento por Criativo
+                    <span
+                      className="rounded bg-[#6cff2f]/12 px-1.5 py-0.5 text-[9px] font-black text-[#6cff2f]"
+                      title="Receita das vendas cujo lead foi rastreado até este anúncio"
+                    >
+                      CRM
+                    </span>
+                  </div>
+                  <p className="mb-3 text-[10px] text-[#9aa4aa]">
+                    Vendas do período que dá para rastrear até o anúncio que trouxe o lead
+                    {criativosReceita.length > 0 && (
+                      <> · total atribuído {premiumValue(criativosReceita.reduce((s, c) => s + c.receita, 0), 'currency')}</>
+                    )}
+                  </p>
+                  <CreativeRevenueStrip criativos={criativosReceita} loading={criativosReceitaLoading} />
+                </div>
+              )}
 
               {/* Melhores Criativos — scroll horizontal, abaixo das campanhas */}
               <div className="px-4 py-4">

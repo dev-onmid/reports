@@ -52,18 +52,30 @@ export function buildCreativeWindow(
 
   const params: unknown[] = [];
   let windowFilter: string;
+  // ⚠️ A data do NEGÓCIO, não a da linha. `created_at` é quando o registro
+  // entrou no nosso banco — para uma linha do ledger de faturamento isso é o
+  // dia da IMPORTAÇÃO. Importar agosto em setembro jogaria a venda (e o
+  // criativo que a trouxe) no mês errado.
+  //
+  // A régua é a MESMA do card de Faturamento do dashboard e do funil: venda
+  // pela data de fechamento, lead pela data de cadastro. Se divergirem, a
+  // faixa "Faturamento por Criativo" some com um número diferente do card
+  // logo acima dela — que é exatamente o tipo de inconsistência que a régua
+  // única existe pra matar.
+  //
+  // `created_at` fica como último recurso (registro sem data alguma), lido em
+  // BRT: a sessão do Postgres roda em UTC e um `::date` cru cortaria o dia às
+  // 21h, empurrando o lead da noite para o dia seguinte.
+  const DIA_DO_NEGOCIO =
+    `COALESCE(l.data_fechamento, l.fechado_em, l.lead_date, l.data,` +
+    ` (l.created_at AT TIME ZONE 'America/Sao_Paulo')::date)`;
   if (range) {
-    // `to` é inclusivo: o dia inteiro entra (< to + 1 dia).
-    // ⚠️ As bordas são ancoradas em BRT de propósito: created_at é timestamptz e a
-    // sessão do Postgres roda em UTC, então um `::date` cru cortaria o dia às 21h BRT
-    // e empurraria os leads do fim da noite para o dia (e o mês) seguinte.
+    // `to` é inclusivo: o dia inteiro entra.
     params.push(range.from, range.to);
-    windowFilter =
-      `l.created_at >= ($1::timestamp AT TIME ZONE 'America/Sao_Paulo')` +
-      ` AND l.created_at < (($2::timestamp + INTERVAL '1 day') AT TIME ZONE 'America/Sao_Paulo')`;
+    windowFilter = `${DIA_DO_NEGOCIO} BETWEEN $1::date AND $2::date`;
   } else {
     params.push(days);
-    windowFilter = `l.created_at >= NOW() - ($1 || ' days')::interval`;
+    windowFilter = `${DIA_DO_NEGOCIO} >= (NOW() AT TIME ZONE 'America/Sao_Paulo')::date - ($1 || ' days')::interval`;
   }
 
   let clientFilter = '';
