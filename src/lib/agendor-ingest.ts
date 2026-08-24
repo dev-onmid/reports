@@ -18,7 +18,7 @@
 
 import type { Pool } from 'pg';
 import type { FiltrosImportacao, NegocioAgendor, PessoaAgendor } from '@/lib/agendor';
-import { resolverLeadExistente } from '@/lib/lead-identity';
+import { resolverLeadExistente, vincularAoLeadDeOrigem } from '@/lib/lead-identity';
 import { normalizarNegocio, normalizarPessoa, parseFiltro, passaFiltros } from '@/lib/agendor';
 import { agendorFetch, AGENDOR_API, type ConexaoAgendor, registrarLogAgendor } from '@/lib/agendor-server';
 import { sinaisDoStatus } from '@/lib/importacao-origem';
@@ -245,6 +245,23 @@ export type ResultadoIngestao = {
  * Não faz requisição: é só para o lead B2B não ficar sem nome nem origem —
  * nesses negócios o Agendor não vincula pessoa, só organização.
  */
+/**
+ * Telefone de contato da EMPRESA, cru — só para ACHAR a conversa que originou
+ * o negócio, nunca para gravar em `numero`.
+ *
+ * ⚠️ Medido na API da Incorpast (2026-08-24): **100 de 100** organizações têm
+ * telefone, no formato `+5543988619300`. O dado sempre esteve disponível e o
+ * sistema sempre o baixou — era descartado por medo de fundir os negócios da
+ * mesma empresa num lead só. O medo era certo para a GRAVAÇÃO; para o VÍNCULO
+ * (`vincularAoLeadDeOrigem`, que mantém as linhas separadas) não se aplica.
+ */
+function telefoneDaEmpresaEmMemoria(apiToken: string | null, orgId: string | null): string | null {
+  if (!apiToken || !orgId) return null;
+  const cat = catalogos.get(apiToken.slice(0, 12));
+  if (!cat || Date.now() - cat.em >= TTL_CATALOGO_MS) return null;
+  return cat.orgs.get(orgId)?.telefoneBruto ?? null;
+}
+
 function fichaDaEmpresaEmMemoria(apiToken: string | null, orgId: string | null): PessoaAgendor | null {
   if (!apiToken || !orgId) return null;
   const cat = catalogos.get(apiToken.slice(0, 12));
@@ -404,7 +421,18 @@ export async function posProcessarIngestao(
   pool: Pool, conn: ConexaoAgendor, negocio: NegocioAgendor, pessoa: PessoaAgendor | null,
   r: ResultadoIngestao, raw: unknown, origemDoLog: 'criado' | 'atualizado' | 'backfill',
 ): Promise<void> {
-  const regiao = regiaoFromPhone(pessoa?.telefoneBruto ?? null);
+  // ⚠️ B2B: o negócio não tem telefone próprio (está pendurado na empresa), mas
+  // a conversa de WhatsApp que o originou tem. Liga um ao outro SEM fundir as
+  // linhas — a mesma empresa tem vários negócios e uma conversa só.
+  const telContato = pessoa?.telefoneBruto
+    ?? telefoneDaEmpresaEmMemoria(conn.api_token, negocio.organizacaoId);
+  if (telContato || pessoa?.email) {
+    await vincularAoLeadDeOrigem(pool, conn.client_id, r.leadId, {
+      telefone: telContato, email: pessoa?.email,
+    }).catch(err => { console.error('[agendor vincular]', err?.message ?? err); return false; });
+  }
+
+  const regiao = regiaoFromPhone(pessoa?.telefoneBruto ?? telContato ?? null);
   await applyLeadAttribution(pool, r.leadId, {
     tracking: {},
     ddd: regiao?.ddd ?? null,

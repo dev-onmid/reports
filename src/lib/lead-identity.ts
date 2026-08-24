@@ -213,3 +213,65 @@ export async function resolverLeadExistente(
   const por = (['external_id', 'negocio', 'telefone', 'lid', 'email'] as const)[melhor.forca - 1];
   return { id: melhor.id, por };
 }
+
+// ───────────────────────────────────────────── vínculo sem mesclagem (B2B)
+
+/**
+ * Liga um lead ao lead que o ORIGINOU, sem juntar as duas linhas.
+ *
+ * ⚠️ Existe para o caso B2B, onde mesclar seria errado: no Agendor da Incorpast
+ * o negócio está pendurado na EMPRESA, e a mesma empresa tem vários negócios.
+ * Escrever o telefone da empresa em `numero` fundiria todos eles num lead só
+ * (e estouraria a unique de produção). Mas a conversa de WhatsApp que originou
+ * aqueles negócios é UMA, e é ela que carrega o criativo.
+ *
+ * A solução é a mesma da ponte do ledger de faturamento: aponta
+ * `origem_lead_id` e COPIA o rastreio, mantendo as linhas separadas. Três
+ * negócios da mesma empresa podem apontar para a mesma conversa — o que é
+ * exatamente a verdade.
+ *
+ * ⚠️ Rastreio é SOBERANO: preenche só o que está vazio no destino e **nunca
+ * escreve de volta** na origem.
+ *
+ * Devolve true quando ligou algo novo.
+ */
+export async function vincularAoLeadDeOrigem(
+  pool: Pool, clientId: string, leadId: string,
+  contato: { telefone?: string | null; email?: string | null },
+): Promise<boolean> {
+  if (!contato.telefone && !contato.email) return false;
+  const origem = await resolverLeadExistente(pool, clientId, contato);
+  // Achou a si mesmo (o lead já tem esse telefone) → nada a ligar.
+  if (!origem || origem.id === leadId) return false;
+
+  const { rowCount } = await pool.query(
+    `UPDATE public.crm_leads d
+        SET origem_lead_id = o.id,
+            canal         = COALESCE(NULLIF(d.canal, ''), o.canal),
+            origin        = COALESCE(NULLIF(d.origin, ''), o.origin),
+            source_id     = COALESCE(NULLIF(d.source_id, ''), o.source_id),
+            source_url    = COALESCE(NULLIF(d.source_url, ''), o.source_url),
+            ctwa_clid     = COALESCE(NULLIF(d.ctwa_clid, ''), o.ctwa_clid),
+            campaign_name = COALESCE(NULLIF(d.campaign_name, ''), o.campaign_name),
+            adset_name    = COALESCE(NULLIF(d.adset_name, ''), o.adset_name),
+            ad_name       = COALESCE(NULLIF(d.ad_name, ''), o.ad_name),
+            utm_source    = COALESCE(NULLIF(d.utm_source, ''), o.utm_source),
+            utm_medium    = COALESCE(NULLIF(d.utm_medium, ''), o.utm_medium),
+            utm_campaign  = COALESCE(NULLIF(d.utm_campaign, ''), o.utm_campaign),
+            utm_content   = COALESCE(NULLIF(d.utm_content, ''), o.utm_content),
+            utm_term      = COALESCE(NULLIF(d.utm_term, ''), o.utm_term),
+            gclid         = COALESCE(NULLIF(d.gclid, ''), o.gclid),
+            fbclid        = COALESCE(NULLIF(d.fbclid, ''), o.fbclid),
+            ddd           = COALESCE(NULLIF(d.ddd, ''), o.ddd),
+            regiao_uf     = COALESCE(NULLIF(d.regiao_uf, ''), o.regiao_uf),
+            regiao_cidade = COALESCE(NULLIF(d.regiao_cidade, ''), o.regiao_cidade),
+            regiao_fonte  = COALESCE(NULLIF(d.regiao_fonte, ''), o.regiao_fonte),
+            first_origin_at = COALESCE(d.first_origin_at, o.first_origin_at),
+            updated_at    = NOW()
+       FROM public.crm_leads o
+      WHERE d.id = $1 AND o.id = $2 AND d.client_id = $3
+        AND d.origem_lead_id IS DISTINCT FROM o.id`,
+    [leadId, origem.id, clientId],
+  );
+  return (rowCount ?? 0) > 0;
+}
