@@ -1791,7 +1791,12 @@ export default function PagamentosPage() {
 
   useEffect(() => { loadBalances(); }, [loadBalances]);
 
-  const activeClientIds = new Set(clients.filter(c => c.status === 'Ativo').map(c => c.id));
+  // `useClients()` já devolve só os não-arquivados/inativos. O filtro extra por
+  // `status === 'Ativo'` que existia aqui cortava o status 'Alerta' — cliente que
+  // continua veiculando e é justamente quem não pode parar por falta de saldo.
+  // Mesma régua do CLIENTE_ATIVO_SQL em src/lib/balance-alerts.ts: se divergirem,
+  // a tela e o aviso do WhatsApp voltam a discordar.
+  const activeClientIds = new Set(clients.map(c => c.id));
   const activeClientLinks = clientLinks.filter(l => activeClientIds.has(l.clientId));
   const balanceAlertClientLinks = activeClientLinks.filter((link) => {
     const client = clients.find(c => c.id === link.clientId);

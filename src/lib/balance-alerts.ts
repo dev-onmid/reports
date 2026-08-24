@@ -9,6 +9,21 @@ import { upsertSinal, resolverSinaisAntigos, AGENCIA } from '@/lib/notificacoes'
 /** Days of runway below which an account is considered at risk (UI-configurable). */
 export const DEFAULT_DIAS_ANTECEDENCIA = 3;
 
+/**
+ * Cliente que ainda veicula anúncio: tudo menos Arquivado e Inativo.
+ *
+ * Antes não havia filtro nenhum aqui, então cliente arquivado/desativado sumia
+ * da tela de Pagamentos mas continuava sendo cobrado no grupo todo dia — e essa
+ * divergência é o que faz o alerta perder credibilidade.
+ *
+ * ⚠️ A régua é "não arquivado", e não `= 'Ativo'`, de propósito: `ClientStatus`
+ * tem quatro valores e **'Alerta' é um cliente que continua rodando**. Cortá-lo
+ * deixaria a campanha de quem já está em situação delicada parar por falta de
+ * saldo, sem aviso — exatamente o oposto do que este alerta existe para evitar.
+ * Um status novo passa a entrar por padrão, que é o lado seguro do erro.
+ */
+const CLIENTE_ATIVO_SQL = `COALESCE(c.status, 'Ativo') NOT IN ('Arquivado', 'Inativo')`;
+
 /** Recent window: how fast the account is burning money right now. */
 const RITMO_WINDOW_DAYS = 7;
 
@@ -121,6 +136,7 @@ async function fetchMetaBalances(): Promise<AccountBalance[]> {
       FROM public.client_account_links cal
       JOIN public.clients c ON c.id = cal.client_id
       WHERE cal.platform IN ('meta', 'meta_ads')
+        AND ${CLIENTE_ATIVO_SQL}
     `);
     links = linkRows;
   } finally {
@@ -324,6 +340,7 @@ async function fetchGoogleBalances(): Promise<AccountBalance[]> {
       FROM public.client_account_links cal
       JOIN public.clients c ON c.id = cal.client_id
       WHERE cal.platform IN ('google', 'google_ads')
+        AND ${CLIENTE_ATIVO_SQL}
     `);
     links = linkRows;
   } finally {
