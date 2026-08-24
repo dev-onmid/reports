@@ -94,6 +94,12 @@ export type LeadParaFunil = {
   fechou: boolean;
   agendou: boolean;
   dataAgendada: string | null;
+  /**
+   * Data do próprio lead (criação). Serve para descartar agendamento
+   * IMPOSSÍVEL — ver `diaDoAgendamento`. Opcional: quem não passa mantém o
+   * comportamento antigo.
+   */
+  dataLead?: string | null;
   receita: number;
   /**
    * De qual planilha o registro veio, para separar VENDA de LEAD (default
@@ -138,12 +144,23 @@ export type ContagemFunil = {
   faltaram: number;
   /** Agendou, não veio, e não há data para julgar. Não é falta nem promessa. */
   agendamentoSemData: number;
+  /**
+   * A data passou, mas o CRM nunca disse o que aconteceu — e o STATUS do lead
+   * nem chegou a dizer que ele estava agendado (ex.: "Em Atendimento" com uma
+   * data solta no campo).
+   *
+   * ⚠️ Isto NÃO é falta. Chamar de falta era o que fazia o funil contar 61
+   * ausências onde o relatório da clínica registrava 30: os 31 excedentes eram
+   * leads que só existem no nosso CRM, promovidos a "agendamento" pela mera
+   * presença de uma data.
+   */
+  agendamentoSemDesfecho: number;
 };
 
 export const FUNIL_VAZIO: ContagemFunil = {
   contatos: 0, qualificados: 0, agendamentos: 0, comparecimentos: 0,
   fechamentos: 0, perdidos: 0, receita: 0,
-  aComparecer: 0, faltaram: 0, agendamentoSemData: 0,
+  aComparecer: 0, faltaram: 0, agendamentoSemData: 0, agendamentoSemDesfecho: 0,
 };
 
 /** Reconhece o rótulo de ausência — a mesma família que `classificarEtapa` já isola. */
@@ -209,7 +226,34 @@ export type PostoDoLead = {
   posto: number;
   /** Contagem paralela: desqualificado segue contando nas etapas que alcançou. */
   perdido: boolean;
+  /** Dia do agendamento já validado ('YYYY-MM-DD'), ou null. */
+  diaAgenda: string | null;
+  /**
+   * O lead só chegou a "agendamento" por causa da DATA — nem o status nem o
+   * booleano `agendou` dizem que houve marcação. Muda o julgamento de quem não
+   * veio: sem confirmação de que estava marcado, data vencida é lacuna de
+   * registro, não falta.
+   */
+  agendaSoPelaData: boolean;
 };
+
+/**
+ * Dia do agendamento, descartando o que é impossível.
+ *
+ * ⚠️ Consulta marcada ANTES de o lead existir não é agendamento — é o mês
+ * digitado errado. Medido em produção (2026-08-23): 59 leads no sistema, 27 só
+ * na Sorrifácil ingleses, todos com a data caindo no mês ANTERIOR ao do
+ * cadastro (lead de 04/08 com agenda em 17/07). Contá-los inflava
+ * AGENDAMENTOS e, como a data já passou, mandava todos direto pro balde de
+ * falta.
+ */
+export function diaDoAgendamento(lead: LeadParaFunil): string | null {
+  const dia = diaISO(lead.dataAgendada);
+  if (dia === null) return null;
+  const doLead = diaISO(lead.dataLead ?? null);
+  if (doLead !== null && dia < doLead) return null;
+  return dia;
+}
 
 /**
  * Classifica UM lead — extraído de `contarFunil` para que a listagem por etapa
@@ -222,17 +266,23 @@ export function etapaDoLead(lead: LeadParaFunil, mapa: MapaEtapas): PostoDoLead 
     ?? mapa.porLabel.get(label)
     ?? classificarEtapa(lead.status);
 
-  let posto = postoDaEtapa(etapaStatus); // perdido → -1: não sobe degrau por si só
+  const postoStatus = postoDaEtapa(etapaStatus); // perdido → -1: não sobe degrau por si só
+  const diaAgenda = diaDoAgendamento(lead);
+  let posto = postoStatus;
   if (lead.fechou) posto = Math.max(posto, 4);
   else if (lead.compareceu) posto = Math.max(posto, 3);
-  else if (lead.agendou || lead.dataAgendada != null) posto = Math.max(posto, 2);
+  else if (lead.agendou || diaAgenda !== null) posto = Math.max(posto, 2);
+  const agendaSoPelaData = posto === 2 && !lead.agendou && postoStatus < 2;
   // (else if de propósito: fechou já implica os anteriores pela cumulatividade)
 
   // Piso em 0: TODO lead é um contato (contarFunil incrementa `contatos` sem
   // condição). Sem o piso, um perdido que nunca avançou ficaria em -1 e sumiria
   // da listagem de "Contatos", divergindo do número do card.
   // Não muda contagem alguma: -1 e 0 falham igual nos testes `posto >= 1`.
-  return { etapaStatus, posto: Math.max(0, posto), perdido: etapaStatus === 'perdido' };
+  return {
+    etapaStatus, posto: Math.max(0, posto), perdido: etapaStatus === 'perdido',
+    diaAgenda, agendaSoPelaData,
+  };
 }
 
 /**
@@ -258,7 +308,7 @@ export function contarFunil(
 
     c.contatos++;
 
-    const { posto, perdido } = etapaDoLead(lead, mapa);
+    const { posto, perdido, diaAgenda, agendaSoPelaData } = etapaDoLead(lead, mapa);
     if (perdido) c.perdidos++;
 
     if (posto >= 1) c.qualificados++;
@@ -266,12 +316,14 @@ export function contarFunil(
     if (posto >= 3) c.comparecimentos++;
     // Agendou e ainda NÃO veio: separa promessa de falta.
     if (posto === 2) {
-      const dia = diaISO(lead.dataAgendada);
       // Falta explícita no status vence a data: "No-Show" marcado é falta mesmo
       // que a data ainda não tenha chegado (remarcação não confirmada).
       if (RE_FALTOU.test(normalizarEtiqueta(lead.status))) c.faltaram++;
-      else if (dia === null) c.agendamentoSemData++;
-      else if (dia >= ref) c.aComparecer++;
+      else if (diaAgenda === null) c.agendamentoSemData++;
+      else if (diaAgenda >= ref) c.aComparecer++;
+      // Data vencida em lead que ninguém marcou como agendado: o CRM não
+      // registrou o desfecho. Afirmar "faltou" seria inventar o dado.
+      else if (agendaSoPelaData) c.agendamentoSemDesfecho++;
       else c.faltaram++;
     }
     if (posto >= 4) {
@@ -316,6 +368,7 @@ export function somarFunis(funis: ContagemFunil[]): ContagemFunil {
     total.aComparecer += f.aComparecer;
     total.faltaram += f.faltaram;
     total.agendamentoSemData += f.agendamentoSemData;
+    total.agendamentoSemDesfecho += f.agendamentoSemDesfecho;
   }
   return total;
 }

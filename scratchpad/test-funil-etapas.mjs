@@ -9,8 +9,7 @@
 import assert from 'node:assert';
 import {
   classificarEtapa, postoDaEtapa, normalizarEtiqueta, contarFunil, somarFunis,
-  resolverTopoFunil, rotuloFonteTopo, normalizarFonteTopo, ETAPAS_PADRAO, FUNIL_VAZIO,
-} from './build/funil-etapas.mjs';
+  resolverTopoFunil, rotuloFonteTopo, normalizarFonteTopo, ETAPAS_PADRAO, FUNIL_VAZIO, diaDoAgendamento } from './build/funil-etapas.mjs';
 let n = 0;
 const eq = (a, b, m) => { assert.deepStrictEqual(a, b, m); n++; };
 const ok = (c, m) => { assert.ok(c, m); n++; };
@@ -252,6 +251,79 @@ console.log(`OK — ${n} asserts`);
 
   eq(FUNIL_VAZIO.aComparecer, 0, 'funil vazio comeca zerado');
   eq(FUNIL_VAZIO.faltaram, 0, 'idem faltaram');
+  eq(FUNIL_VAZIO.agendamentoSemDesfecho, 0, 'idem sem desfecho');
+}
+
+// ---------------------------------------------------------------------------
+// Agendamento IMPOSSIVEL e agendamento so-pela-data.
+//
+// Caso real (Sorrifacil ingleses, agosto/2026): o card mostrava 61 faltas onde
+// o relatorio da clinica registrava 30. Os 31 excedentes eram leads do nosso
+// CRM promovidos a "agendamento" pela mera presenca de uma data — 23 deles com
+// a data no mes ANTERIOR ao cadastro do lead (mes digitado errado).
+{
+  const stages = [];
+  const HOJE = '2026-08-23';
+  const lead = (o) => ({
+    status: null, funnelId: null, compareceu: false, fechou: false,
+    agendou: false, dataAgendada: null, dataLead: null, receita: 0, ...o,
+  });
+
+  // (1) Consulta marcada ANTES de o lead existir nao e agendamento.
+  const impossivel = lead({ status: 'Em Atendimento', dataLead: '2026-08-04', dataAgendada: '2026-07-17' });
+  eq(diaDoAgendamento(impossivel), null, 'data anterior ao lead e descartada');
+  const cImp = contarFunil([impossivel], stages, HOJE);
+  eq(cImp.agendamentos, 0, 'e nao promove o lead a agendamento');
+  eq(cImp.faltaram, 0, 'nem entra na conta de falta');
+  eq(cImp.qualificados, 1, 'o lead continua no degrau que o status dele diz');
+
+  // Mesmo dia conta: agendar no dia em que o lead entrou e comum.
+  eq(diaDoAgendamento(lead({ dataLead: '2026-08-04', dataAgendada: '2026-08-04' })), '2026-08-04',
+    'agendar no mesmo dia do cadastro vale');
+  // Sem data do lead, nada a comparar — comportamento antigo preservado.
+  eq(diaDoAgendamento(lead({ dataAgendada: '2026-07-17' })), '2026-07-17',
+    'sem dataLead a validacao nao tem com o que comparar');
+
+  // (2) Data vencida em lead que NINGUEM marcou como agendado: lacuna de
+  // registro, nao falta. Afirmar "faltou" seria inventar o dado.
+  const soData = lead({ status: 'Em Atendimento', dataLead: '2026-08-03', dataAgendada: '2026-08-04' });
+  const cSo = contarFunil([soData], stages, HOJE);
+  eq(cSo.agendamentos, 1, 'a data ainda promove a agendamento');
+  eq(cSo.faltaram, 0, 'mas data vencida sem confirmacao NAO e falta');
+  eq(cSo.agendamentoSemDesfecho, 1, 'cai no balde de "sem retorno"');
+
+  // (3) Quem o status diz que estava agendado continua caindo em falta.
+  const agendadoDeVerdade = lead({ status: 'Avaliacao Agendada', dataLead: '2026-08-03', dataAgendada: '2026-08-04' });
+  const cAg = contarFunil([agendadoDeVerdade], stages, HOJE);
+  eq(cAg.faltaram, 1, 'status de agendado + data vencida continua sendo falta');
+  eq(cAg.agendamentoSemDesfecho, 0, 'e nao vaza pro balde novo');
+
+  // Idem quando o booleano `agendou` da planilha confirma a marcacao.
+  const boolAgendou = lead({ status: 'Em Atendimento', agendou: true, dataLead: '2026-08-03', dataAgendada: '2026-08-04' });
+  eq(contarFunil([boolAgendou], stages, HOJE).faltaram, 1,
+    'booleano agendou tambem confirma a marcacao');
+
+  // (4) Falta explicita vence tudo, inclusive a checagem de data impossivel.
+  const faltaExplicita = lead({ status: 'Avaliacao Com Falta', dataLead: '2026-08-04', dataAgendada: '2026-07-17' });
+  eq(contarFunil([faltaExplicita], stages, HOJE).faltaram, 1,
+    'falta marcada pela clinica conta mesmo com data corrompida');
+
+  // (5) A INVARIANTE continua de pe com o balde novo.
+  const mix = contarFunil([
+    lead({ status: 'Avaliacao Com Falta', agendou: true, dataAgendada: '2026-08-10' }),
+    lead({ status: 'Avaliacao Agendada', agendou: true, dataAgendada: '2026-08-30' }),
+    lead({ status: 'Em Atendimento', dataLead: '2026-08-01', dataAgendada: '2026-08-05' }),
+    lead({ status: 'Avaliacao Agendada', agendou: true, dataAgendada: null }),
+    lead({ status: 'Avaliacao Realizada', compareceu: true }),
+  ], stages, HOJE);
+  eq(mix.aComparecer + mix.faltaram + mix.agendamentoSemData + mix.agendamentoSemDesfecho,
+    mix.agendamentos - mix.comparecimentos,
+    'os QUATRO baldes somam exatamente agendamentos - comparecimentos');
+  eq([mix.faltaram, mix.aComparecer, mix.agendamentoSemData, mix.agendamentoSemDesfecho], [1, 1, 1, 1],
+    'um em cada balde');
+
+  // somarFunis leva o balde novo junto.
+  eq(somarFunis([mix, mix]).agendamentoSemDesfecho, 2, 'somarFunis soma sem desfecho');
 }
 
 console.log(`OK (com a quebra de agendamentos) — ${n} asserts`);

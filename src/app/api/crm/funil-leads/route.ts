@@ -129,6 +129,9 @@ export async function GET(req: NextRequest) {
         funnelId: row.funnel_id ? String(row.funnel_id) : null,
         agendou: row.agendou === true,
         dataAgendada: row.data_agendada ? String(row.data_agendada) : null,
+        // Mesma régua do card: sem a data do lead, a listagem descartaria menos
+        // agendamentos impossíveis que a contagem e os dois divergiriam.
+        dataLead: row.data_lead ? String(row.data_lead) : null,
         compareceu: row.compareceu === true,
         fechou: row.fechou === true,
         receita: Number(row.valor_rs) || 0,

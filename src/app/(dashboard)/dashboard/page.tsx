@@ -6308,6 +6308,10 @@ export default function GeneralDashboard() {
   if (funilCrm.faltaram > 0) {
     detalhesAgendamento.push({ texto: `${funilCrm.faltaram} faltaram`, tom: 'ruim' });
   }
+  if (funilCrm.agendamentoSemDesfecho > 0) {
+    // Nem promessa nem falta: a data passou e o CRM não registrou o desfecho.
+    detalhesAgendamento.push({ texto: `${funilCrm.agendamentoSemDesfecho} sem retorno`, tom: 'neutro' });
+  }
   if (funilCrm.agendamentoSemData > 0) {
     detalhesAgendamento.push({ texto: `${funilCrm.agendamentoSemData} sem data`, tom: 'neutro' });
   }

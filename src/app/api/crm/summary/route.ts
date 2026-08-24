@@ -71,6 +71,7 @@ export async function GET(req: NextRequest) {
               funnel_id,
               agendou,
               data_agendada,
+              COALESCE(lead_date, data) AS data_lead,
               compareceu,
               COALESCE(registro_tipo, 'hibrido') AS registro_tipo,
               (fechou OR COALESCE(NULLIF(revenue, 0), valor_rs, 0) > 0) AS fechou,
@@ -111,6 +112,9 @@ export async function GET(req: NextRequest) {
         funnelId: row.funnel_id ? String(row.funnel_id) : null,
         agendou: row.agendou === true,
         dataAgendada: row.data_agendada ? String(row.data_agendada) : null,
+        // Agendamento anterior ao próprio lead é mês digitado errado — a lib
+        // descarta. Sem esta coluna a checagem não teria com o que comparar.
+        dataLead: row.data_lead ? String(row.data_lead) : null,
         compareceu: row.compareceu === true,
         fechou: row.fechou === true,
         receita: Number(row.valor_rs) || 0,
