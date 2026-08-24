@@ -247,8 +247,14 @@ export async function vincularAoLeadDeOrigem(
   const { rowCount } = await pool.query(
     `UPDATE public.crm_leads d
         SET origem_lead_id = o.id,
-            canal         = COALESCE(NULLIF(d.canal, ''), o.canal),
-            origin        = COALESCE(NULLIF(d.origin, ''), o.origin),
+            -- ⚠️ 'agendor'/'datalytics' na coluna canal é a PORTA DE ENTRADA, não o
+            -- canal que trouxe o cliente — mesma regra da ingestão do Agendor
+            -- (2026-08-22). Tratar como vazio deixa o canal real da conversa
+            -- passar; canal digitado por gestor continua intocado.
+            canal         = CASE WHEN lower(btrim(COALESCE(d.canal, ''))) IN ('', 'agendor', 'datalytics')
+                                 THEN COALESCE(o.canal, d.canal) ELSE d.canal END,
+            origin        = CASE WHEN lower(btrim(COALESCE(d.origin, ''))) IN ('', 'agendor', 'datalytics', 'organic')
+                                 THEN COALESCE(o.origin, d.origin) ELSE d.origin END,
             source_id     = COALESCE(NULLIF(d.source_id, ''), o.source_id),
             source_url    = COALESCE(NULLIF(d.source_url, ''), o.source_url),
             ctwa_clid     = COALESCE(NULLIF(d.ctwa_clid, ''), o.ctwa_clid),
