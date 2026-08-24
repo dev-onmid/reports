@@ -78,6 +78,7 @@ const CRON_PREFIXES = [
   '/api/crm/sanear-kanban',
   '/api/crm/disparos/worker',
   '/api/crm/followup/worker',
+  '/api/fidelidade/worker',
   '/api/crm/sync-cron',
   '/api/google/search-terms-cron',
   '/api/disparos/worker',

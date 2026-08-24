@@ -14,7 +14,9 @@ import {
   filtrarPublico, resumirSegmento, normalizarParams, paramsPadrao, normalizarTravas,
   capacidadeDaJanela, diasParaVarrer, aplicarVars, varsDoCliente, variaveisDesconhecidas,
   limparMensagens, primeiroNome, MODELOS_FIDELIDADE, ORDEM_MODELOS, TRAVAS_PADRAO,
-  PISO_INTERVALO_SEG,
+  PISO_INTERVALO_SEG, normalizarCupom, variaveisIndisponiveis, validarCampanha,
+  varsDoDestinatario, parseListaManual, dentroDaJanela, diaPermitido, proximaExecucao,
+  MENSAGENS_LISTA_PADRAO,
 } from './build/fidelidade.mjs';
 
 let n = 0;
@@ -247,7 +249,11 @@ const P = (m) => paramsPadrao(m);
   eq(aplicarVars('Oi {{primeiro_nome}}, {{dias}} dias', vars), 'Oi Joao, 43 dias', 'interpolacao');
   eq(aplicarVars('Cupom {{cupom10}}', vars), 'Cupom {{cupom10}}',
     'variavel inexistente fica literal (o motor nao inventa valor)');
-  eq(variaveisDesconhecidas('Oi {{primeiro_nome}}, use {{cupom}} e {{cupom}}'), ['cupom'],
+  // ⚠️ `{{cupom}}` era o exemplo de variavel inexistente ate o motor ganhar
+  // cupom por campanha. Agora ela e VALIDA — o exemplo de invalida virou outro.
+  eq(variaveisDesconhecidas('Oi {{primeiro_nome}}, use {{cupom}}'), [],
+    'cupom passou a ser variavel valida');
+  eq(variaveisDesconhecidas('Oi {{primeiro_nome}}, use {{desconto}} e {{desconto}}'), ['desconto'],
     'a tela consegue avisar da variavel invalida, sem repetir');
   eq(variaveisDesconhecidas('Oi {{nome}}'), [], 'variavel valida nao vira aviso');
 
@@ -288,4 +294,180 @@ const P = (m) => paramsPadrao(m);
   eq(new Set(dias).size, dias.length, 'cada modelo de fabrica cai num dia diferente');
 }
 
-console.log(`OK — ${n} asserts`);
+
+// ═══════════════════════════════════════════ Motor: cupom, lista e relógio ══
+
+// ── Cupom ────────────────────────────────────────────────────────────────────
+{
+  eq(normalizarCupom('  volta10 '), 'VOLTA10', 'cupom vira caixa alta sem espaco');
+  eq(normalizarCupom('VOLTA 10'), 'VOLTA10', 'espaco no meio some (codigo nao tem espaco)');
+  eq(normalizarCupom(''), null, 'vazio nao e cupom');
+  eq(normalizarCupom('   '), null, 'so espaco nao e cupom');
+  eq(normalizarCupom(null), null, 'null nao e cupom');
+  eq(normalizarCupom(123), null, 'numero nao e cupom');
+  eq(normalizarCupom('x'.repeat(80)).length, 40, 'cupom absurdo e cortado');
+  // O mesmo cupom escrito de dois jeitos precisa virar UM, senao a medicao de
+  // resgate contra o coupon_code do pedido conta separado.
+  eq(normalizarCupom('volta10'), normalizarCupom('VOLTA10'), 'caixa diferente = mesmo cupom');
+}
+
+// ── Variaveis por fonte de publico ───────────────────────────────────────────
+{
+  const comConsumo = 'Faz {{dias}} dias, {{primeiro_nome}}!';
+  eq(variaveisIndisponiveis(comConsumo, 'segmento'), [], 'segmento preenche variavel de consumo');
+  eq(variaveisIndisponiveis(comConsumo, 'lista'), ['dias'], 'lista manual NAO tem historico');
+  eq(variaveisIndisponiveis('Oi {{primeiro_nome}}, use {{cupom}}', 'lista'), [],
+    'nome e cupom funcionam em lista manual');
+  eq(variaveisIndisponiveis('{{ticket}} {{pedidos}} {{dias}}', 'lista').sort(),
+    ['dias', 'pedidos', 'ticket'], 'as tres de consumo sao pegas');
+}
+
+// ── Validacao da campanha ────────────────────────────────────────────────────
+{
+  eq(validarCampanha(['Oi {{primeiro_nome}}!'], 'segmento', null), [], 'mensagem simples passa');
+  eq(validarCampanha([], 'segmento', null).length, 1, 'campanha sem mensagem e recusada');
+  eq(validarCampanha(['   '], 'segmento', null).length, 1, 'so espaco tambem e recusada');
+
+  ok(validarCampanha(['Faz {{dias}} dias'], 'lista', null)[0].includes('histórico'),
+    'lista manual com variavel de consumo e recusada, explicando o porque');
+
+  ok(validarCampanha(['Use {{cupom}} hoje'], 'segmento', null)[0].includes('cupom'),
+    'citar {{cupom}} sem cadastrar cupom e recusado — sairia "use  hoje"');
+  eq(validarCampanha(['Use {{cupom}} hoje'], 'segmento', 'VOLTA10'), [],
+    'com cupom cadastrado, passa');
+
+  ok(validarCampanha(['Oi {{nomee}}'], 'segmento', null)[0].includes('{{nomee}}'),
+    'variavel inexistente aponta o nome errado');
+
+  // Duas variacoes ruins geram dois erros, numerados — o gestor precisa saber
+  // QUAL variacao consertar.
+  const erros = validarCampanha(['{{dias}}', 'ok', '{{ticket}}'], 'lista', null);
+  eq(erros.length, 2, 'um erro por variacao ruim');
+  ok(erros[0].startsWith('Variação 1'), 'primeiro erro aponta a variacao 1');
+  ok(erros[1].startsWith('Variação 3'), 'segundo aponta a variacao 3 (a 2 esta boa)');
+}
+
+// ── aplicarVars: previa x envio ──────────────────────────────────────────────
+{
+  const vars = varsDoDestinatario({ chave: 'x', telefone: 'y', nome: 'Ana Paula' }, 'Tokio', 'VOLTA10');
+  eq(vars.primeiro_nome, 'Ana', 'primeiro nome');
+  eq(vars.cupom, 'VOLTA10', 'cupom entra nas variaveis');
+  eq(vars.dias, undefined, 'sem consumo, nao existe {{dias}}');
+
+  // ⚠️ O ponto mais importante do motor: na PREVIA o gestor precisa VER o erro;
+  // no ENVIO o consumidor nunca pode receber "{{dias}}" literal.
+  eq(aplicarVars('Faz {{dias}} dias', vars), 'Faz {{dias}} dias', 'previa mostra a chave crua');
+  eq(aplicarVars('Faz {{dias}} dias', vars, 'envio'), 'Faz dias', 'envio apaga e normaliza o espaco');
+  eq(aplicarVars('Oi {{primeiro_nome}}, use {{cupom}}!', vars, 'envio'), 'Oi Ana, use VOLTA10!',
+    'envio normal');
+  eq(aplicarVars('Oi{{x}} , tudo bem?', vars, 'envio'), 'Oi, tudo bem?',
+    'espaco antes da virgula some no envio');
+
+  const comConsumo = varsDoDestinatario(
+    { chave: 'x', telefone: 'y', nome: null, consumo: { pedidos: 4, ticketMedio: 87.5, diasDesdeUltima: 42.7 } },
+    'Tokio', null,
+  );
+  eq(comConsumo.dias, '43', 'dias arredondado');
+  eq(comConsumo.primeiro_nome, 'tudo bem', 'sem nome, a saudacao ainda fecha');
+  eq(comConsumo.cupom, '', 'sem cupom, a variavel existe vazia');
+}
+
+// ── Leitura da lista manual ──────────────────────────────────────────────────
+{
+  const norm = (raw) => {
+    const d = String(raw).replace(/\D/g, '');
+    if (d.length < 8) return null;
+    let x = d;
+    if (x.startsWith('55') && x.length >= 12) x = x.slice(2);
+    if (x.length === 11) return x.slice(0, 2) + x.slice(3);
+    return x.slice(-10);
+  };
+
+  const r = parseListaManual(
+    '5543999990000,Maria\n43 99999-0000;Maria de novo\n(11) 98888-7777\nlixo aqui\n\n5511988887777',
+    norm,
+  );
+  eq(r.contatos.length, 2, 'so duas pessoas distintas');
+  eq(r.duplicados, 2, 'o mesmo numero em formatos diferentes conta como duplicado');
+  eq(r.invalidos, ['lixo aqui'], 'a linha invalida volta INTEIRA pra tela poder mostrar qual e');
+  eq(r.contatos[0].nome, 'Maria', 'nome depois da virgula');
+  eq(r.contatos[1].nome, null, 'sem nome fica null');
+
+  // Ponto e virgula e o separador do Excel em pt-BR.
+  eq(parseListaManual('5543999990000;Ana', norm).contatos[0].nome, 'Ana', 'aceita ponto e virgula');
+  // Nome com virgula no meio nao pode ser cortado ao meio.
+  eq(parseListaManual('5543999990000,Silva, Ana', norm).contatos[0].nome, 'Silva, Ana',
+    'o resto da linha inteiro e o nome');
+  eq(parseListaManual('', norm).contatos.length, 0, 'texto vazio nao quebra');
+  eq(parseListaManual('   \n  \n', norm).contatos.length, 0, 'linhas em branco sao ignoradas');
+}
+
+// ── Relogio: janela, dia e proxima execucao (BRT) ────────────────────────────
+{
+  const travas = normalizarTravas({ janelaInicio: '09:00', janelaFim: '20:00', diasSemana: [1, 2, 3, 4, 5] });
+  // 2026-08-25 e uma TERCA. 12:00Z = 09:00 BRT (primeiro minuto da janela).
+  eq(dentroDaJanela(travas, new Date('2026-08-25T12:00:00Z')), true, '09:00 BRT esta dentro');
+  eq(dentroDaJanela(travas, new Date('2026-08-25T11:59:00Z')), false, '08:59 BRT esta fora');
+  eq(dentroDaJanela(travas, new Date('2026-08-25T22:59:00Z')), true, '19:59 BRT ainda dentro');
+  eq(dentroDaJanela(travas, new Date('2026-08-25T23:00:00Z')), false, '20:00 BRT ja fechou (fim exclusivo)');
+  // ⚠️ Sem a conversao pra BRT, 03:00Z pareceria "de manha" e liberaria envio a
+  // meia-noite de Brasilia.
+  eq(dentroDaJanela(travas, new Date('2026-08-26T03:00:00Z')), false, 'meia-noite BRT esta fora');
+
+  eq(diaPermitido(travas, new Date('2026-08-25T12:00:00Z')), true, 'terca permitida');
+  eq(diaPermitido(travas, new Date('2026-08-23T12:00:00Z')), false, 'domingo nao permitido');
+  // ⚠️ O caso que a conversao existe para resolver: 2026-08-24T00:30Z ja e
+  // SEGUNDA em UTC, mas em Brasilia ainda e DOMINGO 21:30. Ler o relogio do
+  // servidor liberaria envio num dia que o gestor bloqueou.
+  const meiaNoiteUtc = new Date('2026-08-24T00:30:00Z');
+  eq(diaPermitido(normalizarTravas({ diasSemana: [0] }), meiaNoiteUtc), true,
+    'domingo em Brasilia conta como domingo');
+  eq(diaPermitido(normalizarTravas({ diasSemana: [1] }), meiaNoiteUtc), false,
+    'e NAO como segunda, que e o que o UTC diria');
+
+  const virada = normalizarTravas({ janelaInicio: '22:00', janelaFim: '02:00' });
+  eq(dentroDaJanela(virada, new Date('2026-08-26T02:00:00Z')), true, 'janela que vira o dia: 23h BRT dentro');
+  eq(dentroDaJanela(virada, new Date('2026-08-25T18:00:00Z')), false, 'e 15h BRT fora');
+}
+
+// ── proximaExecucao ──────────────────────────────────────────────────────────
+{
+  // Terca 2026-08-25, 10:00 BRT (13:00Z). Campanha roda terca as 18:00 BRT.
+  const agora = new Date('2026-08-25T13:00:00Z');
+  const p1 = proximaExecucao([2], '18:00', agora);
+  eq(p1.toISOString(), '2026-08-25T21:00:00.000Z', 'hoje mais tarde: 18:00 BRT = 21:00Z');
+
+  // Se ja passou da hora de hoje, vai pra proxima semana.
+  const p2 = proximaExecucao([2], '09:00', agora);
+  eq(p2.toISOString(), '2026-09-01T12:00:00.000Z', 'hora ja passou hoje -> proxima terca');
+
+  // Varios dias: pega o mais proximo.
+  const p3 = proximaExecucao([1, 3, 5], '18:00', agora);
+  eq(p3.toISOString(), '2026-08-26T21:00:00.000Z', 'quarta e o proximo dia da lista');
+
+  // Vira o mes e o ano sem esforco (o Date.UTC normaliza o dia excedente).
+  const reveillon = new Date('2026-12-31T13:00:00Z');
+  const p4 = proximaExecucao([5], '18:00', reveillon);
+  eq(p4.toISOString(), '2027-01-01T21:00:00.000Z', 'atravessa a virada do ano');
+
+  eq(proximaExecucao([], '18:00', agora), null, 'sem dia escolhido nao ha proxima execucao');
+  eq(proximaExecucao([9], '18:00', agora), null, 'dia invalido e descartado');
+
+  // Nunca devolve o passado — seria uma campanha em loop, disparando a cada tick.
+  for (const dia of [0, 1, 2, 3, 4, 5, 6]) {
+    const p = proximaExecucao([dia], '18:00', agora);
+    ok(p.getTime() > agora.getTime(), `dia ${dia}: proxima execucao esta no futuro`);
+  }
+}
+
+// ── Mensagens padrao da lista manual ─────────────────────────────────────────
+{
+  eq(limparMensagens([], null), MENSAGENS_LISTA_PADRAO, 'campanha de lista cai no texto generico');
+  eq(limparMensagens([], 'vip'), MODELOS_FIDELIDADE.vip.mensagensPadrao, 'campanha de segmento cai no do modelo');
+  for (const t of MENSAGENS_LISTA_PADRAO) {
+    eq(variaveisIndisponiveis(t, 'lista'), [], 'texto de fabrica da lista nao usa variavel de consumo');
+    eq(variaveisDesconhecidas(t), [], 'nem variavel inexistente');
+  }
+}
+
+console.log(`OK — ${n} asserts (com motor)`);

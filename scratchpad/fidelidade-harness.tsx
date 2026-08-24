@@ -8,10 +8,17 @@
 //   npx esbuild scratchpad/fidelidade-harness.tsx --bundle --outfile=public/__fid_test/app.js \
 //     --loader:.tsx=tsx --define:process.env.NODE_ENV='"development"' --format=iife
 //   npx @tailwindcss/cli -i src/app/globals.css -o public/__fid_test/app.css
-//   abrir http://localhost:3000/__fid_test/
+//
+// Cenários por query:
+//   ?desativada=1  → cliente com o interruptor desligado
+//   ?semdelivery=1 → cliente sem Cardápio Web/Anota AI (só listas manuais)
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { ClientFidelidadeTab } from '../src/app/(dashboard)/clientes/[id]/fidelidade-tab';
+
+const q = new URLSearchParams(location.search);
+const DESATIVADA = q.has('desativada');
+const SEM_DELIVERY = q.has('semdelivery');
 
 const PESSOAS = (n: number, base: number) =>
   Array.from({ length: n }, (_, i) => ({
@@ -24,57 +31,62 @@ const PESSOAS = (n: number, base: number) =>
     ultimaCompra: '2026-07-01T12:00:00.000Z',
   }));
 
-// `?desativada=1` simula o cliente com o interruptor desligado (a resposta que
-// a rota devolve quando `clients.fidelidade_ativa` é false).
-const DESATIVADA = new URLSearchParams(location.search).has('desativada');
+const campanhaSegmento = (modelo: string, params: Record<string, number | null>, msgs: string[], extra = {}) => ({
+  id: `id-${modelo}`, fonte: 'segmento', modelo, listaId: null, nome: modelo,
+  params, mensagens: msgs, cupom: null, imagemUrl: null,
+  diasSemana: [4], hora: '18:00', tetoPublico: null, ativa: false, salva: true,
+  ultimaExecucao: null, ...extra,
+});
 
 const RESPOSTA = {
   ativo: true,
-  conectado: true,
+  conectado: !SEM_DELIVERY,
   loja: 'Tokio Maki',
   regua: { janelaDias: 30, inatividadeDias: 60 },
-  ticketMedioLoja: 104.5,
-  base: { clientes: 1840, comTelefone: 1792 },
+  ticketMedioLoja: SEM_DELIVERY ? 0 : 104.5,
+  base: SEM_DELIVERY ? { clientes: 0, comTelefone: 0 } : { clientes: 1840, comTelefone: 1792 },
   instancia: { provider: 'evolution', id: 'tokiomaki-oficial' },
   travas: {
     intervaloMinSeg: 120, tetoDiario: 50, janelaInicio: '09:00', janelaFim: '20:00',
     diasSemana: [1, 2, 3, 4, 5, 6], cooldownDias: 7, optoutAtivo: true,
   },
   campanhas: [
-    { modelo: 'primeira_recompra', params: { diasMin: 10, diasMax: 120 },
-      mensagens: ['Oi, {{primeiro_nome}}! Vi que faz {{dias}} dias que você pediu na {{loja}} pela primeira vez 😊 Bora repetir?',
-        'E aí, {{primeiro_nome}}! Que tal a segunda rodada?', 'Oi {{primeiro_nome}}, usa o {{cupom10}} hoje!'],
-      imagemUrl: null, diasSemana: [4], hora: '18:00', tetoPublico: null, ativa: false, salva: true },
-    { modelo: 'em_risco', params: { pedidosMin: 2, diasMax: 90 },
-      mensagens: ['Oi, {{primeiro_nome}}! Faz {{dias}} dias que a gente não te vê 👀'],
-      imagemUrl: null, diasSemana: [2], hora: '18:00', tetoPublico: null, ativa: false, salva: false },
-    { modelo: 'inativo', params: { pedidosMin: 2, diasMax: 180 },
-      mensagens: ['{{primeiro_nome}}, faz {{dias}} dias que você não pede na {{loja}}...'],
-      imagemUrl: null, diasSemana: [3], hora: '17:00', tetoPublico: 200, ativa: false, salva: false },
-    { modelo: 'vip', params: { pedidosMin: 4, ticketMin: null },
-      mensagens: ['Oi, {{primeiro_nome}}! Você é um dos que mais pede na {{loja}} 💜'],
-      imagemUrl: null, diasSemana: [5], hora: '17:00', tetoPublico: null, ativa: false, salva: false },
-    { modelo: 'reconquistado', params: { diasMax: 15 },
-      mensagens: ['Que bom te ver de volta, {{primeiro_nome}}! 🎉'],
-      imagemUrl: null, diasSemana: [1], hora: '18:00', tetoPublico: null, ativa: false, salva: false },
+    campanhaSegmento('primeira_recompra', { diasMin: 10, diasMax: 120 }, [
+      'Oi, {{primeiro_nome}}! Faz {{dias}} dias do seu primeiro pedido na {{loja}} 😊 Use o cupom {{cupom}} e volte hoje.',
+      'E aí, {{primeiro_nome}}! Que tal a segunda rodada? {{cupom}} é seu.',
+    ], { cupom: 'VOLTA10', ativa: true }),
+    campanhaSegmento('em_risco', { pedidosMin: 2, diasMax: 90 },
+      ['Oi, {{primeiro_nome}}! Faz {{dias}} dias que a gente não te vê 👀']),
+    campanhaSegmento('inativo', { pedidosMin: 2, diasMax: 180 },
+      ['{{primeiro_nome}}, faz {{dias}} dias que você não pede na {{loja}}...']),
+    campanhaSegmento('vip', { pedidosMin: 4, ticketMin: null },
+      ['Oi, {{primeiro_nome}}! Você é um dos que mais pede na {{loja}} 💜']),
+    campanhaSegmento('reconquistado', { diasMax: 15 },
+      ['Que bom te ver de volta, {{primeiro_nome}}! 🎉']),
+    // Campanha de LISTA com uma variação inválida de propósito: {{dias}} não
+    // existe em lista manual, e a tela precisa recusar o salvamento.
+    {
+      id: 'camp-lista-1', fonte: 'lista', modelo: null, listaId: 'lista-1',
+      nome: 'Oferta — Clientes do salão',
+      params: {}, mensagens: ['Oi {{primeiro_nome}}! Use {{cupom}} hoje 🍽️', 'Faz {{dias}} dias!'],
+      cupom: 'SALAO15', imagemUrl: null, diasSemana: [2], hora: '18:00',
+      tetoPublico: null, ativa: false, salva: true, ultimaExecucao: null,
+    },
   ],
-  segmentos: [
-    { modelo: 'primeira_recompra',
-      resumo: { pessoas: 612, receitaHistorica: 58_430.5, ticketMedio: 95.47, diasParadoMediano: 47 },
-      amostra: PESSOAS(25, 12) },
-    { modelo: 'em_risco',
-      resumo: { pessoas: 134, receitaHistorica: 41_220, ticketMedio: 118.3, diasParadoMediano: 38 },
-      amostra: PESSOAS(25, 34) },
-    { modelo: 'inativo',
-      resumo: { pessoas: 289, receitaHistorica: 96_110, ticketMedio: 121.9, diasParadoMediano: 96 },
-      amostra: PESSOAS(25, 70) },
-    { modelo: 'vip',
-      resumo: { pessoas: 47, receitaHistorica: 88_940, ticketMedio: 187.4, diasParadoMediano: 9 },
-      amostra: PESSOAS(25, 2) },
-    // Segmento VAZIO de propósito: a tela precisa aguentar zero pessoas.
-    { modelo: 'reconquistado',
-      resumo: { pessoas: 0, receitaHistorica: 0, ticketMedio: 0, diasParadoMediano: null },
-      amostra: [] },
+  listas: [
+    { id: 'lista-1', nome: 'Clientes do salão', contatos: 342, criadoEm: '2026-08-01T12:00:00.000Z' },
+    { id: 'lista-2', nome: 'Evento de julho', contatos: 87, criadoEm: '2026-07-20T12:00:00.000Z' },
+  ],
+  segmentos: SEM_DELIVERY ? [] : [
+    { modelo: 'primeira_recompra', resumo: { pessoas: 612, receitaHistorica: 58_430.5, ticketMedio: 95.47, diasParadoMediano: 47 }, amostra: PESSOAS(25, 12) },
+    { modelo: 'em_risco', resumo: { pessoas: 134, receitaHistorica: 41_220, ticketMedio: 118.3, diasParadoMediano: 38 }, amostra: PESSOAS(25, 34) },
+    { modelo: 'inativo', resumo: { pessoas: 289, receitaHistorica: 96_110, ticketMedio: 121.9, diasParadoMediano: 96 }, amostra: PESSOAS(25, 70) },
+    { modelo: 'vip', resumo: { pessoas: 47, receitaHistorica: 88_940, ticketMedio: 187.4, diasParadoMediano: 9 }, amostra: PESSOAS(25, 2) },
+    { modelo: 'reconquistado', resumo: { pessoas: 0, receitaHistorica: 0, ticketMedio: 0, diasParadoMediano: null }, amostra: [] },
+  ],
+  execucoes: [
+    { id: 'e1', campanha: 'Comprou uma vez só', iniciada_em: '2026-08-24T21:00:00.000Z', status: 'rodando', publico: 612, enviadas: 41, falhas: 1, puladas: 128 },
+    { id: 'e2', campanha: 'Oferta — Clientes do salão', iniciada_em: '2026-08-19T21:00:00.000Z', status: 'concluida', publico: 342, enviadas: 300, falhas: 4, puladas: 38 },
   ],
 };
 
@@ -87,7 +99,7 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   if (url.includes('/fidelidade')) {
     const body = init?.body ? JSON.parse(String(init.body)) : null;
     chamadas.push({ url: `${init?.method ?? 'GET'} ${url}`, body });
-    await new Promise(r => setTimeout(r, 120));
+    await new Promise(r => setTimeout(r, 80));
     const corpo = DESATIVADA ? { ativo: false, conectado: false } : RESPOSTA;
     return new Response(JSON.stringify(corpo), { headers: { 'Content-Type': 'application/json' } });
   }

@@ -285,17 +285,41 @@ export function resumirSegmento(publico: ClienteDelivery[]): ResumoSegmento {
 
 // ------------------------------------------------------------------ Mensagem
 
+/**
+ * De onde sai o público de uma campanha.
+ *
+ * `segmento` = derivado dos pedidos (os 5 modelos). `lista` = telefones
+ * cadastrados na mão, sem depender de integração nenhuma — é o que permite a
+ * Fidelidade existir em cliente que não tem cardápio digital conectado.
+ */
+export const FONTES = ['segmento', 'lista'] as const;
+export type FonteCampanha = typeof FONTES[number];
+
 /** As únicas variáveis que o motor consegue preencher de verdade. */
 export const VARIAVEIS = [
-  { chave: 'primeiro_nome', descricao: 'Primeiro nome do cliente' },
-  { chave: 'nome', descricao: 'Nome completo, como veio no pedido' },
-  { chave: 'dias', descricao: 'Dias desde o último pedido' },
-  { chave: 'pedidos', descricao: 'Quantos pedidos já fez' },
-  { chave: 'ticket', descricao: 'Ticket médio dele, formatado em reais' },
-  { chave: 'loja', descricao: 'Nome da loja' },
+  { chave: 'primeiro_nome', descricao: 'Primeiro nome do cliente', consumo: false },
+  { chave: 'nome', descricao: 'Nome completo, como veio no cadastro', consumo: false },
+  { chave: 'loja', descricao: 'Nome da loja', consumo: false },
+  { chave: 'cupom', descricao: 'O cupom desta campanha', consumo: false },
+  { chave: 'dias', descricao: 'Dias desde o último pedido', consumo: true },
+  { chave: 'pedidos', descricao: 'Quantos pedidos já fez', consumo: true },
+  { chave: 'ticket', descricao: 'Ticket médio dele, formatado em reais', consumo: true },
 ] as const;
 
 const CHAVES_VALIDAS = new Set<string>(VARIAVEIS.map(v => v.chave));
+
+/**
+ * Variáveis que só existem quando há histórico de compra.
+ *
+ * ⚠️ Numa lista manual não sabemos nada além do nome. Uma mensagem com
+ * `{{dias}}` sairia como "faz  dias que você não pede" — ou, pior, com as
+ * chaves cruas visíveis para o consumidor. Por isso a lista delas é explícita:
+ * `variaveisIndisponiveis` bloqueia no salvamento e `aplicarVars` limpa o que
+ * escapar, para que nenhum caminho consiga entregar um texto quebrado.
+ */
+export const VARIAVEIS_CONSUMO = new Set<string>(
+  VARIAVEIS.filter(v => v.consumo).map(v => v.chave),
+);
 
 export function primeiroNome(nome: string | null | undefined): string {
   const limpo = (nome ?? '').trim();
@@ -315,7 +339,7 @@ export function moedaBR(v: number): string {
  */
 export type ClienteParaVars = Pick<ClienteDelivery, 'nome' | 'pedidos' | 'ticketMedio' | 'diasDesdeUltima'>;
 
-export function varsDoCliente(c: ClienteParaVars, loja: string): Record<string, string> {
+export function varsDoCliente(c: ClienteParaVars, loja: string, cupom?: string | null): Record<string, string> {
   const nome = c.nome?.trim() || '';
   return {
     nome,
@@ -324,11 +348,68 @@ export function varsDoCliente(c: ClienteParaVars, loja: string): Record<string, 
     pedidos: String(c.pedidos),
     ticket: moedaBR(c.ticketMedio),
     loja,
+    cupom: (cupom ?? '').trim(),
   };
 }
 
-export function aplicarVars(texto: string, vars: Record<string, string>): string {
-  return texto.replace(/\{\{(\w+)\}\}/g, (m, k: string) => vars[k] ?? m);
+/**
+ * Destinatário de uma campanha, venha ele dos pedidos ou de uma lista manual.
+ *
+ * `consumo` ausente é o caso da lista manual: existe telefone e talvez nome, e
+ * mais nada. O motor precisa desse tipo único para não ter dois caminhos de
+ * envio que envelheceriam separados.
+ */
+export type Destinatario = {
+  /** Telefone normalizado — chave de dedupe, cooldown e opt-out. */
+  chave: string;
+  telefone: string;
+  nome: string | null;
+  consumo?: { pedidos: number; ticketMedio: number; diasDesdeUltima: number };
+};
+
+export function varsDoDestinatario(
+  d: Destinatario, loja: string, cupom?: string | null,
+): Record<string, string> {
+  const nome = d.nome?.trim() || '';
+  const base: Record<string, string> = {
+    nome,
+    primeiro_nome: primeiroNome(nome) || 'tudo bem',
+    loja,
+    cupom: (cupom ?? '').trim(),
+  };
+  if (!d.consumo) return base;
+  return {
+    ...base,
+    dias: String(Math.max(0, Math.round(d.consumo.diasDesdeUltima))),
+    pedidos: String(d.consumo.pedidos),
+    ticket: moedaBR(d.consumo.ticketMedio),
+  };
+}
+
+/**
+ * Substitui as variáveis e LIMPA o que sobrou.
+ *
+ * ⚠️ O comportamento antigo (deixar `{{chave}}` literal quando não havia valor)
+ * é certo na PRÉVIA, onde o gestor precisa ver o erro, e péssimo no ENVIO, onde
+ * essa chave chegaria ao consumidor. Por isso o modo `envio`: apaga a variável
+ * sem valor e normaliza os espaços/pontuação que sobram, para o texto ainda ler
+ * como frase. É a última rede — a validação no salvamento já deveria ter
+ * impedido a campanha de existir assim.
+ */
+export function aplicarVars(
+  texto: string, vars: Record<string, string>, modo: 'previa' | 'envio' = 'previa',
+): string {
+  const trocado = texto.replace(/\{\{(\w+)\}\}/g, (m, k: string) => {
+    const v = vars[k];
+    if (v !== undefined) return v;
+    return modo === 'envio' ? '' : m;
+  });
+  if (modo !== 'envio') return trocado;
+  return trocado
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/ +([,.!?;:])/g, '$1')
+    .replace(/[ \t]+\n/g, '\n')
+    .trim();
 }
 
 /**
@@ -346,14 +427,133 @@ export function variaveisDesconhecidas(texto: string): string[] {
   return [...new Set(fora)];
 }
 
+/**
+ * Variáveis válidas que ESTA fonte de público não consegue preencher.
+ *
+ * Numa lista manual, `{{dias}}` é uma variável legítima do sistema — só não
+ * existe dado para ela. Separado de `variaveisDesconhecidas` porque a mensagem
+ * ao gestor é outra: ali ele errou o nome; aqui ele escolheu a fonte errada.
+ */
+export function variaveisIndisponiveis(texto: string, fonte: FonteCampanha): string[] {
+  if (fonte !== 'lista') return [];
+  const achadas = texto.match(/\{\{(\w+)\}\}/g) ?? [];
+  return [...new Set(
+    achadas.map(t => t.slice(2, -2)).filter(k => VARIAVEIS_CONSUMO.has(k)),
+  )];
+}
+
+/**
+ * Tudo que impede uma campanha de ser salva. Lista vazia = pode gravar.
+ *
+ * Roda no SERVIDOR também, não só na tela: é a garantia de que nenhuma
+ * campanha chega ao motor com texto que ele não sabe montar.
+ */
+export function validarCampanha(
+  mensagens: string[], fonte: FonteCampanha, cupom?: string | null,
+): string[] {
+  const erros: string[] = [];
+  const textos = mensagens.filter(m => m.trim());
+  if (textos.length === 0) erros.push('Escreva pelo menos uma mensagem.');
+
+  for (const [i, texto] of textos.entries()) {
+    const desconhecidas = variaveisDesconhecidas(texto);
+    if (desconhecidas.length > 0) {
+      erros.push(`Variação ${i + 1}: ${desconhecidas.map(v => `{{${v}}}`).join(', ')} não existe.`);
+    }
+    const indisponiveis = variaveisIndisponiveis(texto, fonte);
+    if (indisponiveis.length > 0) {
+      erros.push(
+        `Variação ${i + 1}: ${indisponiveis.map(v => `{{${v}}}`).join(', ')} depende do histórico `
+        + 'de pedidos, que uma lista manual não tem.',
+      );
+    }
+    // Cupom citado sem cupom cadastrado sairia como frase truncada
+    // ("use o cupom  no seu pedido") — pior que não oferecer nada.
+    if (texto.includes('{{cupom}}') && !normalizarCupom(cupom)) {
+      erros.push(`Variação ${i + 1}: usa {{cupom}}, mas nenhum cupom foi cadastrado na campanha.`);
+    }
+  }
+  return erros;
+}
+
+/**
+ * Código de cupom em caixa alta, sem espaço.
+ *
+ * ⚠️ Nós NÃO criamos o cupom no Cardápio Web — quem cria é o gestor, no painel
+ * da loja, onde ficam validade e limite de uso. Aqui é só o código que vai no
+ * texto. Guardar em caixa alta evita o mesmo cupom virar dois na hora de medir
+ * o resgate contra o `coupon_code` que volta no pedido.
+ */
+export function normalizarCupom(bruto: unknown): string | null {
+  if (typeof bruto !== 'string') return null;
+  const limpo = bruto.trim().toUpperCase().replace(/\s+/g, '');
+  if (!limpo) return null;
+  return limpo.slice(0, 40);
+}
+
+/** Texto de fábrica de uma campanha de lista manual — sem nada de consumo. */
+export const MENSAGENS_LISTA_PADRAO = [
+  'Oi, {{primeiro_nome}}! Passando pra avisar de uma novidade da {{loja}} 😊',
+  'E aí, {{primeiro_nome}}! A {{loja}} preparou algo pra você hoje 🍽️',
+  '{{primeiro_nome}}, tudo bem? A {{loja}} tem uma oferta esperando por você 😉',
+];
+
 /** Mensagem vazia não pode ser salva como variação — viraria envio em branco. */
-export function limparMensagens(bruto: unknown, modelo: ModeloId): string[] {
+export function limparMensagens(bruto: unknown, modelo: ModeloId | null): string[] {
   const lista = Array.isArray(bruto) ? bruto : [];
   const limpas = lista
     .map(m => (typeof m === 'string' ? m.trim() : ''))
     .filter(m => m.length > 0)
     .slice(0, 3);
-  return limpas.length > 0 ? limpas : [...MODELOS_FIDELIDADE[modelo].mensagensPadrao];
+  if (limpas.length > 0) return limpas;
+  // Campanha de lista manual não tem modelo — cai no texto genérico.
+  return modelo ? [...MODELOS_FIDELIDADE[modelo].mensagensPadrao] : [...MENSAGENS_LISTA_PADRAO];
+}
+
+// ------------------------------------------------------------------ Lista manual
+
+export type ContatoLista = { telefone: string; nome: string | null };
+
+export type LeituraLista = {
+  contatos: ContatoLista[];
+  /** Linhas que não continham telefone reconhecível. */
+  invalidos: string[];
+  /** Quantas linhas repetiam um telefone já lido. */
+  duplicados: number;
+};
+
+/**
+ * Lê a lista colada/importada: uma linha por pessoa, `telefone` ou
+ * `telefone,nome` (aceita `;` também, que é o separador do Excel em pt-BR).
+ *
+ * Deduplica pelo telefone NORMALIZADO — o mesmo número escrito com e sem o 9º
+ * dígito é a mesma pessoa, e mandar duas vezes é a forma mais rápida de virar
+ * denúncia. As linhas inválidas voltam para a tela mostrar QUAIS são, em vez de
+ * sumirem com um "12 números ignorados" que ninguém consegue conferir.
+ */
+export function parseListaManual(
+  texto: string,
+  normalizar: (raw: string) => string | null,
+): LeituraLista {
+  const contatos: ContatoLista[] = [];
+  const invalidos: string[] = [];
+  const vistos = new Set<string>();
+  let duplicados = 0;
+
+  for (const linha of String(texto ?? '').split(/\r?\n/)) {
+    const bruta = linha.trim();
+    if (!bruta) continue;
+    const sep = bruta.includes(';') ? ';' : ',';
+    const [fone, ...resto] = bruta.split(sep);
+    const chave = normalizar(fone.trim());
+    if (!chave) { invalidos.push(bruta.slice(0, 60)); continue; }
+    if (vistos.has(chave)) { duplicados++; continue; }
+    vistos.add(chave);
+    const nome = resto.join(sep).trim();
+    contatos.push({ telefone: fone.trim(), nome: nome || null });
+  }
+
+  return { contatos, invalidos, duplicados };
 }
 
 // ------------------------------------------------------------------ Travas
@@ -443,3 +643,78 @@ export function capacidadeDaJanela(travas: Travas): number {
 }
 
 export const DIAS_SEMANA_LABEL = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+
+// ------------------------------------------------------------------ Relógio
+
+/**
+ * BRT fixo em UTC-3. O Brasil não tem horário de verão desde 2019, e é a mesma
+ * escolha já feita em `disparos-schedule` e no funil de recorrência.
+ *
+ * ⚠️ Aqui a semântica é BRT de ponta a ponta — diferente das colunas
+ * `active_from`/`active_until` do motor de Disparos, que guardam UTC por
+ * herança. O gestor digita "09:00" pensando em Brasília, e é isso que vale.
+ */
+const BRT_OFFSET_MS = 3 * 60 * 60 * 1000;
+
+/** Partes do relógio de Brasília para um instante. */
+export function partesBRT(agora: Date): { diaSemana: number; minutos: number } {
+  const brt = new Date(agora.getTime() - BRT_OFFSET_MS);
+  return {
+    diaSemana: brt.getUTCDay(),
+    minutos: brt.getUTCHours() * 60 + brt.getUTCMinutes(),
+  };
+}
+
+function minutosDaHora(hhmm: string): number {
+  const [h, m] = hhmm.split(':').map(Number);
+  return (Number.isFinite(h) ? h : 0) * 60 + (Number.isFinite(m) ? m : 0);
+}
+
+/**
+ * Está dentro da janela de horário permitida?
+ *
+ * Janela que vira o dia (ex.: 22:00–02:00) é tratada de propósito — não porque
+ * alguém deva disparar de madrugada, mas porque uma janela invertida
+ * silenciosamente vazia faria a campanha "não rodar" sem explicação.
+ */
+export function dentroDaJanela(travas: Travas, agora: Date): boolean {
+  const { minutos } = partesBRT(agora);
+  const inicio = minutosDaHora(travas.janelaInicio);
+  const fim = minutosDaHora(travas.janelaFim);
+  if (inicio === fim) return true;
+  if (inicio < fim) return minutos >= inicio && minutos < fim;
+  return minutos >= inicio || minutos < fim;
+}
+
+/** O dia de hoje (em Brasília) está liberado nas travas do cliente? */
+export function diaPermitido(travas: Travas, agora: Date): boolean {
+  return travas.diasSemana.includes(partesBRT(agora).diaSemana);
+}
+
+/**
+ * Próximo instante em que a campanha deve rodar, em UTC.
+ *
+ * Devolve `null` quando não há dia escolhido — a campanha ficaria parada para
+ * sempre, e é melhor o chamador tratar isso do que devolver uma data que nunca
+ * chega. Procura em até 8 dias para cobrir a volta da semana inteira.
+ */
+export function proximaExecucao(diasSemana: number[], hora: string, agora: Date): Date | null {
+  const dias = [...new Set(diasSemana.filter(d => Number.isInteger(d) && d >= 0 && d <= 6))];
+  if (dias.length === 0) return null;
+
+  const brt = new Date(agora.getTime() - BRT_OFFSET_MS);
+  const [hh, mm] = hora.split(':').map(Number);
+  const h = Number.isFinite(hh) ? hh : 0;
+  const m = Number.isFinite(mm) ? mm : 0;
+
+  for (let i = 0; i <= 8; i++) {
+    const diaSemana = (brt.getUTCDay() + i) % 7;
+    if (!dias.includes(diaSemana)) continue;
+    // A hora é BRT; somar o offset devolve o instante UTC correspondente.
+    const alvo = Date.UTC(
+      brt.getUTCFullYear(), brt.getUTCMonth(), brt.getUTCDate() + i, h + 3, m, 0, 0,
+    );
+    if (alvo > agora.getTime()) return new Date(alvo);
+  }
+  return null;
+}

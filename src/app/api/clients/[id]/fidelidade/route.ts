@@ -4,44 +4,29 @@ import { getSession, unauthorized } from '@/lib/api-auth';
 import { ensureCardapioWebSchema, getConnection } from '@/lib/cardapioweb';
 import { ensureAnotaAiSchema, listarLojas } from '@/lib/anotaai';
 import { lerPedidosDelivery } from '@/lib/delivery-orders';
-import { agruparPorCliente, normalizarRegua } from '@/lib/cardapioweb-recorrencia';
+import { agruparPorCliente, normalizarRegua, normalizarTelefoneBR } from '@/lib/cardapioweb-recorrencia';
 import { getClientInstance } from '@/lib/followup-send';
 import {
-  filtrarPublico, resumirSegmento, MODELOS, ORDEM_MODELOS, type ModeloId,
+  filtrarPublico, resumirSegmento, ORDEM_MODELOS, parseListaManual, validarCampanha,
+  limparMensagens, normalizarCupom, type FonteCampanha,
 } from '@/lib/fidelidade';
 import {
   ensureFidelidadeSchema, listarCampanhas, lerTravas, salvarCampanha, salvarTravas,
+  listarListas, salvarLista, excluirLista, excluirCampanha,
 } from '@/lib/fidelidade-server';
 
 /**
- * Fidelidade — leitura dos segmentos e da configuração das campanhas.
+ * Fidelidade — segmentos, listas manuais e configuração das campanhas.
  *
- * ⚠️ Esta rota NÃO envia nada e não conhece o motor de disparo. Ela responde
- * "quem se encaixa em cada modelo hoje" e devolve a configuração salva.
+ * ⚠️ Esta rota não envia nada: quem dispara é `/api/fidelidade/worker`. Aqui
+ * só se lê público e se grava configuração.
  *
- * Como o funil de recorrência, é leitura pura do que já foi sincronizado: nada
- * de chamada ao Cardápio Web aqui — a tela não pode depender do rate limit de
- * 5 req/min deles para renderizar.
+ * Leitura pura do que já foi sincronizado — nada de chamada ao Cardápio Web,
+ * porque a tela não pode depender do rate limit de 5 req/min deles.
  */
 
 const AMOSTRA = 25;
 
-function ehModelo(v: unknown): v is ModeloId {
-  return typeof v === 'string' && (MODELOS as readonly string[]).includes(v);
-}
-
-/**
- * A Fidelidade é OPT-IN por cliente (`clients.fidelidade_ativa`, DEFAULT false).
- *
- * ⚠️ Este é o portão de verdade — esconder a aba é só apresentação, e link
- * direto, aba antiga aberta ou chamada por fora passariam por cima dela. Todo
- * caminho novo (inclusive o worker da Fase 2) tem de perguntar aqui antes de
- * ler público ou, principalmente, de enviar qualquer coisa: o remetente é o
- * WhatsApp do próprio cliente.
- *
- * Coluna ausente (instalação que ainda não rodou o ALTER) é tratada como
- * DESLIGADA — falha fechada, nunca aberta.
- */
 async function fidelidadeAtiva(
   pool: ReturnType<typeof makeServerPool>, clientId: string,
 ): Promise<boolean> {
@@ -61,68 +46,68 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
       ensureCardapioWebSchema(pool), ensureAnotaAiSchema(pool), ensureFidelidadeSchema(pool),
     ]);
 
-    // Antes de qualquer leitura: desligada não calcula segmento nenhum.
     if (!await fidelidadeAtiva(pool, clientId)) {
       return Response.json({ ativo: false, conectado: false });
     }
 
-    const [conn, lojasAnota] = await Promise.all([
+    const [conn, lojasAnota, campanhas, travas, listas, instancia] = await Promise.all([
       getConnection(pool, clientId),
       listarLojas(pool, clientId),
+      listarCampanhas(pool, clientId),
+      lerTravas(pool, clientId),
+      listarListas(pool, clientId),
+      getClientInstance(pool, clientId).catch(() => null),
     ]);
-    // Sem nenhuma plataforma de delivery não existe base de consumo — e o
-    // público destas campanhas é, por decisão, só quem já pediu.
-    if (!conn && lojasAnota.length === 0) return Response.json({ ativo: true, conectado: false });
 
+    // ⚠️ A aba NÃO exige mais integração de delivery: com lista manual ela serve
+    // qualquer cliente. `conectado` deixou de ser porteiro e virou informação —
+    // é só ele que decide se os SEGMENTOS têm de onde sair.
+    const conectado = !!conn || lojasAnota.length > 0;
     const regua = normalizarRegua({
       janelaDias: conn?.janela_dias, inatividadeDias: conn?.inatividade_dias,
     });
 
-    const [{ pedidos }, campanhas, travas, instancia] = await Promise.all([
-      lerPedidosDelivery(pool, clientId),
-      listarCampanhas(pool, clientId),
-      lerTravas(pool, clientId),
-      getClientInstance(pool, clientId).catch(() => null),
-    ]);
+    let ticketMedioLoja = 0;
+    let base = { clientes: 0, comTelefone: 0 };
+    let segmentos: unknown[] = [];
 
-    const clientes = agruparPorCliente(pedidos, regua, new Date().toISOString());
-    const comFone = clientes.filter(c => c.telefone).length;
+    if (conectado) {
+      const { pedidos } = await lerPedidosDelivery(pool, clientId);
+      const clientes = agruparPorCliente(pedidos, regua, new Date().toISOString());
+      const pedidosTotal = clientes.reduce((s, c) => s + c.pedidos, 0);
+      const receitaTotal = clientes.reduce((s, c) => s + c.receita, 0);
+      ticketMedioLoja = pedidosTotal > 0 ? receitaTotal / pedidosTotal : 0;
+      base = { clientes: clientes.length, comTelefone: clientes.filter(c => c.telefone).length };
 
-    // Ticket médio da LOJA (não do segmento): é a base da régua relativa do VIP.
-    const receitaTotal = clientes.reduce((s, c) => s + c.receita, 0);
-    const pedidosTotal = clientes.reduce((s, c) => s + c.pedidos, 0);
-    const ticketMedioLoja = pedidosTotal > 0 ? receitaTotal / pedidosTotal : 0;
-
-    const porModelo = new Map(campanhas.map(c => [c.modelo, c]));
-    const segmentos = ORDEM_MODELOS.map(modelo => {
-      const camp = porModelo.get(modelo)!;
-      const publico = filtrarPublico(clientes, modelo, camp.params, { regua, ticketMedioLoja });
-      return {
-        modelo,
-        resumo: resumirSegmento(publico),
-        // Ordenado por receita (agruparPorCliente já entrega assim): quem vale
-        // mais aparece primeiro na amostra.
-        amostra: publico.slice(0, AMOSTRA).map(c => ({
-          nome: c.nome, telefone: c.telefone, pedidos: c.pedidos,
-          receita: c.receita, ticketMedio: c.ticketMedio,
-          diasDesdeUltima: c.diasDesdeUltima, ultimaCompra: c.ultimaCompra,
-        })),
-      };
-    });
+      const porModelo = new Map(campanhas.filter(c => c.modelo).map(c => [c.modelo!, c]));
+      segmentos = ORDEM_MODELOS.map(modelo => {
+        const camp = porModelo.get(modelo)!;
+        const publico = filtrarPublico(clientes, modelo, camp.params, { regua, ticketMedioLoja });
+        return {
+          modelo,
+          resumo: resumirSegmento(publico),
+          amostra: publico.slice(0, AMOSTRA).map(c => ({
+            nome: c.nome, telefone: c.telefone, pedidos: c.pedidos,
+            receita: c.receita, ticketMedio: c.ticketMedio,
+            diasDesdeUltima: c.diasDesdeUltima, ultimaCompra: c.ultimaCompra,
+          })),
+        };
+      });
+    }
 
     return Response.json({
       ativo: true,
-      conectado: true,
+      conectado,
       loja: conn?.merchant_name ?? lojasAnota[0]?.store_name ?? null,
       regua,
       ticketMedioLoja,
-      base: { clientes: clientes.length, comTelefone: comFone },
-      // O número é o do próprio cliente (instância do CRM). A tela precisa
-      // avisar quando não há nenhuma: sem ela, nada poderá ser enviado.
+      base,
       instancia: instancia ? { provider: instancia.provider, id: instancia.instanceId } : null,
       travas,
       campanhas,
+      listas,
       segmentos,
+      execucoes: await ultimasExecucoes(pool, clientId),
     });
   } catch (err) {
     console.error('[fidelidade]', err);
@@ -130,6 +115,19 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
   } finally {
     await pool.end();
   }
+}
+
+async function ultimasExecucoes(pool: ReturnType<typeof makeServerPool>, clientId: string) {
+  const { rows } = await pool.query(
+    `SELECT e.id, e.campanha_id, e.iniciada_em, e.concluida_em, e.status,
+            e.publico, e.enviadas, e.falhas, e.puladas, f.nome AS campanha
+       FROM public.fidelidade_execucoes e
+       LEFT JOIN public.fidelidade_campanhas f ON f.id = e.campanha_id
+      WHERE e.client_id = $1
+      ORDER BY e.iniciada_em DESC LIMIT 20`,
+    [clientId],
+  ).catch(() => ({ rows: [] }));
+  return rows;
 }
 
 export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
@@ -142,8 +140,6 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
   try {
     await ensureFidelidadeSchema(pool);
 
-    // Desligada não grava nada: aba aberta antes de alguém desativar não pode
-    // continuar configurando campanha por trás.
     if (!await fidelidadeAtiva(pool, clientId)) {
       return Response.json({ error: 'Fidelidade desativada para este cliente' }, { status: 403 });
     }
@@ -151,10 +147,60 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     if (body.travas !== undefined) {
       return Response.json({ travas: await salvarTravas(pool, clientId, body.travas) });
     }
-    if (ehModelo(body.modelo)) {
-      return Response.json({ campanha: await salvarCampanha(pool, clientId, body.modelo, body) });
+
+    // ── Listas manuais ──────────────────────────────────────────────────
+    if (body.lista !== undefined) {
+      const lista = body.lista as Record<string, unknown>;
+      const nome = typeof lista.nome === 'string' && lista.nome.trim()
+        ? lista.nome.trim().slice(0, 120) : 'Lista sem nome';
+      const leitura = parseListaManual(String(lista.texto ?? ''), normalizarTelefoneBR);
+      const idLista = typeof lista.id === 'string' ? lista.id : null;
+      if (leitura.contatos.length === 0 && !idLista) {
+        return Response.json(
+          { error: 'Nenhum telefone válido na lista', invalidos: leitura.invalidos },
+          { status: 400 },
+        );
+      }
+      const r = await salvarLista(pool, clientId, {
+        id: idLista, nome, contatos: leitura.contatos,
+      });
+      return Response.json({
+        lista: r, invalidos: leitura.invalidos, duplicados: leitura.duplicados,
+        listas: await listarListas(pool, clientId),
+      });
     }
-    return Response.json({ error: 'Informe `modelo` ou `travas`' }, { status: 400 });
+
+    if (body.excluirLista !== undefined) {
+      await excluirLista(pool, clientId, String(body.excluirLista));
+      return Response.json({ listas: await listarListas(pool, clientId) });
+    }
+
+    if (body.excluirCampanha !== undefined) {
+      await excluirCampanha(pool, clientId, String(body.excluirCampanha));
+      return Response.json({ campanhas: await listarCampanhas(pool, clientId) });
+    }
+
+    // ── Campanha ────────────────────────────────────────────────────────
+    if (body.fonte !== undefined || body.modelo !== undefined) {
+      const fonte: FonteCampanha = body.fonte === 'lista' ? 'lista' : 'segmento';
+      // A MESMA validação da tela roda aqui: é o que garante que nenhuma
+      // campanha chega ao motor com texto que ele não sabe montar.
+      const erros = validarCampanha(
+        limparMensagens(body.mensagens, fonte === 'segmento' ? (body.modelo as never) : null),
+        fonte,
+        normalizarCupom(body.cupom),
+      );
+      if (erros.length > 0) return Response.json({ error: erros.join(' '), erros }, { status: 400 });
+
+      try {
+        const campanha = await salvarCampanha(pool, clientId, body);
+        return Response.json({ campanha });
+      } catch (err) {
+        return Response.json({ error: String((err as Error).message ?? err) }, { status: 400 });
+      }
+    }
+
+    return Response.json({ error: 'Nada para salvar' }, { status: 400 });
   } catch (err) {
     console.error('[fidelidade PATCH]', err);
     return Response.json({ error: 'Falha ao salvar' }, { status: 500 });

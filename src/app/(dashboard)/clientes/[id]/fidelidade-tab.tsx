@@ -2,25 +2,27 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  AlertTriangle, ChevronDown, Clock, Info, Loader2, PowerOff, Save, ShieldCheck, Users,
+  AlertTriangle, ChevronDown, Clock, Info, ListPlus, Loader2, PowerOff, Save, ShieldCheck,
+  Ticket, Trash2, Users, Zap,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
   MODELOS_FIDELIDADE, ORDEM_MODELOS, VARIAVEIS, DIAS_SEMANA_LABEL, PISO_INTERVALO_SEG,
-  aplicarVars, capacidadeDaJanela, diasParaVarrer, moedaBR, varsDoCliente,
-  variaveisDesconhecidas, type ModeloId, type ParamsRegua, type Travas,
+  aplicarVars, capacidadeDaJanela, diasParaVarrer, moedaBR, varsDoDestinatario,
+  variaveisDesconhecidas, variaveisIndisponiveis, validarCampanha,
+  type FonteCampanha, type ModeloId, type ParamsRegua, type Travas,
 } from '@/lib/fidelidade';
 
 /**
- * Aba Fidelidade — campanhas de recompra por comportamento de consumo.
+ * Aba Fidelidade — campanhas de recompra por consumo E por lista manual.
  *
- * ⚠️ FASE 1: esta tela CALCULA e CONFIGURA. Nenhuma mensagem é enviada — o
- * motor de disparo é a fase seguinte. O banner do topo diz isso ao usuário em
- * vez de exibir um botão "Ativar" que não faz nada.
+ * Duas fontes de público convivem: os 5 SEGMENTOS, derivados dos pedidos, e as
+ * LISTAS manuais, que não dependem de integração nenhuma. O editor é o mesmo
+ * para as duas — duplicá-lo faria as regras divergirem na primeira mudança.
  *
- * Os públicos vêm do servidor a cada carga: mudar a régua exige salvar e
- * recalcular, de propósito. Recalcular no browser exigiria trazer a base
- * inteira de clientes finais pra cá só para exibir um número.
+ * ⚠️ Campanha ATIVA dispara sozinha pelo WhatsApp do cliente. Por isso ativar
+ * pede confirmação explícita, e a validação da mensagem roda aqui e de novo no
+ * servidor.
  */
 
 type PessoaAmostra = {
@@ -35,12 +37,31 @@ type Segmento = {
 };
 
 type Campanha = {
-  modelo: ModeloId; params: ParamsRegua; mensagens: string[]; imagemUrl: string | null;
-  diasSemana: number[]; hora: string; tetoPublico: number | null; ativa: boolean; salva: boolean;
+  id: string | null;
+  fonte: FonteCampanha;
+  modelo: ModeloId | null;
+  listaId: string | null;
+  nome: string;
+  params: ParamsRegua;
+  mensagens: string[];
+  cupom: string | null;
+  imagemUrl: string | null;
+  diasSemana: number[];
+  hora: string;
+  tetoPublico: number | null;
+  ativa: boolean;
+  salva: boolean;
+  ultimaExecucao: string | null;
+};
+
+type Lista = { id: string; nome: string; contatos: number; criadoEm: string };
+
+type Execucao = {
+  id: string; campanha: string | null; iniciada_em: string; status: string;
+  publico: number; enviadas: number; falhas: number; puladas: number;
 };
 
 type Painel = {
-  /** Interruptor por cliente (`clients.fidelidade_ativa`). Ausente = desligada. */
   ativo?: boolean;
   conectado: boolean;
   error?: string;
@@ -51,7 +72,9 @@ type Painel = {
   instancia?: { provider: string; id: string } | null;
   travas?: Travas;
   campanhas?: Campanha[];
+  listas?: Lista[];
   segmentos?: Segmento[];
+  execucoes?: Execucao[];
 };
 
 const COR_MODELO: Record<ModeloId, string> = {
@@ -61,6 +84,11 @@ const COR_MODELO: Record<ModeloId, string> = {
   vip: 'var(--secondary)',
   reconquistado: '#22c55e',
 };
+
+/** Chave estável de rascunho: modelo para segmento, id para lista. */
+function chaveCampanha(c: Campanha): string {
+  return c.fonte === 'segmento' ? (c.modelo ?? 'sem-modelo') : (c.id ?? 'nova');
+}
 
 function Card({ children, className }: { children: React.ReactNode; className?: string }) {
   return <div className={cn('rounded-[var(--radius)] border border-border bg-card p-4', className)}>{children}</div>;
@@ -79,10 +107,7 @@ function NumeroInput({
       value={valor ?? ''}
       placeholder={placeholder}
       onChange={(e) => onChange(e.target.value === '' ? null : Number(e.target.value))}
-      className={cn(
-        'h-9 w-full rounded-[var(--radius)] border border-border bg-background px-2 text-sm',
-        className,
-      )}
+      className={cn('h-9 w-full rounded-[var(--radius)] border border-border bg-background px-2 text-sm', className)}
     />
   );
 }
@@ -90,10 +115,11 @@ function NumeroInput({
 export function ClientFidelidadeTab({ clientId }: { clientId: string }) {
   const [painel, setPainel] = useState<Painel | null>(null);
   const [carregando, setCarregando] = useState(true);
-  const [aberto, setAberto] = useState<ModeloId | null>(null);
+  const [aberto, setAberto] = useState<string | null>(null);
   const [rascunhos, setRascunhos] = useState<Record<string, Campanha>>({});
   const [travasDraft, setTravasDraft] = useState<Travas | null>(null);
   const [salvando, setSalvando] = useState<string | null>(null);
+  const [erro, setErro] = useState<string | null>(null);
 
   const carregar = useCallback(async () => {
     setCarregando(true);
@@ -102,7 +128,7 @@ export function ClientFidelidadeTab({ clientId }: { clientId: string }) {
       const data = await r.json() as Painel;
       setPainel(data);
       if (data.campanhas) {
-        setRascunhos(Object.fromEntries(data.campanhas.map(c => [c.modelo, c])));
+        setRascunhos(Object.fromEntries(data.campanhas.map(c => [chaveCampanha(c), c])));
       }
       if (data.travas) setTravasDraft(data.travas);
     } catch {
@@ -114,38 +140,26 @@ export function ClientFidelidadeTab({ clientId }: { clientId: string }) {
 
   useEffect(() => { void carregar(); }, [carregar]);
 
-  const salvarCampanha = useCallback(async (modelo: ModeloId) => {
-    const c = rascunhos[modelo];
-    if (!c) return;
-    setSalvando(modelo);
+  const patch = useCallback(async (corpo: unknown, tag: string) => {
+    setSalvando(tag);
+    setErro(null);
     try {
-      await fetch(`/api/clients/${clientId}/fidelidade`, {
+      const r = await fetch(`/api/clients/${clientId}/fidelidade`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(c),
+        body: JSON.stringify(corpo),
       });
-      // Recarrega tudo: mexer na régua muda o público, e o número novo só o
-      // servidor sabe calcular.
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({})) as { error?: string };
+        setErro(d.error ?? 'Não foi possível salvar.');
+        return false;
+      }
       await carregar();
+      return true;
     } finally {
       setSalvando(null);
     }
-  }, [clientId, rascunhos, carregar]);
-
-  const salvarTravas = useCallback(async () => {
-    if (!travasDraft) return;
-    setSalvando('travas');
-    try {
-      await fetch(`/api/clients/${clientId}/fidelidade`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ travas: travasDraft }),
-      });
-      await carregar();
-    } finally {
-      setSalvando(null);
-    }
-  }, [clientId, travasDraft, carregar]);
+  }, [clientId, carregar]);
 
   const capacidade = useMemo(
     () => (travasDraft ? capacidadeDaJanela(travasDraft) : 0),
@@ -160,8 +174,6 @@ export function ClientFidelidadeTab({ clientId }: { clientId: string }) {
     );
   }
 
-  // Desligada tem de aparecer como desligada mesmo aqui dentro: a aba some da
-  // barra, mas link direto e aba já aberta continuam alcançando esta tela.
   if (painel && painel.ativo === false) {
     return (
       <Card className="mt-4">
@@ -170,8 +182,8 @@ export function ClientFidelidadeTab({ clientId }: { clientId: string }) {
           <div className="space-y-1">
             <h3 className="font-heading text-lg uppercase leading-none">Fidelidade desativada</h3>
             <p className="text-sm text-muted-foreground">
-              Este cliente está fora das campanhas de recompra — nenhum segmento é calculado
-              e nada pode ser configurado. Para ligar, use o botão
+              Este cliente está fora das campanhas de recompra — nada é calculado, nada é
+              configurado e nada é enviado. Para ligar, use o botão
               <strong className="text-foreground"> Fidelidade</strong> na faixa
               <strong className="text-foreground"> Configurações do cliente</strong>, no topo da página.
             </p>
@@ -181,57 +193,49 @@ export function ClientFidelidadeTab({ clientId }: { clientId: string }) {
     );
   }
 
-  if (!painel?.conectado) {
-    return (
-      <Card className="mt-4">
-        <div className="flex items-start gap-3">
-          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-[#facc15]" />
-          <div className="space-y-1">
-            <h3 className="font-heading text-lg uppercase leading-none">Sem base de consumo</h3>
-            <p className="text-sm text-muted-foreground">
-              As campanhas de fidelidade falam com quem já comprou — o público sai dos
-              pedidos do Cardápio Web ou do Anota AI. Conecte uma das plataformas na aba
-              <strong className="text-foreground"> Integrações → Delivery</strong> e volte aqui.
-            </p>
-          </div>
-        </div>
-      </Card>
-    );
-  }
-
   const travas = travasDraft;
+  const campanhas = Object.values(rascunhos);
+  const campanhasLista = campanhas.filter(c => c.fonte === 'lista');
+  const ativas = campanhas.filter(c => c.ativa).length;
 
   return (
     <div className="mt-4 space-y-4">
-      {/* Fase 1: a tela não pode sugerir que já dispara. */}
-      <div className="flex items-start gap-3 rounded-[var(--radius)] border border-[#facc15]/40 bg-[#facc15]/[0.07] p-3">
-        <Info className="mt-0.5 h-4 w-4 shrink-0 text-[#facc15]" />
+      <div className="flex items-start gap-3 rounded-[var(--radius)] border border-primary/40 bg-primary/[0.06] p-3">
+        <Zap className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
         <p className="text-xs leading-relaxed text-muted-foreground">
-          <strong className="text-foreground">Nada é enviado ainda.</strong> Esta etapa monta
-          os segmentos e guarda régua, textos e travas. O disparo automático entra depois,
-          usando exatamente o que estiver configurado aqui.
+          <strong className="text-foreground">Campanha ativa dispara sozinha</strong>, pelo WhatsApp
+          deste cliente, respeitando as travas abaixo. Campanha desativada só calcula o público.
+          {ativas > 0 && <> Hoje há <strong className="text-foreground">{ativas} ativa(s)</strong>.</>}
         </p>
       </div>
 
-      {/* Linha de contexto: base, loja e número que enviaria. */}
+      {erro && (
+        <div className="flex items-start gap-2 rounded-[var(--radius)] border border-destructive/40 bg-destructive/[0.08] p-3">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+          <p className="text-xs text-destructive">{erro}</p>
+        </div>
+      )}
+
       <div className="grid gap-3 sm:grid-cols-3">
         <Card>
           <Rotulo>Base de clientes</Rotulo>
-          <p className="mt-1 font-heading text-2xl leading-none">{painel.base?.comTelefone ?? 0}</p>
+          <p className="mt-1 font-heading text-2xl leading-none">{painel?.base?.comTelefone ?? 0}</p>
           <p className="mt-1 text-[11px] text-muted-foreground">
-            com telefone, de {painel.base?.clientes ?? 0} que já compraram
+            {painel?.conectado
+              ? `com telefone, de ${painel?.base?.clientes ?? 0} que já compraram`
+              : 'sem delivery conectado — use listas manuais'}
           </p>
         </Card>
         <Card>
           <Rotulo>Ticket médio da loja</Rotulo>
-          <p className="mt-1 font-heading text-2xl leading-none">{moedaBR(painel.ticketMedioLoja ?? 0)}</p>
+          <p className="mt-1 font-heading text-2xl leading-none">{moedaBR(painel?.ticketMedioLoja ?? 0)}</p>
           <p className="mt-1 text-[11px] text-muted-foreground">
-            régua de recompra: {painel.regua?.janelaDias}d · inativo: {painel.regua?.inatividadeDias}d
+            recompra: {painel?.regua?.janelaDias}d · inativo: {painel?.regua?.inatividadeDias}d
           </p>
         </Card>
         <Card>
           <Rotulo>Número de envio</Rotulo>
-          {painel.instancia ? (
+          {painel?.instancia ? (
             <>
               <p className="mt-1 truncate font-heading text-lg leading-none" title={painel.instancia.id}>
                 {painel.instancia.id}
@@ -242,13 +246,12 @@ export function ClientFidelidadeTab({ clientId }: { clientId: string }) {
             </>
           ) : (
             <p className="mt-1 text-xs text-[#facc15]">
-              Nenhuma instância vinculada — sem ela nada poderá ser enviado. Vincule em Integrações → WhatsApp.
+              Nenhuma instância vinculada — sem ela nada será enviado. Vincule na aba Rastreio.
             </p>
           )}
         </Card>
       </div>
 
-      {/* Travas — por cliente, porque a reputação é do chip. */}
       {travas && (
         <Card>
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -257,13 +260,11 @@ export function ClientFidelidadeTab({ clientId }: { clientId: string }) {
               <h3 className="font-heading text-xl uppercase leading-none">Travas de segurança</h3>
             </div>
             <button
-              onClick={() => void salvarTravas()}
+              onClick={() => void patch({ travas: travasDraft }, 'travas')}
               disabled={salvando === 'travas'}
               className="inline-flex h-8 items-center gap-1.5 rounded-[var(--radius)] bg-primary px-3 text-xs font-bold uppercase text-primary-foreground disabled:opacity-60"
             >
-              {salvando === 'travas'
-                ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                : <Save className="h-3.5 w-3.5" />}
+              {salvando === 'travas' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
               Salvar travas
             </button>
           </div>
@@ -282,35 +283,25 @@ export function ClientFidelidadeTab({ clientId }: { clientId: string }) {
             </div>
             <div className="space-y-1">
               <Rotulo>Máximo por dia</Rotulo>
-              <NumeroInput
-                valor={travas.tetoDiario}
-                onChange={(v) => setTravasDraft({ ...travas, tetoDiario: v ?? 50 })}
-              />
+              <NumeroInput valor={travas.tetoDiario} onChange={(v) => setTravasDraft({ ...travas, tetoDiario: v ?? 50 })} />
               <p className="text-[10px] text-muted-foreground">Soma todas as campanhas do número</p>
             </div>
             <div className="space-y-1">
               <Rotulo>Só entre</Rotulo>
               <div className="flex items-center gap-1">
-                <input
-                  type="time" value={travas.janelaInicio}
+                <input type="time" value={travas.janelaInicio}
                   onChange={(e) => setTravasDraft({ ...travas, janelaInicio: e.target.value })}
-                  className="h-9 w-full rounded-[var(--radius)] border border-border bg-background px-2 text-sm"
-                />
+                  className="h-9 w-full rounded-[var(--radius)] border border-border bg-background px-2 text-sm" />
                 <span className="text-xs text-muted-foreground">e</span>
-                <input
-                  type="time" value={travas.janelaFim}
+                <input type="time" value={travas.janelaFim}
                   onChange={(e) => setTravasDraft({ ...travas, janelaFim: e.target.value })}
-                  className="h-9 w-full rounded-[var(--radius)] border border-border bg-background px-2 text-sm"
-                />
+                  className="h-9 w-full rounded-[var(--radius)] border border-border bg-background px-2 text-sm" />
               </div>
             </div>
             <div className="space-y-1">
               <Rotulo>Mesma pessoa a cada</Rotulo>
               <div className="flex items-center gap-2">
-                <NumeroInput
-                  valor={travas.cooldownDias}
-                  onChange={(v) => setTravasDraft({ ...travas, cooldownDias: v ?? 7 })}
-                />
+                <NumeroInput valor={travas.cooldownDias} onChange={(v) => setTravasDraft({ ...travas, cooldownDias: v ?? 7 })} />
                 <span className="text-xs text-muted-foreground">dias</span>
               </div>
               <p className="text-[10px] text-muted-foreground">Vale entre TODAS as campanhas</p>
@@ -324,37 +315,25 @@ export function ClientFidelidadeTab({ clientId }: { clientId: string }) {
                 {DIAS_SEMANA_LABEL.map((label, dia) => {
                   const on = travas.diasSemana.includes(dia);
                   return (
-                    <button
-                      key={dia}
+                    <button key={dia}
                       onClick={() => setTravasDraft({
                         ...travas,
-                        diasSemana: on
-                          ? travas.diasSemana.filter(d => d !== dia)
-                          : [...travas.diasSemana, dia].sort(),
+                        diasSemana: on ? travas.diasSemana.filter(d => d !== dia) : [...travas.diasSemana, dia].sort(),
                       })}
-                      className={cn(
-                        'h-7 rounded-[var(--radius)] border px-2 text-[10px] font-bold uppercase',
-                        on ? 'border-primary bg-primary/15 text-primary' : 'border-border text-muted-foreground',
-                      )}
-                    >
+                      className={cn('h-7 rounded-[var(--radius)] border px-2 text-[10px] font-bold uppercase',
+                        on ? 'border-primary bg-primary/15 text-primary' : 'border-border text-muted-foreground')}>
                       {label}
                     </button>
                   );
                 })}
               </div>
             </div>
-
             <label className="flex cursor-pointer items-center gap-2 text-xs">
-              <input
-                type="checkbox" checked={travas.optoutAtivo}
+              <input type="checkbox" checked={travas.optoutAtivo}
                 onChange={(e) => setTravasDraft({ ...travas, optoutAtivo: e.target.checked })}
-                className="h-3.5 w-3.5 accent-[var(--primary)]"
-              />
-              <span className="text-muted-foreground">
-                Tirar da lista quem responder pedindo para não receber
-              </span>
+                className="h-3.5 w-3.5 accent-[var(--primary)]" />
+              <span className="text-muted-foreground">Tirar da lista quem responder pedindo para não receber</span>
             </label>
-
             <p className="ml-auto text-[11px] text-muted-foreground">
               Entrega real: <strong className="text-foreground">{capacidade} mensagens/dia</strong>
               {capacidade < travas.tetoDiario && ' (a janela de horário não comporta o teto)'}
@@ -363,40 +342,37 @@ export function ClientFidelidadeTab({ clientId }: { clientId: string }) {
         </Card>
       )}
 
-      {/* Segmentos */}
-      <div className="space-y-3">
-        {ORDEM_MODELOS.map((modelo) => {
-          const seg = painel.segmentos?.find(s => s.modelo === modelo);
-          const camp = rascunhos[modelo];
-          const meta = MODELOS_FIDELIDADE[modelo];
-          if (!seg || !camp) return null;
-          const expandido = aberto === modelo;
-          const dias = travas ? diasParaVarrer(seg.resumo.pessoas, travas) : 0;
+      <ListasCard
+        listas={painel?.listas ?? []}
+        salvando={salvando}
+        onSalvar={(lista) => patch({ lista }, 'lista')}
+        onExcluir={(id) => patch({ excluirLista: id }, 'lista')}
+        onNovaCampanha={async (lista) => {
+          const ok = await patch({
+            fonte: 'lista', listaId: lista.id, nome: `Oferta — ${lista.nome}`,
+            mensagens: [], diasSemana: [2], hora: '18:00', ativa: false,
+          }, 'lista');
+          if (ok) setAberto(null);
+        }}
+      />
 
-          return (
-            <Card key={modelo} className="p-0">
-              <button
-                onClick={() => setAberto(expandido ? null : modelo)}
-                className="flex w-full items-start gap-3 p-4 text-left"
-              >
-                <span className="mt-1 h-8 w-1 shrink-0 rounded-full" style={{ background: COR_MODELO[modelo] }} />
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h3 className="font-heading text-xl uppercase leading-none">{meta.nome}</h3>
-                    {camp.salva && (
-                      <span className="rounded-full border border-primary/40 bg-primary/10 px-2 py-0.5 text-[9px] font-bold uppercase text-primary">
-                        configurada
-                      </span>
-                    )}
-                  </div>
-                  <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">{meta.objetivo}</p>
-
-                  <div className="mt-3 flex flex-wrap items-baseline gap-x-5 gap-y-1">
-                    <span className="flex items-baseline gap-1.5">
-                      <Users className="h-3.5 w-3.5 self-center text-muted-foreground" />
-                      <strong className="font-heading text-2xl leading-none">{seg.resumo.pessoas}</strong>
-                      <span className="text-[11px] text-muted-foreground">pessoas</span>
-                    </span>
+      {/* Segmentos (só com delivery conectado) */}
+      {painel?.conectado ? (
+        <div className="space-y-3">
+          {ORDEM_MODELOS.map((modelo) => {
+            const seg = painel.segmentos?.find(s => s.modelo === modelo);
+            const camp = rascunhos[modelo];
+            if (!seg || !camp) return null;
+            return (
+              <CampanhaCard
+                key={modelo}
+                campanha={camp}
+                titulo={MODELOS_FIDELIDADE[modelo].nome}
+                subtitulo={MODELOS_FIDELIDADE[modelo].objetivo}
+                cor={COR_MODELO[modelo]}
+                pessoas={seg.resumo.pessoas}
+                extras={
+                  <>
                     <span className="text-[11px] text-muted-foreground">
                       já gastaram <strong className="text-foreground">{moedaBR(seg.resumo.receitaHistorica)}</strong>
                     </span>
@@ -405,147 +381,375 @@ export function ClientFidelidadeTab({ clientId }: { clientId: string }) {
                     </span>
                     {seg.resumo.diasParadoMediano !== null && (
                       <span className="text-[11px] text-muted-foreground">
-                        parados há <strong className="text-foreground">{seg.resumo.diasParadoMediano}d</strong> (mediana)
+                        parados há <strong className="text-foreground">{seg.resumo.diasParadoMediano}d</strong>
                       </span>
                     )}
-                    {dias > 1 && (
-                      <span className="flex items-center gap-1 text-[11px] text-[#facc15]">
-                        <Clock className="h-3 w-3" /> {dias} dias para falar com todos
-                      </span>
-                    )}
-                  </div>
-                </div>
-                <ChevronDown className={cn('mt-1 h-4 w-4 shrink-0 text-muted-foreground transition-transform', expandido && 'rotate-180')} />
-              </button>
+                  </>
+                }
+                travas={travas}
+                aberto={aberto === modelo}
+                onToggle={() => setAberto(aberto === modelo ? null : modelo)}
+                amostra={seg.amostra}
+                loja={painel.loja ?? 'nossa loja'}
+                ticketMedioLoja={painel.ticketMedioLoja ?? 0}
+                salvando={salvando === modelo}
+                onChange={(c) => setRascunhos(r => ({ ...r, [modelo]: c }))}
+                onSalvar={(c) => patch(c, modelo)}
+              />
+            );
+          })}
+        </div>
+      ) : (
+        <Card>
+          <div className="flex items-start gap-3">
+            <Info className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              Os <strong className="text-foreground">segmentos por consumo</strong> (quem comprou uma
+              vez só, em risco, inativo, VIP) precisam do Cardápio Web ou do Anota AI conectado — é de
+              lá que sai o histórico de pedidos. Sem integração, use as listas manuais acima.
+            </p>
+          </div>
+        </Card>
+      )}
 
-              {expandido && (
-                <EditorCampanha
-                  modelo={modelo}
-                  campanha={camp}
-                  segmento={seg}
-                  loja={painel.loja ?? 'nossa loja'}
-                  ticketMedioLoja={painel.ticketMedioLoja ?? 0}
-                  salvando={salvando === modelo}
-                  onChange={(c) => setRascunhos(r => ({ ...r, [modelo]: c }))}
-                  onSalvar={() => void salvarCampanha(modelo)}
-                />
-              )}
-            </Card>
-          );
-        })}
-      </div>
+      {/* Campanhas de lista manual */}
+      {campanhasLista.length > 0 && (
+        <div className="space-y-3">
+          <Rotulo>Campanhas por lista</Rotulo>
+          {campanhasLista.map((camp) => {
+            const chave = chaveCampanha(camp);
+            const lista = painel?.listas?.find(l => l.id === camp.listaId);
+            return (
+              <CampanhaCard
+                key={chave}
+                campanha={camp}
+                titulo={camp.nome}
+                subtitulo={lista ? `Lista "${lista.nome}" — ${lista.contatos} contatos` : 'Lista removida — campanha sem público'}
+                cor="var(--secondary)"
+                pessoas={lista?.contatos ?? 0}
+                travas={travas}
+                aberto={aberto === chave}
+                onToggle={() => setAberto(aberto === chave ? null : chave)}
+                amostra={[]}
+                loja={painel?.loja ?? 'nossa loja'}
+                ticketMedioLoja={painel?.ticketMedioLoja ?? 0}
+                salvando={salvando === chave}
+                onChange={(c) => setRascunhos(r => ({ ...r, [chave]: c }))}
+                onSalvar={(c) => patch(c, chave)}
+                onExcluir={camp.id ? () => patch({ excluirCampanha: camp.id }, chave) : undefined}
+              />
+            );
+          })}
+        </div>
+      )}
+
+      {(painel?.execucoes?.length ?? 0) > 0 && <ExecucoesCard execucoes={painel!.execucoes!} />}
     </div>
   );
 }
 
-function EditorCampanha({
-  modelo, campanha, segmento, loja, ticketMedioLoja, salvando, onChange, onSalvar,
-}: {
-  modelo: ModeloId; campanha: Campanha; segmento: Segmento; loja: string;
-  ticketMedioLoja: number; salvando: boolean;
-  onChange: (c: Campanha) => void; onSalvar: () => void;
-}) {
-  const meta = MODELOS_FIDELIDADE[modelo];
-  const [verPessoas, setVerPessoas] = useState(false);
+// ─────────────────────────────────────────────────────────────────── Listas
 
-  // A prévia usa uma pessoa REAL do segmento — texto de exemplo com nome
-  // inventado esconde o caso do cliente sem nome cadastrado.
-  const exemplo = segmento.amostra[0];
-  const vars = varsDoCliente(
-    exemplo ?? { nome: 'Maria Souza', pedidos: 3, ticketMedio: ticketMedioLoja, diasDesdeUltima: 42 },
-    loja,
-  );
+function ListasCard({
+  listas, salvando, onSalvar, onExcluir, onNovaCampanha,
+}: {
+  listas: Lista[];
+  salvando: string | null;
+  onSalvar: (lista: { id?: string; nome: string; texto: string }) => Promise<boolean>;
+  onExcluir: (id: string) => void;
+  onNovaCampanha: (lista: Lista) => void;
+}) {
+  const [abrindo, setAbrindo] = useState(false);
+  const [nome, setNome] = useState('');
+  const [texto, setTexto] = useState('');
+  const [alvo, setAlvo] = useState<string | null>(null);
+
+  const linhas = texto.split('\n').filter(l => l.trim()).length;
+
+  function importar(file: File) {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const conteudo = (e.target?.result as string) ?? '';
+      setTexto(conteudo.split(/\r?\n/).filter(l => l.trim()).join('\n'));
+    };
+    reader.readAsText(file);
+  }
 
   return (
-    <div className="space-y-4 border-t border-border p-4">
-      {/* Régua */}
-      <div>
-        <Rotulo>Quem entra</Rotulo>
-        <div className="mt-2 grid gap-3 sm:grid-cols-2">
-          {meta.campos.map((campo) => (
-            <div key={campo.chave} className="space-y-1">
-              <label className="text-xs font-medium">
-                {campo.rotulo}
-                <span className="ml-1 text-muted-foreground">({campo.sufixo})</span>
-              </label>
-              <NumeroInput
-                valor={campanha.params[campo.chave] ?? null}
-                placeholder={campo.padrao === null ? 'automático' : String(campo.padrao)}
-                onChange={(v) => onChange({ ...campanha, params: { ...campanha.params, [campo.chave]: v } })}
-              />
-              <p className="text-[10px] leading-relaxed text-muted-foreground">{campo.ajuda}</p>
+    <Card>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <ListPlus className="h-4 w-4 text-primary" />
+          <h3 className="font-heading text-xl uppercase leading-none">Listas manuais</h3>
+        </div>
+        <button
+          onClick={() => { setAbrindo(a => !a); setAlvo(null); setNome(''); setTexto(''); }}
+          className="h-8 rounded-[var(--radius)] border border-border px-3 text-xs font-bold uppercase text-muted-foreground hover:text-foreground"
+        >
+          {abrindo ? 'Cancelar' : 'Nova lista'}
+        </button>
+      </div>
+
+      <p className="mb-3 text-[11px] leading-relaxed text-muted-foreground">
+        Telefones cadastrados na mão — não dependem de integração nenhuma. Uma linha por pessoa,
+        <code className="mx-1 rounded bg-background px-1">telefone</code> ou
+        <code className="mx-1 rounded bg-background px-1">telefone,nome</code>. Números repetidos são
+        descartados sozinhos.
+      </p>
+
+      {abrindo && (
+        <div className="mb-3 space-y-2 rounded-[var(--radius)] border border-border bg-background/40 p-3">
+          <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+            <input
+              value={nome} onChange={(e) => setNome(e.target.value)}
+              placeholder="Nome da lista (ex: Clientes do salão)"
+              className="h-9 w-full rounded-[var(--radius)] border border-border bg-background px-2 text-sm"
+            />
+            <label className="inline-flex h-9 cursor-pointer items-center rounded-[var(--radius)] border border-border px-3 text-xs font-bold uppercase text-muted-foreground hover:text-foreground">
+              Importar CSV
+              <input type="file" accept=".csv,.txt" className="hidden"
+                onChange={(e) => { const f = e.target.files?.[0]; if (f) importar(f); }} />
+            </label>
+          </div>
+          <textarea
+            value={texto} onChange={(e) => setTexto(e.target.value)} rows={6}
+            placeholder={'5543999990000,Maria\n5511988887777,João'}
+            className="w-full rounded-[var(--radius)] border border-border bg-background p-2 font-mono text-xs"
+          />
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[11px] text-muted-foreground">{linhas} linha(s)</span>
+            <button
+              disabled={!nome.trim() || linhas === 0 || salvando === 'lista'}
+              onClick={async () => {
+                const ok = await onSalvar({ id: alvo ?? undefined, nome, texto });
+                if (ok) { setAbrindo(false); setNome(''); setTexto(''); }
+              }}
+              className="inline-flex h-8 items-center gap-1.5 rounded-[var(--radius)] bg-primary px-3 text-xs font-bold uppercase text-primary-foreground disabled:opacity-50"
+            >
+              {salvando === 'lista' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+              Salvar lista
+            </button>
+          </div>
+        </div>
+      )}
+
+      {listas.length === 0 ? (
+        <p className="text-xs text-muted-foreground">Nenhuma lista cadastrada ainda.</p>
+      ) : (
+        <div className="space-y-1.5">
+          {listas.map((l) => (
+            <div key={l.id} className="flex flex-wrap items-center gap-2 rounded-[var(--radius)] border border-border px-3 py-2">
+              <span className="text-sm font-medium">{l.nome}</span>
+              <span className="text-[11px] text-muted-foreground">{l.contatos} contatos</span>
+              <div className="ml-auto flex items-center gap-2">
+                <button onClick={() => onNovaCampanha(l)}
+                  className="text-[10px] font-bold uppercase tracking-wide text-primary">
+                  Criar campanha
+                </button>
+                <button
+                  onClick={() => { if (confirm(`Excluir a lista "${l.nome}"? As campanhas que usam ela são desativadas.`)) onExcluir(l.id); }}
+                  className="text-muted-foreground hover:text-destructive" title="Excluir lista">
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </div>
             </div>
           ))}
         </div>
-      </div>
+      )}
+    </Card>
+  );
+}
 
-      {/* Cadência */}
+// ────────────────────────────────────────────────────────────────── Campanha
+
+function CampanhaCard({
+  campanha, titulo, subtitulo, cor, pessoas, extras, travas, aberto, onToggle,
+  amostra, loja, ticketMedioLoja, salvando, onChange, onSalvar, onExcluir,
+}: {
+  campanha: Campanha; titulo: string; subtitulo: string; cor: string; pessoas: number;
+  extras?: React.ReactNode; travas: Travas | null; aberto: boolean; onToggle: () => void;
+  amostra: PessoaAmostra[]; loja: string; ticketMedioLoja: number; salvando: boolean;
+  onChange: (c: Campanha) => void; onSalvar: (c: Campanha) => void; onExcluir?: () => void;
+}) {
+  const dias = travas ? diasParaVarrer(pessoas, travas) : 0;
+
+  return (
+    <Card className="p-0">
+      <button onClick={onToggle} className="flex w-full items-start gap-3 p-4 text-left">
+        <span className="mt-1 h-8 w-1 shrink-0 rounded-full" style={{ background: cor }} />
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="font-heading text-xl uppercase leading-none">{titulo}</h3>
+            {campanha.ativa ? (
+              <span className="rounded-full border border-primary/40 bg-primary/10 px-2 py-0.5 text-[9px] font-bold uppercase text-primary">
+                disparando
+              </span>
+            ) : campanha.salva ? (
+              <span className="rounded-full border border-border px-2 py-0.5 text-[9px] font-bold uppercase text-muted-foreground">
+                pausada
+              </span>
+            ) : null}
+            {campanha.cupom && (
+              <span className="inline-flex items-center gap-1 rounded-full border border-secondary/40 bg-secondary/10 px-2 py-0.5 text-[9px] font-bold uppercase text-secondary">
+                <Ticket className="h-2.5 w-2.5" /> {campanha.cupom}
+              </span>
+            )}
+          </div>
+          <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">{subtitulo}</p>
+          <div className="mt-3 flex flex-wrap items-baseline gap-x-5 gap-y-1">
+            <span className="flex items-baseline gap-1.5">
+              <Users className="h-3.5 w-3.5 self-center text-muted-foreground" />
+              <strong className="font-heading text-2xl leading-none">{pessoas}</strong>
+              <span className="text-[11px] text-muted-foreground">pessoas</span>
+            </span>
+            {extras}
+            {dias > 1 && (
+              <span className="flex items-center gap-1 text-[11px] text-[#facc15]">
+                <Clock className="h-3 w-3" /> {dias} dias para falar com todos
+              </span>
+            )}
+          </div>
+        </div>
+        <ChevronDown className={cn('mt-1 h-4 w-4 shrink-0 text-muted-foreground transition-transform', aberto && 'rotate-180')} />
+      </button>
+
+      {aberto && (
+        <EditorCampanha
+          campanha={campanha} amostra={amostra} loja={loja} ticketMedioLoja={ticketMedioLoja}
+          salvando={salvando} onChange={onChange} onSalvar={onSalvar} onExcluir={onExcluir}
+        />
+      )}
+    </Card>
+  );
+}
+
+function EditorCampanha({
+  campanha, amostra, loja, ticketMedioLoja, salvando, onChange, onSalvar, onExcluir,
+}: {
+  campanha: Campanha; amostra: PessoaAmostra[]; loja: string; ticketMedioLoja: number;
+  salvando: boolean; onChange: (c: Campanha) => void; onSalvar: (c: Campanha) => void;
+  onExcluir?: () => void;
+}) {
+  const meta = campanha.modelo ? MODELOS_FIDELIDADE[campanha.modelo] : null;
+  const [verPessoas, setVerPessoas] = useState(false);
+
+  const exemplo = amostra[0];
+  const destinatario = campanha.fonte === 'lista'
+    // Lista manual não tem consumo — a prévia precisa mostrar exatamente isso.
+    ? { chave: '', telefone: '', nome: exemplo?.nome ?? 'Maria Souza' }
+    : {
+      chave: '', telefone: '', nome: exemplo?.nome ?? 'Maria Souza',
+      consumo: {
+        pedidos: exemplo?.pedidos ?? 3,
+        ticketMedio: exemplo?.ticketMedio ?? ticketMedioLoja,
+        diasDesdeUltima: exemplo?.diasDesdeUltima ?? 42,
+      },
+    };
+  const vars = varsDoDestinatario(destinatario, loja, campanha.cupom);
+  const erros = validarCampanha(campanha.mensagens, campanha.fonte, campanha.cupom);
+
+  return (
+    <div className="space-y-4 border-t border-border p-4">
+      {campanha.fonte === 'lista' && (
+        <div className="space-y-1">
+          <Rotulo>Nome da campanha</Rotulo>
+          <input value={campanha.nome} onChange={(e) => onChange({ ...campanha, nome: e.target.value })}
+            className="h-9 w-full rounded-[var(--radius)] border border-border bg-background px-2 text-sm" />
+        </div>
+      )}
+
+      {meta && (
+        <div>
+          <Rotulo>Quem entra</Rotulo>
+          <div className="mt-2 grid gap-3 sm:grid-cols-2">
+            {meta.campos.map((campo) => (
+              <div key={campo.chave} className="space-y-1">
+                <label className="text-xs font-medium">
+                  {campo.rotulo}<span className="ml-1 text-muted-foreground">({campo.sufixo})</span>
+                </label>
+                <NumeroInput
+                  valor={campanha.params[campo.chave] ?? null}
+                  placeholder={campo.padrao === null ? 'automático' : String(campo.padrao)}
+                  onChange={(v) => onChange({ ...campanha, params: { ...campanha.params, [campo.chave]: v } })}
+                />
+                <p className="text-[10px] leading-relaxed text-muted-foreground">{campo.ajuda}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Cupom da oferta */}
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="space-y-1">
-          <Rotulo>Roda nos dias</Rotulo>
-          <div className="flex flex-wrap gap-1">
-            {DIAS_SEMANA_LABEL.map((label, dia) => {
-              const on = campanha.diasSemana.includes(dia);
-              return (
-                <button
-                  key={dia}
-                  onClick={() => onChange({
-                    ...campanha,
-                    diasSemana: on
-                      ? campanha.diasSemana.filter(d => d !== dia)
-                      : [...campanha.diasSemana, dia].sort(),
-                  })}
-                  className={cn(
-                    'h-7 rounded-[var(--radius)] border px-2 text-[10px] font-bold uppercase',
-                    on ? 'border-primary bg-primary/15 text-primary' : 'border-border text-muted-foreground',
-                  )}
-                >
-                  {label}
-                </button>
-              );
-            })}
-          </div>
+          <Rotulo>Cupom desta oferta</Rotulo>
+          <input
+            value={campanha.cupom ?? ''}
+            onChange={(e) => onChange({ ...campanha, cupom: e.target.value.toUpperCase() })}
+            placeholder="VOLTA10"
+            className="h-9 w-full rounded-[var(--radius)] border border-border bg-background px-2 font-mono text-sm uppercase"
+          />
+          <p className="text-[10px] leading-relaxed text-muted-foreground">
+            Crie o cupom no painel do cardápio (com validade e limite de uso) e cole o código aqui.
+            Use <code className="rounded bg-background px-1">{'{{cupom}}'}</code> na mensagem.
+          </p>
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-1">
             <Rotulo>Começa às</Rotulo>
-            <input
-              type="time" value={campanha.hora}
+            <input type="time" value={campanha.hora}
               onChange={(e) => onChange({ ...campanha, hora: e.target.value })}
-              className="h-9 w-full rounded-[var(--radius)] border border-border bg-background px-2 text-sm"
-            />
+              className="h-9 w-full rounded-[var(--radius)] border border-border bg-background px-2 text-sm" />
           </div>
           <div className="space-y-1">
             <Rotulo>Máx. por rodada</Rotulo>
-            <NumeroInput
-              valor={campanha.tetoPublico}
-              placeholder="sem limite"
-              onChange={(v) => onChange({ ...campanha, tetoPublico: v })}
-            />
+            <NumeroInput valor={campanha.tetoPublico} placeholder="sem limite"
+              onChange={(v) => onChange({ ...campanha, tetoPublico: v })} />
           </div>
         </div>
       </div>
 
-      {/* Mensagens */}
+      <div className="space-y-1">
+        <Rotulo>Roda nos dias</Rotulo>
+        <div className="flex flex-wrap gap-1">
+          {DIAS_SEMANA_LABEL.map((label, dia) => {
+            const on = campanha.diasSemana.includes(dia);
+            return (
+              <button key={dia}
+                onClick={() => onChange({
+                  ...campanha,
+                  diasSemana: on ? campanha.diasSemana.filter(d => d !== dia) : [...campanha.diasSemana, dia].sort(),
+                })}
+                className={cn('h-7 rounded-[var(--radius)] border px-2 text-[10px] font-bold uppercase',
+                  on ? 'border-primary bg-primary/15 text-primary' : 'border-border text-muted-foreground')}>
+                {label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
       <div>
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <Rotulo>Mensagens (rodízio entre as três)</Rotulo>
           <p className="text-[10px] text-muted-foreground">
-            Variáveis: {VARIAVEIS.map(v => `{{${v.chave}}}`).join('  ')}
+            {VARIAVEIS
+              .filter(v => campanha.fonte !== 'lista' || !v.consumo)
+              .map(v => `{{${v.chave}}}`).join('  ')}
           </p>
         </div>
         <div className="mt-2 grid gap-3 lg:grid-cols-3">
           {[0, 1, 2].map((i) => {
             const texto = campanha.mensagens[i] ?? '';
             const desconhecidas = variaveisDesconhecidas(texto);
+            const indisponiveis = variaveisIndisponiveis(texto, campanha.fonte);
             return (
               <div key={i} className="space-y-1">
                 <label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
                   Variação {i + 1}
                 </label>
                 <textarea
-                  value={texto}
-                  rows={4}
+                  value={texto} rows={4}
                   onChange={(e) => {
                     const novas = [...campanha.mensagens];
                     novas[i] = e.target.value;
@@ -553,11 +757,16 @@ function EditorCampanha({
                   }}
                   className="w-full rounded-[var(--radius)] border border-border bg-background p-2 text-xs leading-relaxed"
                 />
-                <div className="flex items-baseline justify-between gap-2">
+                <div className="flex flex-wrap items-baseline justify-between gap-2">
                   <span className="text-[10px] text-muted-foreground">{texto.length} caracteres</span>
                   {desconhecidas.length > 0 && (
                     <span className="text-[10px] text-[#facc15]">
-                      {desconhecidas.map(d => `{{${d}}}`).join(', ')} não existe — vai como texto
+                      {desconhecidas.map(d => `{{${d}}}`).join(', ')} não existe
+                    </span>
+                  )}
+                  {indisponiveis.length > 0 && (
+                    <span className="text-[10px] text-destructive">
+                      {indisponiveis.map(d => `{{${d}}}`).join(', ')} não existe em lista manual
                     </span>
                   )}
                 </div>
@@ -567,69 +776,139 @@ function EditorCampanha({
         </div>
       </div>
 
-      {/* Prévia com gente de verdade */}
       <div>
-        <Rotulo>Como chega no WhatsApp {exemplo ? `de ${exemplo.nome ?? 'um cliente sem nome cadastrado'}` : '(exemplo)'}</Rotulo>
+        <Rotulo>
+          Como chega no WhatsApp {exemplo ? `de ${exemplo.nome ?? 'um cliente sem nome cadastrado'}` : '(exemplo)'}
+        </Rotulo>
         <div className="mt-2 space-y-2">
           {campanha.mensagens.filter(Boolean).map((m, i) => (
             <p key={i} className="max-w-md rounded-[var(--radius)] bg-[#075E54]/15 px-3 py-2 text-xs leading-relaxed">
-              {aplicarVars(m, vars)}
+              {aplicarVars(m, vars, 'envio')}
             </p>
           ))}
         </div>
       </div>
 
-      {/* Amostra do público */}
-      <div>
-        <button
-          onClick={() => setVerPessoas(v => !v)}
-          className="text-xs font-bold uppercase tracking-wide text-primary"
-        >
-          {verPessoas ? 'Esconder' : `Ver ${Math.min(segmento.amostra.length, 25)} de ${segmento.resumo.pessoas} pessoas`}
-        </button>
-        {verPessoas && (
-          <div className="mt-2 overflow-x-auto">
-            <table className="w-full min-w-[520px] text-xs">
-              <thead>
-                <tr className="border-b border-border text-left text-[10px] uppercase tracking-widest text-muted-foreground">
-                  <th className="py-1.5 pr-3 font-bold">Cliente</th>
-                  <th className="py-1.5 pr-3 font-bold">Telefone</th>
-                  <th className="py-1.5 pr-3 text-right font-bold">Pedidos</th>
-                  <th className="py-1.5 pr-3 text-right font-bold">Gastou</th>
-                  <th className="py-1.5 text-right font-bold">Parado há</th>
-                </tr>
-              </thead>
-              <tbody>
-                {segmento.amostra.map((p) => (
-                  <tr key={p.telefone ?? p.nome} className="border-b border-border/50">
-                    <td className="py-1.5 pr-3">{p.nome ?? '—'}</td>
-                    <td className="py-1.5 pr-3 text-muted-foreground">{p.telefone ?? '—'}</td>
-                    <td className="py-1.5 pr-3 text-right">{p.pedidos}</td>
-                    <td className="py-1.5 pr-3 text-right">{moedaBR(p.receita)}</td>
-                    <td className="py-1.5 text-right">{p.diasDesdeUltima}d</td>
+      {amostra.length > 0 && (
+        <div>
+          <button onClick={() => setVerPessoas(v => !v)}
+            className="text-xs font-bold uppercase tracking-wide text-primary">
+            {verPessoas ? 'Esconder' : `Ver ${amostra.length} pessoas`}
+          </button>
+          {verPessoas && (
+            <div className="mt-2 overflow-x-auto">
+              <table className="w-full min-w-[520px] text-xs">
+                <thead>
+                  <tr className="border-b border-border text-left text-[10px] uppercase tracking-widest text-muted-foreground">
+                    <th className="py-1.5 pr-3 font-bold">Cliente</th>
+                    <th className="py-1.5 pr-3 font-bold">Telefone</th>
+                    <th className="py-1.5 pr-3 text-right font-bold">Pedidos</th>
+                    <th className="py-1.5 pr-3 text-right font-bold">Gastou</th>
+                    <th className="py-1.5 text-right font-bold">Parado há</th>
                   </tr>
-                ))}
-                {segmento.amostra.length === 0 && (
-                  <tr><td colSpan={5} className="py-4 text-center text-muted-foreground">
-                    Ninguém se encaixa nesta régua hoje.
-                  </td></tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+                </thead>
+                <tbody>
+                  {amostra.map((p) => (
+                    <tr key={p.telefone ?? p.nome} className="border-b border-border/50">
+                      <td className="py-1.5 pr-3">{p.nome ?? '—'}</td>
+                      <td className="py-1.5 pr-3 text-muted-foreground">{p.telefone ?? '—'}</td>
+                      <td className="py-1.5 pr-3 text-right">{p.pedidos}</td>
+                      <td className="py-1.5 pr-3 text-right">{moedaBR(p.receita)}</td>
+                      <td className="py-1.5 text-right">{p.diasDesdeUltima}d</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
 
-      <div className="flex justify-end border-t border-border pt-3">
+      {erros.length > 0 && (
+        <div className="space-y-1 rounded-[var(--radius)] border border-destructive/40 bg-destructive/[0.06] p-2">
+          {erros.map((e, i) => <p key={i} className="text-[11px] text-destructive">{e}</p>)}
+        </div>
+      )}
+
+      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-3">
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => {
+              const ligando = !campanha.ativa;
+              if (ligando && !confirm(
+                'Ativar esta campanha faz o sistema ENVIAR mensagens de verdade pelo WhatsApp '
+                + 'deste cliente, sozinho, respeitando as travas. Confirmar?')) return;
+              onSalvar({ ...campanha, ativa: ligando });
+            }}
+            disabled={salvando || erros.length > 0}
+            className={cn(
+              'inline-flex h-9 items-center gap-1.5 rounded-[var(--radius)] border px-3 text-xs font-bold uppercase disabled:opacity-50',
+              campanha.ativa
+                ? 'border-destructive/50 text-destructive'
+                : 'border-primary bg-primary/15 text-primary',
+            )}
+          >
+            <Zap className="h-3.5 w-3.5" />
+            {campanha.ativa ? 'Pausar disparo' : 'Ativar disparo'}
+          </button>
+          {onExcluir && (
+            <button
+              onClick={() => { if (confirm('Excluir esta campanha?')) onExcluir(); }}
+              className="text-muted-foreground hover:text-destructive" title="Excluir campanha">
+              <Trash2 className="h-4 w-4" />
+            </button>
+          )}
+        </div>
         <button
-          onClick={onSalvar}
-          disabled={salvando}
-          className="inline-flex h-9 items-center gap-1.5 rounded-[var(--radius)] bg-primary px-4 text-xs font-bold uppercase text-primary-foreground disabled:opacity-60"
+          onClick={() => onSalvar(campanha)}
+          disabled={salvando || erros.length > 0}
+          className="inline-flex h-9 items-center gap-1.5 rounded-[var(--radius)] bg-primary px-4 text-xs font-bold uppercase text-primary-foreground disabled:opacity-50"
         >
           {salvando ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
           Salvar e recalcular
         </button>
       </div>
     </div>
+  );
+}
+
+// ───────────────────────────────────────────────────────────────── Histórico
+
+function ExecucoesCard({ execucoes }: { execucoes: Execucao[] }) {
+  return (
+    <Card>
+      <h3 className="mb-3 font-heading text-xl uppercase leading-none">Últimos disparos</h3>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[560px] text-xs">
+          <thead>
+            <tr className="border-b border-border text-left text-[10px] uppercase tracking-widest text-muted-foreground">
+              <th className="py-1.5 pr-3 font-bold">Quando</th>
+              <th className="py-1.5 pr-3 font-bold">Campanha</th>
+              <th className="py-1.5 pr-3 font-bold">Status</th>
+              <th className="py-1.5 pr-3 text-right font-bold">Público</th>
+              <th className="py-1.5 pr-3 text-right font-bold">Enviadas</th>
+              <th className="py-1.5 pr-3 text-right font-bold">Puladas</th>
+              <th className="py-1.5 text-right font-bold">Falhas</th>
+            </tr>
+          </thead>
+          <tbody>
+            {execucoes.map((e) => (
+              <tr key={e.id} className="border-b border-border/50">
+                <td className="py-1.5 pr-3">{new Date(e.iniciada_em).toLocaleString('pt-BR')}</td>
+                <td className="py-1.5 pr-3">{e.campanha ?? '—'}</td>
+                <td className="py-1.5 pr-3">{e.status}</td>
+                <td className="py-1.5 pr-3 text-right">{e.publico}</td>
+                <td className="py-1.5 pr-3 text-right text-primary">{e.enviadas}</td>
+                <td className="py-1.5 pr-3 text-right text-muted-foreground">{e.puladas}</td>
+                <td className="py-1.5 text-right text-destructive">{e.falhas}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="mt-2 text-[10px] text-muted-foreground">
+        &quot;Puladas&quot; são as pessoas que o motor deixou de fora na hora: opt-out, cooldown ou teto de público.
+      </p>
+    </Card>
   );
 }
