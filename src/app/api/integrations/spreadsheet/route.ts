@@ -37,6 +37,85 @@ function sintetizarIdVenda(
   return 'venda:' + createHash('sha1').update(chave).digest('hex').slice(0, 32);
 }
 
+/**
+ * Liga cada linha do ledger de faturamento ao LEAD que a originou, pelo número
+ * do orçamento — e copia para a linha o rastreio que o lead carrega.
+ *
+ * ⚠️ Este é o elo que faltava para responder "qual criativo mais vendeu".
+ * A planilha de faturamento não tem telefone (medido: 2.502 linhas em
+ * produção, ZERO com telefone), então a venda nunca encostava no lead que
+ * guarda o ctwa_clid/criativo. Resultado: de R$ 7,03 milhões em vendas, R$ 0
+ * estavam atribuídos a um criativo. O `NUMERO ORCAMENTO` do relatório de Leads
+ * é o mesmo `ORCAMENTO` do relatório de Faturamento — é essa a ponte.
+ *
+ * ⚠️ O telefone NÃO é copiado: a produção tem uma unique (client_id, numero) e
+ * a linha de venda colidiria com o próprio lead.
+ *
+ * ⚠️ Rastreio é SOBERANO: copia só onde a linha de venda está vazia, e nunca
+ * volta para o lead. A regra é a mesma do resto do sistema — quem viu o lead
+ * chegar sabe de onde ele veio; a planilha sabe o que aconteceu depois.
+ *
+ * Idempotente: roda de novo sem efeito colateral.
+ */
+async function ligarVendasAosLeads(pool: ReturnType<typeof makeServerPool>, clientId: string) {
+  // Leads antigos guardavam o nº do orçamento só em external_id. Preenche a
+  // coluna de negócio a partir dele quando o valor é o número cru da fonte
+  // (ids sintéticos — venda:, agendor:, leadgen: — não são chave de negócio).
+  await pool.query(
+    `UPDATE public.crm_leads
+        SET negocio_externo_id = external_id
+      WHERE client_id = $1
+        AND negocio_externo_id IS NULL
+        AND COALESCE(registro_tipo, 'hibrido') <> 'venda'
+        AND external_id IS NOT NULL
+        AND external_id !~ ':'`,
+    [clientId],
+  ).catch(() => {});
+
+  const { rowCount } = await pool.query(
+    `UPDATE public.crm_leads v
+        SET origem_lead_id = l.id,
+            -- Atribuição: preenche o que está vazio na linha de venda.
+            canal         = COALESCE(NULLIF(v.canal, ''), l.canal),
+            origin        = COALESCE(NULLIF(v.origin, ''), l.origin),
+            source_id     = COALESCE(NULLIF(v.source_id, ''), l.source_id),
+            source_url    = COALESCE(NULLIF(v.source_url, ''), l.source_url),
+            ctwa_clid     = COALESCE(NULLIF(v.ctwa_clid, ''), l.ctwa_clid),
+            campaign_name = COALESCE(NULLIF(v.campaign_name, ''), l.campaign_name),
+            adset_name    = COALESCE(NULLIF(v.adset_name, ''), l.adset_name),
+            ad_name       = COALESCE(NULLIF(v.ad_name, ''), l.ad_name),
+            utm_source    = COALESCE(NULLIF(v.utm_source, ''), l.utm_source),
+            utm_medium    = COALESCE(NULLIF(v.utm_medium, ''), l.utm_medium),
+            utm_campaign  = COALESCE(NULLIF(v.utm_campaign, ''), l.utm_campaign),
+            utm_content   = COALESCE(NULLIF(v.utm_content, ''), l.utm_content),
+            utm_term      = COALESCE(NULLIF(v.utm_term, ''), l.utm_term),
+            gclid         = COALESCE(NULLIF(v.gclid, ''), l.gclid),
+            fbclid        = COALESCE(NULLIF(v.fbclid, ''), l.fbclid),
+            keyword       = COALESCE(NULLIF(v.keyword, ''), l.keyword),
+            placement     = COALESCE(NULLIF(v.placement, ''), l.placement),
+            ddd           = COALESCE(NULLIF(v.ddd, ''), l.ddd),
+            regiao_uf     = COALESCE(NULLIF(v.regiao_uf, ''), l.regiao_uf),
+            regiao_cidade = COALESCE(NULLIF(v.regiao_cidade, ''), l.regiao_cidade),
+            regiao_fonte  = COALESCE(NULLIF(v.regiao_fonte, ''), l.regiao_fonte),
+            first_origin_at = COALESCE(v.first_origin_at, l.first_origin_at),
+            updated_at    = NOW()
+       FROM public.crm_leads l
+      WHERE v.client_id = $1
+        AND v.registro_tipo = 'venda'
+        AND v.negocio_externo_id IS NOT NULL
+        AND l.client_id = v.client_id
+        AND COALESCE(l.registro_tipo, 'hibrido') <> 'venda'
+        AND l.negocio_externo_id = v.negocio_externo_id
+        -- Só reescreve quando há o que ganhar: evita UPDATE em massa a cada
+        -- reimportação de um ledger já ligado.
+        AND (v.origem_lead_id IS DISTINCT FROM l.id
+             OR (NULLIF(v.canal, '') IS NULL AND l.canal IS NOT NULL)
+             OR (NULLIF(v.source_id, '') IS NULL AND l.source_id IS NOT NULL))`,
+    [clientId],
+  );
+  return rowCount ?? 0;
+}
+
 /** Um grupo de arquivos com o MESMO cabeçalho — mesmo mapeamento serve pros dois. */
 export type SpreadsheetFormato = {
   assinatura: string;
@@ -298,6 +377,8 @@ async function ensureTables(pool: ReturnType<typeof makeServerPool>) {
       ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'Fechado',
       ADD COLUMN IF NOT EXISTS status_category TEXT,
       ADD COLUMN IF NOT EXISTS fechou BOOLEAN DEFAULT FALSE,
+      ADD COLUMN IF NOT EXISTS negocio_externo_id TEXT,
+      ADD COLUMN IF NOT EXISTS origem_lead_id UUID,
       ADD COLUMN IF NOT EXISTS valor_rs NUMERIC,
       ADD COLUMN IF NOT EXISTS revenue NUMERIC DEFAULT 0,
       ADD COLUMN IF NOT EXISTS raw JSONB,
@@ -343,11 +424,13 @@ async function insertLeadBatch(
     registroTipo?: TipoPlanilha;
     dataFechamento?: string | null;
     raw: string;
+    /** Nº do orçamento/negócio na fonte — a ponte entre Leads e Faturamento. */
+    negocioExternoId?: string | null;
   }>,
 ) {
   if (rows.length === 0) return;
 
-  const COLS = 27;
+  const COLS = 28;
   const values: unknown[] = [];
   const placeholders = rows.map((row, index) => {
     const base = index * COLS;
@@ -380,6 +463,7 @@ async function insertLeadBatch(
       row.agendou ?? false,
       row.registroTipo ?? 'hibrido',
       row.dataFechamento ?? null,
+      row.negocioExternoId ?? null,
     );
     return `(${Array.from({ length: COLS }, (_, i) => `$${base + i + 1}`).join(',')})`;
   }).join(',');
@@ -389,7 +473,7 @@ async function insertLeadBatch(
       (upload_id, client_id, lead_date, lead_name, phone, source, city, status_raw,
        data, nome, numero, canal, observacao, orcamento, pagamento, bairro, data_agendada,
        revenue, valor_rs, fechou, status_category, status, raw, compareceu, agendou,
-       registro_tipo, data_fechamento)
+       registro_tipo, data_fechamento, negocio_externo_id)
      VALUES ${placeholders}
      -- SEM alvo de propósito: a producao tem uma unique (client_id, numero)
      -- criada FORA do repo; com alvo explicito, instalacao sem a constraint
@@ -432,6 +516,7 @@ async function upsertPorTelefone(
     channel: string | null; statusRaw: string | null; scheduledDate: string | null;
     budget: number; payment: string | null; neighborhood: string | null;
     notes: string | null; revenue: number; closed: boolean; raw: string;
+    negocioExternoId?: string | null;
     compareceu?: boolean; agendou?: boolean;
     registroTipo?: TipoPlanilha; dataFechamento?: string | null;
   }>,
@@ -485,6 +570,7 @@ async function upsertPorTelefone(
          pagamento = COALESCE($8, pagamento),
          data_agendada = COALESCE($9, data_agendada),
          observacao = COALESCE(NULLIF($10, ''), observacao),
+         negocio_externo_id = COALESCE(negocio_externo_id, $14),
          upload_id = $11
        WHERE id = $1::uuid`,
       [
@@ -501,6 +587,7 @@ async function upsertPorTelefone(
         r.uploadId,
         r.compareceu ?? false,
         r.agendou ?? false,
+        r.negocioExternoId ?? null,
       ],
     );
   }
@@ -535,11 +622,13 @@ async function upsertLeadBatch(
     registroTipo?: TipoPlanilha;
     dataFechamento?: string | null;
     raw: string;
+    /** Nº do orçamento/negócio na fonte — a ponte entre Leads e Faturamento. */
+    negocioExternoId?: string | null;
   }>,
 ) {
   if (rows.length === 0) return;
 
-  const COLS = 30;
+  const COLS = 31;
   const values: unknown[] = [];
   const placeholders = rows.map((row, index) => {
     const base = index * COLS;
@@ -557,6 +646,7 @@ async function upsertLeadBatch(
       row.agendou ?? false,
       row.registroTipo ?? 'hibrido',
       row.dataFechamento ?? null,
+      row.negocioExternoId ?? null,
     );
     return `(${Array.from({ length: COLS }, (_, i) => `$${base + i + 1}`).join(',')})`;
   }).join(',');
@@ -569,7 +659,7 @@ async function upsertLeadBatch(
        stage, updated_at_external,
        orcamento, pagamento, observacao,
        revenue, valor_rs, fechou, status_category, status, raw, compareceu, agendou,
-       registro_tipo, data_fechamento)
+       registro_tipo, data_fechamento, negocio_externo_id)
      VALUES ${placeholders}
      -- ATENCAO: o WHERE abaixo e OBRIGATORIO. O indice unico de
      -- (client_id, external_id) é PARCIAL (só vale com external_id NOT NULL), e
@@ -608,6 +698,9 @@ async function upsertLeadBatch(
        fechou = EXCLUDED.fechou,
        -- Ledger de vendas: reimport atualiza tipo/data de fechamento no lugar.
        registro_tipo = EXCLUDED.registro_tipo,
+       -- Chave de negócio: preenche, nunca apaga (um export sem a coluna não
+       -- pode quebrar a ponte que já foi estabelecida).
+       negocio_externo_id = COALESCE(public.crm_leads.negocio_externo_id, EXCLUDED.negocio_externo_id),
        data_fechamento = COALESCE(EXCLUDED.data_fechamento, public.crm_leads.data_fechamento),
        status_category = EXCLUDED.status_category,
        status = EXCLUDED.status,
@@ -862,6 +955,9 @@ export async function POST(req: NextRequest) {
       }
     }
     let duplicadasNoLote = 0;
+    // Quantas linhas de faturamento encontraram o lead de origem — vai pra
+    // resposta porque é o número que diz se a atribuição por criativo funciona.
+    let vendasLigadas = 0;
 
     try {
       const rowsByClient = new Map<string, Record<string, unknown>[]>();
@@ -971,6 +1067,11 @@ export async function POST(req: NextRequest) {
             closed: tipoPlanilha === 'venda'
               ? true
               : sinais.fechou || (statusCol ? isWonStatus(statusRaw) : revenueBruto > 0),
+            // Chave de NEGÓCIO da fonte (nº do orçamento/proposta). É a ponte
+            // entre o relatório de Leads e o de Faturamento: o mesmo número
+            // aparece nos dois, e é por ele que a venda encontra o lead que
+            // carrega o rastreio do anúncio. Gravada nos DOIS lados.
+            negocioExternoId: dealIdCol ? idExterno(row[dealIdCol]) : null,
             registroTipo: tipoPlanilha,
             // Data de fechamento = a data mapeada no relatório de Vendas
             // (ex.: DATA FATURAMENTO). Só o tipo Venda janela a receita por ela.
@@ -1053,6 +1154,15 @@ export async function POST(req: NextRequest) {
             await upsertPorTelefone(pool, batch);
           }
         }
+
+        // Roda em TODA importação, não só na de Vendas: a chave de negócio pode
+        // chegar primeiro pelo ledger e só depois pela planilha de Leads (ou o
+        // contrário). Idempotente e barata — reconcilia os dois lados na ordem
+        // que vierem.
+        vendasLigadas += await ligarVendasAosLeads(pool, clientId).catch(err => {
+          console.error('[spreadsheet ligarVendas]', err?.message ?? err);
+          return 0;
+        });
       }
 
       return Response.json({
@@ -1064,6 +1174,7 @@ export async function POST(req: NextRequest) {
       origens_fora: resumoOrigem.origens.slice(0, 10),
       receita_descartada: receitaDescartada,
       duplicadas_no_lote: duplicadasNoLote,
+      vendas_ligadas: vendasLigadas,
       // Troca de coluna de data no ledger de Vendas. Vai pra resposta porque
       // corrigir em silêncio é a mesma doença de descartar em silêncio.
       data_trocada: dataTrocada,

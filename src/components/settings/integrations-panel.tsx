@@ -1477,6 +1477,7 @@ function SpreadsheetImportPanel() {
     duplicadas_no_lote?: number;
     receita_descartada?: number;
     data_trocada?: { de: string; para: string } | null;
+    vendas_ligadas?: number;
   } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -1670,6 +1671,7 @@ function SpreadsheetImportPanel() {
         origem_descartadas: 0, receita_descartada: 0, duplicadas_no_lote: 0,
         origens_fora: [] as { origem: string; linhas: number }[],
         data_trocada: null as { de: string; para: string } | null,
+        vendas_ligadas: 0,
       };
 
       const lotes = formatos
@@ -1711,6 +1713,7 @@ function SpreadsheetImportPanel() {
           origem_descartadas?: number; origens_fora?: { origem: string; linhas: number }[];
           duplicadas_no_lote?: number; receita_descartada?: number;
           data_trocada?: { de: string; para: string } | null;
+          vendas_ligadas?: number;
         };
         if (!res.ok || data.error) {
           // Diz QUAL arquivo falhou: com dois relatórios no mesmo envio, um erro
@@ -1726,6 +1729,7 @@ function SpreadsheetImportPanel() {
         acc.duplicadas_no_lote += data.duplicadas_no_lote ?? 0;
         acc.origens_fora.push(...(data.origens_fora ?? []));
         if (data.data_trocada) acc.data_trocada = data.data_trocada;
+        acc.vendas_ligadas += data.vendas_ligadas ?? 0;
       }
 
       // Junta as origens descartadas dos formatos numa lista só.
@@ -2142,6 +2146,13 @@ function SpreadsheetImportPanel() {
                   <p className="text-muted-foreground">
                     <strong className="text-foreground">{relatorio.duplicadas_no_lote}</strong>{' '}
                     linha(s) duplicada(s) entre as planilhas — ficou a versão mais recente de cada.
+                  </p>
+                )}
+                {(relatorio.vendas_ligadas ?? 0) > 0 && (
+                  <p className="text-emerald-400">
+                    <strong>{relatorio.vendas_ligadas}</strong> linha(s) de faturamento
+                    encontraram o lead de origem pelo nº do orçamento — a venda passa a
+                    carregar o canal e o criativo que trouxeram o paciente.
                   </p>
                 )}
                 {relatorio.data_trocada && (
