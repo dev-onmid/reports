@@ -203,8 +203,17 @@ export async function conferirFiltros(
   let p = pessoa;
   let origemDesconhecida = pessoaFalhou;
 
+  // ⚠️ A origem é resolvida SEMPRE, não só quando há filtro de origem ativo.
+  // Antes a busca da ficha da empresa era condicionada ao filtro — então
+  // cliente SEM filtro (Cinfel) nunca descobria a origem e todo negócio dele
+  // entrava como 'agendor'. Medido na conta deles: a pessoa vem com
+  // `leadOrigin: null` e a ORGANIZAÇÃO com `leadOrigin: {Prospecção}` —
+  // é lá que a origem mora. O custo é o mesmo caminho em lote já usado pelo
+  // filtro (catálogo cacheado por 30 min), não uma requisição por negócio.
+  const precisaOrigem = !p?.origemLeadId && (n.pessoa.id !== null || n.organizacaoId !== null);
+
   // 1) catálogo em lote — resolve a origem sem gastar uma requisição por negócio
-  if (filtros.origens && filtros.origens.length > 0 && !p?.origemLeadId && conn.api_token) {
+  if (precisaOrigem && conn.api_token) {
     const cat = await carregarCatalogo(conn.api_token);
     const ficha = (n.pessoa.id ? cat.pessoas.get(n.pessoa.id) : null)
       ?? (n.organizacaoId ? cat.orgs.get(n.organizacaoId) : null);
@@ -225,10 +234,7 @@ export async function conferirFiltros(
   }
 
   // 2) fallback individual (catálogo parcial ou ficha ausente)
-  if (
-    filtros.origens && filtros.origens.length > 0 &&
-    !p?.origemLeadId && origemDesconhecida !== false && n.organizacaoId && conn.api_token
-  ) {
+  if (!p?.origemLeadId && origemDesconhecida !== false && n.organizacaoId && conn.api_token) {
     const org = await buscarOrganizacaoAgendor(conn.api_token, n.organizacaoId);
     if (org?.origemLeadId) {
       // Telefone da empresa NÃO entra: o upsert casa lead por telefone, e o
