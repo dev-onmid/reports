@@ -140,8 +140,29 @@ export class AgendorError extends Error {
  * de webhook usa isto pra buscar o telefone da pessoa, e não pode pendurar a
  * resposta ao Agendor (política de retry deles é desconhecida).
  */
+/**
+ * Campos personalizados do Agendor só voltam com `withCustomFields=true`.
+ *
+ * ⚠️ Sem o parâmetro a chave `customFields` nem aparece no payload — provado na
+ * conta da Cinfel: `/deals/44049085` volta sem nada, e a MESMA URL com o
+ * parâmetro volta `{origem_do_lead: {id: 70870, value: "Google/Site"}}`.
+ * Era por isso que a origem "não existia" para nós: a Cinfel usa um campo
+ * PERSONALIZADO chamado "Origem do lead", não o `leadOrigin` padrão.
+ *
+ * Vale também na LISTAGEM (medido: 100 negócios por requisição, 23 com campos
+ * preenchidos), então ler isso custa ZERO requisição a mais — só o parâmetro.
+ *
+ * ⚠️ É inofensivo para quem não usa campo personalizado: medido em 6 negócios
+ * de Londrigifts e Incorpast, o payload volta idêntico, sem `customFields`.
+ * Por isso entra aqui, no cliente HTTP, e não em cada chamador.
+ */
+function comCamposPersonalizados(url: string): string {
+  if (!/\/deals(\/|\?|$)/.test(url) || url.includes('withCustomFields')) return url;
+  return url + (url.includes('?') ? '&' : '?') + 'withCustomFields=true';
+}
+
 export async function agendorFetch<T>(apiToken: string, url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, {
+  const res = await fetch(comCamposPersonalizados(url), {
     ...init,
     headers: {
       Authorization: `Token ${apiToken}`,

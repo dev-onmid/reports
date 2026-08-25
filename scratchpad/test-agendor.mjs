@@ -1,7 +1,7 @@
 // Testes da normalização Agendor.
 // Recompilar antes (ver cabeçalho de test-origem.mjs) — teste roda no build compilado.
 import assert from 'node:assert';
-import { statusDoNegocio, normalizarNegocio, normalizarPessoa, extrairEventoAgendor, canalDoNegocio }
+import { statusDoNegocio, normalizarNegocio, normalizarPessoa, extrairEventoAgendor, canalDoNegocio, extrairOrigemPersonalizada, passaFiltros as pf2 }
   from './build/agendor.mjs';
 let n = 0; const eq = (a,b,m) => { assert.deepStrictEqual(a,b,m); n++; }; const ok = (c,m) => { assert.ok(c,m); n++; };
 
@@ -194,3 +194,62 @@ console.log('✓ +6 asserts (organização como fonte de origem)');
   eq(canal(null, cru), 'agendor', 'e o canal cai no padrão');
 }
 console.log(`✓ ${n} asserts (com a origem resolvida)`);
+
+// ---- CAMPO PERSONALIZADO "Origem do lead" (caso Cinfel, 2026-08-25)
+//
+// A Cinfel criou um campo próprio; o `leadOrigin` padrão fica vazio em 96% dos
+// negócios dela. Payload REAL medido na API:
+//   customFields: { origem_do_lead: { id: 70870, value: "Google/Site" } }
+{
+  const cf = { 'tipo_de_cliente_-_autopecas': { id: 69731, value: 'Cliente final' },
+               carro_de_interesse: [{ id: 70865, value: 'Willys CJ5' }],
+               origem_do_lead: { id: 70870, value: 'Google/Site' } };
+  eq(extrairOrigemPersonalizada(cf),
+    { origemPersonalizada: 'Google/Site', origemPersonalizadaId: '70870' },
+    'lê o campo personalizado no formato {id, value}');
+  eq(extrairOrigemPersonalizada({ origem_do_lead: [{ id: 9, value: 'Instagram' }] }),
+    { origemPersonalizada: 'Instagram', origemPersonalizadaId: '9' },
+    'aceita campo de múltipla escolha (array)');
+  eq(extrairOrigemPersonalizada({ origem_do_lead: 'Facebook' }),
+    { origemPersonalizada: 'Facebook', origemPersonalizadaId: null },
+    'aceita campo de texto livre');
+
+  // ⚠️ Quem NÃO tem campo personalizado não pode sentir diferença nenhuma.
+  for (const vazio of [undefined, null, {}, { outro_campo: { id: 1, value: 'x' } }])
+    eq(extrairOrigemPersonalizada(vazio),
+      { origemPersonalizada: null, origemPersonalizadaId: null },
+      'sem campo de origem → null (Londrigifts/Incorpast intactos)');
+
+  // normalizarNegocio integra o campo
+  const n = normalizarNegocio({ id: 44049085, title: '1151 - Rafael', customFields: cf,
+    dealStatus: { name: 'Ganho' } });
+  eq(n.origemPersonalizada, 'Google/Site', 'normalizarNegocio traz a origem personalizada');
+  eq(n.origemPersonalizadaId, '70870', 'e o id da opção');
+  eq(canalDoNegocio(null, n), 'Google/Site', 'o canal sai do campo personalizado');
+
+  // ⚠️ O personalizado VENCE o padrão: quem usa campo próprio deixa o padrão vazio.
+  eq(canalDoNegocio({ origemLead: 'Prospecção' }, { origemPersonalizada: 'Instagram' }),
+    'Instagram', 'campo personalizado vence o leadOrigin padrão');
+  // Sem personalizado, a régua antiga vale INTEIRA (Londrigifts/Incorpast).
+  eq(canalDoNegocio({ origemLead: 'Google' }, { origemPersonalizada: null }), 'Google',
+    'sem personalizado, o padrão manda');
+  eq(canalDoNegocio(null, { origemResolvida: 'Google', origemPersonalizada: null }), 'Google',
+    'sem personalizado, a origem da empresa manda');
+
+  // Filtro aceita QUALQUER uma das duas fontes de origem
+  const f = { funis: null, origens: ['70870'] };
+  const negCf = { idExterno: '1', funilId: null, funilNome: null,
+    origemPersonalizada: 'Google/Site', origemPersonalizadaId: '70870' };
+  ok(pf2(f, negCf, null).passa, 'filtro casa pelo id da opção personalizada');
+  ok(!pf2(f, { ...negCf, origemPersonalizadaId: '99999' }, null).passa,
+    'opção personalizada fora da lista barra');
+  // E o caminho antigo continua igual
+  const fPadrao = { funis: null, origens: ['5'] };
+  const negSem = { idExterno: '1', funilId: null, funilNome: null,
+    origemPersonalizada: null, origemPersonalizadaId: null };
+  ok(pf2(fPadrao, negSem, { origemLeadId: '5', origemLead: 'Site' }).passa,
+    'filtro pelo leadOrigin padrão continua funcionando');
+  ok(!pf2(fPadrao, negSem, { origemLeadId: '7', origemLead: 'Ind' }).passa,
+    'e continua barrando quem está fora');
+}
+console.log(`✓ ${n} asserts (com campo personalizado)`);

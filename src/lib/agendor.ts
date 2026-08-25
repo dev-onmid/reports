@@ -71,6 +71,16 @@ export type NegocioAgendor = {
    * negócio devolvido pelo filtro, então nenhum deles precisa mudar.
    */
   origemResolvida?: string | null;
+  /**
+   * Origem vinda de CAMPO PERSONALIZADO ("Origem do lead" da Cinfel).
+   *
+   * ⚠️ É outro campo, com outra lista de valores (Instagram, Facebook,
+   * Google/Site), diferente do `leadOrigin` padrão do Agendor (Redes sociais,
+   * Prospecção, Fachada…). A Cinfel usa o personalizado — e como só líamos o
+   * padrão, 96% dos negócios dela apareciam "sem origem".
+   */
+  origemPersonalizada: string | null;
+  origemPersonalizadaId: string | null;
 };
 
 /** Item vendido no negócio — a base do painel de categorias mais vendidas. */
@@ -163,12 +173,40 @@ export function normalizarNegocio(d: Obj): NegocioAgendor | null {
     organizacaoId: str(obj(d.organization)?.id),
     descricao: str(d.description),
     criadoEm: str(d.createdAt),
+    ...extrairOrigemPersonalizada(d.customFields),
     responsavel: str(obj(d.owner)?.name),
     responsavelId: str(obj(d.owner)?.id),
     valorEstimado: num(d.value),
     produtos: normalizarProdutos(d.products_entities ?? d.products),
     linkExterno: str(d._webUrl),
   };
+}
+
+/**
+ * Lê `customFields.origem_do_lead`, que o Agendor devolve como `{id, value}` ou
+ * como array de opções (campo de múltipla escolha).
+ *
+ * Nomes aceitos cobrem as grafias que o próprio Agendor gera ao criar o campo
+ * (ele normaliza o rótulo digitado pelo cliente: "Origem do lead" vira
+ * `origem_do_lead`). Campo ausente → null, e o canal cai na régua antiga.
+ */
+export function extrairOrigemPersonalizada(cf: unknown): {
+  origemPersonalizada: string | null; origemPersonalizadaId: string | null;
+} {
+  const campos = obj(cf);
+  const vazio = { origemPersonalizada: null, origemPersonalizadaId: null };
+  if (!campos) return vazio;
+  const chave = Object.keys(campos).find(k =>
+    /^origem(_do)?(_de)?_?(lead|contato|cliente)?$/.test(k.toLowerCase().replace(/\s+/g, '_')));
+  if (!chave) return vazio;
+  const bruto = campos[chave];
+  const item = Array.isArray(bruto) ? obj(bruto[0]) : obj(bruto);
+  if (!item) {
+    // Campo de texto livre: o valor vem direto, sem {id, value}.
+    const s = str(bruto);
+    return s ? { origemPersonalizada: s, origemPersonalizadaId: null } : vazio;
+  }
+  return { origemPersonalizada: str(item.value), origemPersonalizadaId: str(item.id) };
 }
 
 /**
@@ -213,9 +251,16 @@ export function normalizarProdutos(v: unknown): ProdutoAgendor[] {
  */
 export function canalDoNegocio(
   pessoa: { origemLead?: string | null } | null,
-  negocio: { origemResolvida?: string | null },
+  negocio: { origemResolvida?: string | null; origemPersonalizada?: string | null },
 ): string {
-  return pessoa?.origemLead?.trim() || negocio.origemResolvida?.trim() || 'agendor';
+  // ⚠️ O campo PERSONALIZADO vem primeiro: quando o cliente criou um "Origem do
+  // lead" próprio, é ele que a equipe preenche — o `leadOrigin` padrão fica
+  // vazio (96% dos negócios da Cinfel). Quem não usa campo personalizado não
+  // sente diferença: o valor é null e a régua antiga vale inteira.
+  return negocio.origemPersonalizada?.trim()
+    || pessoa?.origemLead?.trim()
+    || negocio.origemResolvida?.trim()
+    || 'agendor';
 }
 
 /**
@@ -320,12 +365,15 @@ export function passaFiltros(
     if (opts?.origemDesconhecida) {
       return { passa: false, motivo: 'origem não verificada (limite de requisições) — será tentado de novo' };
     }
-    const id = pessoa?.origemLeadId ?? null;
-    // Origem conhecida e fora da lista → barra. Pessoa sem origem cadastrada
-    // no Agendor conta como "fora" quando há filtro — origem específica foi
-    // pedida justamente pra excluir o resto.
-    if (id === null || !filtros.origens.includes(id)) {
-      return { passa: false, motivo: `origem "${pessoa?.origemLead ?? 'sem origem'}" fora do filtro` };
+    // ⚠️ Duas fontes de origem, e QUALQUER uma das duas serve: o `leadOrigin`
+    // padrão e o campo PERSONALIZADO ("Origem do lead"). Cliente que usa o
+    // personalizado tem o padrão vazio — exigir só o padrão barraria 96% da
+    // base dele (caso Cinfel). O gestor escolhe os ids na tela; os dois
+    // vocabulários convivem na mesma lista.
+    const ids = [pessoa?.origemLeadId, negocio.origemPersonalizadaId].filter(Boolean) as string[];
+    if (!ids.some(i => filtros.origens!.includes(i))) {
+      const rotulo = negocio.origemPersonalizada ?? pessoa?.origemLead ?? 'sem origem';
+      return { passa: false, motivo: `origem "${rotulo}" fora do filtro` };
     }
   }
   return { passa: true, motivo: null };
