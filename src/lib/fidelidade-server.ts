@@ -122,6 +122,12 @@ export async function ensureFidelidadeSchema(pool: Pool) {
        enviado_em  TIMESTAMPTZ,
        erro        TEXT
      )`,
+    // ⚠️ O TEXTO exatamente como foi entregue, já com nome, loja e cupom
+    // aplicados. Guardar só o índice da variação obrigaria a RECONSTRUIR a
+    // mensagem para mostrar ao gestor — e reconstrução não é registro: se o
+    // texto da campanha mudar depois, a reconstrução passa a mentir sobre o
+    // que a pessoa recebeu.
+    `ALTER TABLE public.fidelidade_envios ADD COLUMN IF NOT EXISTS texto TEXT`,
     // O índice do COOLDOWN — a consulta mais quente do motor.
     `CREATE INDEX IF NOT EXISTS fidelidade_envios_cooldown_idx
        ON public.fidelidade_envios (client_id, chave, enviado_em DESC)

@@ -256,16 +256,18 @@ async function enviarProxima(
   if (res.ok) {
     await pool.query(
       `UPDATE public.fidelidade_envios
-          SET status = 'enviada', enviado_em = NOW(), variacao = $2 WHERE id = $1`,
-      [alvo.id, variacao],
+          SET status = 'enviada', enviado_em = NOW(), variacao = $2, texto = $3 WHERE id = $1`,
+      [alvo.id, variacao, texto],
     );
     await pool.query(
       `UPDATE public.fidelidade_execucoes SET enviadas = enviadas + 1 WHERE id = $1`, [execucaoId],
     );
   } else {
+    // O texto vai junto mesmo na falha: sem ele não dá para saber se o erro foi
+    // do número ou do conteúdo da mensagem.
     await pool.query(
-      `UPDATE public.fidelidade_envios SET status = 'falha', erro = $2 WHERE id = $1`,
-      [alvo.id, String(res.error ?? 'falha')],
+      `UPDATE public.fidelidade_envios SET status = 'falha', erro = $2, texto = $3 WHERE id = $1`,
+      [alvo.id, String(res.error ?? 'falha'), texto],
     );
     await pool.query(
       `UPDATE public.fidelidade_execucoes SET falhas = falhas + 1 WHERE id = $1`, [execucaoId],

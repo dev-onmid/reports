@@ -743,3 +743,98 @@ export function proximaExecucao(diasSemana: number[], hora: string, agora: Date)
   }
   return null;
 }
+
+// ------------------------------------------------------------------ Progresso
+
+export type ProgressoCampanha = {
+  total: number;
+  enviadas: number;
+  puladas: number;
+  falhas: number;
+  pendentes: number;
+  /** 0–100 sobre o que EFETIVAMENTE vai receber (total menos as puladas). */
+  pct: number;
+};
+
+/**
+ * Progresso de uma rodada.
+ *
+ * ⚠️ A porcentagem ignora as PULADAS de propósito: quem está em cooldown ou
+ * pediu para sair nunca vai receber, e mantê-los no denominador faria a barra
+ * parar em 60% para sempre numa campanha que já terminou tudo que tinha para
+ * fazer.
+ */
+export function progressoDaExecucao(
+  e: { publico: number; enviadas: number; puladas: number; falhas: number },
+): ProgressoCampanha {
+  const total = Math.max(0, e.publico);
+  const alvo = Math.max(0, total - e.puladas);
+  const feitas = e.enviadas + e.falhas;
+  return {
+    total,
+    enviadas: e.enviadas,
+    puladas: e.puladas,
+    falhas: e.falhas,
+    pendentes: Math.max(0, alvo - feitas),
+    pct: alvo > 0 ? Math.min(100, Math.round((feitas / alvo) * 100)) : 0,
+  };
+}
+
+/**
+ * Em quantos DIAS DE CALENDÁRIO a fila termina, no ritmo das travas.
+ *
+ * ⚠️ Conta só os dias que a campanha pode rodar: com teto de 50/dia e domingo
+ * bloqueado, 342 pessoas não são 7 dias — são 8. Somar dias corridos mentiria
+ * justamente na informação que o gestor usa para prometer prazo.
+ *
+ * Devolve 0 quando não há fila e -1 quando não há dia permitido nenhum (a
+ * campanha nunca terminaria, e isso precisa aparecer como aviso, não como "0").
+ */
+export function diasParaTerminar(
+  pendentes: number, travas: Travas, enviadasHoje: number, agora: Date,
+): number {
+  if (pendentes <= 0) return 0;
+  if (travas.diasSemana.length === 0) return -1;
+
+  const porDia = capacidadeDaJanela(travas);
+  if (porDia <= 0) return -1;
+
+  let resta = pendentes;
+  let dias = 0;
+  let diaSemana = partesBRT(agora).diaSemana;
+
+  // Hoje só tem o que sobrou do teto — e só se hoje for dia permitido.
+  if (travas.diasSemana.includes(diaSemana)) {
+    resta -= Math.max(0, porDia - enviadasHoje);
+    dias = 1;
+  }
+
+  // Teto de 400 voltas: cobre ~1 ano mesmo com um dia permitido por semana.
+  let voltas = 0;
+  while (resta > 0 && voltas < 400) {
+    diaSemana = (diaSemana + 1) % 7;
+    dias++;
+    voltas++;
+    if (travas.diasSemana.includes(diaSemana)) resta -= porDia;
+  }
+  return resta > 0 ? -1 : Math.max(1, dias);
+}
+
+/** Por que a pessoa ficou de fora, em português. */
+export function rotuloMotivo(motivo: string | null | undefined, travas?: Travas): string {
+  switch (motivo) {
+    case 'optout': return 'Pediu para não receber';
+    case 'cooldown': return travas
+      ? `Já recebeu outra campanha nos últimos ${travas.cooldownDias} dias`
+      : 'Já recebeu outra campanha há pouco';
+    case 'teto_publico': return 'Passou do limite desta rodada';
+    default: return motivo ?? '—';
+  }
+}
+
+export const STATUS_ENVIO_LABEL: Record<string, string> = {
+  pendente: 'Na fila',
+  enviada: 'Enviada',
+  pulada: 'Pulada',
+  falha: 'Falhou',
+};

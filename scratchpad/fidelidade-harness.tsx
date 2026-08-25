@@ -94,12 +94,52 @@ const RESPOSTA = {
   ],
 };
 
+const ACOMP = {
+  travas: RESPOSTA.travas,
+  enviadasHoje: 41,
+  porStatus: { enviada: 120, pendente: 182, pulada: 38, falha: 2 },
+  execucoes: [
+    {
+      id: 'e1', campanha_id: 'camp-lista-1', campanha: 'Oferta — Clientes do salão', ativa: true,
+      status: 'rodando', iniciada_em: '2026-08-25T21:00:00.000Z', concluida_em: null,
+      publico: 342, enviadas: 120, puladas: 38, falhas: 2,
+    },
+  ],
+  envios: [
+    { id: 'v1', campanha_id: 'camp-lista-1', campanha: 'Oferta — Clientes do salão', nome: 'Matheus Campos',
+      telefone: '5543988619300', status: 'enviada', motivo: null, erro: null, cupom: 'SALAO15',
+      texto: 'Oi, Matheus! Passando pra avisar de uma novidade da PicoLocos Guanabara 😊',
+      criado_em: '2026-08-25T21:00:00.000Z', enviado_em: '2026-08-25T21:40:00.000Z' },
+    { id: 'v2', campanha_id: 'camp-lista-1', campanha: 'Oferta — Clientes do salão', nome: null,
+      telefone: '5511988887777', status: 'enviada', motivo: null, erro: null, cupom: 'SALAO15',
+      texto: 'Tudo bem? A PicoLocos Guanabara tem uma oferta esperando por você 😉',
+      criado_em: '2026-08-25T21:00:00.000Z', enviado_em: '2026-08-25T21:38:00.000Z' },
+    { id: 'v3', campanha_id: 'camp-lista-1', campanha: 'Oferta — Clientes do salão', nome: 'Ana Paula',
+      telefone: '5543999991234', status: 'pulada', motivo: 'cooldown', erro: null, cupom: null, texto: null,
+      criado_em: '2026-08-25T21:00:00.000Z', enviado_em: null },
+    { id: 'v4', campanha_id: 'camp-lista-1', campanha: 'Oferta — Clientes do salão', nome: 'João',
+      telefone: '5543669952409', status: 'falha', motivo: null, cupom: 'SALAO15',
+      erro: 'Evolution 400: number does not exist',
+      texto: 'Oi, João! Passando pra avisar de uma novidade da PicoLocos Guanabara 😊',
+      criado_em: '2026-08-25T21:00:00.000Z', enviado_em: null },
+    { id: 'v5', campanha_id: 'camp-lista-1', campanha: 'Oferta — Clientes do salão', nome: 'Carla',
+      telefone: '5543912345678', status: 'pendente', motivo: null, erro: null, cupom: null, texto: null,
+      criado_em: '2026-08-25T21:00:00.000Z', enviado_em: null },
+  ],
+  temMais: false,
+};
+
 const chamadas: { url: string; body: unknown }[] = [];
 (window as unknown as { __chamadas: typeof chamadas }).__chamadas = chamadas;
 
 const original = window.fetch.bind(window);
 window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+  if (url.includes('/fidelidade/acompanhamento')) {
+    chamadas.push({ url: `${init?.method ?? 'GET'} ${url}`, body: init?.body ? JSON.parse(String(init.body)) : null });
+    await new Promise(r => setTimeout(r, 60));
+    return new Response(JSON.stringify(ACOMP), { headers: { 'Content-Type': 'application/json' } });
+  }
   if (url.includes('/fidelidade/disparar')) {
     chamadas.push({ url: `POST ${url}`, body: init?.body ? JSON.parse(String(init.body)) : null });
     await new Promise(r => setTimeout(r, 80));
