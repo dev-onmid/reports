@@ -14,6 +14,7 @@
  */
 
 import type { Pool } from 'pg';
+import { extrairOrigemPersonalizada } from '@/lib/agendor';
 
 export const AGENDOR_API = 'https://api.agendor.com.br/v3';
 const AGENDOR_SUBS = 'https://api.agendor.com.br/integrations/subscriptions';
@@ -246,8 +247,51 @@ export async function listarOpcoesAgendor(apiToken: string): Promise<{
         .map(x => ({ id: String(x.id), nome: String(x.name) }));
     } catch { return []; }
   };
-  const [funis, origens] = await Promise.all([pegar('/funnels'), pegar('/lead_origins')]);
+  const [funis, padrao, personalizadas] = await Promise.all([
+    pegar('/funnels'),
+    pegar('/lead_origins'),
+    origensPersonalizadas(apiToken),
+  ]);
+  // ⚠️ As duas listas na mesma caixa de seleção, de propósito: para o gestor
+  // "Origem do lead" é UMA coisa, e ele não tem por que saber se o cliente usou
+  // o campo padrão do Agendor ou criou um próprio. O sufixo distingue quando os
+  // dois vocabulários têm nome parecido (a Cinfel tem "Site/Google" no padrão e
+  // "Google/Site" no personalizado — origens diferentes, valores diferentes).
+  const origens = [
+    ...padrao,
+    ...personalizadas.filter(p => !padrao.some(o => o.id === p.id))
+      .map(p => ({ ...p, nome: `${p.nome} (campo personalizado)` })),
+  ];
   return { funis, origens };
+}
+
+/**
+ * Opções do campo PERSONALIZADO "Origem do lead", quando a conta usa um.
+ *
+ * ⚠️ Não existe endpoint que liste campos personalizados (`/custom_fields` e
+ * variantes devolvem 404 — testado). O jeito de descobrir as opções é ler os
+ * negócios com `withCustomFields=true` e coletar os valores distintos. Duas
+ * páginas bastam para pegar o vocabulário de uma conta e mantêm o custo baixo
+ * numa API que limita por volume.
+ *
+ * Conta sem campo personalizado devolve lista vazia e nada muda para ela.
+ */
+async function origensPersonalizadas(apiToken: string): Promise<Array<{ id: string; nome: string }>> {
+  const vistas = new Map<string, string>();
+  try {
+    for (let pagina = 1; pagina <= 2; pagina++) {
+      const r = await agendorFetch<{ data?: Array<{ customFields?: unknown }> }>(
+        apiToken, `${AGENDOR_API}/deals?per_page=100&page=${pagina}`);
+      const lista = r?.data ?? [];
+      for (const d of lista) {
+        const { origemPersonalizada, origemPersonalizadaId } = extrairOrigemPersonalizada(d.customFields);
+        if (origemPersonalizadaId && origemPersonalizada) vistas.set(origemPersonalizadaId, origemPersonalizada);
+      }
+      if (lista.length < 100) break;
+    }
+  } catch { /* conta sem campo personalizado, ou API indisponível — segue sem */ }
+  return [...vistas.entries()].map(([id, nome]) => ({ id, nome }))
+    .sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
 }
 
 // ---------------------------------------------------------------- log cru
