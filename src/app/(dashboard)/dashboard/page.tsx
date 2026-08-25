@@ -6809,57 +6809,15 @@ export default function GeneralDashboard() {
               </div>
             </PremiumPanel>
 
-            {/* Em food os blocos já foram renderizados no grid editável acima —
-                aqui fica só o funil de leads, que não existe em delivery. */}
-            {!modoFood && (
-              <div className="grid gap-4 xl:grid-cols-[1.08fr_0.92fr]">
-                {deliverySoloId ? (
-                  <DeliveryResumoCard clientId={deliverySoloId} from={deliveryRange.from} to={deliveryRange.to} />
-                ) : (
-                  <SimpleFunnel steps={funnelStepsNew} totalRate={funnelTaxa > 0 ? premiumValue(funnelTaxa, 'percent') : '—'} fonteLabel={fonteTopoLabel} onStageClick={setFunilStageIdx} />
-                )}
-                <ChannelSummaryTable rows={channelRows} />
-              </div>
-            )}
+            {/* ── Instagram — logo abaixo do Resumo de Tráfego ──
+                Posição pedida pelo Matheus: o orgânico fica colado no pago, e a
+                leitura de tráfego acontece toda junta antes de o funil começar.
 
-            {/* ── Faturamento por origem ──
-                Fica ao lado do Resumo por Canal de propósito: aquele mostra o
-                CUSTO por canal (investimento, leads, CPL) e este mostra o
-                RETORNO. Em food só aparece quando há venda com valor no CRM —
-                a receita de delivery já tem painel próprio na grade. */}
-            {(!modoFood || porCanal.origens.length > 0 || porCanal.leads.length > 0) && (
-              <div className="grid gap-4 xl:grid-cols-2">
-                <CanalDonutCard
-                  titulo="Faturamento por Canal"
-                  fatiasBrutas={porCanal.origens.map(o => ({
-                    label: o.label,
-                    valor: o.receita,
-                    nota: `${o.vendas} ${o.vendas === 1 ? 'venda' : 'vendas'}`
-                      + (o.ticket !== null ? ` · ${premiumValue(o.ticket, 'currency')}` : ''),
-                  }))}
-                  total={porCanal.total}
-                  semCanal={porCanal.semAtribuicao}
-                  formato="currency"
-                  aviso="Preencher a origem no cadastro do negócio (ou entrar por lead de anúncio, que já traz o canal) é o que move esse valor para uma fatia de verdade."
-                />
-                <CanalDonutCard
-                  titulo="Leads por Canal"
-                  fatiasBrutas={porCanal.leads.map(l => ({ label: l.label, valor: l.leads }))}
-                  total={porCanal.leadsTotal}
-                  semCanal={porCanal.leadsSemCanal}
-                  formato="number"
-                  aviso="São os leads do CRM contados pela data de criação — número diferente do card de Leads acima, que conta resultado de anúncio."
-                />
-              </div>
-            )}
-
-            {/* ── Instagram — logo abaixo do funil ──
                 ⚠️ Vale para food TAMBÉM. Este painel já sumiu no modo food uma
                 vez, sob o argumento de que o Instagram aparecia no capítulo
                 Tráfego da DeliveryView — mas aquele capítulo foi REMOVIDO a
                 pedido do Matheus, e a justificativa morreu junto: food ficou sem
-                Instagram nenhum. É o mesmo painel do modo lead-gen, no mesmo
-                lugar. */}
+                Instagram nenhum. É o mesmo painel do modo lead-gen. */}
             {(() => {
               const allIg = pageInsights.filter(p => p.instagram).map(p => p.instagram!);
               const prevIg = prevPageInsights.filter(p => p.instagram).map(p => p.instagram!);
@@ -6935,6 +6893,51 @@ export default function GeneralDashboard() {
                 </PremiumPanel>
               );
             })()}
+
+            {/* Em food os blocos já foram renderizados no grid editável acima —
+                aqui fica só o funil de leads, que não existe em delivery. */}
+            {!modoFood && (
+              <div className="grid gap-4 xl:grid-cols-[1.08fr_0.92fr]">
+                {deliverySoloId ? (
+                  <DeliveryResumoCard clientId={deliverySoloId} from={deliveryRange.from} to={deliveryRange.to} />
+                ) : (
+                  <SimpleFunnel steps={funnelStepsNew} totalRate={funnelTaxa > 0 ? premiumValue(funnelTaxa, 'percent') : '—'} fonteLabel={fonteTopoLabel} onStageClick={setFunilStageIdx} />
+                )}
+                <ChannelSummaryTable rows={channelRows} />
+              </div>
+            )}
+
+            {/* ── Faturamento por origem ──
+                Fica ao lado do Resumo por Canal de propósito: aquele mostra o
+                CUSTO por canal (investimento, leads, CPL) e este mostra o
+                RETORNO. Em food só aparece quando há venda com valor no CRM —
+                a receita de delivery já tem painel próprio na grade. */}
+            {(!modoFood || porCanal.origens.length > 0 || porCanal.leads.length > 0) && (
+              <div className="grid gap-4 xl:grid-cols-2">
+                <CanalDonutCard
+                  titulo="Faturamento por Canal"
+                  fatiasBrutas={porCanal.origens.map(o => ({
+                    label: o.label,
+                    valor: o.receita,
+                    nota: `${o.vendas} ${o.vendas === 1 ? 'venda' : 'vendas'}`
+                      + (o.ticket !== null ? ` · ${premiumValue(o.ticket, 'currency')}` : ''),
+                  }))}
+                  total={porCanal.total}
+                  semCanal={porCanal.semAtribuicao}
+                  formato="currency"
+                  aviso="Preencher a origem no cadastro do negócio (ou entrar por lead de anúncio, que já traz o canal) é o que move esse valor para uma fatia de verdade."
+                />
+                <CanalDonutCard
+                  titulo="Leads por Canal"
+                  fatiasBrutas={porCanal.leads.map(l => ({ label: l.label, valor: l.leads }))}
+                  total={porCanal.leadsTotal}
+                  semCanal={porCanal.leadsSemCanal}
+                  formato="number"
+                  aviso="São os leads do CRM contados pela data de criação — número diferente do card de Leads acima, que conta resultado de anúncio."
+                />
+              </div>
+            )}
+
 
             {/* ── Desempenho comercial: quem vendeu e o que se vendeu ──
                 Espelha os dois painéis do CRM externo (Agendor). Só aparece
