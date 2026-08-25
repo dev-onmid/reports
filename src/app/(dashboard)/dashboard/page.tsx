@@ -63,6 +63,7 @@ import { useClients } from '@/lib/client-store';
 import { cn, formatCurrencyBRL } from '@/lib/utils';
 import { ClientAvatar } from '@/components/client-avatar';
 import { CreativeRevenueStrip, type CriativoReceita } from '@/components/dashboard/creative-revenue-strip';
+import { VendedoresCard, CategoriasCard, type LinhaVendedor, type LinhaCategoria } from '@/components/dashboard/desempenho-comercial';
 import type { TopCreative } from '@/app/api/meta/top-creatives/route';
 import type { PageInsightsResult, InstagramPageData } from '@/app/api/meta/page-insights/route';
 import type { FaturamentoPorOrigem, LeadsPorCanal } from '@/app/api/crm/por-canal/route';
@@ -5238,6 +5239,10 @@ export default function GeneralDashboard() {
   /** Faturamento por criativo no período — vem do CRM, não do Meta. */
   const [criativosReceita, setCriativosReceita] = useState<CriativoReceita[]>([]);
   const [criativosReceitaLoading, setCriativosReceitaLoading] = useState(false);
+  /** Quem vendeu mais e o que mais se vendeu — CRM externo (Agendor). */
+  const [vendedores, setVendedores] = useState<LinhaVendedor[]>([]);
+  const [categorias, setCategorias] = useState<LinhaCategoria[]>([]);
+  const [desempenhoLoading, setDesempenhoLoading] = useState(false);
   /** Degrau do Funil de Performance aberto no modal de leads (índice em ETAPAS_FUNIL). */
   const [funilStageIdx, setFunilStageIdx] = useState<number | null>(null);
   const [campaignSortBy, setCampaignSortBy] = useState<SortKey>('spend');
@@ -6229,6 +6234,26 @@ export default function GeneralDashboard() {
   })();
   const deliveryRange = periodoISO;
 
+  // ── Desempenho comercial: vendedores e categorias ─────────────────────────
+  useEffect(() => {
+    let cancelado = false;
+    const ids = [...selectedIds];
+    if (ids.length === 0) { setVendedores([]); setCategorias([]); return () => { cancelado = true; }; }
+    setDesempenhoLoading(true);
+    const qs = new URLSearchParams({ clientIds: ids.join(','), from: periodoISO.from, to: periodoISO.to });
+    fetch(`/api/crm/desempenho?${qs}`)
+      .then(r => r.ok ? r.json() as Promise<{ vendedores?: LinhaVendedor[]; categorias?: LinhaCategoria[] }> : null)
+      .then(j => {
+        if (cancelado) return;
+        setVendedores(j?.vendedores ?? []);
+        setCategorias(j?.categorias ?? []);
+      })
+      .catch(() => { if (!cancelado) { setVendedores([]); setCategorias([]); } })
+      .finally(() => { if (!cancelado) setDesempenhoLoading(false); });
+    return () => { cancelado = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedKey, periodoISO.from, periodoISO.to]);
+
   // ── Faturamento por criativo (CRM) ────────────────────────────────────────
   // Uma busca por cliente selecionado — a rota da biblioteca é por cliente, e
   // pedir sem cliente traria a carteira inteira só pra descartar quase tudo.
@@ -6910,6 +6935,35 @@ export default function GeneralDashboard() {
                 </PremiumPanel>
               );
             })()}
+
+            {/* ── Desempenho comercial: quem vendeu e o que se vendeu ──
+                Espelha os dois painéis do CRM externo (Agendor). Só aparece
+                quando há responsável ou produto no período — sem isso seria
+                uma seção vazia num cliente que não usa CRM com vendedores. */}
+            {(desempenhoLoading || vendedores.length > 0 || categorias.length > 0) && (
+              <PremiumPanel className="p-4">
+                <div className="grid gap-6 lg:grid-cols-2">
+                  <div className="min-w-0">
+                    <div className="mb-3 flex items-center gap-2 text-xs font-black uppercase tracking-[0.07em] text-[#dce4e8]">
+                      Quem vendeu mais
+                      <span
+                        className="rounded bg-white/[0.08] px-1.5 py-0.5 text-[9px] font-black text-[#9aa4aa]"
+                        title="Ganhos pela data do ganho · perdidos pela data da perda · novos pela data de criação"
+                      >
+                        CRM
+                      </span>
+                    </div>
+                    <VendedoresCard linhas={vendedores} loading={desempenhoLoading} />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="mb-3 text-xs font-black uppercase tracking-[0.07em] text-[#dce4e8]">
+                      Categorias mais vendidas
+                    </div>
+                    <CategoriasCard linhas={categorias} loading={desempenhoLoading} />
+                  </div>
+                </div>
+              </PremiumPanel>
+            )}
 
             {/* ── Meta Ads: campanhas expansíveis + criativos ── */}
             <PremiumPanel className="border-[#168BFF]/28 shadow-[0_0_40px_rgba(22,139,255,0.12)]">

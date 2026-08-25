@@ -40,8 +40,18 @@ async function ensureColunasLead(pool: Pool) {
       ADD COLUMN IF NOT EXISTS compareceu BOOLEAN DEFAULT FALSE,
       ADD COLUMN IF NOT EXISTS fechou BOOLEAN DEFAULT FALSE,
       ADD COLUMN IF NOT EXISTS fechado_em DATE,
+      ADD COLUMN IF NOT EXISTS perdido_em DATE,
+      ADD COLUMN IF NOT EXISTS responsavel TEXT,
+      -- ⚠️ Valor ESTIMADO do negócio, longe de valor_rs. Ver NegocioAgendor.
+      ADD COLUMN IF NOT EXISTS valor_negocio NUMERIC,
+      ADD COLUMN IF NOT EXISTS produtos JSONB,
+      ADD COLUMN IF NOT EXISTS link_externo TEXT,
       ADD COLUMN IF NOT EXISTS external_id TEXT
   `).catch(() => {});
+  await pool.query(
+    `CREATE INDEX IF NOT EXISTS crm_leads_responsavel_idx
+       ON public.crm_leads (client_id, responsavel) WHERE responsavel IS NOT NULL`,
+  ).catch(() => {});
 }
 
 /** Espelho de etapa no Kanban — mesma regra do Datalytics. */
@@ -295,6 +305,12 @@ export async function ingerirNegocioAgendor(
   const fechadoEm = ganhou
     ? ((negocio.ganhoEm ?? new Date().toISOString()).slice(0, 10))
     : null;
+  const perdidoEm = negocio.status === 'perdido'
+    ? ((negocio.perdidoEm ?? new Date().toISOString()).slice(0, 10))
+    : null;
+  // Alimenta o painel "quem vendeu mais" (ganhos, perdidos E novos). Fica em
+  // coluna própria justamente para não encostar na receita — ver NegocioAgendor.
+  const produtosJson = negocio.produtos.length > 0 ? JSON.stringify(negocio.produtos) : null;
 
   // ⚠️ `canal` guarda a ORIGEM DO NEGÓCIO ("Google", "Instagram", "Indicação"),
   // não a porta de entrada. Gravar 'agendor' aqui — como era antes — fazia o
@@ -347,6 +363,13 @@ export async function ingerirNegocioAgendor(
            valor_rs = COALESCE($6, valor_rs),
            revenue = COALESCE($6, revenue),
            fechado_em = COALESCE(fechado_em, $13::date),
+           perdido_em = COALESCE(perdido_em, $15::date),
+           -- Responsável, valor estimado e produtos: o Agendor é a fonte, então
+           -- sobrescrevem (mudar de vendedor ou de itens é evento normal).
+           responsavel = COALESCE($16, responsavel),
+           valor_negocio = COALESCE($17, valor_negocio),
+           produtos = COALESCE($18::jsonb, produtos),
+           link_externo = COALESCE($19, link_externo),
            nome = COALESCE(NULLIF(nome, ''), $7),
            email = COALESCE(NULLIF(email, ''), $8),
            numero = COALESCE(NULLIF(numero, ''), $9),
@@ -365,6 +388,8 @@ export async function ingerirNegocioAgendor(
           valorVenda, pessoa?.nome ?? negocio.pessoa.nome ?? negocio.titulo,
           pessoa?.email ?? negocio.pessoa.email, pessoa?.telefoneBruto,
           observacao, externalId, funnelId, fechadoEm, canalDoLead,
+          perdidoEm, negocio.responsavel, negocio.valorEstimado, produtosJson,
+          negocio.linkExterno,
         ],
       );
       if (labelEtapa) await espelharEtapa(pool, clientId, leadFunnel, labelEtapa);
@@ -381,8 +406,10 @@ export async function ingerirNegocioAgendor(
     const { rows: [novo] } = await pool.query<{ id: string }>(
       `INSERT INTO public.crm_leads
          (client_id, mes, data, nome, numero, canal, origin, observacao, status,
-          funnel_id, email, valor_rs, revenue, agendou, compareceu, fechou, fechado_em, external_id)
-       VALUES ($1, $2, $3, $4, $5, $16, 'Agendor', $6, $7, $8, $9, $10, $10, $11, $12, $13, $14::date, $15)
+          funnel_id, email, valor_rs, revenue, agendou, compareceu, fechou, fechado_em, external_id,
+          perdido_em, responsavel, valor_negocio, produtos, link_externo)
+       VALUES ($1, $2, $3, $4, $5, $16, 'Agendor', $6, $7, $8, $9, $10, $10, $11, $12, $13, $14::date, $15,
+               $17::date, $18, $19, $20::jsonb, $21)
        RETURNING id`,
       [
         clientId,
@@ -401,6 +428,11 @@ export async function ingerirNegocioAgendor(
         fechadoEm,
         externalId,
         canalDoLead,
+        perdidoEm,
+        negocio.responsavel,
+        negocio.valorEstimado,
+        produtosJson,
+        negocio.linkExterno,
       ],
     );
     if (labelEtapa) await espelharEtapa(pool, clientId, funnelId, labelEtapa);

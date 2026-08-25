@@ -41,6 +41,30 @@ export type NegocioAgendor = {
   organizacaoId: string | null;
   descricao: string | null;
   criadoEm: string | null;
+  /** Responsável pela venda (`owner.name`) — 100% preenchido nas contas medidas. */
+  responsavel: string | null;
+  responsavelId: string | null;
+  /**
+   * Valor ESTIMADO do negócio, venha ele ganho, perdido ou aberto.
+   *
+   * ⚠️ NÃO é faturamento e nunca pode virar `valor_rs`. O sistema inteiro
+   * assume "tem valor = vendeu" (`crm/summary` classifica `valor > 0` como
+   * fechado), e foi gravar valor de negócio ABERTO que inflou a dashboard da
+   * Incorpast em 2026-08-21. Existe para o painel "quem vendeu mais", que
+   * precisa somar perdidos e novos — coluna própria, longe da receita.
+   */
+  valorEstimado: number | null;
+  produtos: ProdutoAgendor[];
+  /** Link do negócio no Agendor (`_webUrl`). */
+  linkExterno: string | null;
+};
+
+/** Item vendido no negócio — a base do painel de categorias mais vendidas. */
+export type ProdutoAgendor = {
+  nome: string | null;
+  categoria: string | null;
+  quantidade: number | null;
+  valorTotal: number | null;
 };
 
 export type PessoaAgendor = {
@@ -125,7 +149,39 @@ export function normalizarNegocio(d: Obj): NegocioAgendor | null {
     organizacaoId: str(obj(d.organization)?.id),
     descricao: str(d.description),
     criadoEm: str(d.createdAt),
+    responsavel: str(obj(d.owner)?.name),
+    responsavelId: str(obj(d.owner)?.id),
+    valorEstimado: num(d.value),
+    produtos: normalizarProdutos(d.products_entities ?? d.products),
+    linkExterno: str(d._webUrl),
   };
+}
+
+/**
+ * Produtos do negócio.
+ *
+ * ⚠️ Lê `products_entities` (que traz quantidade/valor) e cai em `products`
+ * (só o catálogo) — o webhook manda um, a API manda os dois. Item sem
+ * categoria entra como null e a tela agrupa em "Sem categoria": inventar um
+ * rótulo aqui esconderia lacuna de cadastro do cliente.
+ */
+export function normalizarProdutos(v: unknown): ProdutoAgendor[] {
+  if (!Array.isArray(v)) return [];
+  const out: ProdutoAgendor[] = [];
+  for (const item of v.slice(0, 60)) {
+    const p = obj(item);
+    if (!p) continue;
+    const nome = str(p.name);
+    const categoria = str(p.category) ?? str(obj(p.category)?.name);
+    if (!nome && !categoria) continue;
+    out.push({
+      nome,
+      categoria,
+      quantidade: num(p.quantity),
+      valorTotal: num(p.totalValue),
+    });
+  }
+  return out;
 }
 
 /**
