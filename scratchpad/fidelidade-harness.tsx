@@ -105,6 +105,19 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   }
   if (url.includes('/fidelidade')) {
     const body = init?.body ? JSON.parse(String(init.body)) : null;
+    // Criação de campanha de lista: a rota real devolve { campanha } com id.
+    if (body && body.fonte === 'lista' && !body.id) {
+      chamadas.push({ url: `PATCH ${url}`, body });
+      const nova = {
+        id: 'camp-nova', fonte: 'lista', modelo: null, listaId: body.listaId,
+        nome: body.nome, params: {}, mensagens: [], cupom: null, imagemUrl: null,
+        diasSemana: body.diasSemana, hora: body.hora, tetoPublico: null,
+        ativa: false, salva: true, ultimaExecucao: null,
+      };
+      (RESPOSTA.campanhas as unknown[]).push(nova);
+      await new Promise(r => setTimeout(r, 60));
+      return new Response(JSON.stringify({ campanha: nova }), { headers: { 'Content-Type': 'application/json' } });
+    }
     chamadas.push({ url: `${init?.method ?? 'GET'} ${url}`, body });
     await new Promise(r => setTimeout(r, 80));
     const corpo = DESATIVADA ? { ativo: false, conectado: false } : RESPOSTA;

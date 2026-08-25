@@ -85,13 +85,23 @@ const COR_MODELO: Record<ModeloId, string> = {
   reconquistado: '#22c55e',
 };
 
+/**
+ * Leva a tela até a campanha recém-criada. Sem isso ela aparece abaixo dos
+ * cinco segmentos, fora do campo de visão de quem acabou de clicar.
+ */
+function focarCampanha(chave: string) {
+  requestAnimationFrame(() => {
+    document.getElementById(`campanha-${chave}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  });
+}
+
 /** Chave estável de rascunho: modelo para segmento, id para lista. */
 function chaveCampanha(c: Campanha): string {
   return c.fonte === 'segmento' ? (c.modelo ?? 'sem-modelo') : (c.id ?? 'nova');
 }
 
-function Card({ children, className }: { children: React.ReactNode; className?: string }) {
-  return <div className={cn('rounded-[var(--radius)] border border-border bg-card p-4', className)}>{children}</div>;
+function Card({ children, className, id }: { children: React.ReactNode; className?: string; id?: string }) {
+  return <div id={id} className={cn('rounded-[var(--radius)] border border-border bg-card p-4', className)}>{children}</div>;
 }
 
 function Rotulo({ children }: { children: React.ReactNode }) {
@@ -193,6 +203,50 @@ export function ClientFidelidadeTab({ clientId }: { clientId: string }) {
       setSalvando(null);
     }
   }, [clientId, carregar]);
+
+  /**
+   * "Criar campanha" na lista.
+   *
+   * ⚠️ Antes isto só disparava o PATCH e fechava tudo: a campanha nascia
+   * FECHADA e no fim da página, depois dos 5 segmentos — de onde o gestor
+   * está olhando, "não acontecia nada". E clicar de novo criava uma segunda.
+   * Agora reaproveita a que já existe, abre e rola até ela.
+   */
+  const criarCampanhaDaLista = useCallback(async (lista: Lista) => {
+    const existente = Object.values(rascunhos)
+      .find(c => c.fonte === 'lista' && c.listaId === lista.id);
+    if (existente?.id) {
+      setAberto(existente.id);
+      setResultado(`A lista "${lista.nome}" já tem uma campanha — abri ela para você.`);
+      focarCampanha(existente.id);
+      return;
+    }
+
+    setSalvando('lista');
+    setErro(null);
+    setResultado(null);
+    try {
+      const r = await fetch(`/api/clients/${clientId}/fidelidade`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fonte: 'lista', listaId: lista.id, nome: `Oferta — ${lista.nome}`,
+          mensagens: [], diasSemana: [1, 2, 3, 4, 5, 6], hora: '18:00', ativa: false,
+        }),
+      });
+      const d = await r.json().catch(() => ({})) as { error?: string; campanha?: Campanha };
+      if (!r.ok || !d.campanha?.id) {
+        setErro(d.error ?? 'Não foi possível criar a campanha.');
+        return;
+      }
+      await carregar();
+      setAberto(d.campanha.id);
+      setResultado(`Campanha criada para a lista "${lista.nome}". Ela está logo abaixo, já aberta.`);
+      focarCampanha(d.campanha.id);
+    } finally {
+      setSalvando(null);
+    }
+  }, [clientId, carregar, rascunhos]);
 
   const capacidade = useMemo(
     () => (travasDraft ? capacidadeDaJanela(travasDraft) : 0),
@@ -387,13 +441,7 @@ export function ClientFidelidadeTab({ clientId }: { clientId: string }) {
         salvando={salvando}
         onSalvar={(lista) => patch({ lista }, 'lista')}
         onExcluir={(id) => patch({ excluirLista: id }, 'lista')}
-        onNovaCampanha={async (lista) => {
-          const ok = await patch({
-            fonte: 'lista', listaId: lista.id, nome: `Oferta — ${lista.nome}`,
-            mensagens: [], diasSemana: [2], hora: '18:00', ativa: false,
-          }, 'lista');
-          if (ok) setAberto(null);
-        }}
+        onNovaCampanha={(lista) => void criarCampanhaDaLista(lista)}
       />
 
       {/* Segmentos (só com delivery conectado) */}
@@ -617,7 +665,7 @@ function CampanhaCard({
   const dias = travas ? diasParaVarrer(pessoas, travas) : 0;
 
   return (
-    <Card className="p-0">
+    <Card className="p-0" id={`campanha-${campanha.id ?? campanha.modelo ?? ''}`}>
       <button onClick={onToggle} className="flex w-full items-start gap-3 p-4 text-left">
         <span className="mt-1 h-8 w-1 shrink-0 rounded-full" style={{ background: cor }} />
         <div className="min-w-0 flex-1">
