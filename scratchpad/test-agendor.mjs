@@ -1,7 +1,7 @@
 // Testes da normalização Agendor.
 // Recompilar antes (ver cabeçalho de test-origem.mjs) — teste roda no build compilado.
 import assert from 'node:assert';
-import { statusDoNegocio, normalizarNegocio, normalizarPessoa, extrairEventoAgendor }
+import { statusDoNegocio, normalizarNegocio, normalizarPessoa, extrairEventoAgendor, canalDoNegocio }
   from './build/agendor.mjs';
 let n = 0; const eq = (a,b,m) => { assert.deepStrictEqual(a,b,m); n++; }; const ok = (c,m) => { assert.ok(c,m); n++; };
 
@@ -167,3 +167,30 @@ console.log(`✓ ${n} asserts (com tolerância a 429)`);
   assert.equal(org.nome, 'NORPAVE');
 }
 console.log('✓ +6 asserts (organização como fonte de origem)');
+
+// ---- origem resolvida viaja DENTRO do negócio (caso Londrigifts, agosto/2026)
+//
+// O filtro buscava a organização, via "Google" e deixava o negócio passar — e a
+// gravação, que só olhava `pessoa?.origemLead` (null em B2B), escrevia
+// 'agendor'. 12 vendas de R$ 30.142,50 viraram "canal não informado" sendo que
+// as 12 eram Google. A régua do canal agora é:
+//   pessoa.origemLead → negocio.origemResolvida → 'agendor'
+{
+  const canal = canalDoNegocio;
+
+  // B2B: sem pessoa, mas o filtro resolveu a origem na ficha da empresa.
+  eq(canal(null, { origemResolvida: 'Google' }), 'Google',
+    'origem da EMPRESA vira o canal quando não há pessoa');
+  // Pessoa com origem vence (é mais específica que a da empresa).
+  eq(canal({ origemLead: 'Instagram' }, { origemResolvida: 'Google' }), 'Instagram',
+    'origem da PESSOA vence a da empresa');
+  // Nenhuma das duas: marca da fonte, como antes.
+  eq(canal(null, {}), 'agendor', 'sem origem nenhuma continua marcando a fonte');
+  eq(canal({ origemLead: '  ' }, {}), 'agendor', 'origem em branco não vira canal');
+  eq(canal(null, { origemResolvida: '  ' }), 'agendor', 'resolvida em branco idem');
+  // ⚠️ O campo é opcional: negócio normalizado sem passar pelo filtro não quebra.
+  const cru = normalizarNegocio({ id: 7, title: 'x', dealStatus: { name: 'Ganho' } });
+  eq(cru.origemResolvida, undefined, 'normalizarNegocio não inventa origem resolvida');
+  eq(canal(null, cru), 'agendor', 'e o canal cai no padrão');
+}
+console.log(`✓ ${n} asserts (com a origem resolvida)`);

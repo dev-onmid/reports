@@ -57,6 +57,20 @@ export type NegocioAgendor = {
   produtos: ProdutoAgendor[];
   /** Link do negócio no Agendor (`_webUrl`). */
   linkExterno: string | null;
+  /**
+   * Origem descoberta pelo FILTRO de importação (`conferirFiltros`), quando o
+   * negócio não tem pessoa e ela veio da ficha da ORGANIZAÇÃO.
+   *
+   * ⚠️ Existe porque a descoberta estava sendo jogada fora. O filtro buscava a
+   * organização, via "Google", deixava o negócio passar — e a gravação, que só
+   * olhava `pessoa?.origemLead` (null em B2B), escrevia `canal = 'agendor'`.
+   * Resultado medido na Londrigifts, agosto/2026: 12 vendas de R$ 30.142,50
+   * aparecendo como "canal não informado" quando as 12 eram Google.
+   *
+   * Viaja DENTRO do negócio de propósito: os dois chamadores já repassam o
+   * negócio devolvido pelo filtro, então nenhum deles precisa mudar.
+   */
+  origemResolvida?: string | null;
 };
 
 /** Item vendido no negócio — a base do painel de categorias mais vendidas. */
@@ -182,6 +196,26 @@ export function normalizarProdutos(v: unknown): ProdutoAgendor[] {
     });
   }
   return out;
+}
+
+/**
+ * Canal do lead: o que TROUXE o cliente, não a porta por onde o dado entrou.
+ *
+ * Ordem: origem da PESSOA → origem resolvida na ficha da EMPRESA → marca da
+ * fonte ('agendor').
+ *
+ * ⚠️ O degrau do meio existe por um bug real (Londrigifts, agosto/2026): o
+ * filtro de importação buscava a organização, via "Google" e deixava o negócio
+ * passar — mas a gravação só olhava a pessoa, que em B2B é null, e escrevia
+ * 'agendor'. 12 vendas de R$ 30.142,50 apareceram como "canal não informado"
+ * sendo que as 12 eram Google, e o gestor sabia que não podia ser: só Google,
+ * Instagram e Email MKT passam no filtro dele.
+ */
+export function canalDoNegocio(
+  pessoa: { origemLead?: string | null } | null,
+  negocio: { origemResolvida?: string | null },
+): string {
+  return pessoa?.origemLead?.trim() || negocio.origemResolvida?.trim() || 'agendor';
 }
 
 /**

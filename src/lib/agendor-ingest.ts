@@ -19,7 +19,7 @@
 import type { Pool } from 'pg';
 import type { FiltrosImportacao, NegocioAgendor, PessoaAgendor } from '@/lib/agendor';
 import { resolverLeadExistente, vincularAoLeadDeOrigem } from '@/lib/lead-identity';
-import { normalizarNegocio, normalizarPessoa, parseFiltro, passaFiltros } from '@/lib/agendor';
+import { canalDoNegocio, normalizarNegocio, normalizarPessoa, parseFiltro, passaFiltros } from '@/lib/agendor';
 import { agendorFetch, AGENDOR_API, type ConexaoAgendor, registrarLogAgendor } from '@/lib/agendor-server';
 import { sinaisDoStatus } from '@/lib/importacao-origem';
 import { classificarEtapa, normalizarEtiqueta } from '@/lib/funil-etapas';
@@ -214,6 +214,8 @@ export async function conferirFiltros(
       p = p
         ? { ...p, origemLead: ficha.origemLead, origemLeadId: ficha.origemLeadId }
         : { ...ficha, telefone: null, telefoneBruto: null };
+      // Leva a origem DENTRO do negócio: é o que o `canal` vai gravar.
+      n = { ...n, origemResolvida: ficha.origemLead };
       origemDesconhecida = false;
     } else if (cat.completo && (n.pessoa.id || n.organizacaoId)) {
       // catálogo íntegro e a ficha não tem origem → é ausência de verdade,
@@ -234,6 +236,7 @@ export async function conferirFiltros(
       p = p
         ? { ...p, origemLead: org.origemLead, origemLeadId: org.origemLeadId }
         : { ...org, telefone: null, telefoneBruto: null };
+      n = { ...n, origemResolvida: org.origemLead };
     } else if (org === null) {
       origemDesconhecida = true; // fetch falhou (429?) — desconhecido passa
     }
@@ -317,7 +320,10 @@ export async function ingerirNegocioAgendor(
   // gráfico de Faturamento por Canal mostrar 84% "sem canal registrado" mesmo
   // com o Agendor tendo a origem preenchida (o canal ficava só num texto na
   // observação). Sem origem, 'agendor' continua como marca da fonte.
-  const canalDoLead = pessoa?.origemLead?.trim() || 'agendor';
+  // ⚠️ `origemResolvida` é o que o FILTRO já descobriu na ficha da empresa. Sem
+  // ele, negócio B2B entrava como 'agendor' mesmo tendo passado por ser Google
+  // — o filtro sabia, a gravação não (Londrigifts, agosto/2026).
+  const canalDoLead = canalDoNegocio(pessoa, negocio);
 
   await pool.query('BEGIN');
   try {
