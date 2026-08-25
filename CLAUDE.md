@@ -26,6 +26,21 @@ Pedido do Matheus: dashboard própria para restaurante/delivery e, depois, um **
   - ⚠️ Ocultar um elemento deixa o BURACO no lugar (a compactação do RGL é vertical, não horizontal). É reposicionar na mão — comportamento do grid, não bug.
 - **⚠️ DEPLOY**: `main` **não** era "no ar". O `build-image.yml` só gerava artefato; publicar era manual (scp + `deploy-recv.sh`). Isso fez uma remoção de tela parecer não feita **duas vezes**. Agora o workflow publica por SSH e faz smoke test externo — segredos `VPS_HOST`/`VPS_USER`/`VPS_SSH_KEY`, e o passo é pulado se não existirem.
 
+## Dashboard — "Performance comercial" reconstruída fiel ao mockup (2026-08-25)
+
+Pedido do Matheus com print de referência e a instrução explícita de reproduzir o layout, sem releitura. Os dois painéis JÁ existiam (`9d59659`) — o que mudou foi a apresentação; a rota, as réguas de data e o cálculo continuam os mesmos.
+
+- **⚠️ Colisão de sessão**: comecei implementando do zero e sobrescrevi `/api/crm/desempenho`, que já existia. Restaurei do git e adaptei o componente existente. **Antes de criar rota/componente, conferir se o histórico já traz a feature** — o `git log` do início da conversa listava `9d59659` e eu não olhei.
+- **Layout**: seção `PERFORMANCE COMERCIAL` + selo `CRM`, dois cards de altura igual (`items-stretch` + `mt-auto` no rodapé). Esquerda: ranking com medalha (ouro/prata/bronze; do 4º em diante círculo neutro), avatar de iniciais, nome à esquerda e faturamento à direita, barra de 3px e selos ganhos/perdidos/novos. Direita: donut + legenda com ponto, barra e percentual.
+- **⚠️ Tabela virou ranking**: a versão anterior era `<table>` com 4 colunas de valor. O problema não era estética — as três colunas somavam moedas diferentes lado a lado.
+- **⚠️ Perdidos e novos aparecem em QUANTIDADE, não em valor.** Ganho é faturamento gravado (`valor_rs`); perdido e novo são estimativa digitada no CRM (`valor_negocio`). Mostrar os três como dinheiro fazia R$ 1,02 mi de "perdidos" da Bruna parecer receita.
+- **⚠️ `negocios` ≠ `itens`**: a rota contava LINHA de produto e o rótulo dizia "Por itens". Um negócio de 500 canetas é 1 linha e 500 itens. Acrescentado `itens` (`SUM(quantidade)`) — aditivo, `negocios` preservado —, senão o miolo "itens vendidos" seria falso.
+- **⚠️ "Ver todas as categorias" expande a LISTA, não o donut.** A paleta tem 5 tons; desenhar 12 fatias obrigaria a repetir cor e duas categorias com o mesmo verde tornam o gráfico ilegível. O donut fica sempre em top 5 + "Outras", que leva o RESTO exato para fechar com o total do miolo.
+- **`0 perdidos` fica neutro**, como na referência — zero não é alerta.
+- Paleta reaproveitada dos degraus do funil (`#6cff2f, #0ea5e9, #7b2cff, #f97316, #ec4899`), que já é a sequência do mockup; "Outras" em cinza, sem consumir tom.
+- ✅ Verificado: tsc + `next build` + eslint limpos; harness no browser com **números REAIS de produção** (Londrigifts: Bruna R$ 115.131,22/66/37/114 · Jessica R$ 77.675,65/49/44/116 · Junio R$ 13.004,00/4/0/5 · Andréa R$ 7.918,14/8/14/22 — batem exatamente com o print), toggle Por itens ↔ Por valor reordenando (Kits de Churrasco lidera em valor e nem aparece no top por itens), expandir sem repetir cor, estados carregando e vazio.
+- ⚠️ **Mobile NÃO verificado no browser**: o pane reportou viewport 980 em todas as tentativas de redimensionar. O empilhamento é correto por construção (`sm:grid-cols` na legenda, `lg:grid-cols-2` na seção, `truncate`/`min-w-0` em todo texto) e não há overflow a 980 — mas ninguém olhou a 375px.
+
 ## Funil — a lista de leads ganhou canal, etapa, filtro e detalhe do lead (2026-08-23)
 
 Pedido do Matheus sobre o modal que abre ao clicar num degrau: mostrar o canal ao lado do nome, clicar no nome abrir "o modal igual é no CRM, que mostra todas as infos", e ter um filtro.

@@ -6942,25 +6942,22 @@ export default function GeneralDashboard() {
                 uma seção vazia num cliente que não usa CRM com vendedores. */}
             {(desempenhoLoading || vendedores.length > 0 || categorias.length > 0) && (
               <PremiumPanel className="p-4">
-                <div className="grid gap-6 lg:grid-cols-2">
-                  <div className="min-w-0">
-                    <div className="mb-3 flex items-center gap-2 text-xs font-black uppercase tracking-[0.07em] text-[#dce4e8]">
-                      Quem vendeu mais
-                      <span
-                        className="rounded bg-white/[0.08] px-1.5 py-0.5 text-[9px] font-black text-[#9aa4aa]"
-                        title="Ganhos pela data do ganho · perdidos pela data da perda · novos pela data de criação"
-                      >
-                        CRM
-                      </span>
-                    </div>
-                    <VendedoresCard linhas={vendedores} loading={desempenhoLoading} />
-                  </div>
-                  <div className="min-w-0">
-                    <div className="mb-3 text-xs font-black uppercase tracking-[0.07em] text-[#dce4e8]">
-                      Categorias mais vendidas
-                    </div>
-                    <CategoriasCard linhas={categorias} loading={desempenhoLoading} />
-                  </div>
+                <div className="mb-4 flex items-center gap-2">
+                  <h3 className="text-sm font-bold uppercase tracking-[0.07em] text-[#F1F4F5]">
+                    Performance comercial
+                  </h3>
+                  <span
+                    className="rounded-[4px] bg-[#172027] px-1.5 py-0.5 text-[10px] font-semibold text-[#87929B]"
+                    title="Ganhos pela data do ganho · perdidos pela data da perda · novos pela data de criação"
+                  >
+                    CRM
+                  </span>
+                </div>
+                {/* Os dois cards têm chrome próprio (título + controle) e
+                    `items-stretch` garante a mesma altura visual. */}
+                <div className="grid items-stretch gap-4 lg:grid-cols-2">
+                  <VendedoresCard linhas={vendedores} loading={desempenhoLoading} />
+                  <CategoriasCard linhas={categorias} loading={desempenhoLoading} />
                 </div>
               </PremiumPanel>
             )}

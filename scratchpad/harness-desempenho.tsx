@@ -8,26 +8,26 @@ import { VendedoresCard, CategoriasCard, type LinhaVendedor, type LinhaCategoria
   from '@/components/dashboard/desempenho-comercial';
 
 const VENDEDORES: LinhaVendedor[] = [
-  { responsavel: 'Bruna Stersa', ganhos: 17, ganhos_valor: 54090.05, perdidos: 4, perdidos_valor: 36958, novos: 106, novos_valor: 52263.95 },
-  { responsavel: 'Jessica', ganhos: 32, ganhos_valor: 50506.20, perdidos: 3, perdidos_valor: 0, novos: 181, novos_valor: 80002.10 },
-  { responsavel: 'Rodolfo Pacheco', ganhos: 8, ganhos_valor: 21453, perdidos: 0, perdidos_valor: 0, novos: 10, novos_valor: 31568 },
-  { responsavel: 'Andréa Mendes', ganhos: 4, ganhos_valor: 19362.50, perdidos: 6, perdidos_valor: 63471.20, novos: 8, novos_valor: 84191.30 },
-  { responsavel: 'Junio', ganhos: 3, ganhos_valor: 1679.70, perdidos: 0, perdidos_valor: 0, novos: 4, novos_valor: 12212.70 },
+  { responsavel: 'Bruna Stersa', ganhos: 66, ganhos_valor: 115131.22, perdidos: 37, perdidos_valor: 1171839.5, novos: 114, novos_valor: 1336592.22 },
+  { responsavel: 'Jessica', ganhos: 49, ganhos_valor: 77675.65, perdidos: 44, perdidos_valor: 22116.5, novos: 116, novos_valor: 163657.25 },
+  { responsavel: 'Junio', ganhos: 4, ganhos_valor: 13004, perdidos: 0, perdidos_valor: 0, novos: 5, novos_valor: 22404 },
+  { responsavel: 'Andréa Mendes', ganhos: 8, ganhos_valor: 7918.14, perdidos: 14, perdidos_valor: 62245.3, novos: 22, novos_valor: 70163.44 },
+  { responsavel: 'Nayara Artur', ganhos: 5, ganhos_valor: 3291, perdidos: 14, perdidos_valor: 178083.8, novos: 19, novos_valor: 181374.8 },
 ];
 
 const CATEGORIAS: LinhaCategoria[] = [
-  { categoria: 'Copos Térmicos', negocios: 12, valor: 18400 },
-  { categoria: 'Canetas de Metal', negocios: 11, valor: 4300 },
-  { categoria: 'Blocos e Cadernetas', negocios: 10, valor: 9100 },
-  { categoria: 'Diversos', negocios: 9, valor: 6200 },
-  { categoria: 'Canecas de Metal', negocios: 5, valor: 7300 },
-  { categoria: 'Mochilas e Bolsas', negocios: 4, valor: 22800 },
-  { categoria: 'Necessaires', negocios: 4, valor: 3100 },
-  { categoria: 'Chaveiros de Metal', negocios: 4, valor: 900 },
-  { categoria: 'Squeezes e Garrafas Térmicas', negocios: 4, valor: 5600 },
-  { categoria: 'Pasta Catálogo', negocios: 3, valor: 2400 },
-  { categoria: 'Agendas', negocios: 2, valor: 1800 },
-  { categoria: 'Sem categoria', negocios: 6, valor: 1200 },
+  { categoria: 'Diversos', negocios: 24, itens: 2787, valor: 21656.46 },
+  { categoria: 'Canetas de Plástico', negocios: 4, itens: 2500, valor: 6495 },
+  { categoria: 'Canetas de Metal', negocios: 17, itens: 2251, valor: 12669 },
+  { categoria: 'Blocos e Cadernetas', negocios: 13, itens: 1560, valor: 15436 },
+  { categoria: 'Chaveiros de Metal', negocios: 7, itens: 1010, valor: 3482.5 },
+  { categoria: 'Canecas de Metal', negocios: 13, itens: 909, valor: 16399.4 },
+  { categoria: 'Copos Térmicos', negocios: 26, itens: 718, valor: 21879.4 },
+  { categoria: 'Mochilas e Bolsas', negocios: 9, itens: 687, valor: 3903.4 },
+  { categoria: 'Squeezes e Garrafas Térmicas', negocios: 8, itens: 520, valor: 6153.9 },
+  { categoria: 'Kits de Churrasco', negocios: 9, itens: 310, valor: 31021.44 },
+  { categoria: 'Necessaires', negocios: 4, itens: 240, valor: 3100 },
+  { categoria: 'Sem categoria', negocios: 6, itens: 180, valor: 1200 },
 ];
 
 function Painel({ rotulo, vend, cat, loading }: {
@@ -36,20 +36,13 @@ function Painel({ rotulo, vend, cat, loading }: {
   return (
     <section className="mb-6 rounded-[14px] border border-white/[0.08] bg-[#0d1519]/92 p-4">
       <p className="mb-3 text-[10px] font-black uppercase tracking-widest text-[#6cff2f]">{rotulo}</p>
-      <div className="grid gap-6 lg:grid-cols-2">
-        <div className="min-w-0">
-          <div className="mb-3 flex items-center gap-2 text-xs font-black uppercase tracking-[0.07em] text-[#dce4e8]">
-            Quem vendeu mais
-            <span className="rounded bg-white/[0.08] px-1.5 py-0.5 text-[9px] font-black text-[#9aa4aa]">CRM</span>
-          </div>
-          <VendedoresCard linhas={vend} loading={loading} />
-        </div>
-        <div className="min-w-0">
-          <div className="mb-3 text-xs font-black uppercase tracking-[0.07em] text-[#dce4e8]">
-            Categorias mais vendidas
-          </div>
-          <CategoriasCard linhas={cat} loading={loading} />
-        </div>
+      <div className="mb-4 flex items-center gap-2">
+        <h3 className="text-sm font-bold uppercase tracking-[0.07em] text-[#F1F4F5]">Performance comercial</h3>
+        <span className="rounded-[4px] bg-[#172027] px-1.5 py-0.5 text-[10px] font-semibold text-[#87929B]">CRM</span>
+      </div>
+      <div className="grid items-stretch gap-4 lg:grid-cols-2">
+        <VendedoresCard linhas={vend} loading={loading} />
+        <CategoriasCard linhas={cat} loading={loading} />
       </div>
     </section>
   );

@@ -31,7 +31,7 @@ type LinhaVendedor = {
   novos: number; novos_valor: number;
 };
 
-type LinhaCategoria = { categoria: string; negocios: number; valor: number };
+type LinhaCategoria = { categoria: string; negocios: number; itens: number; valor: number };
 
 export async function GET(req: NextRequest) {
   const sp = req.nextUrl.searchParams;
@@ -73,6 +73,10 @@ export async function GET(req: NextRequest) {
     const { rows: categorias } = await pool.query<LinhaCategoria>(
       `SELECT COALESCE(NULLIF(p->>'categoria', ''), 'Sem categoria') AS categoria,
               COUNT(*)::int AS negocios,
+              -- negocios conta LINHA de produto; itens soma a quantidade. Sao
+              -- coisas diferentes (um negocio de 500 canetas e 1 linha e 500
+              -- itens) e o painel diz "itens vendidos", entao precisa da soma.
+              COALESCE(SUM(COALESCE((p->>'quantidade')::numeric, 0)), 0)::float AS itens,
               COALESCE(SUM(COALESCE((p->>'valorTotal')::numeric, 0)), 0)::float AS valor
          FROM public.crm_leads l
         CROSS JOIN LATERAL jsonb_array_elements(l.produtos) AS p
@@ -80,8 +84,8 @@ export async function GET(req: NextRequest) {
           AND l.produtos IS NOT NULL
           AND l.fechado_em BETWEEN $2::date AND $3::date
         GROUP BY 1
-        ORDER BY negocios DESC, valor DESC
-        LIMIT 30`,
+        ORDER BY itens DESC, valor DESC
+        LIMIT 60`,
       [clientIds, from, to],
     ).catch(() => ({ rows: [] as LinhaCategoria[] }));
 
