@@ -75,6 +75,13 @@ export function VendedoresCard({ linhas, loading }: { linhas: LinhaVendedor[]; l
           ))}
         </tbody>
       </table>
+      {/* ⚠️ Sem esta linha, o valor de PERDIDOS e NOVOS é lido como dinheiro
+          real. É a estimativa que o vendedor digitou no CRM — na Londrigifts
+          isso dá R$ 1,02 mi em perdidos de um vendedor só. Ganhos, esses sim,
+          são o faturamento gravado. */}
+      <p className="mt-2 px-2 text-[10px] leading-snug text-[#9aa4aa]">
+        Ganhos = faturamento registrado · Perdidos e novos = valor estimado no CRM
+      </p>
     </div>
   );
 }

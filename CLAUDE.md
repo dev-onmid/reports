@@ -245,6 +245,19 @@ Pedidos do Matheus: (1) o que é feito na conta do cliente (Meta/Google) — ant
 - **⚠️⚠️ RÉGUA PROTEGIDA**: o overview EXCLUI `origem='resumo'` da "última ação" — resumo é observação, não otimização; sem isso toda conta ficaria eternamente "em dia" e o alerta de atraso morreria. Registro novo automático no Histórico = decidir se conta na régua.
 - ✅ Validado em produção (dry): 18/08 → 6 clientes com ação real compilada ("Status da campanha ×4 — Leticia Ribeiro", orçamentos, programação de conjunto com nomes de campanha). ⚠️ Não verificado no browser: a seção nova da aba do cliente (só build); caminho Google ainda sem evento capturado em produção (mesmo código do log ao vivo). 1º registro real: amanhã 08h40.
 
+## Dashboard — quem vendeu mais e categorias mais vendidas (2026-08-24)
+
+Pedido do Matheus com dois prints do Agendor: trazer para a dashboard o painel de vendedores (usuários × ganhos/perdidos/novos) e o de categorias de produto.
+
+- **A API já trazia tudo e o sistema descartava** (medido em 40 negócios reais): `owner` (responsável) **40/40**, `author` 40/40, `_webUrl` 40/40, `ranking` 40/40, `products_entities` 19/40 com **nome, categoria, quantidade e valorTotal**. `description` e `lossReason` vinham vazios nessa conta.
+- **Colunas novas**: `responsavel`, `valor_negocio`, `produtos JSONB`, `link_externo`, `perdido_em` (+ índice `crm_leads_responsavel_idx`).
+- **⚠️ `valor_negocio` é coluna PRÓPRIA, longe de `valor_rs`.** O sistema inteiro assume "tem valor = vendeu" (`crm/summary` classifica `valor > 0` como fechado), e foi gravar valor de negócio ABERTO que inflou a dashboard da Incorpast em 21/08. O painel precisa somar perdidos e novos, então a estimativa mora em outro lugar e **nunca vira receita**.
+- **⚠️ TRÊS réguas de data na mesma rota** (`/api/crm/desempenho`), de propósito: ganho por `fechado_em` (igual ao card de Faturamento), perdido por `perdido_em`, novo por `lead_date/data`. Régua única faria "novos" contar quem foi ganho no período mas criado antes. **Ganhos somam `valor_rs` (real); perdidos e novos somam a estimativa** — e a tela DIZ isso num rodapé, senão R$ 1,02 mi de perdidos da Londrigifts seria lido como dinheiro.
+- **Categorias contam só negócio GANHO** ("mais vendidas" é sobre o que foi vendido, não sobre o funil), com toggle **Por itens / Por valor** — as duas leituras discordam com frequência (medido: Mochilas e Bolsas sai de 5,4% por item para 27,4% por valor). Cauda vira "Outros (N)"; item sem categoria vira "Sem categoria" em vez de ganhar rótulo inventado.
+- ✅ **Backfill de 1.353 negócios** (Cinfel 27, Incorpast 134, Londrigifts 1.194) paginando `/deals` — 2 tokens, ~110 requisições. **13 vendedores** e produtos em 352 negócios. Rota validada ao vivo: Londrigifts 90d → Jessica 38 ganhos/R$ 59.573,15, Bruna 26/R$ 53.720,80; categorias Copos Térmicos 20 itens, Kits de Churrasco R$ 30.593,24.
+- ✅ Verificado: tsc + `next build` limpos (rota registrada); browser com os 3 estados (dados, carregando, vazio explicado), toggle reordenando, zero erro de console.
+- ⚠️ **Só o Agendor alimenta esses painéis hoje.** Planilha, WhatsApp e Datalytics não trazem responsável nem produto — cliente sem Agendor não vê a seção (ela some em vez de mostrar caixa vazia).
+
 ## Agendor B2B — o contato SEMPRE existiu na API; o sistema descartava (2026-08-24)
 
 Pergunta do Matheus: o cruzamento está funcionando na Incorpast (lead pelo WhatsApp, atendimento pelo Agendor)? **Não estava — e a informação de contato existia.**
