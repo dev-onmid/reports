@@ -96,6 +96,13 @@ const chamadas: { url: string; body: unknown }[] = [];
 const original = window.fetch.bind(window);
 window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+  if (url.includes('/fidelidade/disparar')) {
+    chamadas.push({ url: `POST ${url}`, body: init?.body ? JSON.parse(String(init.body)) : null });
+    await new Promise(r => setTimeout(r, 80));
+    // Resposta real do motor quando manda: { enviada:true, telefone }.
+    return new Response(JSON.stringify({ ok: true, resultado: { enviada: true, telefone: '5543999990000', variacao: 0 } }),
+      { headers: { 'Content-Type': 'application/json' } });
+  }
   if (url.includes('/fidelidade')) {
     const body = init?.body ? JSON.parse(String(init.body)) : null;
     chamadas.push({ url: `${init?.method ?? 'GET'} ${url}`, body });

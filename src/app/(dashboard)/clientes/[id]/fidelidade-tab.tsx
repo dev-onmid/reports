@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle, ChevronDown, Clock, Info, ListPlus, Loader2, PowerOff, Save, ShieldCheck,
-  Ticket, Trash2, Users, Zap,
+  Send, Ticket, Trash2, Users, Zap,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
@@ -120,6 +120,7 @@ export function ClientFidelidadeTab({ clientId }: { clientId: string }) {
   const [travasDraft, setTravasDraft] = useState<Travas | null>(null);
   const [salvando, setSalvando] = useState<string | null>(null);
   const [erro, setErro] = useState<string | null>(null);
+  const [resultado, setResultado] = useState<string | null>(null);
 
   const carregar = useCallback(async () => {
     setCarregando(true);
@@ -156,6 +157,38 @@ export function ClientFidelidadeTab({ clientId }: { clientId: string }) {
       }
       await carregar();
       return true;
+    } finally {
+      setSalvando(null);
+    }
+  }, [clientId, carregar]);
+
+  /**
+   * Traduz o relatório do motor para uma frase. O gestor não tem por que ler
+   * `{"pulou":"teto_diario"}` — e é justamente quando NADA acontece que ele
+   * precisa entender o porquê.
+   */
+  const disparar = useCallback(async (campanhaId: string, tag: string) => {
+    setSalvando(tag);
+    setErro(null);
+    setResultado(null);
+    try {
+      const r = await fetch(`/api/clients/${clientId}/fidelidade/disparar`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ campanhaId }),
+      });
+      const d = await r.json().catch(() => ({})) as { error?: string; resultado?: Record<string, unknown> };
+      if (!r.ok) { setErro(d.error ?? 'Não foi possível disparar.'); return; }
+
+      const res = d.resultado ?? {};
+      if (res.enviada === true) setResultado(`Mensagem enviada para ${res.telefone}.`);
+      else if (res.enviada === false) setResultado(`O envio para ${res.telefone} falhou — veja "Últimos disparos".`);
+      else if (res.pulou === 'teto_diario') setResultado(`Teto diário já atingido (${res.enviadas_hoje} hoje). Nada foi enviado.`);
+      else if (res.pulou === 'instancia') setResultado('O WhatsApp deste cliente não está conectado agora. Nada foi enviado.');
+      else if (res.concluida) setResultado('A fila desta campanha acabou — todo mundo já recebeu nesta rodada.');
+      else if (res.publico === 0) setResultado('Ninguém entrou na fila: público vazio, ou todos em cooldown/opt-out.');
+      else setResultado('Nada foi enviado nesta chamada.');
+      await carregar();
     } finally {
       setSalvando(null);
     }
@@ -213,6 +246,13 @@ export function ClientFidelidadeTab({ clientId }: { clientId: string }) {
         <div className="flex items-start gap-2 rounded-[var(--radius)] border border-destructive/40 bg-destructive/[0.08] p-3">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
           <p className="text-xs text-destructive">{erro}</p>
+        </div>
+      )}
+
+      {resultado && (
+        <div className="flex items-start gap-2 rounded-[var(--radius)] border border-primary/40 bg-primary/[0.06] p-3">
+          <Zap className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+          <p className="text-xs text-foreground">{resultado}</p>
         </div>
       )}
 
@@ -395,6 +435,7 @@ export function ClientFidelidadeTab({ clientId }: { clientId: string }) {
                 salvando={salvando === modelo}
                 onChange={(c) => setRascunhos(r => ({ ...r, [modelo]: c }))}
                 onSalvar={(c) => patch(c, modelo)}
+                onDisparar={camp.id ? () => disparar(camp.id!, modelo) : undefined}
               />
             );
           })}
@@ -437,6 +478,7 @@ export function ClientFidelidadeTab({ clientId }: { clientId: string }) {
                 onChange={(c) => setRascunhos(r => ({ ...r, [chave]: c }))}
                 onSalvar={(c) => patch(c, chave)}
                 onExcluir={camp.id ? () => patch({ excluirCampanha: camp.id }, chave) : undefined}
+                onDisparar={camp.id ? () => disparar(camp.id!, chave) : undefined}
               />
             );
           })}
@@ -564,12 +606,13 @@ function ListasCard({
 
 function CampanhaCard({
   campanha, titulo, subtitulo, cor, pessoas, extras, travas, aberto, onToggle,
-  amostra, loja, ticketMedioLoja, salvando, onChange, onSalvar, onExcluir,
+  amostra, loja, ticketMedioLoja, salvando, onChange, onSalvar, onExcluir, onDisparar,
 }: {
   campanha: Campanha; titulo: string; subtitulo: string; cor: string; pessoas: number;
   extras?: React.ReactNode; travas: Travas | null; aberto: boolean; onToggle: () => void;
   amostra: PessoaAmostra[]; loja: string; ticketMedioLoja: number; salvando: boolean;
   onChange: (c: Campanha) => void; onSalvar: (c: Campanha) => void; onExcluir?: () => void;
+  onDisparar?: () => void;
 }) {
   const dias = travas ? diasParaVarrer(pessoas, travas) : 0;
 
@@ -617,6 +660,7 @@ function CampanhaCard({
         <EditorCampanha
           campanha={campanha} amostra={amostra} loja={loja} ticketMedioLoja={ticketMedioLoja}
           salvando={salvando} onChange={onChange} onSalvar={onSalvar} onExcluir={onExcluir}
+          onDisparar={onDisparar}
         />
       )}
     </Card>
@@ -624,11 +668,11 @@ function CampanhaCard({
 }
 
 function EditorCampanha({
-  campanha, amostra, loja, ticketMedioLoja, salvando, onChange, onSalvar, onExcluir,
+  campanha, amostra, loja, ticketMedioLoja, salvando, onChange, onSalvar, onExcluir, onDisparar,
 }: {
   campanha: Campanha; amostra: PessoaAmostra[]; loja: string; ticketMedioLoja: number;
   salvando: boolean; onChange: (c: Campanha) => void; onSalvar: (c: Campanha) => void;
-  onExcluir?: () => void;
+  onExcluir?: () => void; onDisparar?: () => void;
 }) {
   const meta = campanha.modelo ? MODELOS_FIDELIDADE[campanha.modelo] : null;
   const [verPessoas, setVerPessoas] = useState(false);
@@ -851,6 +895,24 @@ function EditorCampanha({
             <Zap className="h-3.5 w-3.5" />
             {campanha.ativa ? 'Pausar disparo' : 'Ativar disparo'}
           </button>
+          {/* Disparo manual: uma mensagem, com o gestor olhando. É o que
+              substitui ter de chamar o cron por linha de comando. */}
+          {onDisparar && campanha.salva && (
+            <button
+              onClick={() => {
+                if (!confirm(
+                  'Isto envia UMA mensagem AGORA, de verdade, para a próxima pessoa da fila. '
+                  + 'Continuar?')) return;
+                onDisparar();
+              }}
+              disabled={salvando || erros.length > 0}
+              className="inline-flex h-9 items-center gap-1.5 rounded-[var(--radius)] border border-border px-3 text-xs font-bold uppercase text-muted-foreground hover:text-foreground disabled:opacity-50"
+              title="Envia uma mensagem agora, ignorando dia e horário — as demais travas continuam valendo"
+            >
+              <Send className="h-3.5 w-3.5" />
+              Disparar 1 agora
+            </button>
+          )}
           {onExcluir && (
             <button
               onClick={() => { if (confirm('Excluir esta campanha?')) onExcluir(); }}
