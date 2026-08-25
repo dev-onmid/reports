@@ -242,9 +242,12 @@ const P = (m) => paramsPadrao(m);
   ok(vars.ticket.includes('87,50'), 'ticket formatado em reais');
 
   // Cliente sem nome cadastrado nao pode gerar "Oi, !".
+  // ⚠️ A 1a versao punha "tudo bem" no lugar do nome; num texto que ja dizia
+  // "tudo bem?" o consumidor recebeu "tudo bem, tudo bem?". Agora a variavel
+  // fica vazia e a pontuacao e recomposta no envio.
   const anonimo = varsDoCliente({ nome: null, pedidos: 1, ticketMedio: 10, diasDesdeUltima: 3 }, 'Loja');
-  eq(anonimo.primeiro_nome, 'tudo bem', 'sem nome, a saudacao ainda faz sentido');
-  eq(aplicarVars('Oi, {{primeiro_nome}}!', anonimo), 'Oi, tudo bem!', 'e a frase fecha');
+  eq(anonimo.primeiro_nome, '', 'sem nome, a variavel e vazia');
+  eq(aplicarVars('Oi, {{primeiro_nome}}!', anonimo, 'envio'), 'Oi!', 'e a frase fecha sozinha');
 
   eq(aplicarVars('Oi {{primeiro_nome}}, {{dias}} dias', vars), 'Oi Joao, 43 dias', 'interpolacao');
   eq(aplicarVars('Cupom {{cupom10}}', vars), 'Cupom {{cupom10}}',
@@ -368,7 +371,7 @@ const P = (m) => paramsPadrao(m);
     'Tokio', null,
   );
   eq(comConsumo.dias, '43', 'dias arredondado');
-  eq(comConsumo.primeiro_nome, 'tudo bem', 'sem nome, a saudacao ainda fecha');
+  eq(comConsumo.primeiro_nome, '', 'sem nome, a variavel e vazia (a frase e recomposta no envio)');
   eq(comConsumo.cupom, '', 'sem cupom, a variavel existe vazia');
 }
 
@@ -467,6 +470,59 @@ const P = (m) => paramsPadrao(m);
   for (const t of MENSAGENS_LISTA_PADRAO) {
     eq(variaveisIndisponiveis(t, 'lista'), [], 'texto de fabrica da lista nao usa variavel de consumo');
     eq(variaveisDesconhecidas(t), [], 'nem variavel inexistente');
+  }
+}
+
+// ── Contato SEM nome: o bug que chegou ao consumidor ─────────────────────────
+{
+  // ⚠️ Caso REAL (25/08): a lista manual tinha contato sem nome e a variacao
+  // "{{primeiro_nome}}, tudo bem? ..." chegou como "tudo bem, tudo bem? ...",
+  // porque o primeiro_nome caia num substituto fixo "tudo bem".
+  const semNome = varsDoDestinatario({ chave: 'x', telefone: 'y', nome: null }, 'PicoLocos Guanabara', null);
+  const comNome = varsDoDestinatario({ chave: 'x', telefone: 'y', nome: 'Matheus Campos' }, 'PicoLocos Guanabara', null);
+
+  eq(semNome.primeiro_nome, '', 'sem nome, a variavel e VAZIA — nada de frase de enchimento');
+
+  const frase = '{{primeiro_nome}}, tudo bem? A {{loja}} tem uma oferta esperando por você 😉';
+  eq(aplicarVars(frase, semNome, 'envio'),
+    'Tudo bem? A PicoLocos Guanabara tem uma oferta esperando por você 😉',
+    'a virgula orfa some e a frase sobe a maiuscula');
+  eq(aplicarVars(frase, comNome, 'envio'),
+    'Matheus, tudo bem? A PicoLocos Guanabara tem uma oferta esperando por você 😉',
+    'com nome, nada muda');
+
+  eq(aplicarVars('Oi, {{primeiro_nome}}! Novidade da {{loja}} 😊', semNome, 'envio'),
+    'Oi! Novidade da PicoLocos Guanabara 😊', '"Oi, !" vira "Oi!"');
+  eq(aplicarVars('E aí, {{primeiro_nome}}? Bora?', semNome, 'envio'), 'E aí? Bora?',
+    'interrogacao tambem');
+  eq(aplicarVars('{{primeiro_nome}}, obrigado por voltar!', semNome, 'envio'),
+    'Obrigado por voltar!', 'frase que comeca com a variavel sobe a maiuscula');
+
+  // Nao pode "consertar" o que nao esta quebrado.
+  eq(aplicarVars('Oi, {{primeiro_nome}}!', comNome, 'envio'), 'Oi, Matheus!',
+    'texto com nome nao e mexido');
+  eq(aplicarVars('sem variavel nenhuma, tudo bem?', comNome, 'envio'),
+    'sem variavel nenhuma, tudo bem?',
+    'texto que NAO comeca com variavel mantem a minuscula original');
+  eq(aplicarVars('Valor: R$ 10,50 e taxa 2,00', comNome, 'envio'),
+    'Valor: R$ 10,50 e taxa 2,00', 'virgula de numero e dois-pontos legitimos ficam');
+  eq(aplicarVars('Linha 1\n{{primeiro_nome}}, ola', semNome, 'envio'), 'Linha 1\nola',
+    'sobra no comeco de qualquer linha, nao so da primeira');
+
+  // Nenhuma mensagem de fabrica pode quebrar num contato sem nome.
+  for (const m of ORDEM_MODELOS) {
+    for (const t of MODELOS_FIDELIDADE[m].mensagensPadrao) {
+      const saida = aplicarVars(t, { ...semNome, dias: '30', pedidos: '3', ticket: 'R$ 90,00' }, 'envio');
+      ok(!saida.includes('{{'), `${m}: nada de chave crua`);
+      ok(!/^[,;:!?]/.test(saida), `${m}: nao comeca com pontuacao orfa`);
+      ok(!/ ,|,,|, !|, \?/.test(saida), `${m}: sem pontuacao duplicada`);
+      ok(/^\p{Lu}|^\p{Emoji_Presentation}/u.test(saida), `${m}: comeca com maiuscula`);
+    }
+  }
+  for (const t of MENSAGENS_LISTA_PADRAO) {
+    const saida = aplicarVars(t, semNome, 'envio');
+    ok(!saida.includes('{{'), 'lista: nada de chave crua');
+    ok(!/^[,;:!?]/.test(saida), 'lista: nao comeca com pontuacao orfa');
   }
 }
 

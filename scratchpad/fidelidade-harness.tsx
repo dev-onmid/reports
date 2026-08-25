@@ -68,7 +68,11 @@ const RESPOSTA = {
     {
       id: 'camp-lista-1', fonte: 'lista', modelo: null, listaId: 'lista-1',
       nome: 'Oferta — Clientes do salão',
-      params: {}, mensagens: ['Oi {{primeiro_nome}}! Use {{cupom}} hoje 🍽️', 'Faz {{dias}} dias!'],
+      params: {}, mensagens: [
+        'Oi, {{primeiro_nome}}! Passando pra avisar de uma novidade da {{loja}} 😊',
+        '{{primeiro_nome}}, tudo bem? A {{loja}} tem uma oferta esperando por você 😉',
+        'Faz {{dias}} dias!',
+      ],
       cupom: 'SALAO15', imagemUrl: null, diasSemana: [2], hora: '18:00',
       tetoPublico: null, ativa: false, salva: true, ultimaExecucao: null,
     },

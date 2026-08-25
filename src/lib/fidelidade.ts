@@ -343,7 +343,7 @@ export function varsDoCliente(c: ClienteParaVars, loja: string, cupom?: string |
   const nome = c.nome?.trim() || '';
   return {
     nome,
-    primeiro_nome: primeiroNome(nome) || 'tudo bem',
+    primeiro_nome: primeiroNome(nome),
     dias: String(Math.max(0, Math.round(c.diasDesdeUltima))),
     pedidos: String(c.pedidos),
     ticket: moedaBR(c.ticketMedio),
@@ -373,7 +373,7 @@ export function varsDoDestinatario(
   const nome = d.nome?.trim() || '';
   const base: Record<string, string> = {
     nome,
-    primeiro_nome: primeiroNome(nome) || 'tudo bem',
+    primeiro_nome: primeiroNome(nome),
     loja,
     cupom: (cupom ?? '').trim(),
   };
@@ -405,11 +405,36 @@ export function aplicarVars(
     return modo === 'envio' ? '' : m;
   });
   if (modo !== 'envio') return trocado;
-  return trocado
+  return limparPontuacao(trocado, texto.trimStart().startsWith('{{'));
+}
+
+/**
+ * Costura a frase depois que uma variável virou vazio.
+ *
+ * ⚠️ Isto existe por causa de um caso REAL: `{{primeiro_nome}}, tudo bem?` num
+ * contato sem nome cadastrado. A primeira versão usava "tudo bem" como
+ * substituto do nome e o consumidor recebeu "tudo bem, tudo bem?". Substituto
+ * fixo só funciona para UMA forma de frase — apagar e recompor funciona para
+ * todas.
+ *
+ * `comecavaComVariavel` decide a maiúscula: se a frase começava com a variável
+ * e ela sumiu, a primeira letra do que sobrou precisa subir, senão a mensagem
+ * chega começando em minúscula.
+ */
+function limparPontuacao(texto: string, comecavaComVariavel: boolean): string {
+  const limpo = texto
     .replace(/[ \t]{2,}/g, ' ')
-    .replace(/ +([,.!?;:])/g, '$1')
+    // Espaço antes de pontuação: "Oi, !" → "Oi,!"
+    .replace(/[ \t]+([,.!?;:])/g, '$1')
+    // Pontuação órfã encostada em outra: "Oi,!" → "Oi!"
+    .replace(/([,;:])[ \t]*([,.!?;:])/g, '$2')
+    // Sobra no início da linha: ", tudo bem?" → "tudo bem?"
+    .replace(/(^|\n)[ \t]*[,;:][ \t]*/g, '$1')
     .replace(/[ \t]+\n/g, '\n')
     .trim();
+
+  if (!comecavaComVariavel) return limpo;
+  return limpo.replace(/^(\p{Ll})/u, (m) => m.toUpperCase());
 }
 
 /**

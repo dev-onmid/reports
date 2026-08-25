@@ -738,6 +738,10 @@ function EditorCampanha({
       },
     };
   const vars = varsDoDestinatario(destinatario, loja, campanha.cupom);
+  const varsSemNome = varsDoDestinatario({ ...destinatario, nome: null }, loja, campanha.cupom);
+  const usaNome = campanha.mensagens.some(
+    m => m && (m.includes('{{primeiro_nome}}') || m.includes('{{nome}}')),
+  );
   const erros = validarCampanha(campanha.mensagens, campanha.fonte, campanha.cupom);
 
   return (
@@ -879,6 +883,22 @@ function EditorCampanha({
             </p>
           ))}
         </div>
+
+        {/* ⚠️ A prévia com um nome de exemplo esconde o caso mais comum de
+            lista manual: contato SEM nome. Foi assim que "{{primeiro_nome}},
+            tudo bem?" chegou ao consumidor como "tudo bem, tudo bem?". */}
+        {usaNome && (
+          <div className="mt-3">
+            <Rotulo>E em quem não tem nome cadastrado</Rotulo>
+            <div className="mt-2 space-y-2">
+              {campanha.mensagens.filter(Boolean).map((m, i) => (
+                <p key={i} className="max-w-md rounded-[var(--radius)] border border-dashed border-border px-3 py-2 text-xs leading-relaxed text-muted-foreground">
+                  {aplicarVars(m, varsSemNome, 'envio')}
+                </p>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {amostra.length > 0 && (
