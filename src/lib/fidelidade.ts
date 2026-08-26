@@ -838,3 +838,25 @@ export const STATUS_ENVIO_LABEL: Record<string, string> = {
   pulada: 'Pulada',
   falha: 'Falhou',
 };
+
+/**
+ * As próximas N datas em que a campanha vai rodar.
+ *
+ * A tela mostra isso como chips (QUA 12/08 · QUI 13/08 …), igual ao painel que
+ * o gestor já conhece: "roda às terças" é abstrato, "próxima terça é 01/09" é
+ * uma data que ele confere contra o calendário dele.
+ */
+export function proximasExecucoes(
+  diasSemana: number[], hora: string, agora: Date, quantas = 4,
+): Date[] {
+  const saida: Date[] = [];
+  let cursor = agora;
+  for (let i = 0; i < quantas; i++) {
+    const proxima = proximaExecucao(diasSemana, hora, cursor);
+    if (!proxima) break;
+    saida.push(proxima);
+    // +1 min para não devolver a mesma data para sempre.
+    cursor = new Date(proxima.getTime() + 60_000);
+  }
+  return saida;
+}
