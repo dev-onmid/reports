@@ -89,6 +89,12 @@ export async function ensureFidelidadeSchema(pool: Pool) {
        criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW(),
        PRIMARY KEY (lista_id, chave)
      )`,
+    // ⚠️ Histórico que veio NA PLANILHA. É o que permite segmentar uma base
+    // importada — cliente sem integração de delivery nenhuma passa a ter
+    // "em risco", "inativo" e "VIP" iguais aos de quem tem.
+    `ALTER TABLE public.fidelidade_lista_contatos ADD COLUMN IF NOT EXISTS pedidos INT`,
+    `ALTER TABLE public.fidelidade_lista_contatos ADD COLUMN IF NOT EXISTS total_gasto NUMERIC`,
+    `ALTER TABLE public.fidelidade_lista_contatos ADD COLUMN IF NOT EXISTS ultima_compra TIMESTAMPTZ`,
 
     // ── Execução ──────────────────────────────────────────────────────────
     `CREATE TABLE IF NOT EXISTS public.fidelidade_execucoes (
@@ -197,7 +203,9 @@ export function campanhaPadrao(modelo: ModeloId): CampanhaFidelidade {
     listaId: null,
     nome: m.nome,
     params: paramsPadrao(modelo),
-    mensagens: [...m.mensagensPadrao],
+    // ⚠️ SEM texto: a segmentação vem pronta, o conteúdo é do gestor. Com o
+    // texto de fábrica preenchido, a campanha parecia escrita por ele.
+    mensagens: [],
     cupom: null,
     imagemUrl: null,
     diasSemana: [...m.cadenciaPadrao.diasSemana],
@@ -261,10 +269,21 @@ export async function listarCampanhas(pool: Pool, clientId: string): Promise<Cam
     [clientId],
   ).catch(() => ({ rows: [] as LinhaCampanha[] }));
 
-  // ⚠️ Só o que o gestor criou. A versão anterior devolvia os 5 modelos como
-  // campanhas de fábrica, e eles apareciam na grade com texto pronto como se
-  // fossem dele — os modelos agora são só OPÇÃO na hora de criar.
-  return rows.map(linhaParaCampanha);
+  const salvas = rows.map(linhaParaCampanha);
+
+  // Os 5 grupos aparecem SEMPRE, mesmo antes de existirem no banco: é a
+  // segmentação pronta, que é o valor da aba. O que NÃO vem pronto é a
+  // mensagem — essa nasce vazia e o gestor escreve.
+  const jaSalvo = new Set(salvas.filter(c => c.fonte === 'segmento').map(c => c.modelo));
+  const prontos = ORDEM_MODELOS.filter(m => !jaSalvo.has(m)).map(campanhaPadrao);
+
+  const porModelo = new Map(salvas.filter(c => c.modelo).map(c => [c.modelo!, c]));
+  const segmentos = ORDEM_MODELOS
+    .map(m => porModelo.get(m) ?? prontos.find(p => p.modelo === m)!)
+    .filter(Boolean);
+  const listas = salvas.filter(c => c.fonte === 'lista');
+  const extras = salvas.filter(c => c.fonte === 'segmento' && !segmentos.includes(c));
+  return [...segmentos, ...extras, ...listas];
 }
 
 export async function salvarCampanha(
@@ -365,7 +384,11 @@ export async function listarListas(pool: Pool, clientId: string): Promise<ListaF
  */
 export async function salvarLista(
   pool: Pool, clientId: string,
-  { id, nome, contatos }: { id?: string | null; nome: string; contatos: { telefone: string; nome: string | null }[] },
+  { id, nome, contatos }: {
+    id?: string | null; nome: string;
+    contatos: { telefone: string; nome: string | null; pedidos?: number | null;
+                totalGasto?: number | null; ultimaCompra?: string | null }[];
+  },
 ): Promise<{ id: string; inseridos: number }> {
   let listaId = id ?? null;
   if (listaId) {
@@ -385,11 +408,18 @@ export async function salvarLista(
   for (const c of contatos) {
     const chave = normalizarTelefoneBR(c.telefone);
     if (!chave) continue;
+    // COALESCE em todos os campos: reimportar uma planilha mais pobre não pode
+    // APAGAR o histórico que uma importação anterior já tinha trazido.
     await pool.query(
-      `INSERT INTO public.fidelidade_lista_contatos (lista_id, chave, telefone, nome)
-       VALUES ($1, $2, $3, $4)
-       ON CONFLICT (lista_id, chave) DO UPDATE SET nome = COALESCE(EXCLUDED.nome, fidelidade_lista_contatos.nome)`,
-      [listaId, chave, c.telefone, c.nome],
+      `INSERT INTO public.fidelidade_lista_contatos
+         (lista_id, chave, telefone, nome, pedidos, total_gasto, ultima_compra)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       ON CONFLICT (lista_id, chave) DO UPDATE SET
+         nome = COALESCE(EXCLUDED.nome, fidelidade_lista_contatos.nome),
+         pedidos = COALESCE(EXCLUDED.pedidos, fidelidade_lista_contatos.pedidos),
+         total_gasto = COALESCE(EXCLUDED.total_gasto, fidelidade_lista_contatos.total_gasto),
+         ultima_compra = COALESCE(EXCLUDED.ultima_compra, fidelidade_lista_contatos.ultima_compra)`,
+      [listaId, chave, c.telefone, c.nome, c.pedidos ?? null, c.totalGasto ?? null, c.ultimaCompra ?? null],
     );
     inseridos++;
   }
@@ -406,15 +436,30 @@ export async function excluirLista(pool: Pool, clientId: string, id: string): Pr
   await pool.query(`DELETE FROM public.fidelidade_listas WHERE id = $1 AND client_id = $2`, [id, clientId]);
 }
 
-export async function contatosDaLista(
-  pool: Pool, listaId: string,
-): Promise<{ chave: string; telefone: string; nome: string | null }[]> {
-  const { rows } = await pool.query<{ chave: string; telefone: string; nome: string | null }>(
-    `SELECT chave, telefone, nome FROM public.fidelidade_lista_contatos
+export type ContatoDaLista = {
+  chave: string; telefone: string; nome: string | null;
+  pedidos: number | null; totalGasto: number | null; ultimaCompra: string | null;
+};
+
+export async function contatosDaLista(pool: Pool, listaId: string): Promise<ContatoDaLista[]> {
+  const { rows } = await pool.query<{
+    chave: string; telefone: string; nome: string | null;
+    pedidos: number | null; total_gasto: string | null; ultima_compra: Date | null;
+  }>(
+    `SELECT chave, telefone, nome, pedidos, total_gasto, ultima_compra
+       FROM public.fidelidade_lista_contatos
       WHERE lista_id = $1 ORDER BY criado_em ASC`,
     [listaId],
-  ).catch(() => ({ rows: [] as { chave: string; telefone: string; nome: string | null }[] }));
-  return rows;
+  ).catch(() => ({ rows: [] }));
+
+  return rows.map(r => ({
+    chave: r.chave, telefone: r.telefone, nome: r.nome,
+    pedidos: r.pedidos,
+    totalGasto: r.total_gasto == null ? null : Number(r.total_gasto),
+    ultimaCompra: r.ultima_compra
+      ? (r.ultima_compra instanceof Date ? r.ultima_compra.toISOString() : String(r.ultima_compra))
+      : null,
+  }));
 }
 
 // ───────────────────────────────────────────────────────────────── Travas

@@ -874,3 +874,71 @@ export function proximasExecucoes(
   }
   return saida;
 }
+
+// ------------------------------------------------- Base importada com histórico
+
+/**
+ * Contato de lista que veio com histórico de compra na planilha.
+ *
+ * ⚠️ Isto é uma FOTO, não a série de compras: sabemos quando foi a última,
+ * quantas houve e quanto somaram — não as datas de cada uma. É o suficiente
+ * para quatro dos cinco grupos, e por isso `reconquistado` fica de fora:
+ * detectá-lo exige ver o INTERVALO entre a última compra e a anterior, que a
+ * planilha não traz. Inventar isso classificaria gente errada.
+ */
+export type ContatoComHistorico = {
+  telefone: string;
+  nome: string | null;
+  pedidos: number | null;
+  totalGasto: number | null;
+  /** ISO da última compra. */
+  ultimaCompra: string | null;
+};
+
+export const GRUPOS_DA_BASE: ModeloId[] = ['primeira_recompra', 'em_risco', 'inativo', 'vip'];
+
+/** A lista tem dado suficiente para ser segmentada? */
+export function listaSegmentavel(contatos: ContatoComHistorico[]): boolean {
+  return contatos.some(c => c.ultimaCompra && (c.pedidos ?? 0) > 0);
+}
+
+/**
+ * Converte o contato importado no mesmo shape que `filtrarPublico` consome.
+ *
+ * A etapa é deduzida da foto: 1 compra dentro da janela = novo; passou da
+ * janela = em risco; passou da inatividade = inativo; o resto = recorrente.
+ * Sem data de última compra o contato fica FORA da segmentação (etapa null) —
+ * ele continua alcançável numa campanha "lista inteira", só não num grupo.
+ */
+export function clienteDoContato(
+  c: ContatoComHistorico, regua: Regua, agoraIso: string,
+): ClienteDelivery | null {
+  if (!c.ultimaCompra) return null;
+  const ultima = new Date(c.ultimaCompra).getTime();
+  const agora = new Date(agoraIso).getTime();
+  if (!Number.isFinite(ultima) || !Number.isFinite(agora)) return null;
+
+  const dias = Math.floor((agora - ultima) / 86_400_000);
+  const pedidos = Math.max(1, Math.round(c.pedidos ?? 1));
+  const receita = Math.max(0, Number(c.totalGasto) || 0);
+
+  const etapa: ClienteDelivery['etapa'] =
+    dias >= regua.inatividadeDias ? 'inativo'
+    : dias >= regua.janelaDias ? 'em_risco'
+    : pedidos === 1 ? 'novo'
+    : 'recorrente';
+
+  return {
+    chave: c.telefone,
+    nome: c.nome,
+    telefone: c.telefone,
+    etapa,
+    pedidos,
+    receita,
+    ticketMedio: receita / pedidos,
+    primeiraCompra: c.ultimaCompra,
+    ultimaCompra: c.ultimaCompra,
+    diasDesdeUltima: Math.max(0, dias),
+    intervaloMedianoDias: null,
+  };
+}

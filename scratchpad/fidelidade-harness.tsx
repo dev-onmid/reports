@@ -63,8 +63,7 @@ const RESPOSTA = {
       ['{{primeiro_nome}}, faz {{dias}} dias que você não pede na {{loja}}...']),
     campanhaSegmento('vip', { pedidosMin: 4, ticketMin: null },
       ['Oi, {{primeiro_nome}}! Você é um dos que mais pede na {{loja}} 💜']),
-    campanhaSegmento('reconquistado', { diasMax: 15 },
-      ['Que bom te ver de volta, {{primeiro_nome}}! 🎉']),
+    campanhaSegmento('reconquistado', { diasMax: 15 }, []),
     // Campanha de LISTA com uma variação inválida de propósito: {{dias}} não
     // existe em lista manual, e a tela precisa recusar o salvamento.
     {

@@ -180,19 +180,40 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
       const lista = body.lista as Record<string, unknown>;
       const nome = typeof lista.nome === 'string' && lista.nome.trim()
         ? lista.nome.trim().slice(0, 120) : 'Lista sem nome';
-      const leitura = parseListaManual(String(lista.texto ?? ''), normalizarTelefoneBR);
+      // Dois caminhos: `contatos` vem do ARQUIVO já lido no navegador (com
+      // histórico, quando a planilha traz); `texto` é o campo de colar, que só
+      // tem telefone e nome.
+      const doArquivo = Array.isArray(lista.contatos)
+        ? (lista.contatos as Record<string, unknown>[])
+          .map(c => ({
+            telefone: String(c.telefone ?? ''),
+            nome: typeof c.nome === 'string' && c.nome.trim() ? c.nome.trim() : null,
+            pedidos: Number.isFinite(Number(c.pedidos)) ? Number(c.pedidos) : null,
+            totalGasto: Number.isFinite(Number(c.totalGasto)) ? Number(c.totalGasto) : null,
+            ultimaCompra: typeof c.ultimaCompra === 'string' ? c.ultimaCompra : null,
+          }))
+          .filter(c => normalizarTelefoneBR(c.telefone))
+        : [];
+
+      const colados = parseListaManual(String(lista.texto ?? ''), normalizarTelefoneBR);
+      const contatos = doArquivo.length > 0
+        ? doArquivo
+        : colados.contatos.map(c => ({
+          ...c, pedidos: null, totalGasto: null, ultimaCompra: null,
+        }));
+
       const idLista = typeof lista.id === 'string' ? lista.id : null;
-      if (leitura.contatos.length === 0 && !idLista) {
+      if (contatos.length === 0 && !idLista) {
         return Response.json(
-          { error: 'Nenhum telefone válido na lista', invalidos: leitura.invalidos },
+          { error: 'Nenhum telefone válido na lista', invalidos: colados.invalidos },
           { status: 400 },
         );
       }
-      const r = await salvarLista(pool, clientId, {
-        id: idLista, nome, contatos: leitura.contatos,
-      });
+      const r = await salvarLista(pool, clientId, { id: idLista, nome, contatos });
+      const comHistorico = contatos.filter(c => c.ultimaCompra).length;
       return Response.json({
-        lista: r, invalidos: leitura.invalidos, duplicados: leitura.duplicados,
+        lista: r, invalidos: colados.invalidos, duplicados: colados.duplicados,
+        comHistorico,
         listas: await listarListas(pool, clientId),
       });
     }

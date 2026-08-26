@@ -2,11 +2,12 @@
 
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  AlertTriangle, Loader2, MoreVertical, Pencil, PowerOff, RefreshCw, Save,
-  Image as ImageIcon, Plus, Search, ShieldCheck, Ticket, Trash2, Upload, X, Zap,
+  AlertTriangle, Clock, Crown, Loader2, ListChecks, Moon, MoreVertical,
+  Pencil, Plus, PowerOff, RefreshCw, Repeat, Save, Search, ShieldCheck, Sparkles, Ticket,
+  Trash2, Upload, X, Zap, type LucideIcon,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { lerArquivoContatos } from '@/lib/contatos-arquivo';
+import { lerArquivoContatos, contatosParaTexto, type ContatoLido } from '@/lib/contatos-arquivo';
 import {
   MODELOS_FIDELIDADE, VARIAVEIS, DIAS_SEMANA_LABEL, PISO_INTERVALO_SEG,
   STATUS_ENVIO_LABEL, aplicarVars, capacidadeDaJanela, diasParaTerminar,
@@ -94,6 +95,14 @@ type Acompanhamento = {
   execucoes: Execucao[]; envios: Envio[]; temMais: boolean;
 };
 
+const ICONE_MODELO: Record<ModeloId, LucideIcon> = {
+  primeira_recompra: Repeat,
+  em_risco: Clock,
+  inativo: Moon,
+  vip: Crown,
+  reconquistado: Sparkles,
+};
+
 const COR_MODELO: Record<ModeloId, string> = {
   primeira_recompra: 'var(--primary)',
   em_risco: '#facc15',
@@ -145,8 +154,15 @@ function Kpi({ label, valor, sub, alerta }: { label: string; valor: string; sub?
 function Metrica({ label, valor, cor }: { label: string; valor: string; cor?: string }) {
   return (
     <div className="min-w-0">
-      <p className="truncate text-[9px] font-bold uppercase tracking-wider text-muted-foreground">{label}</p>
-      <p className={cn('mt-0.5 font-heading text-lg leading-none', cor)}>{valor}</p>
+      <p className="truncate text-[9px] font-bold uppercase tracking-wide text-muted-foreground" title={label}>
+        {label}
+      </p>
+      {/* ⚠️ `truncate` no VALOR: em 3 colunas, "R$ 1.283,50" encostava no
+          número vizinho e os dois viravam um borrão. Melhor cortar com
+          reticências e manter o título completo no hover. */}
+      <p className={cn('mt-0.5 truncate font-heading text-sm leading-none', cor)} title={valor}>
+        {valor}
+      </p>
     </div>
   );
 }
@@ -176,19 +192,6 @@ function dataCurta(d: Date): { dia: string; data: string } {
 }
 
 const brl = (n: number) => n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-
-/** "há 3 meses (14/05/2026)" — o mesmo rótulo do painel de referência. */
-function criadaEm(iso: string | null | undefined): string {
-  if (!iso) return '';
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '';
-  const dias = Math.floor((Date.now() - d.getTime()) / 86_400_000);
-  const quando = dias < 1 ? 'hoje'
-    : dias < 30 ? `há ${dias} dia${dias > 1 ? 's' : ''}`
-    : dias < 365 ? `há ${Math.floor(dias / 30)} ${Math.floor(dias / 30) > 1 ? 'meses' : 'mês'}`
-    : `há ${Math.floor(dias / 365)} ano${Math.floor(dias / 365) > 1 ? 's' : ''}`;
-  return `Criada ${quando} (${d.toLocaleDateString('pt-BR')})`;
-}
 
 function chaveCampanha(c: Campanha): string {
   return c.fonte === 'segmento' ? (c.modelo ?? 'sem-modelo') : (c.id ?? 'nova');
@@ -545,7 +548,7 @@ export function ClientFidelidadeTab({ clientId }: { clientId: string }) {
               )}
             </Card>
           ) : (
-            <div className="grid gap-3 lg:grid-cols-2">
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
               {visiveis.map((c) => (
                 <CampanhaCard
                   key={chaveCampanha(c)} campanha={c}
@@ -722,6 +725,8 @@ function CampanhaCard({
   );
   const titulo = campanha.modelo ? MODELOS_FIDELIDADE[campanha.modelo].nome : campanha.nome;
   const enviadas = resultado?.enviadas ?? 0;
+  const Icone = campanha.modelo ? ICONE_MODELO[campanha.modelo] : ListChecks;
+  const semTexto = campanha.mensagens.filter(Boolean).length === 0;
   // ⚠️ Sem envio não há o que atribuir: receita e pedidos viram travessão, não
   // zero. "R$ 0,00" afirmaria que a campanha rodou e não vendeu.
   const medido = enviadas > 0 ? resultado : undefined;
@@ -731,41 +736,55 @@ function CampanhaCard({
       <div className="h-1 w-full shrink-0" style={{ background: cor }} />
 
       <div className="flex-1 p-4">
-        {/* Miniatura + conteúdo, como no painel de referência. */}
-        <div className="flex gap-3">
-          <div className="hidden h-24 w-24 shrink-0 items-center justify-center overflow-hidden rounded-[var(--radius)] bg-background sm:flex">
+        {/* Ícone grande: o gestor reconhece o grupo pelo símbolo antes de ler. */}
+        <div className="flex items-start gap-3">
+          <div
+            className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-[var(--radius)]"
+            style={{ background: `color-mix(in srgb, ${cor} 14%, transparent)` }}
+          >
             {campanha.imagemUrl
               // eslint-disable-next-line @next/next/no-img-element -- URL externa do cliente; next/image exigiria allowlist de domínio
               ? <img src={campanha.imagemUrl} alt="" className="h-full w-full object-cover" />
-              : <ImageIcon className="h-7 w-7 text-muted-foreground/40" />}
+              : <Icone className="h-7 w-7" style={{ color: cor }} />}
           </div>
 
           <div className="min-w-0 flex-1">
-            <div className="flex items-start justify-between gap-2">
-              <h3 className="min-w-0 truncate font-heading text-lg uppercase leading-none">{titulo}</h3>
-              {campanha.cupom && (
-                <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-secondary/40 bg-secondary/10 px-2 py-0.5 text-[9px] font-bold uppercase text-secondary">
-                  <Ticket className="h-2.5 w-2.5" />{campanha.cupom}
-                </span>
-              )}
-            </div>
-            <p className="mt-1.5 line-clamp-2 text-xs leading-relaxed text-foreground/80">
-              {campanha.mensagens.find(Boolean) ?? 'Sem mensagem escrita.'}
-            </p>
-            <p className="mt-1.5 line-clamp-1 text-[11px] text-muted-foreground">
-              {criadaEm(campanha.criadoEm) || objetivo}
+            <h3 className="line-clamp-2 font-heading text-base uppercase leading-tight">{titulo}</h3>
+            <p className="mt-1 flex items-baseline gap-1.5">
+              <span className="font-heading text-2xl leading-none" style={{ color: cor }}>{publico}</span>
+              <span className="text-[11px] text-muted-foreground">pessoas no grupo agora</span>
             </p>
           </div>
+
+          {campanha.cupom && (
+            <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-secondary/40 bg-secondary/10 px-2 py-0.5 text-[9px] font-bold uppercase text-secondary">
+              <Ticket className="h-2.5 w-2.5" />{campanha.cupom}
+            </span>
+          )}
         </div>
 
+        {/* Sem mensagem, o card diz o que falta em vez de mostrar vazio. */}
+        {semTexto ? (
+          <button onClick={onEditar}
+            className="mt-3 flex w-full items-center gap-2 rounded-[var(--radius)] border border-dashed border-border p-2.5 text-left text-[11px] text-muted-foreground hover:border-primary/50 hover:text-foreground">
+            <Pencil className="h-3.5 w-3.5 shrink-0" />
+            Escreva a mensagem desta campanha para poder ativar
+          </button>
+        ) : (
+          <p className="mt-3 line-clamp-2 text-xs leading-relaxed text-foreground/80">
+            {campanha.mensagens.find(Boolean)}
+          </p>
+        )}
+        <p className="mt-1.5 line-clamp-1 text-[11px] text-muted-foreground">{objetivo}</p>
+
         {/* As 5 métricas de RESULTADO — é isso que responde "valeu a pena?". */}
-        <div className="mt-3 grid grid-cols-5 gap-2 border-t border-border pt-3">
-          <Metrica label="Mensagens" valor={String(enviadas)} />
+        <div className="mt-3 grid grid-cols-5 gap-1.5 border-t border-border pt-3">
+          <Metrica label="Msgs" valor={String(enviadas)} />
           <Metrica label="Receita" valor={medido ? brl(medido.receita) : '—'} cor="text-primary" />
           <Metrica label="Pedidos" valor={medido ? String(medido.pedidos) : '—'} />
-          <Metrica label="Conversão"
+          <Metrica label="Conv."
             valor={medido?.conversao == null ? '—' : `${(medido.conversao * 100).toFixed(1)}%`} />
-          <Metrica label="Ticket médio"
+          <Metrica label="Ticket"
             valor={medido?.ticketMedio == null ? '—' : brl(medido.ticketMedio)} />
         </div>
 
@@ -782,11 +801,7 @@ function CampanhaCard({
               })()}
             </p>
           </div>
-        ) : (
-          <p className="mt-2 text-[10px] text-muted-foreground">
-            Público atual: <strong className="text-foreground">{publico}</strong> pessoas
-          </p>
-        )}
+        ) : null}
       </div>
 
       {/* Rodapé: datas + status + ações na MESMA linha, como no print. */}
@@ -819,11 +834,18 @@ function CampanhaCard({
             <Pencil className="h-4 w-4" />
           </button>
           <MenuAcoes itens={[
-            { label: campanha.ativa ? 'Pausar disparo' : 'Ativar disparo', onClick: () => {
-              if (!campanha.ativa && !confirm(
-                'Ativar faz o sistema ENVIAR mensagens sozinho pelo WhatsApp deste cliente. Confirmar?')) return;
-              onAlternar();
-            } },
+            {
+              label: campanha.ativa ? 'Pausar disparo'
+                : semTexto ? 'Escreva a mensagem para ativar' : 'Ativar disparo',
+              onClick: () => {
+                // Ativar sem texto salvaria "pausada" em silêncio — o motor não
+                // teria o que enviar. Melhor levar direto ao editor.
+                if (semTexto) { onEditar(); return; }
+                if (!campanha.ativa && !confirm(
+                  'Ativar faz o sistema ENVIAR mensagens sozinho pelo WhatsApp deste cliente. Confirmar?')) return;
+                onAlternar();
+              },
+            },
             ...(onDisparar ? [{ label: salvando ? 'Disparando…' : 'Disparar 1 agora', onClick: () => {
               if (confirm('Isto envia UMA mensagem AGORA, de verdade. Continuar?')) onDisparar();
             } }] : []),
@@ -984,22 +1006,33 @@ function TabelaListas({ listas, salvando, onNova, onExcluir, onCriarCampanha }: 
 }
 
 function FormLista({ salvando, onSalvar }: {
-  salvando: boolean; onSalvar: (l: { nome: string; texto: string }) => Promise<boolean>;
+  salvando: boolean;
+  onSalvar: (l: { nome: string; texto: string; contatos?: ContatoLido[] }) => Promise<boolean>;
 }) {
   const [nome, setNome] = useState('');
   const [texto, setTexto] = useState('');
+  const [doArquivo, setDoArquivo] = useState<ContatoLido[] | null>(null);
   const [lendo, setLendo] = useState(false);
   const [aviso, setAviso] = useState<string | null>(null);
-  const linhas = texto.split('\n').filter(l => l.trim()).length;
+
+  const linhas = doArquivo ? doArquivo.length : texto.split('\n').filter(l => l.trim()).length;
+  const comHistorico = doArquivo?.filter(c => c.ultimaCompra).length ?? 0;
 
   async function importar(file: File) {
     setLendo(true); setAviso(null);
     try {
-      const conteudo = await lerArquivoContatos(file);
-      const n = conteudo.split('\n').filter(Boolean).length;
-      setTexto(t => (t.trim() ? `${t.trim()}\n${conteudo}` : conteudo));
-      setAviso(n > 0 ? `${n} contato(s) lidos de ${file.name}.` : `Nenhum telefone encontrado em ${file.name}.`);
+      const lidos = await lerArquivoContatos(file);
+      if (lidos.length === 0) {
+        setAviso(`Nenhum telefone encontrado em ${file.name}.`);
+        return;
+      }
+      setDoArquivo(lidos);
+      setTexto(contatosParaTexto(lidos));
       if (!nome.trim()) setNome(file.name.replace(/\.[^.]+$/, ''));
+      const comHist = lidos.filter(c => c.ultimaCompra).length;
+      setAviso(comHist > 0
+        ? `${lidos.length} contatos lidos — ${comHist} com histórico de compra. Essa base dá para segmentar.`
+        : `${lidos.length} contatos lidos. Sem colunas de histórico, a lista vira um público único.`);
     } catch {
       setAviso('Não consegui ler esse arquivo. Tente CSV ou Excel (.xlsx).');
     } finally { setLendo(false); }
@@ -1010,35 +1043,47 @@ function FormLista({ salvando, onSalvar }: {
       <div className="space-y-1">
         <Rotulo>Nome da lista</Rotulo>
         <input value={nome} onChange={(e) => setNome(e.target.value)}
-          placeholder="Ex: Clientes do salão"
+          placeholder="Ex: Base de clientes 2026"
           className="h-9 w-full rounded-[var(--radius)] border border-border bg-background px-2 text-sm" />
       </div>
 
-      <label className="flex cursor-pointer items-center justify-center gap-2 rounded-[var(--radius)] border border-dashed border-primary/50 bg-primary/[0.04] p-4 text-xs font-bold uppercase text-primary">
-        {lendo ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-        Escolher arquivo Excel ou CSV
+      <label className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-[var(--radius)] border border-dashed border-primary/50 bg-primary/[0.04] p-6 text-center">
+        {lendo ? <Loader2 className="h-6 w-6 animate-spin text-primary" /> : <Upload className="h-6 w-6 text-primary" />}
+        <span className="text-xs font-bold uppercase text-primary">Escolher Excel ou CSV</span>
+        <span className="text-[10px] leading-relaxed text-muted-foreground">
+          Se a planilha tiver <strong className="text-foreground">última compra</strong>,{' '}
+          <strong className="text-foreground">nº de pedidos</strong> e{' '}
+          <strong className="text-foreground">total gasto</strong>, o sistema segmenta a base sozinho.
+        </span>
         <input type="file" accept=".csv,.txt,.xlsx,.xls" className="hidden"
           onChange={(e) => { const f = e.target.files?.[0]; if (f) void importar(f); e.target.value = ''; }} />
       </label>
-      {aviso && <p className="text-[11px] text-primary">{aviso}</p>}
+
+      {aviso && (
+        <p className={cn('text-[11px]', comHistorico > 0 ? 'text-primary' : 'text-muted-foreground')}>{aviso}</p>
+      )}
 
       <div className="space-y-1">
         <Rotulo>Ou cole os telefones</Rotulo>
-        <textarea value={texto} onChange={(e) => setTexto(e.target.value)} rows={8}
+        <textarea
+          value={texto}
+          onChange={(e) => { setTexto(e.target.value); setDoArquivo(null); }}
+          rows={7}
           placeholder={'5543999990000,Maria\n5511988887777,João'}
           className="w-full rounded-[var(--radius)] border border-border bg-background p-2 font-mono text-xs" />
         <p className="text-[10px] leading-relaxed text-muted-foreground">
-          Uma linha por pessoa: <code className="rounded bg-background px-1">telefone</code> ou{' '}
-          <code className="rounded bg-background px-1">telefone,nome</code>. Na planilha o sistema acha
-          sozinho a coluna do telefone e a do nome. Repetidos são descartados.
+          Colando, o sistema recebe só telefone e nome — sem histórico não dá para segmentar.
+          Repetidos são descartados.
         </p>
       </div>
 
       <div className="flex items-center justify-between gap-2">
-        <span className="text-[11px] text-muted-foreground">{linhas} linha(s)</span>
+        <span className="text-[11px] text-muted-foreground">
+          {linhas} contato(s){comHistorico > 0 && ` · ${comHistorico} com histórico`}
+        </span>
         <button
           disabled={!nome.trim() || linhas === 0 || salvando}
-          onClick={() => void onSalvar({ nome, texto })}
+          onClick={() => void onSalvar({ nome, texto, contatos: doArquivo ?? undefined })}
           className="inline-flex h-9 items-center gap-1.5 rounded-[var(--radius)] bg-primary px-4 text-xs font-bold uppercase text-primary-foreground disabled:opacity-50"
         >
           {salvando ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}

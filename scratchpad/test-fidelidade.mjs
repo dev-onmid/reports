@@ -16,7 +16,7 @@ import {
   limparMensagens, primeiroNome, MODELOS_FIDELIDADE, ORDEM_MODELOS, TRAVAS_PADRAO,
   PISO_INTERVALO_SEG, normalizarCupom, variaveisIndisponiveis, validarCampanha,
   varsDoDestinatario, parseListaManual, dentroDaJanela, diaPermitido, proximaExecucao,
-  MENSAGENS_LISTA_PADRAO, sugestaoDeTexto,
+  MENSAGENS_LISTA_PADRAO, sugestaoDeTexto, clienteDoContato, listaSegmentavel, GRUPOS_DA_BASE,
 } from './build/fidelidade.mjs';
 
 let n = 0;
@@ -552,6 +552,44 @@ const P = (m) => paramsPadrao(m);
   eq(sugestaoDeTexto('vip'), MODELOS_FIDELIDADE.vip.mensagensPadrao,
     'a sugestao continua disponivel — por botao, nao imposta');
   eq(sugestaoDeTexto(null), MENSAGENS_LISTA_PADRAO, 'lista tem sugestao propria');
+}
+
+// ── Base importada com historico vira segmento ──────────────────────────────
+{
+  const regua = { janelaDias: 30, inatividadeDias: 60 };
+  const agora = '2026-08-26T12:00:00.000Z';
+  const base = [
+    { telefone: '4399990001', nome: 'Ana', pedidos: 1, totalGasto: 80, ultimaCompra: '2026-08-20T12:00:00.000Z' },
+    { telefone: '4399990002', nome: 'Bruno', pedidos: 5, totalGasto: 900, ultimaCompra: '2026-07-10T12:00:00.000Z' },
+    { telefone: '4399990003', nome: 'Carla', pedidos: 3, totalGasto: 300, ultimaCompra: '2026-03-01T12:00:00.000Z' },
+    { telefone: '4399990004', nome: 'Sem data', pedidos: 2, totalGasto: 100, ultimaCompra: null },
+  ];
+
+  ok(listaSegmentavel(base), 'base com data e pedidos e segmentavel');
+  ok(!listaSegmentavel([{ telefone: 'x', nome: null, pedidos: null, totalGasto: null, ultimaCompra: null }]),
+    'base so com telefone NAO e segmentavel');
+
+  const clientes = base.map(c => clienteDoContato(c, regua, agora)).filter(Boolean);
+  eq(clientes.length, 3, '⚠️ contato sem data de compra fica FORA da segmentacao');
+  eq(clientes.map(c => c.etapa), ['novo', 'em_risco', 'inativo'],
+    'a etapa sai da foto: dentro da janela, passou dela, passou da inatividade');
+  eq(clientes[1].ticketMedio, 180, 'ticket = total gasto / pedidos');
+
+  const ctx = { regua, ticketMedioLoja: 100 };
+  eq(filtrarPublico(clientes, 'em_risco', paramsPadrao('em_risco'), ctx).map(c => c.nome), ['Bruno'],
+    'o filtro dos segmentos funciona igual na base importada');
+  eq(filtrarPublico(clientes, 'inativo', paramsPadrao('inativo'), ctx).map(c => c.nome), ['Carla'],
+    'inativo idem');
+
+  // ⚠️ `reconquistado` exige o INTERVALO entre as duas ultimas compras, que a
+  // planilha nao traz — por isso ele nao entra nos grupos da base importada.
+  ok(!GRUPOS_DA_BASE.includes('reconquistado'),
+    'reconquistado fica de fora: a foto nao permite deduzi-lo sem inventar');
+  eq(GRUPOS_DA_BASE.length, 4, 'quatro grupos possiveis a partir da planilha');
+
+  // Data futura / lixo nao quebra.
+  eq(clienteDoContato({ telefone: 'x', nome: null, pedidos: 1, totalGasto: 0, ultimaCompra: 'lixo' }, regua, agora),
+    null, 'data invalida deixa o contato fora, em vez de classifica-lo errado');
 }
 
 console.log(`OK — ${n} asserts (com motor)`);
