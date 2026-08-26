@@ -1,5 +1,18 @@
 @AGENTS.md
 
+## Publicação no Instagram/Facebook — escopo destravado e provado (2026-08-26)
+
+Pedido do Matheus: agendador de posts em massa (stories com frequência, mesmo post em vários clientes), "melhor que o Meta Business". Rodada de VIABILIDADE — nada do planejador foi construído ainda; o que foi feito é o destrave da credencial.
+
+- **⚠️ O token de produção NÃO tinha as permissões de publicar** — medido em `/me/permissions` (não deduzido do `FB_SCOPE`): 15 concedidas, `instagram_content_publish` e `pages_manage_posts` ausentes. `FB_SCOPE` ganhou as duas; o Matheus reconectou e a Meta **concedeu na hora, sem App Review** (17 concedidas). ⚠️ Era o risco de cronograma da feature inteira (Advanced Access leva 2–6 semanas) e ele não se materializou — o app já carrega Advanced Access de `ads_management`.
+- **⚠️ A reconexão TROCOU o dono do token**: a conexão da Letícia **sumiu do banco** (não ficou duplicata, ao contrário do previsto — o POST é INSERT puro, sem upsert). Hoje há 1 conexão, do Matheus, expirando **25/10/2026**. Cobertura MELHOROU: 48 → **55 contas de anúncio**, 57 → 56 páginas. **36 dos 37 clientes com IG seguem acessíveis**; o único fora é Elquis Galdino, que já estava com `monitored=false` e snapshot congelado em 18/07 — não dá para atribuir à reconexão.
+- ✅ **Provado ao vivo na @onmidmkt** (conta da própria agência, ig_id `17841458476481702`): container de mídia criado e `status_code=FINISHED`. **NÃO publicado** — container não publicado é invisível e expira em 24h, então é o teste de risco zero. Prova três coisas de uma vez: a permissão funciona, a conta é elegível, e **a Meta baixou o JPEG do NOSSO domínio** (`/api/reports/image-proxy`, que é público) — validando a arquitetura de mídia que o planejador vai precisar.
+- **O que a API permite** (conferido na doc, não de memória): `media_type=STORIES` existe, junto de IMAGE/REELS/CAROUSEL; teto de **100 publicações por conta / 24h**, stories no mesmo teto; **JPEG é o único formato de imagem**; a mídia precisa estar em **URL pública** (a Meta faz cURL na hora). **O Instagram NÃO tem agendamento nativo** — a fila tem de ser nossa (cron da VPS). O Facebook TEM (`scheduled_publish_time`, 10min a 30 dias).
+- **⚠️ Limite que não é nosso e precisa ser dito ao cliente**: a API publica story como **mídia pura**. Enquete, sticker de link, caixa de perguntas, música, menção @, hashtag e contagem regressiva **não são expostos por nenhum endpoint** — story que precisa disso continua manual. O que dá para configurar é mídia, horário, contas, frequência e ordem. `alt_text` não vale para stories/reels.
+- **Gaps de infra que sobraram para construir**: `client_assets` só aceita **URL** (não arquivo — falta multipart), **vídeo não é armazenado** (só link de referência), o `/raw` é autenticado (falta rota pública por token, padrão `/relatorio/[token]`), o container **não tem volume montado** (filesystem efêmero; host com 78 GB livres), e **não há lib de imagem no projeto** (converter PNG→JPEG: canvas no navegador evita dependência nova). A resolução cliente→conta já está pronta: `getIgAccount` devolve o `pageToken`, que é exatamente a credencial que a publicação exige.
+- ⚠️ Receita de diagnóstico usada aqui: `ssh root@2.25.144.71 'docker exec -i -w /app onmid-reports node -' < script.cjs` — o `-w /app` é obrigatório (o `pg` só resolve a partir do workdir) e o stdin não deixa arquivo no container (gravar em `/app` exige `-u root` para remover depois).
+
+
 ## Dashboard de Food/Delivery + editor de modelo (2026-08-15/16)
 
 Pedido do Matheus: dashboard própria para restaurante/delivery e, depois, um **modo edição de modelos** onde "editar tudo — tamanho de fonte, cores de box, ícones, métricas, arrastar, excluir, redimensionar, títulos".
