@@ -4,7 +4,7 @@ import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle, Clock, Crown, Loader2, ListChecks, Moon, MoreVertical,
   Pencil, Plus, PowerOff, RefreshCw, Repeat, Save, Search, ShieldCheck, Sparkles, Ticket,
-  Trash2, Upload, X, Zap, type LucideIcon,
+  Upload, Users, X, Zap, type LucideIcon,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { lerArquivoContatos, contatosParaTexto, type ContatoLido } from '@/lib/contatos-arquivo';
@@ -263,7 +263,6 @@ export function ClientFidelidadeTab({ clientId }: { clientId: string }) {
   const [carregando, setCarregando] = useState(true);
   const [editando, setEditando] = useState<string | null>(null);
   const [travasAbertas, setTravasAbertas] = useState(false);
-  const [novaLista, setNovaLista] = useState(false);
   const [criando, setCriando] = useState(false);
   const [rascunhos, setRascunhos] = useState<Record<string, Campanha>>({});
   const [travasDraft, setTravasDraft] = useState<Travas | null>(null);
@@ -378,9 +377,28 @@ export function ClientFidelidadeTab({ clientId }: { clientId: string }) {
     } finally { setSalvando(null); }
   }, [clientId, carregar]);
 
-  const criarCampanhaDaLista = useCallback(async (lista: Lista) => {
-    await criarCampanha({ fonte: 'lista', listaId: lista.id, nome: `Oferta — ${lista.nome}` });
-  }, [criarCampanha]);
+  /**
+   * Sobe a lista E cria a campanha dela numa tacada.
+   *
+   * ⚠️ A lista deixou de ser uma entidade visível na tela: ela é um detalhe de
+   * COMO a campanha achou o público. Ter uma tabela de listas separada obrigava
+   * o gestor a fazer duas coisas para conseguir uma.
+   */
+  const criarComLista = useCallback(async (
+    l: { nome: string; texto: string; contatos?: ContatoLido[] },
+  ) => {
+    setSalvando('nova'); setErro(null);
+    try {
+      const r = await fetch(`/api/clients/${clientId}/fidelidade`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lista: l }),
+      });
+      const d = await r.json().catch(() => ({})) as { error?: string; lista?: { id: string } };
+      if (!r.ok || !d.lista?.id) { setErro(d.error ?? 'Não consegui salvar a lista.'); return false; }
+      await criarCampanha({ fonte: 'lista', listaId: d.lista.id, nome: `Oferta — ${l.nome}` });
+      return true;
+    } finally { setSalvando(null); }
+  }, [clientId, criarCampanha]);
 
   const capacidade = useMemo(() => (travasDraft ? capacidadeDaJanela(travasDraft) : 0), [travasDraft]);
 
@@ -573,14 +591,6 @@ export function ClientFidelidadeTab({ clientId }: { clientId: string }) {
             </div>
           )}
 
-          {/* Listas em TABELA */}
-          <TabelaListas
-            listas={painel?.listas ?? []} salvando={salvando}
-            onNova={() => setNovaLista(true)}
-            onExcluir={(id) => patch({ excluirLista: id }, 'lista')}
-            onCriarCampanha={(l) => void criarCampanhaDaLista(l)}
-          />
-
           {!painel?.conectado && (
             <p className="text-[11px] leading-relaxed text-muted-foreground">
               As campanhas por consumo (comprou uma vez só, em risco, inativo, VIP) precisam do
@@ -688,20 +698,11 @@ export function ClientFidelidadeTab({ clientId }: { clientId: string }) {
             conectado={!!painel?.conectado}
             salvando={salvando === 'nova'}
             onEscolher={(e) => void criarCampanha(e)}
-            onNovaLista={() => { setCriando(false); setNovaLista(true); }}
+            onSubirLista={criarComLista}
           />
         </Drawer>
       )}
 
-      {novaLista && (
-        <Drawer titulo="Nova lista" subtitulo="Telefones que você mesmo sobe — sem depender de integração"
-          onClose={() => setNovaLista(false)}>
-          <FormLista
-            salvando={salvando === 'lista'}
-            onSalvar={async (l) => { const ok = await patch({ lista: l }, 'lista'); if (ok) setNovaLista(false); return ok; }}
-          />
-        </Drawer>
-      )}
     </div>
   );
 }
@@ -867,141 +868,118 @@ function CampanhaCard({
  * texto, cupom e cadência vêm no editor, depois.
  */
 function NovaCampanha({
-  listas, segmentos, conectado, salvando, onEscolher, onNovaLista,
+  listas, segmentos, conectado, salvando, onEscolher, onSubirLista,
 }: {
   listas: Lista[]; segmentos: Segmento[]; conectado: boolean; salvando: boolean;
   onEscolher: (e: { fonte: 'lista'; listaId: string; nome: string }
                 | { fonte: 'segmento'; modelo: ModeloId; nome: string }) => void;
-  onNovaLista: () => void;
+  onSubirLista: (l: { nome: string; texto: string; contatos?: ContatoLido[] }) => Promise<boolean>;
 }) {
-  return (
-    <div className="space-y-5">
-      <div>
-        <Rotulo>Uma lista que você subiu</Rotulo>
-        <p className="mt-1 text-[11px] text-muted-foreground">
-          Telefones cadastrados por você. Não depende de integração nenhuma.
-        </p>
-        <div className="mt-2 space-y-1.5">
-          {listas.length === 0 ? (
-            <button onClick={onNovaLista}
-              className="w-full rounded-[var(--radius)] border border-dashed border-border p-3 text-left text-xs text-muted-foreground hover:text-foreground">
-              Nenhuma lista ainda — clique para subir um Excel/CSV ou colar telefones.
-            </button>
-          ) : listas.map((l) => (
-            <button key={l.id} disabled={salvando}
-              onClick={() => onEscolher({ fonte: 'lista', listaId: l.id, nome: `Oferta — ${l.nome}` })}
-              className="flex w-full items-center gap-3 rounded-[var(--radius)] border border-border p-3 text-left hover:border-primary/50 disabled:opacity-50">
-              <span className="min-w-0 flex-1 truncate text-sm">{l.nome}</span>
-              <span className="shrink-0 text-[11px] text-muted-foreground">{l.contatos} contatos</span>
-            </button>
-          ))}
-        </div>
-      </div>
+  const [etapa, setEtapa] = useState<'escolha' | 'lista' | 'base'>('escolha');
 
-      <div>
-        <Rotulo>Ou um grupo por comportamento de compra</Rotulo>
-        <p className="mt-1 text-[11px] text-muted-foreground">
-          Recalculado a cada disparo — quem mudou de comportamento entra e sai sozinho.
-        </p>
+  if (etapa === 'lista') {
+    return (
+      <div className="space-y-3">
+        <button onClick={() => setEtapa('escolha')}
+          className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground hover:text-foreground">
+          ← Voltar
+        </button>
+        <FormLista salvando={salvando} onSalvar={onSubirLista} />
+
+        {listas.length > 0 && (
+          <div className="border-t border-border pt-3">
+            <Rotulo>Ou reaproveitar uma lista já enviada</Rotulo>
+            <div className="mt-2 space-y-1.5">
+              {listas.map((l) => (
+                <button key={l.id} disabled={salvando}
+                  onClick={() => onEscolher({ fonte: 'lista', listaId: l.id, nome: `Oferta — ${l.nome}` })}
+                  className="flex w-full items-center gap-3 rounded-[var(--radius)] border border-border p-2.5 text-left hover:border-primary/50 disabled:opacity-50">
+                  <span className="min-w-0 flex-1 truncate text-sm">{l.nome}</span>
+                  <span className="shrink-0 text-[11px] text-muted-foreground">{l.contatos} contatos</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (etapa === 'base') {
+    return (
+      <div className="space-y-3">
+        <button onClick={() => setEtapa('escolha')}
+          className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground hover:text-foreground">
+          ← Voltar
+        </button>
         {!conectado ? (
-          <p className="mt-2 rounded-[var(--radius)] border border-dashed border-border p-3 text-[11px] leading-relaxed text-muted-foreground">
-            Precisa do Cardápio Web ou do Anota AI conectado: é de lá que vem o histórico
-            de pedidos que define esses grupos.
+          <p className="rounded-[var(--radius)] border border-dashed border-border p-4 text-[11px] leading-relaxed text-muted-foreground">
+            Este cliente não tem Cardápio Web nem Anota AI conectado, então o sistema ainda não
+            tem histórico de pedidos para separar a base. Suba uma planilha com{' '}
+            <strong className="text-foreground">última compra, nº de pedidos e total gasto</strong>{' '}
+            e os mesmos grupos passam a funcionar.
           </p>
         ) : (
-          <div className="mt-2 space-y-1.5">
+          <div className="space-y-1.5">
             {segmentos.map((seg) => {
               const meta = MODELOS_FIDELIDADE[seg.modelo];
+              const Icone = ICONE_MODELO[seg.modelo];
+              const cor = COR_MODELO[seg.modelo];
               return (
                 <button key={seg.modelo} disabled={salvando}
                   onClick={() => onEscolher({ fonte: 'segmento', modelo: seg.modelo, nome: meta.nome })}
-                  className="w-full rounded-[var(--radius)] border border-border p-3 text-left hover:border-primary/50 disabled:opacity-50">
-                  <div className="flex items-baseline justify-between gap-2">
-                    <span className="text-sm font-medium">{meta.nome}</span>
-                    <span className="shrink-0 text-[11px] text-muted-foreground">
-                      <strong className="font-heading text-base text-foreground">{seg.resumo.pessoas}</strong> pessoas
+                  className="flex w-full items-start gap-3 rounded-[var(--radius)] border border-border p-3 text-left hover:border-primary/50 disabled:opacity-50">
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[var(--radius)]"
+                    style={{ background: `color-mix(in srgb, ${cor} 14%, transparent)` }}>
+                    <Icone className="h-5 w-5" style={{ color: cor }} />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="flex items-baseline justify-between gap-2">
+                      <span className="text-sm font-medium">{meta.nome}</span>
+                      <span className="shrink-0 text-[11px] text-muted-foreground">
+                        <strong className="font-heading text-base text-foreground">{seg.resumo.pessoas}</strong> pessoas
+                      </span>
                     </span>
-                  </div>
-                  <p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-muted-foreground">
-                    {meta.objetivo}
-                  </p>
+                    <span className="mt-1 line-clamp-2 block text-[11px] leading-relaxed text-muted-foreground">
+                      {meta.objetivo}
+                    </span>
+                  </span>
                 </button>
               );
             })}
           </div>
         )}
       </div>
+    );
+  }
 
-      {salvando && (
-        <p className="flex items-center gap-2 text-xs text-muted-foreground">
-          <Loader2 className="h-3.5 w-3.5 animate-spin" /> Criando…
-        </p>
-      )}
-    </div>
-  );
-}
-
-// ──────────────────────────────────────────────────────────── Listas (tabela)
-
-function TabelaListas({ listas, salvando, onNova, onExcluir, onCriarCampanha }: {
-  listas: Lista[]; salvando: string | null; onNova: () => void;
-  onExcluir: (id: string) => void; onCriarCampanha: (l: Lista) => void;
-}) {
+  // Escolha: as duas origens de público, lado a lado.
   return (
-    <Card>
-      <div className="flex items-center justify-between gap-2 border-b border-border p-3">
-        <h3 className="font-heading text-lg uppercase leading-none">Listas</h3>
-        <button
-          onClick={onNova}
-          className="inline-flex h-8 items-center gap-1.5 rounded-[var(--radius)] bg-primary px-3 text-[11px] font-bold uppercase text-primary-foreground"
-        >
-          <Upload className="h-3 w-3" /> Nova lista
-        </button>
-      </div>
-      {listas.length === 0 ? (
-        <p className="p-4 text-xs text-muted-foreground">
-          Nenhuma lista. Suba um Excel/CSV ou cole os telefones para disparar sem depender de integração.
-        </p>
-      ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[520px] text-sm">
-            <thead>
-              <tr className="border-b border-border text-left text-[10px] uppercase tracking-widest text-muted-foreground">
-                <th className="px-3 py-2 font-bold">Lista</th>
-                <th className="px-3 py-2 text-right font-bold">Contatos</th>
-                <th className="px-3 py-2 font-bold">Criada em</th>
-                <th className="px-3 py-2" />
-              </tr>
-            </thead>
-            <tbody>
-              {listas.map((l) => (
-                <tr key={l.id} className="border-b border-border/50 last:border-0">
-                  <td className="px-3 py-2">{l.nome}</td>
-                  <td className="px-3 py-2 text-right font-heading text-base">{l.contatos}</td>
-                  <td className="px-3 py-2 text-xs text-muted-foreground">
-                    {new Date(l.criadoEm).toLocaleDateString('pt-BR')}
-                  </td>
-                  <td className="px-3 py-2">
-                    <div className="flex items-center justify-end gap-3">
-                      <button onClick={() => onCriarCampanha(l)}
-                        disabled={salvando === 'lista'}
-                        className="text-[10px] font-bold uppercase tracking-wide text-primary disabled:opacity-50">
-                        Criar campanha
-                      </button>
-                      <button
-                        onClick={() => { if (confirm(`Excluir a lista "${l.nome}"? As campanhas que usam ela são desativadas.`)) onExcluir(l.id); }}
-                        className="text-muted-foreground hover:text-destructive" title="Excluir lista">
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </Card>
+    <div className="grid gap-3 sm:grid-cols-2">
+      <button onClick={() => setEtapa('lista')}
+        className="flex flex-col items-center gap-3 rounded-[var(--radius)] border border-border p-6 text-center hover:border-primary/50">
+        <span className="flex h-14 w-14 items-center justify-center rounded-full bg-primary/10">
+          <Upload className="h-6 w-6 text-primary" />
+        </span>
+        <span className="font-heading text-lg uppercase leading-none">Subir uma lista</span>
+        <span className="text-[11px] leading-relaxed text-muted-foreground">
+          Excel, CSV ou telefones colados. Se a planilha trouxer última compra, pedidos e total
+          gasto, o sistema separa a base sozinho.
+        </span>
+      </button>
+
+      <button onClick={() => setEtapa('base')}
+        className="flex flex-col items-center gap-3 rounded-[var(--radius)] border border-border p-6 text-center hover:border-primary/50">
+        <span className="flex h-14 w-14 items-center justify-center rounded-full bg-secondary/10">
+          <Users className="h-6 w-6 text-secondary" />
+        </span>
+        <span className="font-heading text-lg uppercase leading-none">Base do sistema</span>
+        <span className="text-[11px] leading-relaxed text-muted-foreground">
+          Os clientes que já compraram, separados por comportamento: em risco, inativo, VIP,
+          comprou uma vez só. Recalculado a cada disparo.
+        </span>
+      </button>
+    </div>
   );
 }
 
