@@ -69,7 +69,18 @@ jobs:
           chmod 600 ~/.ssh/deploy_key
           # Fixa a identidade do host: sem isso, StrictHostKeyChecking=no aceitaria
           # qualquer servidor que respondesse no IP.
-          ssh-keyscan -H "$VPS_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          #
+          # ⚠️ O `2>/dev/null` daqui já custou duas investigações: quando o
+          # runner não alcança a VPS, o ssh-keyscan sai != 0, o `set -e` aborta
+          # o passo e o log fica COMPLETAMENTE VAZIO — o deploy falha sem dizer
+          # por quê. Agora o erro é impresso e a mensagem diz onde olhar.
+          echo "→ conferindo acesso SSH a $VPS_HOST"
+          if ! ssh-keyscan -T 10 -H "$VPS_HOST" >> ~/.ssh/known_hosts; then
+            echo "::error::Sem resposta SSH de $VPS_HOST na porta 22 a partir do runner." \
+                 "A imagem foi construída, mas NÃO foi publicada — produção segue na versão anterior." \
+                 "Confira se a VPS está de pé e se o firewall/fail2ban não está bloqueando os IPs do GitHub Actions."
+            exit 1
+          fi
 
           SSH="ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes"
 
