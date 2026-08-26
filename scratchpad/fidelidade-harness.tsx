@@ -19,6 +19,8 @@ import { ClientFidelidadeTab } from '../src/app/(dashboard)/clientes/[id]/fideli
 const q = new URLSearchParams(location.search);
 const DESATIVADA = q.has('desativada');
 const SEM_DELIVERY = q.has('semdelivery');
+// ?vazio=1 → cliente novo, sem nenhuma campanha criada (o estado inicial real)
+const VAZIO = q.has('vazio');
 
 const PESSOAS = (n: number, base: number) =>
   Array.from({ length: n }, (_, i) => ({
@@ -50,7 +52,7 @@ const RESPOSTA = {
     intervaloMinSeg: 120, tetoDiario: 50, janelaInicio: '09:00', janelaFim: '20:00',
     diasSemana: [1, 2, 3, 4, 5, 6], cooldownDias: 7, optoutAtivo: true,
   },
-  campanhas: [
+  campanhas: VAZIO ? [] : [
     campanhaSegmento('primeira_recompra', { diasMin: 10, diasMax: 120 }, [
       'Oi, {{primeiro_nome}}! Faz {{dias}} dias do seu primeiro pedido na {{loja}} 😊 Use o cupom {{cupom}} e volte hoje.',
       'E aí, {{primeiro_nome}}! Que tal a segunda rodada? {{cupom}} é seu.',

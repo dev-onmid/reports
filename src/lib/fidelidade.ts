@@ -475,10 +475,13 @@ export function variaveisIndisponiveis(texto: string, fonte: FonteCampanha): str
  */
 export function validarCampanha(
   mensagens: string[], fonte: FonteCampanha, cupom?: string | null,
+  opcoes: { rascunho?: boolean } = {},
 ): string[] {
   const erros: string[] = [];
   const textos = mensagens.filter(m => m.trim());
-  if (textos.length === 0) erros.push('Escreva pelo menos uma mensagem.');
+  // Campanha recém-criada não tem texto ainda — isso não é erro, é rascunho.
+  // O que não pode é ATIVAR sem mensagem, e aí `rascunho` é false.
+  if (textos.length === 0 && !opcoes.rascunho) erros.push('Escreva pelo menos uma mensagem.');
 
   for (const [i, texto] of textos.entries()) {
     const desconhecidas = variaveisDesconhecidas(texto);
@@ -524,14 +527,25 @@ export const MENSAGENS_LISTA_PADRAO = [
 ];
 
 /** Mensagem vazia não pode ser salva como variação — viraria envio em branco. */
-export function limparMensagens(bruto: unknown, modelo: ModeloId | null): string[] {
+export function limparMensagens(
+  bruto: unknown, modelo: ModeloId | null, opcoes: { permitirVazio?: boolean } = {},
+): string[] {
   const lista = Array.isArray(bruto) ? bruto : [];
   const limpas = lista
     .map(m => (typeof m === 'string' ? m.trim() : ''))
     .filter(m => m.length > 0)
     .slice(0, 3);
   if (limpas.length > 0) return limpas;
-  // Campanha de lista manual não tem modelo — cai no texto genérico.
+  // ⚠️ `permitirVazio` existe porque campanha NOVA nasce sem texto: quem
+  // escreve é o gestor. Injetar o texto de fábrica fazia a campanha parecer
+  // pronta e dele — foi exatamente a reclamação ("limpa esse padrão").
+  // O fallback continua valendo na LEITURA de linha antiga sem mensagem.
+  if (opcoes.permitirVazio) return [];
+  return modelo ? [...MODELOS_FIDELIDADE[modelo].mensagensPadrao] : [...MENSAGENS_LISTA_PADRAO];
+}
+
+/** Sugestão de texto do modelo — oferecida por botão, nunca imposta. */
+export function sugestaoDeTexto(modelo: ModeloId | null): string[] {
   return modelo ? [...MODELOS_FIDELIDADE[modelo].mensagensPadrao] : [...MENSAGENS_LISTA_PADRAO];
 }
 

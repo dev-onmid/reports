@@ -3,14 +3,14 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle, Loader2, MoreVertical, Pencil, PowerOff, RefreshCw, Save,
-  Image as ImageIcon, Search, ShieldCheck, Ticket, Trash2, Upload, X, Zap,
+  Image as ImageIcon, Plus, Search, ShieldCheck, Ticket, Trash2, Upload, X, Zap,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { lerArquivoContatos } from '@/lib/contatos-arquivo';
 import {
   MODELOS_FIDELIDADE, VARIAVEIS, DIAS_SEMANA_LABEL, PISO_INTERVALO_SEG,
   STATUS_ENVIO_LABEL, aplicarVars, capacidadeDaJanela, diasParaTerminar,
-  progressoDaExecucao, proximasExecucoes, rotuloMotivo, varsDoDestinatario,
+  progressoDaExecucao, proximasExecucoes, rotuloMotivo, sugestaoDeTexto, varsDoDestinatario,
   variaveisDesconhecidas, variaveisIndisponiveis, validarCampanha,
   type FonteCampanha, type ModeloId, type ParamsRegua, type Travas,
 } from '@/lib/fidelidade';
@@ -261,6 +261,7 @@ export function ClientFidelidadeTab({ clientId }: { clientId: string }) {
   const [editando, setEditando] = useState<string | null>(null);
   const [travasAbertas, setTravasAbertas] = useState(false);
   const [novaLista, setNovaLista] = useState(false);
+  const [criando, setCriando] = useState(false);
   const [rascunhos, setRascunhos] = useState<Record<string, Campanha>>({});
   const [travasDraft, setTravasDraft] = useState<Travas | null>(null);
   const [salvando, setSalvando] = useState<string | null>(null);
@@ -347,24 +348,36 @@ export function ClientFidelidadeTab({ clientId }: { clientId: string }) {
     } finally { setSalvando(null); }
   }, [clientId, carregarAcomp]);
 
-  const criarCampanhaDaLista = useCallback(async (lista: Lista) => {
-    const existente = Object.values(rascunhos).find(c => c.fonte === 'lista' && c.listaId === lista.id);
-    if (existente?.id) { setEditando(existente.id); return; }
-    setSalvando('lista'); setErro(null);
+  /**
+   * Cria a campanha e abre o editor dela.
+   *
+   * ⚠️ Nasce SEM texto, de propósito: quem escreve a mensagem é o gestor. Os
+   * modelos entram só como escolha de público, com a sugestão de texto
+   * disponível por botão dentro do editor.
+   */
+  const criarCampanha = useCallback(async (
+    escolha: { fonte: 'lista'; listaId: string; nome: string }
+           | { fonte: 'segmento'; modelo: ModeloId; nome: string },
+  ) => {
+    setSalvando('nova'); setErro(null);
     try {
       const r = await fetch(`/api/clients/${clientId}/fidelidade`, {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          fonte: 'lista', listaId: lista.id, nome: `Oferta — ${lista.nome}`,
-          mensagens: [], diasSemana: [1, 2, 3, 4, 5, 6], hora: '18:00', ativa: false,
+          ...escolha, mensagens: [], diasSemana: [1, 2, 3, 4, 5, 6], hora: '18:00', ativa: false,
         }),
       });
       const d = await r.json().catch(() => ({})) as { error?: string; campanha?: Campanha };
       if (!r.ok || !d.campanha?.id) { setErro(d.error ?? 'Não foi possível criar a campanha.'); return; }
       await carregar();
+      setCriando(false);
       setEditando(d.campanha.id);
     } finally { setSalvando(null); }
-  }, [clientId, carregar, rascunhos]);
+  }, [clientId, carregar]);
+
+  const criarCampanhaDaLista = useCallback(async (lista: Lista) => {
+    await criarCampanha({ fonte: 'lista', listaId: lista.id, nome: `Oferta — ${lista.nome}` });
+  }, [criarCampanha]);
 
   const capacidade = useMemo(() => (travasDraft ? capacidadeDaJanela(travasDraft) : 0), [travasDraft]);
 
@@ -488,6 +501,12 @@ export function ClientFidelidadeTab({ clientId }: { clientId: string }) {
                 className="h-9 w-full rounded-[var(--radius)] border border-border bg-background pl-7 pr-2 text-sm"
               />
             </div>
+            <button
+              onClick={() => setCriando(true)}
+              className="inline-flex h-9 items-center gap-1.5 rounded-[var(--radius)] bg-primary px-4 text-xs font-bold uppercase text-primary-foreground"
+            >
+              <Plus className="h-3.5 w-3.5" /> Nova campanha
+            </button>
             {([['', 'Todas'], ['ativas', 'Ativas'], ['pausadas', 'Pausadas']] as const).map(([v, label]) => {
               const n = v === '' ? todas.length : v === 'ativas' ? ativas : todas.length - ativas;
               return (
@@ -506,10 +525,24 @@ export function ClientFidelidadeTab({ clientId }: { clientId: string }) {
 
           {/* GRADE de campanhas */}
           {visiveis.length === 0 ? (
-            <Card className="p-6 text-center">
-              <p className="text-sm text-muted-foreground">
-                {todas.length === 0 ? 'Nenhuma campanha ainda.' : 'Nenhuma campanha com esse filtro.'}
-              </p>
+            <Card className="p-8 text-center">
+              {todas.length === 0 ? (
+                <>
+                  <p className="font-heading text-lg uppercase">Nenhuma campanha ainda</p>
+                  <p className="mx-auto mt-2 max-w-md text-xs leading-relaxed text-muted-foreground">
+                    Crie a primeira escolhendo de onde vem o público: uma lista que você mesmo sobe,
+                    ou um grupo de clientes por comportamento de compra.
+                  </p>
+                  <button
+                    onClick={() => setCriando(true)}
+                    className="mx-auto mt-4 inline-flex h-9 items-center gap-1.5 rounded-[var(--radius)] bg-primary px-4 text-xs font-bold uppercase text-primary-foreground"
+                  >
+                    <Plus className="h-3.5 w-3.5" /> Criar campanha
+                  </button>
+                </>
+              ) : (
+                <p className="text-sm text-muted-foreground">Nenhuma campanha com esse filtro.</p>
+              )}
             </Card>
           ) : (
             <div className="grid gap-3 lg:grid-cols-2">
@@ -640,6 +673,20 @@ export function ClientFidelidadeTab({ clientId }: { clientId: string }) {
               Salvar travas
             </button>
           </div>
+        </Drawer>
+      )}
+
+      {criando && (
+        <Drawer titulo="Nova campanha" subtitulo="Escolha de onde vem o público"
+          onClose={() => setCriando(false)}>
+          <NovaCampanha
+            listas={painel?.listas ?? []}
+            segmentos={painel?.segmentos ?? []}
+            conectado={!!painel?.conectado}
+            salvando={salvando === 'nova'}
+            onEscolher={(e) => void criarCampanha(e)}
+            onNovaLista={() => { setCriando(false); setNovaLista(true); }}
+          />
         </Drawer>
       )}
 
@@ -788,6 +835,87 @@ function CampanhaCard({
         </div>
       </div>
     </Card>
+  );
+}
+
+// ───────────────────────────────────────────────────────── Nova campanha
+
+/**
+ * Escolha do público. É o único passo obrigatório para a campanha existir —
+ * texto, cupom e cadência vêm no editor, depois.
+ */
+function NovaCampanha({
+  listas, segmentos, conectado, salvando, onEscolher, onNovaLista,
+}: {
+  listas: Lista[]; segmentos: Segmento[]; conectado: boolean; salvando: boolean;
+  onEscolher: (e: { fonte: 'lista'; listaId: string; nome: string }
+                | { fonte: 'segmento'; modelo: ModeloId; nome: string }) => void;
+  onNovaLista: () => void;
+}) {
+  return (
+    <div className="space-y-5">
+      <div>
+        <Rotulo>Uma lista que você subiu</Rotulo>
+        <p className="mt-1 text-[11px] text-muted-foreground">
+          Telefones cadastrados por você. Não depende de integração nenhuma.
+        </p>
+        <div className="mt-2 space-y-1.5">
+          {listas.length === 0 ? (
+            <button onClick={onNovaLista}
+              className="w-full rounded-[var(--radius)] border border-dashed border-border p-3 text-left text-xs text-muted-foreground hover:text-foreground">
+              Nenhuma lista ainda — clique para subir um Excel/CSV ou colar telefones.
+            </button>
+          ) : listas.map((l) => (
+            <button key={l.id} disabled={salvando}
+              onClick={() => onEscolher({ fonte: 'lista', listaId: l.id, nome: `Oferta — ${l.nome}` })}
+              className="flex w-full items-center gap-3 rounded-[var(--radius)] border border-border p-3 text-left hover:border-primary/50 disabled:opacity-50">
+              <span className="min-w-0 flex-1 truncate text-sm">{l.nome}</span>
+              <span className="shrink-0 text-[11px] text-muted-foreground">{l.contatos} contatos</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div>
+        <Rotulo>Ou um grupo por comportamento de compra</Rotulo>
+        <p className="mt-1 text-[11px] text-muted-foreground">
+          Recalculado a cada disparo — quem mudou de comportamento entra e sai sozinho.
+        </p>
+        {!conectado ? (
+          <p className="mt-2 rounded-[var(--radius)] border border-dashed border-border p-3 text-[11px] leading-relaxed text-muted-foreground">
+            Precisa do Cardápio Web ou do Anota AI conectado: é de lá que vem o histórico
+            de pedidos que define esses grupos.
+          </p>
+        ) : (
+          <div className="mt-2 space-y-1.5">
+            {segmentos.map((seg) => {
+              const meta = MODELOS_FIDELIDADE[seg.modelo];
+              return (
+                <button key={seg.modelo} disabled={salvando}
+                  onClick={() => onEscolher({ fonte: 'segmento', modelo: seg.modelo, nome: meta.nome })}
+                  className="w-full rounded-[var(--radius)] border border-border p-3 text-left hover:border-primary/50 disabled:opacity-50">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span className="text-sm font-medium">{meta.nome}</span>
+                    <span className="shrink-0 text-[11px] text-muted-foreground">
+                      <strong className="font-heading text-base text-foreground">{seg.resumo.pessoas}</strong> pessoas
+                    </span>
+                  </div>
+                  <p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-muted-foreground">
+                    {meta.objetivo}
+                  </p>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {salvando && (
+        <p className="flex items-center gap-2 text-xs text-muted-foreground">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" /> Criando…
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -1196,9 +1324,20 @@ function EditorCampanha({
       <div>
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <Rotulo>Mensagens (rodízio entre as três)</Rotulo>
-          <p className="text-[10px] text-muted-foreground">
-            {VARIAVEIS.filter(v => campanha.fonte !== 'lista' || !v.consumo).map(v => `{{${v.chave}}}`).join('  ')}
-          </p>
+          <div className="flex items-center gap-2">
+            {/* Sugestão OFERECIDA, não imposta: a campanha nasce em branco. */}
+            {campanha.mensagens.filter(Boolean).length === 0 && (
+              <button
+                onClick={() => onChange({ ...campanha, mensagens: sugestaoDeTexto(campanha.modelo) })}
+                className="text-[10px] font-bold uppercase tracking-wide text-primary"
+              >
+                Usar sugestão de texto
+              </button>
+            )}
+            <p className="text-[10px] text-muted-foreground">
+              {VARIAVEIS.filter(v => campanha.fonte !== 'lista' || !v.consumo).map(v => `{{${v.chave}}}`).join('  ')}
+            </p>
+          </div>
         </div>
         <div className="mt-2 space-y-3">
           {[0, 1, 2].map((i) => {

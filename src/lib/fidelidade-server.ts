@@ -61,12 +61,12 @@ export async function ensureFidelidadeSchema(pool: Pool) {
     `ALTER TABLE public.fidelidade_campanhas ADD COLUMN IF NOT EXISTS nome TEXT`,
     `ALTER TABLE public.fidelidade_campanhas ADD COLUMN IF NOT EXISTS proxima_execucao TIMESTAMPTZ`,
     `ALTER TABLE public.fidelidade_campanhas ADD COLUMN IF NOT EXISTS ultima_execucao TIMESTAMPTZ`,
-    // ⚠️ A unique passou a ser PARCIAL: um segmento por cliente continua valendo
-    // (senão duas campanhas do mesmo público brigariam sob o cooldown), mas
-    // listas manuais podem ser quantas forem.
+    // ⚠️ NÃO há unique por (cliente, modelo). O gestor cria quantas campanhas
+    // quiser do mesmo público — duas ofertas diferentes para "inativo" é caso
+    // legítimo. Quem impede a mesma pessoa de receber as duas é o COOLDOWN por
+    // telefone, na hora do envio; o schema não tem por que decidir isso.
     `DROP INDEX IF EXISTS public.fidelidade_campanhas_cliente_modelo_idx`,
-    `CREATE UNIQUE INDEX IF NOT EXISTS fidelidade_campanhas_cliente_segmento_idx
-       ON public.fidelidade_campanhas (client_id, modelo) WHERE fonte = 'segmento'`,
+    `DROP INDEX IF EXISTS public.fidelidade_campanhas_cliente_segmento_idx`,
     `CREATE INDEX IF NOT EXISTS fidelidade_campanhas_devidas_idx
        ON public.fidelidade_campanhas (ativa, proxima_execucao)`,
 
@@ -261,14 +261,10 @@ export async function listarCampanhas(pool: Pool, clientId: string): Promise<Cam
     [clientId],
   ).catch(() => ({ rows: [] as LinhaCampanha[] }));
 
-  const salvas = rows.map(linhaParaCampanha);
-  const porModelo = new Map(
-    salvas.filter(c => c.fonte === 'segmento' && c.modelo).map(c => [c.modelo!, c]),
-  );
-
-  const segmentos = ORDEM_MODELOS.map(m => porModelo.get(m) ?? campanhaPadrao(m));
-  const listas = salvas.filter(c => c.fonte === 'lista');
-  return [...segmentos, ...listas];
+  // ⚠️ Só o que o gestor criou. A versão anterior devolvia os 5 modelos como
+  // campanhas de fábrica, e eles apareciam na grade com texto pronto como se
+  // fossem dele — os modelos agora são só OPÇÃO na hora de criar.
+  return rows.map(linhaParaCampanha);
 }
 
 export async function salvarCampanha(
@@ -277,10 +273,11 @@ export async function salvarCampanha(
   const fonte: FonteCampanha = bruto.fonte === 'lista' ? 'lista' : 'segmento';
   const modelo = (MODELOS as readonly string[]).includes(String(bruto.modelo))
     ? String(bruto.modelo) as ModeloId : null;
-  if (fonte === 'segmento' && !modelo) throw new Error('Modelo inválido');
+  if (fonte === 'segmento' && !modelo) throw new Error('Escolha o público da campanha');
 
   const params = modelo ? normalizarParams(modelo, bruto.params) : {};
-  const mensagens = limparMensagens(bruto.mensagens, modelo);
+  // permitirVazio: campanha nova nasce sem texto, e quem escreve é o gestor.
+  const mensagens = limparMensagens(bruto.mensagens, modelo, { permitirVazio: true });
   const padrao = modelo ? MODELOS_FIDELIDADE[modelo].cadenciaPadrao : { diasSemana: [2], hora: '18:00' };
   const dias = parseDias(
     Array.isArray(bruto.diasSemana) ? (bruto.diasSemana as unknown[]).join(',') : null,
@@ -294,48 +291,32 @@ export async function salvarCampanha(
     ? bruto.imagemUrl.trim() : null;
   const cupom = normalizarCupom(bruto.cupom);
   const listaId = fonte === 'lista' && typeof bruto.listaId === 'string' ? bruto.listaId : null;
-  if (fonte === 'lista' && !listaId) throw new Error('Campanha de lista precisa de uma lista');
+  if (fonte === 'lista' && !listaId) throw new Error('Escolha a lista da campanha');
   const nome = typeof bruto.nome === 'string' && bruto.nome.trim()
     ? bruto.nome.trim().slice(0, 120)
     : (modelo ? MODELOS_FIDELIDADE[modelo].nome : 'Campanha');
-  const ativa = bruto.ativa === true;
+  // Sem mensagem, a campanha não pode estar ativa — o motor não teria o que enviar.
+  const ativa = bruto.ativa === true && mensagens.length > 0;
 
   const valores = [
     clientId, fonte, modelo, listaId, nome, JSON.stringify(params), JSON.stringify(mensagens),
     cupom, imagemUrl, dias.join(','), hora, tetoPublico, ativa,
   ];
 
-  // Segmento é idempotente pela unique parcial; lista é insert ou update por id.
-  if (fonte === 'segmento') {
-    const { rows } = await pool.query<LinhaCampanha>(
-      `INSERT INTO public.fidelidade_campanhas
-         (client_id, fonte, modelo, lista_id, nome, params, mensagens, cupom, imagem_url,
-          dias_semana, hora, teto_publico, ativa)
-       VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8,$9,$10,$11,$12,$13)
-       ON CONFLICT (client_id, modelo) WHERE fonte = 'segmento' DO UPDATE SET
-         params = EXCLUDED.params, mensagens = EXCLUDED.mensagens, cupom = EXCLUDED.cupom,
-         imagem_url = EXCLUDED.imagem_url, dias_semana = EXCLUDED.dias_semana,
-         hora = EXCLUDED.hora, teto_publico = EXCLUDED.teto_publico, nome = EXCLUDED.nome,
-         ativa = EXCLUDED.ativa, atualizado_em = NOW()
-       RETURNING ${COLS_CAMPANHA}`,
-      valores,
-    );
-    return linhaParaCampanha(rows[0]);
-  }
-
   const id = typeof bruto.id === 'string' && bruto.id ? bruto.id : null;
   if (id) {
     const { rows } = await pool.query<LinhaCampanha>(
       `UPDATE public.fidelidade_campanhas SET
-         lista_id = $4, nome = $5, params = $6::jsonb, mensagens = $7::jsonb, cupom = $8,
-         imagem_url = $9, dias_semana = $10, hora = $11, teto_publico = $12, ativa = $13,
-         atualizado_em = NOW()
+         fonte = $2, modelo = $3, lista_id = $4, nome = $5, params = $6::jsonb,
+         mensagens = $7::jsonb, cupom = $8, imagem_url = $9, dias_semana = $10,
+         hora = $11, teto_publico = $12, ativa = $13, atualizado_em = NOW()
        WHERE id = $14 AND client_id = $1
        RETURNING ${COLS_CAMPANHA}`,
       [...valores, id],
     );
     if (rows[0]) return linhaParaCampanha(rows[0]);
   }
+
   const { rows } = await pool.query<LinhaCampanha>(
     `INSERT INTO public.fidelidade_campanhas
        (client_id, fonte, modelo, lista_id, nome, params, mensagens, cupom, imagem_url,
@@ -349,7 +330,7 @@ export async function salvarCampanha(
 
 export async function excluirCampanha(pool: Pool, clientId: string, id: string): Promise<void> {
   await pool.query(
-    `DELETE FROM public.fidelidade_campanhas WHERE id = $1 AND client_id = $2 AND fonte = 'lista'`,
+    `DELETE FROM public.fidelidade_campanhas WHERE id = $1 AND client_id = $2`,
     [id, clientId],
   );
 }

@@ -8,7 +8,7 @@ import { agruparPorCliente, normalizarRegua, normalizarTelefoneBR } from '@/lib/
 import { getClientInstance } from '@/lib/followup-send';
 import {
   filtrarPublico, resumirSegmento, ORDEM_MODELOS, parseListaManual, validarCampanha,
-  limparMensagens, normalizarCupom, type FonteCampanha,
+  limparMensagens, normalizarCupom, paramsPadrao, type FonteCampanha,
 } from '@/lib/fidelidade';
 import {
   ensureFidelidadeSchema, listarCampanhas, lerTravas, salvarCampanha, salvarTravas,
@@ -97,10 +97,13 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
       ticketMedioLoja = pedidosTotal > 0 ? receitaTotal / pedidosTotal : 0;
       base = { clientes: clientes.length, comTelefone: clientes.filter(c => c.telefone).length };
 
+      // ⚠️ O segmento existe INDEPENDENTE de campanha: ele é a opção que o
+      // gestor escolhe ao criar. Se já houver campanha usando aquele modelo, a
+      // régua dela manda; senão, a de fábrica — mas só para dimensionar.
       const porModelo = new Map(campanhas.filter(c => c.modelo).map(c => [c.modelo!, c]));
       segmentos = ORDEM_MODELOS.map(modelo => {
-        const camp = porModelo.get(modelo)!;
-        const publico = filtrarPublico(clientes, modelo, camp.params, { regua, ticketMedioLoja });
+        const params = porModelo.get(modelo)?.params ?? paramsPadrao(modelo);
+        const publico = filtrarPublico(clientes, modelo, params, { regua, ticketMedioLoja });
         return {
           modelo,
           resumo: resumirSegmento(publico),
@@ -209,10 +212,13 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
       const fonte: FonteCampanha = body.fonte === 'lista' ? 'lista' : 'segmento';
       // A MESMA validação da tela roda aqui: é o que garante que nenhuma
       // campanha chega ao motor com texto que ele não sabe montar.
+      const modelo = fonte === 'segmento' ? (body.modelo as never) : null;
+      const mensagens = limparMensagens(body.mensagens, modelo, { permitirVazio: true });
       const erros = validarCampanha(
-        limparMensagens(body.mensagens, fonte === 'segmento' ? (body.modelo as never) : null),
-        fonte,
-        normalizarCupom(body.cupom),
+        mensagens, fonte, normalizarCupom(body.cupom),
+        // Sem texto e sem pedir ativação, é rascunho — a campanha acabou de
+        // nascer e o gestor ainda vai escrever.
+        { rascunho: body.ativa !== true },
       );
       if (erros.length > 0) return Response.json({ error: erros.join(' '), erros }, { status: 400 });
 

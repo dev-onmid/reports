@@ -16,7 +16,7 @@ import {
   limparMensagens, primeiroNome, MODELOS_FIDELIDADE, ORDEM_MODELOS, TRAVAS_PADRAO,
   PISO_INTERVALO_SEG, normalizarCupom, variaveisIndisponiveis, validarCampanha,
   varsDoDestinatario, parseListaManual, dentroDaJanela, diaPermitido, proximaExecucao,
-  MENSAGENS_LISTA_PADRAO,
+  MENSAGENS_LISTA_PADRAO, sugestaoDeTexto,
 } from './build/fidelidade.mjs';
 
 let n = 0;
@@ -524,6 +524,34 @@ const P = (m) => paramsPadrao(m);
     ok(!saida.includes('{{'), 'lista: nada de chave crua');
     ok(!/^[,;:!?]/.test(saida), 'lista: nao comeca com pontuacao orfa');
   }
+}
+
+// ── Campanha NOVA nasce sem texto ────────────────────────────────────────────
+{
+  // ⚠️ "Limpa esse padrão": a campanha nova NAO pode vir com o texto de
+  // fabrica, senao aparece na grade como se fosse escrita pelo gestor.
+  eq(limparMensagens([], 'vip', { permitirVazio: true }), [],
+    'campanha nova nasce sem mensagem');
+  eq(limparMensagens([], null, { permitirVazio: true }), [],
+    'idem para lista manual');
+  // Na LEITURA de linha antiga sem mensagem o fallback continua valendo.
+  eq(limparMensagens([], 'vip'), MODELOS_FIDELIDADE.vip.mensagensPadrao,
+    'sem permitirVazio, a leitura ainda cai no texto do modelo');
+
+  // Rascunho sem texto e valido; ativar sem texto, nao.
+  eq(validarCampanha([], 'segmento', null, { rascunho: true }), [],
+    'campanha recem-criada sem texto nao e erro');
+  eq(validarCampanha([], 'segmento', null).length, 1,
+    'mas ativar sem texto continua bloqueado');
+  eq(validarCampanha([''], 'lista', null, { rascunho: true }), [],
+    'so espaco tambem passa como rascunho');
+  // O resto da validacao continua valendo no rascunho.
+  ok(validarCampanha(['Faz {{dias}} dias'], 'lista', null, { rascunho: true })[0].includes('histórico'),
+    'variavel indisponivel e recusada mesmo em rascunho');
+
+  eq(sugestaoDeTexto('vip'), MODELOS_FIDELIDADE.vip.mensagensPadrao,
+    'a sugestao continua disponivel — por botao, nao imposta');
+  eq(sugestaoDeTexto(null), MENSAGENS_LISTA_PADRAO, 'lista tem sugestao propria');
 }
 
 console.log(`OK — ${n} asserts (com motor)`);
