@@ -217,6 +217,15 @@ const FB_SCOPE = [
   'pages_messaging',
   'read_insights',
   'instagram_basic',
+  // instagram_content_publish: publicar feed/reels/STORIES via API (o agendador de
+  // posts). pages_manage_posts: publicar/agendar na Página do Facebook — lá o
+  // agendamento é NATIVO (scheduled_publish_time, 10min a 30 dias); no Instagram
+  // NÃO existe agendamento na API, a fila é nossa. Medido em 2026-08-26: o token
+  // de produção NÃO tinha nenhuma das duas, por isso a reconexão é obrigatória.
+  // ⚠️ As duas podem exigir Advanced Access (App Review) — se a Meta recusar,
+  // elas voltam como `declined` em return_scopes e o resto segue concedido.
+  'instagram_content_publish',
+  'pages_manage_posts',
   'instagram_manage_insights',
   'instagram_manage_comments',
   'instagram_manage_messages',
