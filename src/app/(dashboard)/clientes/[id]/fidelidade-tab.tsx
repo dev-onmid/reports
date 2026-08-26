@@ -4,9 +4,10 @@ import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle, Clock, Crown, Loader2, ListChecks, Moon, MoreVertical,
   Pencil, Plus, PowerOff, RefreshCw, Repeat, Save, Search, ShieldCheck, Sparkles, Ticket,
-  Upload, Users, X, Zap, type LucideIcon,
+  Upload, Users, Zap, type LucideIcon,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { lerArquivoContatos, contatosParaTexto, type ContatoLido } from '@/lib/contatos-arquivo';
 import {
   MODELOS_FIDELIDADE, VARIAVEIS, DIAS_SEMANA_LABEL, PISO_INTERVALO_SEG,
@@ -197,30 +198,35 @@ function chaveCampanha(c: Campanha): string {
   return c.fonte === 'segmento' ? (c.modelo ?? 'sem-modelo') : (c.id ?? 'nova');
 }
 
-/** Painel lateral. Editar sem empurrar a grade para baixo. */
-function Drawer({ titulo, subtitulo, onClose, children }: {
-  titulo: string; subtitulo?: string; onClose: () => void; children: React.ReactNode;
+/**
+ * Modal do sistema — centralizado, o mesmo `Dialog` do "Configurar cliente".
+ *
+ * ⚠️ Era um painel lateral. Ele resolvia o problema de não empurrar a grade,
+ * mas fugia do padrão de todo o resto do app, e padrão quebrado num lugar só
+ * chama mais atenção que o problema que ele resolve.
+ *
+ * ⚠️ A largura precisa do prefixo `sm:`: o `DialogContent` do projeto já traz
+ * `sm:max-w-sm` embutido, e o twMerge não deduplica classe base contra classe
+ * com prefixo — um `max-w-3xl` solto seria ignorado a partir do breakpoint sm.
+ */
+function Modal({ titulo, subtitulo, onClose, children, largura = 'sm:max-w-3xl' }: {
+  titulo: string; subtitulo?: string; onClose: () => void;
+  children: React.ReactNode; largura?: string;
 }) {
-  useEffect(() => {
-    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    window.addEventListener('keydown', esc);
-    return () => window.removeEventListener('keydown', esc);
-  }, [onClose]);
-
   return (
-    <div className="fixed inset-0 z-[100]">
-      <div className="absolute inset-0 bg-black/60" onClick={onClose} />
-      <div className="absolute inset-y-0 right-0 flex w-full max-w-2xl flex-col border-l border-border bg-card shadow-2xl">
-        <div className="flex items-start justify-between gap-3 border-b border-border p-4">
-          <div className="min-w-0">
-            <h3 className="truncate font-heading text-xl uppercase leading-none">{titulo}</h3>
-            {subtitulo && <p className="mt-1 text-xs text-muted-foreground">{subtitulo}</p>}
-          </div>
-          <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><X className="h-5 w-5" /></button>
-        </div>
-        <div className="min-h-0 flex-1 overflow-y-auto p-4">{children}</div>
-      </div>
-    </div>
+    <Dialog open onOpenChange={(aberto) => { if (!aberto) onClose(); }}>
+      <DialogContent className={cn('w-[95vw] border-border bg-card p-0', largura)}>
+        <DialogHeader className="border-b border-border p-4 text-left">
+          <DialogTitle className="font-heading text-xl font-normal uppercase leading-none tracking-wider">
+            {titulo}
+          </DialogTitle>
+          {subtitulo && <p className="mt-1 text-xs text-muted-foreground">{subtitulo}</p>}
+        </DialogHeader>
+        {/* O corpo rola sozinho: campanha com 3 variações de texto passa da
+            altura da tela em notebook. */}
+        <div className="max-h-[70vh] overflow-y-auto p-4">{children}</div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -602,7 +608,7 @@ export function ClientFidelidadeTab({ clientId }: { clientId: string }) {
 
       {/* Painéis laterais */}
       {campEditando && (
-        <Drawer
+        <Modal
           titulo={campEditando.modelo ? MODELOS_FIDELIDADE[campEditando.modelo].nome : campEditando.nome}
           subtitulo={campEditando.fonte === 'lista' ? 'Campanha por lista' : 'Campanha por consumo'}
           onClose={() => setEditando(null)}
@@ -615,11 +621,11 @@ export function ClientFidelidadeTab({ clientId }: { clientId: string }) {
             onChange={(c) => setRascunhos(r => ({ ...r, [chaveCampanha(c)]: c }))}
             onSalvar={async (c) => { const ok = await patch(c, c.id ?? chaveCampanha(c)); if (ok) setEditando(null); }}
           />
-        </Drawer>
+        </Modal>
       )}
 
       {travasAbertas && travas && (
-        <Drawer titulo="Travas de segurança"
+        <Modal titulo="Travas de segurança"
           subtitulo="Valem para TODAS as campanhas deste cliente — a reputação é do número."
           onClose={() => setTravasAbertas(false)}>
           <div className="space-y-4">
@@ -686,11 +692,11 @@ export function ClientFidelidadeTab({ clientId }: { clientId: string }) {
               Salvar travas
             </button>
           </div>
-        </Drawer>
+        </Modal>
       )}
 
       {criando && (
-        <Drawer titulo="Nova campanha" subtitulo="Escolha de onde vem o público"
+        <Modal titulo="Nova campanha" subtitulo="Escolha de onde vem o público"
           onClose={() => setCriando(false)}>
           <NovaCampanha
             listas={painel?.listas ?? []}
@@ -700,7 +706,7 @@ export function ClientFidelidadeTab({ clientId }: { clientId: string }) {
             onEscolher={(e) => void criarCampanha(e)}
             onSubirLista={criarComLista}
           />
-        </Drawer>
+        </Modal>
       )}
 
     </div>
