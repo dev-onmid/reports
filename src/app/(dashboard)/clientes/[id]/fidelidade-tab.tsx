@@ -3,7 +3,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle, Loader2, MoreVertical, Pencil, PowerOff, RefreshCw, Save,
-  Search, Send, ShieldCheck, Ticket, Trash2, Upload, X, Zap,
+  Image as ImageIcon, Search, ShieldCheck, Ticket, Trash2, Upload, X, Zap,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { lerArquivoContatos } from '@/lib/contatos-arquivo';
@@ -56,6 +56,7 @@ type Campanha = {
   ativa: boolean;
   salva: boolean;
   ultimaExecucao: string | null;
+  criadoEm?: string | null;
 };
 
 type Lista = { id: string; nome: string; contatos: number; criadoEm: string };
@@ -79,6 +80,13 @@ type Painel = {
   base?: { clientes: number; comTelefone: number };
   instancia?: { provider: string; id: string } | null;
   travas?: Travas; campanhas?: Campanha[]; listas?: Lista[]; segmentos?: Segmento[];
+  resultados?: Record<string, Resultado>;
+};
+
+/** "Quanto trouxe de volta" — cruzamento de quem recebeu × quem pediu depois. */
+type Resultado = {
+  enviadas: number; pedidos: number; receita: number;
+  conversao: number | null; ticketMedio: number | null; porCupom: number;
 };
 
 type Acompanhamento = {
@@ -165,6 +173,21 @@ function dataCurta(d: Date): { dia: string; data: string } {
       .replace('.', '').slice(0, 3).toUpperCase(),
     data: d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', timeZone: 'America/Sao_Paulo' }),
   };
+}
+
+const brl = (n: number) => n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+
+/** "há 3 meses (14/05/2026)" — o mesmo rótulo do painel de referência. */
+function criadaEm(iso: string | null | undefined): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const dias = Math.floor((Date.now() - d.getTime()) / 86_400_000);
+  const quando = dias < 1 ? 'hoje'
+    : dias < 30 ? `há ${dias} dia${dias > 1 ? 's' : ''}`
+    : dias < 365 ? `há ${Math.floor(dias / 30)} ${Math.floor(dias / 30) > 1 ? 'meses' : 'mês'}`
+    : `há ${Math.floor(dias / 365)} ano${Math.floor(dias / 365) > 1 ? 's' : ''}`;
+  return `Criada ${quando} (${d.toLocaleDateString('pt-BR')})`;
 }
 
 function chaveCampanha(c: Campanha): string {
@@ -502,6 +525,7 @@ export function ClientFidelidadeTab({ clientId }: { clientId: string }) {
                   objetivo={c.modelo ? MODELOS_FIDELIDADE[c.modelo].objetivo
                     : (painel?.listas?.find(l => l.id === c.listaId)?.nome ?? 'Lista removida')}
                   execucao={c.id ? execPorCampanha.get(c.id) : undefined}
+                  resultado={c.id ? painel?.resultados?.[c.id] : undefined}
                   travas={travas} salvando={salvando === (c.id ?? chaveCampanha(c))}
                   onEditar={() => setEditando(c.id ?? chaveCampanha(c))}
                   onDisparar={c.id && c.salva ? () => disparar(c.id!) : undefined}
@@ -635,11 +659,11 @@ export function ClientFidelidadeTab({ clientId }: { clientId: string }) {
 // ─────────────────────────────────────────────────────── Card de campanha
 
 function CampanhaCard({
-  campanha, cor, publico, objetivo, execucao, travas, salvando,
+  campanha, cor, publico, objetivo, execucao, resultado, travas, salvando,
   onEditar, onDisparar, onAlternar, onVerEnvios, onExcluir,
 }: {
   campanha: Campanha; cor: string; publico: number; objetivo: string;
-  execucao?: Execucao; travas: Travas | null; salvando: boolean;
+  execucao?: Execucao; resultado?: Resultado; travas: Travas | null; salvando: boolean;
   onEditar: () => void; onDisparar?: () => void; onAlternar: () => void;
   onVerEnvios?: () => void; onExcluir?: () => void;
 }) {
@@ -649,69 +673,85 @@ function CampanhaCard({
     () => proximasExecucoes(campanha.diasSemana, campanha.hora, new Date(), 4),
     [campanha.diasSemana, campanha.hora],
   );
+  const titulo = campanha.modelo ? MODELOS_FIDELIDADE[campanha.modelo].nome : campanha.nome;
+  const enviadas = resultado?.enviadas ?? 0;
+  // ⚠️ Sem envio não há o que atribuir: receita e pedidos viram travessão, não
+  // zero. "R$ 0,00" afirmaria que a campanha rodou e não vendeu.
+  const medido = enviadas > 0 ? resultado : undefined;
 
   return (
     <Card className="flex flex-col overflow-hidden">
       <div className="h-1 w-full shrink-0" style={{ background: cor }} />
 
       <div className="flex-1 p-4">
-        <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0">
-            <h3 className="truncate font-heading text-lg uppercase leading-none">
-              {campanha.modelo ? MODELOS_FIDELIDADE[campanha.modelo].nome : campanha.nome}
-            </h3>
-            <p className="mt-1 line-clamp-1 text-[11px] text-muted-foreground">{objetivo}</p>
+        {/* Miniatura + conteúdo, como no painel de referência. */}
+        <div className="flex gap-3">
+          <div className="hidden h-24 w-24 shrink-0 items-center justify-center overflow-hidden rounded-[var(--radius)] bg-background sm:flex">
+            {campanha.imagemUrl
+              // eslint-disable-next-line @next/next/no-img-element -- URL externa do cliente; next/image exigiria allowlist de domínio
+              ? <img src={campanha.imagemUrl} alt="" className="h-full w-full object-cover" />
+              : <ImageIcon className="h-7 w-7 text-muted-foreground/40" />}
           </div>
-          <div className="flex shrink-0 items-center gap-1.5">
-            {campanha.cupom && (
-              <span className="inline-flex items-center gap-1 rounded-full border border-secondary/40 bg-secondary/10 px-2 py-0.5 text-[9px] font-bold uppercase text-secondary">
-                <Ticket className="h-2.5 w-2.5" />{campanha.cupom}
-              </span>
-            )}
-            <span className={cn(
-              'rounded-full border px-2 py-0.5 text-[9px] font-bold uppercase',
-              campanha.ativa ? 'border-primary/40 bg-primary/10 text-primary' : 'border-border text-muted-foreground',
-            )}>
-              {campanha.ativa ? 'Ativa' : 'Pausada'}
-            </span>
+
+          <div className="min-w-0 flex-1">
+            <div className="flex items-start justify-between gap-2">
+              <h3 className="min-w-0 truncate font-heading text-lg uppercase leading-none">{titulo}</h3>
+              {campanha.cupom && (
+                <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-secondary/40 bg-secondary/10 px-2 py-0.5 text-[9px] font-bold uppercase text-secondary">
+                  <Ticket className="h-2.5 w-2.5" />{campanha.cupom}
+                </span>
+              )}
+            </div>
+            <p className="mt-1.5 line-clamp-2 text-xs leading-relaxed text-foreground/80">
+              {campanha.mensagens.find(Boolean) ?? 'Sem mensagem escrita.'}
+            </p>
+            <p className="mt-1.5 line-clamp-1 text-[11px] text-muted-foreground">
+              {criadaEm(campanha.criadoEm) || objetivo}
+            </p>
           </div>
         </div>
 
-        {/* Prévia da mensagem, como no painel de referência */}
-        <p className="mt-2 line-clamp-2 text-xs leading-relaxed text-muted-foreground">
-          {campanha.mensagens.find(Boolean) ?? 'Sem mensagem escrita.'}
-        </p>
-
-        {/* Linha de métricas */}
-        <div className="mt-3 grid grid-cols-4 gap-2 border-t border-border pt-3">
-          <Metrica label="Público" valor={String(publico)} />
-          <Metrica label="Enviadas" valor={String(p?.enviadas ?? 0)} cor="text-primary" />
-          <Metrica label="Na fila" valor={String(p?.pendentes ?? 0)} />
-          <Metrica label="Falhas" valor={String(p?.falhas ?? 0)} cor={p?.falhas ? 'text-destructive' : undefined} />
+        {/* As 5 métricas de RESULTADO — é isso que responde "valeu a pena?". */}
+        <div className="mt-3 grid grid-cols-5 gap-2 border-t border-border pt-3">
+          <Metrica label="Mensagens" valor={String(enviadas)} />
+          <Metrica label="Receita" valor={medido ? brl(medido.receita) : '—'} cor="text-primary" />
+          <Metrica label="Pedidos" valor={medido ? String(medido.pedidos) : '—'} />
+          <Metrica label="Conversão"
+            valor={medido?.conversao == null ? '—' : `${(medido.conversao * 100).toFixed(1)}%`} />
+          <Metrica label="Ticket médio"
+            valor={medido?.ticketMedio == null ? '—' : brl(medido.ticketMedio)} />
         </div>
 
-        {rodando && p && (
+        {/* Operação: só aparece quando há rodada andando. */}
+        {rodando && p ? (
           <div className="mt-3">
             <Barra pct={p.pct} cor={cor} />
             <p className="mt-1 text-[10px] text-muted-foreground">
-              {p.pct}% da rodada
+              {p.enviadas} de {p.enviadas + p.pendentes + p.falhas} · {p.pendentes} na fila
+              {p.falhas > 0 && <span className="text-destructive"> · {p.falhas} falhas</span>}
               {travas && p.pendentes > 0 && (() => {
                 const d = diasParaTerminar(p.pendentes, travas, 0, new Date());
                 return d > 1 ? ` · ~${d} dias para terminar` : '';
               })()}
             </p>
           </div>
+        ) : (
+          <p className="mt-2 text-[10px] text-muted-foreground">
+            Público atual: <strong className="text-foreground">{publico}</strong> pessoas
+          </p>
         )}
+      </div>
 
-        {/* Próximas datas — "roda às terças" é abstrato; a data, não. */}
-        <div className="mt-3 flex flex-wrap gap-1">
+      {/* Rodapé: datas + status + ações na MESMA linha, como no print. */}
+      <div className="flex flex-wrap items-center gap-2 border-t border-border px-4 py-2">
+        <div className="flex flex-wrap gap-1">
           {proximas.length === 0 ? (
-            <span className="text-[10px] text-destructive">Nenhum dia marcado — não vai rodar</span>
+            <span className="text-[10px] text-destructive">Nenhum dia marcado</span>
           ) : proximas.map((d, i) => {
             const { dia, data } = dataCurta(d);
             return (
               <span key={i} className={cn(
-                'rounded-[var(--radius)] px-2 py-1 text-center text-[9px] font-bold leading-tight',
+                'rounded-[var(--radius)] px-1.5 py-1 text-center text-[9px] font-bold leading-tight',
                 i === 0 && campanha.ativa ? 'bg-primary/15 text-primary' : 'bg-background text-muted-foreground',
               )}>
                 {dia}<br />{data}
@@ -719,31 +759,27 @@ function CampanhaCard({
             );
           })}
         </div>
-      </div>
 
-      <div className="flex items-center gap-2 border-t border-border px-4 py-2">
-        <button
-          onClick={onEditar}
-          className="inline-flex h-8 items-center gap-1.5 rounded-[var(--radius)] border border-border px-3 text-[11px] font-bold uppercase text-muted-foreground hover:text-foreground"
-        >
-          <Pencil className="h-3 w-3" /> Editar
-        </button>
-        {onDisparar && (
-          <button
-            onClick={() => { if (confirm('Isto envia UMA mensagem AGORA, de verdade. Continuar?')) onDisparar(); }}
-            disabled={salvando}
-            className="inline-flex h-8 items-center gap-1.5 rounded-[var(--radius)] border border-border px-3 text-[11px] font-bold uppercase text-muted-foreground hover:text-foreground disabled:opacity-50"
-          >
-            {salvando ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />} Disparar 1
+        <div className="ml-auto flex items-center gap-2">
+          <span className={cn(
+            'rounded-full border px-2 py-0.5 text-[9px] font-bold uppercase',
+            campanha.ativa ? 'border-primary/40 bg-primary/10 text-primary' : 'border-border text-muted-foreground',
+          )}>
+            {campanha.ativa ? 'Ativa' : 'Pausada'}
+          </span>
+          <button onClick={onEditar} title="Editar campanha"
+            className="text-muted-foreground hover:text-foreground">
+            <Pencil className="h-4 w-4" />
           </button>
-        )}
-        <div className="ml-auto">
           <MenuAcoes itens={[
             { label: campanha.ativa ? 'Pausar disparo' : 'Ativar disparo', onClick: () => {
               if (!campanha.ativa && !confirm(
                 'Ativar faz o sistema ENVIAR mensagens sozinho pelo WhatsApp deste cliente. Confirmar?')) return;
               onAlternar();
             } },
+            ...(onDisparar ? [{ label: salvando ? 'Disparando…' : 'Disparar 1 agora', onClick: () => {
+              if (confirm('Isto envia UMA mensagem AGORA, de verdade. Continuar?')) onDisparar();
+            } }] : []),
             ...(onVerEnvios ? [{ label: 'Ver envios', onClick: onVerEnvios }] : []),
             ...(onExcluir ? [{ label: 'Excluir campanha', onClick: () => {
               if (confirm('Excluir esta campanha?')) onExcluir();

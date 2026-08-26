@@ -35,7 +35,7 @@ const campanhaSegmento = (modelo: string, params: Record<string, number | null>,
   id: `id-${modelo}`, fonte: 'segmento', modelo, listaId: null, nome: modelo,
   params, mensagens: msgs, cupom: null, imagemUrl: null,
   diasSemana: [4], hora: '18:00', tetoPublico: null, ativa: false, salva: true,
-  ultimaExecucao: null, ...extra,
+  ultimaExecucao: null, criadoEm: '2026-05-14T12:00:00.000Z', ...extra,
 });
 
 const RESPOSTA = {
@@ -75,6 +75,7 @@ const RESPOSTA = {
       ],
       cupom: 'SALAO15', imagemUrl: null, diasSemana: [2], hora: '18:00',
       tetoPublico: null, ativa: false, salva: true, ultimaExecucao: null,
+      criadoEm: '2026-05-14T12:00:00.000Z',
     },
   ],
   listas: [
@@ -88,6 +89,12 @@ const RESPOSTA = {
     { modelo: 'vip', resumo: { pessoas: 47, receitaHistorica: 88_940, ticketMedio: 187.4, diasParadoMediano: 9 }, amostra: PESSOAS(25, 2) },
     { modelo: 'reconquistado', resumo: { pessoas: 0, receitaHistorica: 0, ticketMedio: 0, diasParadoMediano: null }, amostra: [] },
   ],
+  resultados: {
+    'id-primeira_recompra': { enviadas: 173, pedidos: 3, receita: 221.9, conversao: 0.017, ticketMedio: 73.97, porCupom: 2 },
+    'id-vip': { enviadas: 9, pedidos: 4, receita: 596.9, conversao: 0.444, ticketMedio: 149.23, porCupom: 0 },
+    'camp-lista-1': { enviadas: 120, pedidos: 12, receita: 1283.5, conversao: 0.1, ticketMedio: 106.96, porCupom: 8 },
+    'id-em_risco': { enviadas: 0, pedidos: 0, receita: 0, conversao: null, ticketMedio: null, porCupom: 0 },
+  },
   execucoes: [
     { id: 'e1', campanha: 'Comprou uma vez só', iniciada_em: '2026-08-24T21:00:00.000Z', status: 'rodando', publico: 612, enviadas: 41, falhas: 1, puladas: 128 },
     { id: 'e2', campanha: 'Oferta — Clientes do salão', iniciada_em: '2026-08-19T21:00:00.000Z', status: 'concluida', publico: 342, enviadas: 300, falhas: 4, puladas: 38 },

@@ -174,6 +174,7 @@ export type CampanhaFidelidade = {
   /** false = nunca salva; a tela mostra os padrões de fábrica. */
   salva: boolean;
   ultimaExecucao: string | null;
+  criadoEm: string | null;
 };
 
 const HORA_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -205,6 +206,7 @@ export function campanhaPadrao(modelo: ModeloId): CampanhaFidelidade {
     ativa: false,
     salva: false,
     ultimaExecucao: null,
+    criadoEm: null,
   };
 }
 
@@ -212,11 +214,11 @@ type LinhaCampanha = {
   id: string; fonte: string; modelo: string | null; lista_id: string | null; nome: string | null;
   params: unknown; mensagens: unknown; cupom: string | null; imagem_url: string | null;
   dias_semana: string | null; hora: string | null; teto_publico: number | null;
-  ativa: boolean; ultima_execucao: string | Date | null;
+  ativa: boolean; ultima_execucao: string | Date | null; criado_em: string | Date | null;
 };
 
 const COLS_CAMPANHA = `id, fonte, modelo, lista_id, nome, params, mensagens, cupom, imagem_url,
-                       dias_semana, hora, teto_publico, ativa, ultima_execucao`;
+                       dias_semana, hora, teto_publico, ativa, ultima_execucao, criado_em`;
 
 function linhaParaCampanha(l: LinhaCampanha): CampanhaFidelidade {
   const modelo = (MODELOS as readonly string[]).includes(l.modelo ?? '')
@@ -241,6 +243,9 @@ function linhaParaCampanha(l: LinhaCampanha): CampanhaFidelidade {
     salva: true,
     ultimaExecucao: l.ultima_execucao
       ? (l.ultima_execucao instanceof Date ? l.ultima_execucao.toISOString() : String(l.ultima_execucao))
+      : null,
+    criadoEm: l.criado_em
+      ? (l.criado_em instanceof Date ? l.criado_em.toISOString() : String(l.criado_em))
       : null,
   };
 }
@@ -531,4 +536,31 @@ export async function enviadasHoje(pool: Pool, clientId: string): Promise<number
     [clientId],
   ).catch(() => ({ rows: [{ n: '0' }] }));
   return Number(rows[0]?.n ?? 0);
+}
+
+/**
+ * Envios ENTREGUES do cliente — a metade "quem recebeu" da atribuição.
+ *
+ * Limitado ao que ainda pode gerar pedido atribuível: buscar o histórico
+ * inteiro a cada carga de tela custaria caro e não mudaria número nenhum.
+ */
+export async function enviosEntregues(
+  pool: Pool, clientId: string, diasAtras = 120,
+): Promise<{ campanhaId: string; chave: string; enviadoEm: string; cupom: string | null }[]> {
+  const { rows } = await pool.query<{
+    campanha_id: string; chave: string; enviado_em: Date; cupom: string | null;
+  }>(
+    `SELECT campanha_id, chave, enviado_em, cupom
+       FROM public.fidelidade_envios
+      WHERE client_id = $1 AND status = 'enviada'
+        AND enviado_em > NOW() - ($2 || ' days')::interval`,
+    [clientId, String(diasAtras)],
+  ).catch(() => ({ rows: [] as { campanha_id: string; chave: string; enviado_em: Date; cupom: string | null }[] }));
+
+  return rows.map(r => ({
+    campanhaId: r.campanha_id,
+    chave: r.chave,
+    enviadoEm: r.enviado_em instanceof Date ? r.enviado_em.toISOString() : String(r.enviado_em),
+    cupom: r.cupom,
+  }));
 }

@@ -12,8 +12,9 @@ import {
 } from '@/lib/fidelidade';
 import {
   ensureFidelidadeSchema, listarCampanhas, lerTravas, salvarCampanha, salvarTravas,
-  listarListas, salvarLista, excluirLista, excluirCampanha,
+  listarListas, salvarLista, excluirLista, excluirCampanha, enviosEntregues,
 } from '@/lib/fidelidade-server';
+import { atribuirResultados } from '@/lib/fidelidade-atribuicao';
 
 /**
  * Fidelidade — segmentos, listas manuais e configuração das campanhas.
@@ -70,9 +71,26 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
     let ticketMedioLoja = 0;
     let base = { clientes: 0, comTelefone: 0 };
     let segmentos: unknown[] = [];
+    // Resultado por campanha: "quanto isso trouxe de volta". Sem delivery
+    // conectado não há pedido para cruzar, e a tela mostra travessão em vez de
+    // zero — zero afirmaria que a campanha não vendeu, o que não sabemos.
+    let resultados: Record<string, unknown> = {};
+
+    const envios = await enviosEntregues(pool, clientId);
 
     if (conectado) {
       const { pedidos } = await lerPedidosDelivery(pool, clientId);
+
+      const atribuiveis = pedidos.map(o => ({
+        chave: normalizarTelefoneBR(o.customer_phone) ?? '',
+        criadoEm: o.created_at instanceof Date ? o.created_at.toISOString() : String(o.created_at),
+        total: Number(o.total) || 0,
+        cancelado: o.status === 'canceled',
+        cupom: Array.isArray(o.discounts)
+          ? (o.discounts.find(d => d?.coupon_code)?.coupon_code ?? null)
+          : null,
+      })).filter(o => o.chave);
+      resultados = Object.fromEntries(atribuirResultados(envios, atribuiveis, 7));
       const clientes = agruparPorCliente(pedidos, regua, new Date().toISOString());
       const pedidosTotal = clientes.reduce((s, c) => s + c.pedidos, 0);
       const receitaTotal = clientes.reduce((s, c) => s + c.receita, 0);
@@ -95,9 +113,15 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
       });
     }
 
+    if (!conectado) {
+      // Sem pedidos, ainda dá para dizer quantas mensagens cada campanha mandou.
+      resultados = Object.fromEntries(atribuirResultados(envios, [], 7));
+    }
+
     return Response.json({
       ativo: true,
       conectado,
+      resultados,
       loja: conn?.merchant_name ?? lojasAnota[0]?.store_name ?? null,
       regua,
       ticketMedioLoja,
