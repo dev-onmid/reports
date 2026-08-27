@@ -65,6 +65,9 @@ export function ClientDeliveryTab({ clientId }: { clientId: string }) {
   const [erro, setErro] = useState('');
   const [form, setForm] = useState({ token: '', janela: 30, inatividade: 60 });
   const [copiado, setCopiado] = useState('');
+  // Troca de token acontece atrás de um clique: o campo aberto por padrão num
+  // card já conectado convida a colar algo por engano e derrubar a integração.
+  const [trocandoToken, setTrocandoToken] = useState(false);
 
   const carregar = useCallback(async () => {
     try {
@@ -101,6 +104,26 @@ export function ClientDeliveryTab({ clientId }: { clientId: string }) {
       const json = await res.json();
       if (!res.ok) { setErro(json?.error ?? 'Falha ao conectar.'); return; }
       setForm(f => ({ ...f, token: '' })); // o token some do formulário após salvar
+      setTrocandoToken(false);
+      await carregar();
+    } finally {
+      setSalvando(false);
+    }
+  }
+
+  async function desconectar() {
+    if (!window.confirm(
+      'Desconectar o Cardápio Web deste cliente?\n\n' +
+      'Os pedidos já importados CONTINUAM no sistema — o que para é a entrada de novos. ' +
+      'Para voltar, é preciso colar o token de novo.',
+    )) return;
+    setSalvando(true); setErro('');
+    try {
+      const res = await fetch(`/api/cardapioweb/config?clientId=${encodeURIComponent(clientId)}`, {
+        method: 'DELETE',
+      });
+      if (!res.ok) { setErro('Não foi possível desconectar.'); return; }
+      setTrocandoToken(false);
       await carregar();
     } finally {
       setSalvando(false);
@@ -202,6 +225,79 @@ export function ClientDeliveryTab({ clientId }: { clientId: string }) {
             </p>
             {campoCopiavel('URL do webhook', webhookUrl, 'url')}
             {campoCopiavel('Token do webhook', conexao.webhook_token ?? '—', 'tok')}
+          </div>
+
+          {/* ── Configuração da API: trocar token e desconectar ──────────────
+              O servidor já sabia fazer as duas coisas (o POST é upsert e o
+              DELETE existe) — só a tela não oferecia, e sem isso não havia
+              como girar um token vazado nem corrigir um token errado sem
+              mexer no banco. */}
+          <div className="mt-4 border-t border-border/60 pt-3">
+            {!trocandoToken ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => { setErro(''); setTrocandoToken(true); }}
+                  className="rounded-[var(--radius)] border border-border px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-foreground hover:border-primary"
+                >
+                  Trocar token da API
+                </button>
+                <button
+                  type="button"
+                  disabled={salvando}
+                  onClick={() => void desconectar()}
+                  className="rounded-[var(--radius)] border border-border px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-muted-foreground hover:border-destructive hover:text-destructive disabled:opacity-40"
+                >
+                  Desconectar loja
+                </button>
+                <span className="text-[11px] text-muted-foreground">
+                  Código da loja e nome vêm do próprio Cardápio Web quando o token é validado.
+                </span>
+              </div>
+            ) : (
+              <div>
+                <div className="mb-3 flex items-start gap-2 rounded-[var(--radius)] border border-yellow-400/30 bg-yellow-400/10 p-3 text-yellow-400">
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                  <p className="text-xs">
+                    O token é <strong>um só por loja</strong>. Se a loja usa a API em outro sistema
+                    (PDV, robô de WhatsApp), gerar um token novo no painel <strong>derruba
+                    esses sistemas</strong>. Confirme com o lojista antes.
+                  </p>
+                </div>
+                <label className="block">
+                  <Rotulo>Novo token da API</Rotulo>
+                  <input
+                    type="password"
+                    value={form.token}
+                    onChange={e => setForm(f => ({ ...f, token: e.target.value }))}
+                    placeholder="Cole o token gerado em Configurações → Integrações → API"
+                    className="mt-1 w-full rounded-[var(--radius)] border border-border bg-surface-soft px-3 py-2 text-sm text-foreground"
+                  />
+                </label>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    disabled={salvando || !form.token.trim()}
+                    onClick={() => void conectar()}
+                    className="rounded-[var(--radius)] bg-primary px-4 py-2 text-xs font-bold uppercase tracking-wider text-primary-foreground disabled:opacity-40"
+                  >
+                    {salvando ? 'Validando token…' : 'Salvar novo token'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setTrocandoToken(false); setForm(f => ({ ...f, token: '' })); setErro(''); }}
+                    className="rounded-[var(--radius)] border border-border px-4 py-2 text-xs font-bold uppercase tracking-wider text-muted-foreground"
+                  >
+                    Cancelar
+                  </button>
+                </div>
+                <p className="mt-2 text-[11px] text-muted-foreground">
+                  O token é testado no Cardápio Web antes de substituir o atual — se estiver
+                  errado, nada muda.
+                </p>
+              </div>
+            )}
+            {erro && <p className="mt-3 text-sm text-destructive">{erro}</p>}
           </div>
         </Card>
       ) : (
