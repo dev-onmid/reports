@@ -41,6 +41,7 @@ Pedido do Matheus na sequência ("e reels como faz?" → "bora criar"). Vídeo e
 - **Sem conversão de vídeo no navegador**: só MP4/MOV entram (`lerMetadadosVideo` recusa WebM ANTES do upload de 80 MB); metadados (duração/dimensões) lidos via `<video preload=metadata>`.
 - ✅ Verificado: **49 asserts**; tsc + `next build` limpos (`/api/publicacoes/upload` registrada); browser com **MP4 REAL** (ffmpeg local, 720×1280 5s — o mock de fetch não intercepta XHR, é assim que o harness carrega o arquivo): upload com `?duracao=5`, tipo pulando pra REELS sozinho, "vídeo no feed" bloqueando o Revisar, payload com `midiaId` e sem `imagem`.
 - ⚠️ Pendência conhecida: vídeo órfão no disco não é limpo (cancelar publicação não apaga o arquivo) — irrelevante no volume de hoje, revisar se o disco crescer.
+- ✅ **VÍDEO PROVADO EM PRODUÇÃO ponta a ponta** (mesma noite): MP4 de teste (ffmpeg 720×1280 6s) → upload pela rota REAL (200, arquivo no volume `/app/midia`) → URL pública servindo `video/mp4` → **story em VÍDEO agendado e publicado pelo CRON** (https://www.instagram.com/stories/onmidmkt/3972619705348426196 — o poll atravessou o processamento da Meta em ~3 ticks) → **container de REELS até FINISHED** com o mesmo vídeo (aceito pela Meta; NÃO publicado de propósito — o `/media_publish` de Reels é a mesma chamada já provada 2×). Volume montado confirmado no `docker inspect`; compose com backup em `docker-compose.yml.bak-reels`. O story some sozinho em 24h; o container de Reels expira sozinho.
 
 
 ## Dashboard de Food/Delivery + editor de modelo (2026-08-15/16)
