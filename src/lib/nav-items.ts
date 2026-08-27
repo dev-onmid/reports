@@ -1,7 +1,7 @@
 import {
   LayoutDashboard, Users, FileText, WalletCards,
   BarChart3, MessageCircle, TableProperties, Zap, Bot, ShieldCheck, WandSparkles,
-  Download, History, Gift,
+  Download, History, Gift, CalendarClock,
 } from 'lucide-react';
 import type { Permission } from '@/lib/mock-data';
 
@@ -43,4 +43,5 @@ export const NAV_ITEMS: NavItem[] = [
   { name: 'Disparos',        href: '/disparos',                  icon: MessageCircle, key: 'disparos',   desc: 'Campanhas WhatsApp',            group: 'ferramentas' },
   { name: 'Biblioteca Meta', href: '/ferramentas/biblioteca-meta', icon: Download,    key: 'radar',      desc: 'Baixar criativos de anúncios',  group: 'ferramentas' },
   { name: 'Sorteador',       href: '/ferramentas/sorteador',       icon: Gift,        key: 'radar',      desc: 'Sorteios de comentários IG/FB', group: 'ferramentas' },
+  { name: 'Publicações',     href: '/ferramentas/publicacoes',     icon: CalendarClock, key: 'radar',    desc: 'Agendar posts e stories',       group: 'ferramentas' },
 ];

@@ -30,6 +30,11 @@ const PUBLIC_PREFIXES = [
   // Portal do cliente — o token na URL é a credencial.
   '/api/portal/',
 
+  // Imagem de publicação agendada: a Meta faz cURL nesta URL a partir da
+  // internet para criar o container de mídia e não manda cookie. O token de
+  // 32 hex é a credencial; não há listagem nem token derivável.
+  '/api/midia/',
+
   // Analytics de landing page: rodam em domínio de terceiro (o site do cliente).
   '/api/lp/collect',
   '/api/lp/tag.js',

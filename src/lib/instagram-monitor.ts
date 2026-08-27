@@ -312,3 +312,121 @@ export async function upsertSnapshot(pool: Pool, snap: SocialSnapshot): Promise<
     ],
   );
 }
+
+// ── Resolução em LOTE (compartilhada) ────────────────────────────────────────
+//
+// Esta parte vivia dentro de /api/social-monitor/refresh/route.ts. Virou lib
+// porque o Planejador de Publicações precisa exatamente da mesma coisa: dado um
+// punhado de clientes, "qual conta IG e com qual page token".
+//
+// ⚠️ NENHUMA resolução nova foi escrita aqui — é o mesmo caminho de sempre
+// (links → conexão → token fresco → getIgAccount). Reescrever reintroduziria o
+// bug de conta cruzada corrigido em 04/08, em que o fallback chutava a primeira
+// página da conexão e vários clientes recebiam a MESMA conta.
+
+export type LinkRow = {
+  client_id: string; connection_id: string | null; account_id: string | null; platform: string;
+};
+
+export type InsumoMeta = {
+  clientId: string;
+  accountId: string;
+  directIgId: string | null;
+  token: Promise<string | null>;
+  /** Clientes que compartilham conta têm a mesma chave — serve para não repetir chamadas na Graph. */
+  cacheKey: string;
+};
+
+/**
+ * Resolve os INSUMOS da Graph para cada cliente (conta de anúncio, IG direto e
+ * token). Devolve o token como Promise porque ele é renovado UMA vez por
+ * conexão, não por cliente.
+ */
+export async function resolverInsumosMeta(
+  pool: Pool,
+  clientIds: string[],
+  getFreshToken: (conn: ConnRow) => Promise<string>,
+): Promise<InsumoMeta[]> {
+  if (clientIds.length === 0) return [];
+
+  const { rows: links } = await pool.query(
+    `SELECT client_id, connection_id, account_id, platform
+       FROM public.client_account_links
+      WHERE client_id = ANY($1) AND platform IN ('meta_ads','meta','instagram')
+      ORDER BY created_at ASC`,
+    [clientIds],
+  );
+  const linksByClient = new Map<string, LinkRow[]>();
+  for (const l of links as LinkRow[]) {
+    const list = linksByClient.get(l.client_id) ?? [];
+    list.push(l);
+    linksByClient.set(l.client_id, list);
+  }
+
+  const { rows: fallbackRows } = await pool.query(
+    `SELECT id FROM public.meta_connections WHERE status = 'connected' ORDER BY connected_at DESC LIMIT 1`,
+  );
+  const fallbackConnId: string | null = fallbackRows[0]?.id ?? null;
+
+  const connIds = [...new Set([
+    ...(links as LinkRow[]).map(l => l.connection_id).filter((id): id is string => Boolean(id)),
+    ...(fallbackConnId ? [fallbackConnId] : []),
+  ])];
+  const { rows: conns } = connIds.length
+    ? await pool.query(`SELECT * FROM public.meta_connections WHERE id = ANY($1) AND status = 'connected'`, [connIds])
+    : { rows: [] };
+  const connMap = new Map<string, ConnRow>((conns as ConnRow[]).map(c => [c.id, c]));
+
+  const tokenCache = new Map<string, Promise<string | null>>();
+  const tokenFor = (connId: string | null): Promise<string | null> => {
+    if (!connId) return Promise.resolve(null);
+    if (!tokenCache.has(connId)) {
+      const conn = connMap.get(connId);
+      tokenCache.set(connId, conn ? getFreshToken(conn).catch(() => null) : Promise.resolve(null));
+    }
+    return tokenCache.get(connId)!;
+  };
+
+  return clientIds.map((clientId) => {
+    const clientLinks = linksByClient.get(clientId) ?? [];
+    const igLink = clientLinks.find(l => l.platform === 'instagram' && l.account_id);
+    const adsLink = clientLinks.find(l => l.platform !== 'instagram' && (l.connection_id || l.account_id));
+    const connId = adsLink?.connection_id ?? igLink?.connection_id ?? fallbackConnId;
+    const accountId = adsLink?.account_id ?? '';
+    const directIgId = igLink?.account_id ?? null;
+    return {
+      clientId, accountId, directIgId,
+      token: tokenFor(connId),
+      cacheKey: `${connId ?? ''}|${accountId}|${directIgId ?? ''}`,
+    };
+  });
+}
+
+/**
+ * Resolve a conta IG publicável de cada cliente. Cliente sem conta resolvível
+ * entra no mapa com `null` — o chamador precisa distinguir "não tem conta" de
+ * "não foi pedido", e sumir com o cliente em silêncio esconderia o motivo.
+ */
+export async function resolverContasIg(
+  pool: Pool,
+  clientIds: string[],
+  getFreshToken: (conn: ConnRow) => Promise<string>,
+): Promise<Map<string, ResolvedIgAccount | null>> {
+  const insumos = await resolverInsumosMeta(pool, clientIds, getFreshToken);
+  const cache = new Map<string, Promise<ResolvedIgAccount | null>>();
+  const saida = new Map<string, ResolvedIgAccount | null>();
+
+  await Promise.all(insumos.map(async (ins) => {
+    if (!cache.has(ins.cacheKey)) {
+      cache.set(ins.cacheKey, (async () => {
+        const token = await ins.token;
+        if (!token) return null;
+        try {
+          return await getIgAccount(ins.accountId, token, ins.directIgId ?? undefined);
+        } catch { return null; }
+      })());
+    }
+    saida.set(ins.clientId, await cache.get(ins.cacheKey)!);
+  }));
+  return saida;
+}

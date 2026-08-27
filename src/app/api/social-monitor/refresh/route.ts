@@ -2,8 +2,8 @@ import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { getFreshMetaToken } from '@/lib/meta-token';
 import {
-  ensureSocialMonitorSchema, fetchClientSnapshot, upsertSnapshot,
-  type ConnRow, type SocialSnapshot,
+  ensureSocialMonitorSchema, fetchClientSnapshot, resolverInsumosMeta, upsertSnapshot,
+  type SocialSnapshot,
 } from '@/lib/instagram-monitor';
 import { sendSocialMonitorAlert, type AlertSendResult } from '@/lib/social-monitor-alert';
 
@@ -29,7 +29,6 @@ function isAuthorized(req: NextRequest): boolean {
 const BUDGET_MS = 280_000;
 const CONCURRENCY = 4;
 
-type LinkRow = { client_id: string; connection_id: string | null; account_id: string | null; platform: string };
 
 async function runRefresh(clientIds: string[] | null) {
   const started = Date.now();
@@ -53,44 +52,11 @@ async function runRefresh(clientIds: string[] | null) {
     const ids = (clients as { id: string }[]).map(c => c.id);
     if (!ids.length) return { ok: true, updated: 0, errors: 0, skipped: 0, tookMs: Date.now() - started };
 
-    const { rows: links } = await pool.query(
-      `SELECT client_id, connection_id, account_id, platform
-         FROM public.client_account_links
-        WHERE client_id = ANY($1) AND platform IN ('meta_ads','meta','instagram')
-        ORDER BY created_at ASC`,
-      [ids],
-    );
-    const linksByClient = new Map<string, LinkRow[]>();
-    for (const l of links as LinkRow[]) {
-      const list = linksByClient.get(l.client_id) ?? [];
-      list.push(l);
-      linksByClient.set(l.client_id, list);
-    }
-
-    const { rows: fallbackRows } = await pool.query(
-      `SELECT id FROM public.meta_connections WHERE status = 'connected' ORDER BY connected_at DESC LIMIT 1`,
-    );
-    const fallbackConnId: string | null = fallbackRows[0]?.id ?? null;
-
-    const connIds = [...new Set([
-      ...(links as LinkRow[]).map(l => l.connection_id).filter((id): id is string => Boolean(id)),
-      ...(fallbackConnId ? [fallbackConnId] : []),
-    ])];
-    const { rows: conns } = connIds.length
-      ? await pool.query(`SELECT * FROM public.meta_connections WHERE id = ANY($1) AND status = 'connected'`, [connIds])
-      : { rows: [] };
-    const connMap = new Map<string, ConnRow>((conns as ConnRow[]).map(c => [c.id, c]));
-
-    // Token renovado uma vez por conexão, não por cliente.
-    const tokenCache = new Map<string, Promise<string | null>>();
-    const tokenFor = (connId: string | null): Promise<string | null> => {
-      if (!connId) return Promise.resolve(null);
-      if (!tokenCache.has(connId)) {
-        const conn = connMap.get(connId);
-        tokenCache.set(connId, conn ? getFreshMetaToken(conn).catch(() => null) : Promise.resolve(null));
-      }
-      return tokenCache.get(connId)!;
-    };
+    // Resolução (links → conexão → token fresco) mora em `instagram-monitor`:
+    // o Planejador de Publicações precisa exatamente da mesma, e duas cópias
+    // divergiriam na primeira mudança.
+    const insumos = await resolverInsumosMeta(pool, ids, getFreshMetaToken);
+    const insumoPorCliente = new Map(insumos.map(x => [x.clientId, x]));
 
     // Dois clientes podem compartilhar a mesma conta de anúncio/página: dedupe
     // pela chave de resolução, para não repetir as chamadas na Graph.
@@ -101,17 +67,13 @@ async function runRefresh(clientIds: string[] | null) {
       if (Date.now() > deadline) { skipped += ids.length - i; break; }
       const chunk = ids.slice(i, i + CONCURRENCY);
       await Promise.allSettled(chunk.map(async (clientId) => {
-        const clientLinks = linksByClient.get(clientId) ?? [];
-        const igLink = clientLinks.find(l => l.platform === 'instagram' && l.account_id);
-        const adsLink = clientLinks.find(l => l.platform !== 'instagram' && (l.connection_id || l.account_id));
-        const connId = adsLink?.connection_id ?? igLink?.connection_id ?? fallbackConnId;
-        const accountId = adsLink?.account_id ?? '';
-        const directIgId = igLink?.account_id ?? null;
+        const ins = insumoPorCliente.get(clientId);
+        if (!ins) { errors++; return; }
+        const { accountId, directIgId, cacheKey } = ins;
 
-        const cacheKey = `${connId ?? ''}|${accountId}|${directIgId ?? ''}`;
         if (!snapshotCache.has(cacheKey)) {
           snapshotCache.set(cacheKey, (async () => {
-            const token = await tokenFor(connId);
+            const token = await ins.token;
             return fetchClientSnapshot({ clientId, accountId, directIgId, token });
           })());
         }
