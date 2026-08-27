@@ -36,6 +36,24 @@ const ORCAMENTO_MS = 240_000;
 const DETALHES_POR_LOJA = 110;
 const JANELA_HISTORICO_MESES = 6;
 
+/**
+ * Janela da varredura contínua, em dias.
+ *
+ * ⚠️ Esta varredura existe porque o desenho anterior desligava a busca assim
+ * que o histórico terminava (`if (conn.historico_concluido) return`), deixando
+ * o webhook como ÚNICA porta de entrada. Como nenhum webhook chegou a ser
+ * cadastrado no painel das lojas, os pedidos pararam em silêncio: Istambul em
+ * 09/08 e Tokiomaki em 31/07, com o cron reportando "sincronizado, sem erro" a
+ * cada hora — porque, do ponto de vista dele, não havia nada a fazer.
+ *
+ * 3 dias cobre com folga a cadência de 1x/hora e ainda recupera uma parada de
+ * fim de semana. O webhook continua sendo o caminho de tempo real; esta
+ * varredura é a rede embaixo dele, igual à reconciliação do Agendor.
+ */
+const RECONCILIACAO_DIAS = 3;
+/** Teto de páginas por execução: cada página é 1 das 5 req/min do histórico. */
+const RECONCILIACAO_PAGINAS = 2;
+
 function autorizado(req: NextRequest): boolean {
   const esperados = [
     process.env.CRON_SECRET, process.env.REPORTS_CRON_SECRET, process.env.CRM_CRON_SECRET,
@@ -53,6 +71,9 @@ type Resultado = {
   eventos_processados: number;
   historico_importados: number;
   historico_concluido: boolean;
+  /** Pedidos novos achados pela varredura da janela recente. */
+  recentes_importados?: number;
+  recentes_vistos?: number;
   descontos_recapturados?: number;
   /** Quantos pedidos existem DE FATO no banco para esta loja. */
   pedidos_no_banco?: number;
@@ -213,6 +234,74 @@ async function avancarHistorico(
   return { importados, concluido: acabou };
 }
 
+/**
+ * Varredura contínua da janela recente — a rede de segurança do webhook.
+ *
+ * Roda SEMPRE, inclusive (e principalmente) depois do histórico concluído.
+ * Idempotente por construção: só busca detalhe de pedido que ainda não existe
+ * no banco, então repetir a passada não gasta rate limit nem duplica nada.
+ */
+async function reconciliarRecentes(
+  pool: ReturnType<typeof makeServerPool>, conn: CardapioWebConnection, orcamentoDetalhes: number,
+): Promise<{ importados: number; vistos: number }> {
+  if (orcamentoDetalhes <= 0) return { importados: 0, vistos: 0 };
+
+  const fim = new Date();
+  const inicio = new Date(fim);
+  inicio.setDate(inicio.getDate() - RECONCILIACAO_DIAS);
+
+  let importados = 0;
+  let vistos = 0;
+
+  for (let pagina = 1; pagina <= RECONCILIACAO_PAGINAS; pagina++) {
+    if (orcamentoDetalhes - importados <= 0) break;
+    // Ritmo do histórico: 5 req/min por loja. Espaça a 2ª página.
+    if (pagina > 1) await sleep(Math.ceil(60_000 / RATE.historicoPorMinuto));
+
+    let lote;
+    try {
+      lote = await listOrderHistory(conn, {
+        startDate: inicio.toISOString(),
+        endDate: fim.toISOString(),
+        page: pagina,
+        perPage: 100,
+      });
+    } catch (err) {
+      if ((err as CardapioWebError).status === 429) break;
+      throw err;
+    }
+
+    const lista = lote.orders ?? [];
+    vistos += lista.length;
+    if (lista.length === 0) break;
+
+    const ids = lista.map(o => Number(o.id)).filter(Number.isFinite);
+    const { rows: existentes } = await pool.query<{ order_id: string }>(
+      `SELECT order_id FROM public.cardapioweb_orders WHERE client_id = $1 AND order_id = ANY($2::bigint[])`,
+      [conn.client_id, ids],
+    );
+    const jaTemos = new Set(existentes.map(r => String(r.order_id)));
+    const faltando = ids.filter(id => !jaTemos.has(String(id)));
+
+    for (const id of faltando) {
+      if (importados >= orcamentoDetalhes) break;
+      try {
+        const detalhe = await getOrderDetail(conn, id);
+        await upsertOrder(pool, conn.client_id, detalhe);
+        importados++;
+      } catch (err) {
+        if ((err as CardapioWebError).status === 429) return { importados, vistos };
+        // Pedido individual com problema não trava a varredura.
+      }
+    }
+
+    // Página incompleta = fim da janela, não há o que paginar.
+    if (lista.length < 100) break;
+  }
+
+  return { importados, vistos };
+}
+
 export async function GET(req: NextRequest) {
   if (!autorizado(req)) return Response.json({ error: 'Não autorizado.' }, { status: 401 });
 
@@ -237,6 +326,17 @@ export async function GET(req: NextRequest) {
         r.eventos_processados = await drenarEventos(pool, conn, DETALHES_POR_LOJA);
 
         let restante = DETALHES_POR_LOJA - r.eventos_processados;
+
+        // ⚠️ ANTES do histórico: pedido dos últimos dias vale mais que página
+        // de 5 meses atrás, e é esta varredura que mantém a loja viva depois
+        // que o histórico termina.
+        if (restante > 0 && Date.now() - inicio < ORCAMENTO_MS) {
+          const rec = await reconciliarRecentes(pool, conn, restante);
+          r.recentes_importados = rec.importados;
+          r.recentes_vistos = rec.vistos;
+          restante -= rec.importados;
+        }
+
         if (restante > 0 && Date.now() - inicio < ORCAMENTO_MS) {
           const h = await avancarHistorico(pool, conn, restante);
           r.historico_importados = h.importados;
