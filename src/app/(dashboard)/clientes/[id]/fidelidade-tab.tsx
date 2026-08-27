@@ -8,6 +8,9 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
 import { lerArquivoContatos, contatosParaTexto, type ContatoLido } from '@/lib/contatos-arquivo';
 import {
   MODELOS_FIDELIDADE, VARIAVEIS, DIAS_SEMANA_LABEL, PISO_INTERVALO_SEG,
@@ -96,6 +99,13 @@ type Acompanhamento = {
   execucoes: Execucao[]; envios: Envio[]; temMais: boolean;
 };
 
+/**
+ * Paleta do DS — nada de hex avulso. Laranja e azul são as duas cores extras
+ * documentadas (conversão e dados de campanha); o resto sai dos tokens.
+ */
+const LARANJA = '#FF6B35';
+const AZUL = '#0B84FF';
+
 const ICONE_MODELO: Record<ModeloId, LucideIcon> = {
   primeira_recompra: Repeat,
   em_risco: Clock,
@@ -106,23 +116,41 @@ const ICONE_MODELO: Record<ModeloId, LucideIcon> = {
 
 const COR_MODELO: Record<ModeloId, string> = {
   primeira_recompra: 'var(--primary)',
-  em_risco: '#facc15',
+  em_risco: LARANJA,
   inativo: 'var(--destructive)',
   vip: 'var(--secondary)',
-  reconquistado: '#22c55e',
+  reconquistado: AZUL,
 };
 
-const COR_STATUS: Record<string, string> = {
-  enviada: 'text-primary',
-  pulada: 'text-muted-foreground',
-  falha: 'text-destructive',
-  pendente: 'text-[#facc15]',
+const VARIANTE_STATUS: Record<string, 'default' | 'tag' | 'destructive' | 'outline'> = {
+  enviada: 'default',
+  pulada: 'tag',
+  falha: 'destructive',
+  pendente: 'outline',
 };
 
 // ─────────────────────────────────────────────────────────────────── Pedaços
 
-function Card({ children, className, id }: { children: React.ReactNode; className?: string; id?: string }) {
-  return <div id={id} className={cn('rounded-[var(--radius)] border border-border bg-card', className)}>{children}</div>;
+/**
+ * Card do DS — barra `h-0.5` no topo e quadrado `h-3 w-3` no canto quando há
+ * cor. É o "corner-square motif" que identifica card de dado no sistema.
+ */
+function Card({ children, className, id, cor }: {
+  children: React.ReactNode; className?: string; id?: string; cor?: string;
+}) {
+  return (
+    <div id={id} className={cn(
+      'relative overflow-hidden rounded-[var(--radius)] border border-border bg-card', className,
+    )}>
+      {cor && (
+        <>
+          <div className="pointer-events-none absolute inset-x-0 top-0 h-0.5" style={{ backgroundColor: cor }} />
+          <div className="pointer-events-none absolute top-0 left-0 h-3 w-3" style={{ backgroundColor: cor }} />
+        </>
+      )}
+      {children}
+    </div>
+  );
 }
 
 function Rotulo({ children }: { children: React.ReactNode }) {
@@ -143,10 +171,12 @@ function NumeroInput({ valor, onChange, placeholder }: {
 
 function Kpi({ label, valor, sub, alerta }: { label: string; valor: string; sub?: string; alerta?: boolean }) {
   return (
-    <Card className="p-3">
+    <Card className="p-4">
       <Rotulo>{label}</Rotulo>
-      <p className={cn('mt-1 font-heading text-2xl leading-none', alerta && 'text-[#facc15]')}>{valor}</p>
-      {sub && <p className="mt-1 truncate text-[11px] text-muted-foreground" title={sub}>{sub}</p>}
+      <p className="mt-2 font-heading text-3xl leading-none" style={alerta ? { color: LARANJA } : undefined}>
+        {valor}
+      </p>
+      {sub && <p className="mt-1 truncate text-xs text-muted-foreground" title={sub}>{sub}</p>}
     </Card>
   );
 }
@@ -155,13 +185,13 @@ function Kpi({ label, valor, sub, alerta }: { label: string; valor: string; sub?
 function Metrica({ label, valor, cor }: { label: string; valor: string; cor?: string }) {
   return (
     <div className="min-w-0">
-      <p className="truncate text-[9px] font-bold uppercase tracking-wide text-muted-foreground" title={label}>
+      <p className="truncate text-[10px] font-bold uppercase tracking-widest text-muted-foreground" title={label}>
         {label}
       </p>
       {/* ⚠️ `truncate` no VALOR: em 3 colunas, "R$ 1.283,50" encostava no
           número vizinho e os dois viravam um borrão. Melhor cortar com
           reticências e manter o título completo no hover. */}
-      <p className={cn('mt-0.5 truncate font-heading text-sm leading-none', cor)} title={valor}>
+      <p className={cn('mt-1 truncate font-heading text-xl leading-none', cor)} title={valor}>
         {valor}
       </p>
     </div>
@@ -170,8 +200,8 @@ function Metrica({ label, valor, cor }: { label: string; valor: string; cor?: st
 
 function Barra({ pct, cor = 'var(--primary)' }: { pct: number; cor?: string }) {
   return (
-    <div className="h-1.5 w-full overflow-hidden rounded-full bg-background">
-      <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, background: cor }} />
+    <div className="h-1.5 w-full overflow-hidden rounded-[var(--radius-sm)] bg-surface-elevated">
+      <div className="h-full transition-all" style={{ width: `${pct}%`, background: cor }} />
     </div>
   );
 }
@@ -457,32 +487,20 @@ export function ClientFidelidadeTab({ clientId }: { clientId: string }) {
       {/* Barra de navegação */}
       <div className="flex flex-wrap items-center gap-2">
         {([['campanhas', 'Campanhas'], ['acompanhamento', 'Acompanhamento']] as const).map(([v, label]) => (
-          <button
-            key={v} onClick={() => setVista(v)}
-            className={cn(
-              'h-9 rounded-[var(--radius)] px-4 text-xs font-bold uppercase tracking-wider transition-colors',
-              vista === v ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground',
-            )}
-          >
+          <Button key={v} size="sm" variant={vista === v ? 'outline' : 'ghost'}
+            onClick={() => setVista(v)} className="uppercase tracking-wider">
             {label}
-            {v === 'acompanhamento' && naFila > 0 && (
-              <span className="ml-1.5 rounded-full bg-[#facc15]/20 px-1.5 py-0.5 text-[9px] text-[#facc15]">{naFila}</span>
-            )}
-          </button>
+            {v === 'acompanhamento' && naFila > 0 && <Badge variant="outline">{naFila}</Badge>}
+          </Button>
         ))}
         <div className="ml-auto flex items-center gap-2">
-          <button
-            onClick={() => setTravasAbertas(true)}
-            className="inline-flex h-9 items-center gap-1.5 rounded-[var(--radius)] border border-border px-3 text-xs font-bold uppercase text-muted-foreground hover:text-foreground"
-          >
-            <ShieldCheck className="h-3.5 w-3.5" /> Travas
-          </button>
-          <button
-            onClick={() => { void carregar(); void carregarAcomp(); }}
-            className="inline-flex h-9 items-center gap-1.5 rounded-[var(--radius)] border border-border px-3 text-xs font-bold uppercase text-muted-foreground hover:text-foreground"
-          >
-            <RefreshCw className={cn('h-3.5 w-3.5', carregando && 'animate-spin')} /> Atualizar
-          </button>
+          <Button size="sm" variant="ghost" onClick={() => setTravasAbertas(true)} className="uppercase">
+            <ShieldCheck /> Travas
+          </Button>
+          <Button size="sm" variant="ghost" className="uppercase"
+            onClick={() => { void carregar(); void carregarAcomp(); }}>
+            <RefreshCw className={cn(carregando && 'animate-spin')} /> Atualizar
+          </Button>
         </div>
       </div>
 
@@ -521,31 +539,20 @@ export function ClientFidelidadeTab({ clientId }: { clientId: string }) {
           {/* Barra de ferramentas da grade */}
           <div className="flex flex-wrap items-center gap-2">
             <div className="relative min-w-[200px] flex-1">
-              <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-              <input
-                value={busca} onChange={(e) => setBusca(e.target.value)}
-                placeholder="Buscar campanha, texto ou cupom"
-                className="h-9 w-full rounded-[var(--radius)] border border-border bg-background pl-7 pr-2 text-sm"
-              />
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input value={busca} onChange={(e) => setBusca(e.target.value)}
+                placeholder="Buscar campanha, texto ou cupom" className="pl-9" />
             </div>
-            <button
-              onClick={() => setCriando(true)}
-              className="inline-flex h-9 items-center gap-1.5 rounded-[var(--radius)] bg-primary px-4 text-xs font-bold uppercase text-primary-foreground"
-            >
-              <Plus className="h-3.5 w-3.5" /> Nova campanha
-            </button>
+            <Button size="sm" onClick={() => setCriando(true)} className="uppercase">
+              <Plus /> Nova campanha
+            </Button>
             {([['', 'Todas'], ['ativas', 'Ativas'], ['pausadas', 'Pausadas']] as const).map(([v, label]) => {
               const n = v === '' ? todas.length : v === 'ativas' ? ativas : todas.length - ativas;
               return (
-                <button
-                  key={v || 'todas'} onClick={() => setFiltroAtivas(v)}
-                  className={cn(
-                    'h-9 rounded-[var(--radius)] border px-3 text-[11px] font-bold uppercase',
-                    filtroAtivas === v ? 'border-primary bg-primary/15 text-primary' : 'border-border text-muted-foreground hover:text-foreground',
-                  )}
-                >
-                  {label} <span className="ml-1 opacity-70">{n}</span>
-                </button>
+                <Button key={v || 'todas'} size="xs" variant={filtroAtivas === v ? 'outline' : 'ghost'}
+                  onClick={() => setFiltroAtivas(v)} className="uppercase">
+                  {label} <span className="opacity-70">{n}</span>
+                </Button>
               );
             })}
           </div>
@@ -560,12 +567,9 @@ export function ClientFidelidadeTab({ clientId }: { clientId: string }) {
                     Crie a primeira escolhendo de onde vem o público: uma lista que você mesmo sobe,
                     ou um grupo de clientes por comportamento de compra.
                   </p>
-                  <button
-                    onClick={() => setCriando(true)}
-                    className="mx-auto mt-4 inline-flex h-9 items-center gap-1.5 rounded-[var(--radius)] bg-primary px-4 text-xs font-bold uppercase text-primary-foreground"
-                  >
-                    <Plus className="h-3.5 w-3.5" /> Criar campanha
-                  </button>
+                  <Button size="sm" className="mx-auto mt-4 uppercase" onClick={() => setCriando(true)}>
+                    <Plus /> Criar campanha
+                  </Button>
                 </>
               ) : (
                 <p className="text-sm text-muted-foreground">Nenhuma campanha com esse filtro.</p>
@@ -664,15 +668,13 @@ export function ClientFidelidadeTab({ clientId }: { clientId: string }) {
                 {DIAS_SEMANA_LABEL.map((label, dia) => {
                   const on = travas.diasSemana.includes(dia);
                   return (
-                    <button key={dia}
+                    <Button key={dia} size="xs" variant={on ? 'outline' : 'ghost'} className="uppercase"
                       onClick={() => setTravasDraft({
                         ...travas,
                         diasSemana: on ? travas.diasSemana.filter(d => d !== dia) : [...travas.diasSemana, dia].sort(),
-                      })}
-                      className={cn('h-8 rounded-[var(--radius)] border px-3 text-[10px] font-bold uppercase',
-                        on ? 'border-primary bg-primary/15 text-primary' : 'border-border text-muted-foreground')}>
+                      })}>
                       {label}
-                    </button>
+                    </Button>
                   );
                 })}
               </div>
@@ -683,14 +685,10 @@ export function ClientFidelidadeTab({ clientId }: { clientId: string }) {
                 className="h-3.5 w-3.5 accent-[var(--primary)]" />
               <span className="text-muted-foreground">Tirar da lista quem responder pedindo para não receber</span>
             </label>
-            <button
-              onClick={async () => { const ok = await patch({ travas: travasDraft }, 'travas'); if (ok) setTravasAbertas(false); }}
-              disabled={salvando === 'travas'}
-              className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-[var(--radius)] bg-primary text-xs font-bold uppercase text-primary-foreground disabled:opacity-60"
-            >
-              {salvando === 'travas' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
-              Salvar travas
-            </button>
+            <Button size="sm" className="w-full uppercase" disabled={salvando === 'travas'}
+              onClick={async () => { const ok = await patch({ travas: travasDraft }, 'travas'); if (ok) setTravasAbertas(false); }}>
+              {salvando === 'travas' ? <Loader2 className="animate-spin" /> : <Save />} Salvar travas
+            </Button>
           </div>
         </Modal>
       )}
@@ -739,16 +737,11 @@ function CampanhaCard({
   const medido = enviadas > 0 ? resultado : undefined;
 
   return (
-    <Card className="flex flex-col overflow-hidden">
-      <div className="h-1 w-full shrink-0" style={{ background: cor }} />
-
-      <div className="flex-1 p-4">
+    <Card className="flex flex-col" cor={cor}>
+      <div className="flex-1 p-4 pt-5">
         {/* Ícone grande: o gestor reconhece o grupo pelo símbolo antes de ler. */}
         <div className="flex items-start gap-3">
-          <div
-            className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-[var(--radius)]"
-            style={{ background: `color-mix(in srgb, ${cor} 14%, transparent)` }}
-          >
+          <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-[var(--radius)] bg-surface-elevated">
             {campanha.imagemUrl
               // eslint-disable-next-line @next/next/no-img-element -- URL externa do cliente; next/image exigiria allowlist de domínio
               ? <img src={campanha.imagemUrl} alt="" className="h-full w-full object-cover" />
@@ -756,17 +749,15 @@ function CampanhaCard({
           </div>
 
           <div className="min-w-0 flex-1">
-            <h3 className="line-clamp-2 font-heading text-base uppercase leading-tight">{titulo}</h3>
+            <h3 className="line-clamp-2 font-heading text-xl uppercase leading-tight">{titulo}</h3>
             <p className="mt-1 flex items-baseline gap-1.5">
-              <span className="font-heading text-2xl leading-none" style={{ color: cor }}>{publico}</span>
-              <span className="text-[11px] text-muted-foreground">pessoas no grupo agora</span>
+              <span className="font-heading text-3xl leading-none" style={{ color: cor }}>{publico}</span>
+              <span className="text-xs text-muted-foreground">pessoas no grupo agora</span>
             </p>
           </div>
 
           {campanha.cupom && (
-            <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-secondary/40 bg-secondary/10 px-2 py-0.5 text-[9px] font-bold uppercase text-secondary">
-              <Ticket className="h-2.5 w-2.5" />{campanha.cupom}
-            </span>
+            <Badge variant="secondary" className="shrink-0"><Ticket className="h-3 w-3" />{campanha.cupom}</Badge>
           )}
         </div>
 
@@ -785,7 +776,7 @@ function CampanhaCard({
         <p className="mt-1.5 line-clamp-1 text-[11px] text-muted-foreground">{objetivo}</p>
 
         {/* As 5 métricas de RESULTADO — é isso que responde "valeu a pena?". */}
-        <div className="mt-3 grid grid-cols-5 gap-1.5 border-t border-border pt-3">
+        <div className="mt-3 grid grid-cols-3 gap-x-2 gap-y-3 border-t border-border pt-3">
           <Metrica label="Msgs" valor={String(enviadas)} />
           <Metrica label="Receita" valor={medido ? brl(medido.receita) : '—'} cor="text-primary" />
           <Metrica label="Pedidos" valor={medido ? String(medido.pedidos) : '—'} />
@@ -820,8 +811,10 @@ function CampanhaCard({
             const { dia, data } = dataCurta(d);
             return (
               <span key={i} className={cn(
-                'rounded-[var(--radius)] px-1.5 py-1 text-center text-[9px] font-bold leading-tight',
-                i === 0 && campanha.ativa ? 'bg-primary/15 text-primary' : 'bg-background text-muted-foreground',
+                'rounded-[var(--radius)] px-1.5 py-1 text-center text-[10px] font-bold uppercase leading-tight tracking-wide',
+                i === 0 && campanha.ativa
+                  ? 'bg-primary/15 text-primary'
+                  : 'bg-surface-elevated text-muted-foreground',
               )}>
                 {dia}<br />{data}
               </span>
@@ -830,16 +823,12 @@ function CampanhaCard({
         </div>
 
         <div className="ml-auto flex items-center gap-2">
-          <span className={cn(
-            'rounded-full border px-2 py-0.5 text-[9px] font-bold uppercase',
-            campanha.ativa ? 'border-primary/40 bg-primary/10 text-primary' : 'border-border text-muted-foreground',
-          )}>
+          <Badge variant={campanha.ativa ? 'default' : 'tag'}>
             {campanha.ativa ? 'Ativa' : 'Pausada'}
-          </span>
-          <button onClick={onEditar} title="Editar campanha"
-            className="text-muted-foreground hover:text-foreground">
-            <Pencil className="h-4 w-4" />
-          </button>
+          </Badge>
+          <Button size="icon-xs" variant="ghost" onClick={onEditar} title="Editar campanha">
+            <Pencil />
+          </Button>
           <MenuAcoes itens={[
             {
               label: campanha.ativa ? 'Pausar disparo'
@@ -886,10 +875,9 @@ function NovaCampanha({
   if (etapa === 'lista') {
     return (
       <div className="space-y-3">
-        <button onClick={() => setEtapa('escolha')}
-          className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground hover:text-foreground">
+        <Button size="xs" variant="ghost" className="uppercase" onClick={() => setEtapa('escolha')}>
           ← Voltar
-        </button>
+        </Button>
         <FormLista salvando={salvando} onSalvar={onSubirLista} />
 
         {listas.length > 0 && (
@@ -914,10 +902,9 @@ function NovaCampanha({
   if (etapa === 'base') {
     return (
       <div className="space-y-3">
-        <button onClick={() => setEtapa('escolha')}
-          className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground hover:text-foreground">
+        <Button size="xs" variant="ghost" className="uppercase" onClick={() => setEtapa('escolha')}>
           ← Voltar
-        </button>
+        </Button>
         {!conectado ? (
           <p className="rounded-[var(--radius)] border border-dashed border-border p-4 text-[11px] leading-relaxed text-muted-foreground">
             Este cliente não tem Cardápio Web nem Anota AI conectado, então o sistema ainda não
@@ -1065,14 +1052,11 @@ function FormLista({ salvando, onSalvar }: {
         <span className="text-[11px] text-muted-foreground">
           {linhas} contato(s){comHistorico > 0 && ` · ${comHistorico} com histórico`}
         </span>
-        <button
+        <Button size="sm" className="uppercase"
           disabled={!nome.trim() || linhas === 0 || salvando}
-          onClick={() => void onSalvar({ nome, texto, contatos: doArquivo ?? undefined })}
-          className="inline-flex h-9 items-center gap-1.5 rounded-[var(--radius)] bg-primary px-4 text-xs font-bold uppercase text-primary-foreground disabled:opacity-50"
-        >
-          {salvando ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
-          Salvar lista
-        </button>
+          onClick={() => void onSalvar({ nome, texto, contatos: doArquivo ?? undefined })}>
+          {salvando ? <Loader2 className="animate-spin" /> : <Save />} Salvar lista
+        </Button>
       </div>
     </div>
   );
@@ -1122,7 +1106,7 @@ function Acompanhar({
                   <span className="shrink-0 text-[10px] text-muted-foreground">desde {hora(e.iniciada_em)}</span>
                 </div>
                 <div className="mt-3"><Barra pct={p.pct} /></div>
-                <div className="mt-2 grid grid-cols-4 gap-2">
+                <div className="mt-3 grid grid-cols-4 gap-2">
                   <Metrica label="Enviadas" valor={String(p.enviadas)} cor="text-primary" />
                   <Metrica label="Na fila" valor={String(p.pendentes)} />
                   <Metrica label="Puladas" valor={String(p.puladas)} />
@@ -1141,15 +1125,10 @@ function Acompanhar({
 
       <div className="flex flex-wrap items-center gap-2">
         {contadores.map(c => (
-          <button
-            key={c.chave || 'tudo'} onClick={() => setFiltroStatus(c.chave)}
-            className={cn(
-              'h-9 rounded-[var(--radius)] border px-3 text-[11px] font-bold uppercase',
-              filtroStatus === c.chave ? 'border-primary bg-primary/15 text-primary' : 'border-border text-muted-foreground hover:text-foreground',
-            )}
-          >
-            {c.label} <span className="ml-1 opacity-70">{c.n}</span>
-          </button>
+          <Button key={c.chave || 'tudo'} size="xs" variant={filtroStatus === c.chave ? 'outline' : 'ghost'}
+            onClick={() => setFiltroStatus(c.chave)} className="uppercase">
+            {c.label} <span className="opacity-70">{c.n}</span>
+          </Button>
         ))}
         <select
           value={filtroCampanha} onChange={(e) => setFiltroCampanha(e.target.value)}
@@ -1191,22 +1170,23 @@ function Acompanhar({
                       <td className="px-3 py-2">{e.nome ?? <span className="text-muted-foreground">sem nome</span>}</td>
                       <td className="px-3 py-2 text-xs text-muted-foreground">{e.telefone}</td>
                       <td className="max-w-[180px] truncate px-3 py-2 text-xs text-muted-foreground">{e.campanha ?? '—'}</td>
-                      <td className={cn('px-3 py-2 text-[10px] font-bold uppercase', COR_STATUS[e.status])}>
-                        {STATUS_ENVIO_LABEL[e.status] ?? e.status}
+                      <td className="px-3 py-2">
+                        <Badge variant={VARIANTE_STATUS[e.status] ?? 'tag'}>
+                          {STATUS_ENVIO_LABEL[e.status] ?? e.status}
+                        </Badge>
                       </td>
                       <td className="px-3 py-2 text-xs text-muted-foreground">{hora(e.enviado_em ?? e.criado_em)}</td>
                       <td className="px-3 py-2 text-right">
-                        <button onClick={() => setExpandido(aberto ? null : e.id)}
-                          className="text-[10px] font-bold uppercase text-primary">
+                        <Button size="xs" variant="link" onClick={() => setExpandido(aberto ? null : e.id)}>
                           {aberto ? 'Fechar' : 'Ver mensagem'}
-                        </button>
+                        </Button>
                       </td>
                     </tr>
                     {aberto && (
                       <tr className="border-b border-border/50 bg-background/30">
                         <td colSpan={6} className="px-3 py-3">
                           {e.texto ? (
-                            <p className="max-w-lg rounded-[var(--radius)] bg-[#075E54]/15 px-3 py-2 text-xs leading-relaxed">
+                            <p className="max-w-lg rounded-[var(--radius)] border-l-2 border-primary bg-surface-elevated px-3 py-2 text-xs leading-relaxed">
                               {e.texto}
                             </p>
                           ) : (
@@ -1225,11 +1205,11 @@ function Acompanhar({
                             <p className="mt-2 text-[11px] text-destructive">Erro: {e.erro ?? 'desconhecido'}</p>
                           )}
                           {(e.status === 'falha' || e.status === 'pulada') && (
-                            <button onClick={() => onReenviar(e.id)} disabled={salvando === e.id}
-                              className="mt-2 inline-flex h-8 items-center gap-1.5 rounded-[var(--radius)] border border-border px-3 text-[11px] font-bold uppercase text-muted-foreground hover:text-foreground disabled:opacity-50">
-                              {salvando === e.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+                            <Button size="xs" variant="ghost" className="mt-2 uppercase"
+                              onClick={() => onReenviar(e.id)} disabled={salvando === e.id}>
+                              {salvando === e.id ? <Loader2 className="animate-spin" /> : <RefreshCw />}
                               Colocar de volta na fila
-                            </button>
+                            </Button>
                           )}
                         </td>
                       </tr>
@@ -1336,15 +1316,13 @@ function EditorCampanha({
           {DIAS_SEMANA_LABEL.map((label, dia) => {
             const on = campanha.diasSemana.includes(dia);
             return (
-              <button key={dia}
+              <Button key={dia} size="xs" variant={on ? 'outline' : 'ghost'} className="uppercase"
                 onClick={() => onChange({
                   ...campanha,
                   diasSemana: on ? campanha.diasSemana.filter(d => d !== dia) : [...campanha.diasSemana, dia].sort(),
-                })}
-                className={cn('h-8 rounded-[var(--radius)] border px-3 text-[10px] font-bold uppercase',
-                  on ? 'border-primary bg-primary/15 text-primary' : 'border-border text-muted-foreground')}>
+                })}>
                 {label}
-              </button>
+              </Button>
             );
           })}
         </div>
@@ -1356,12 +1334,10 @@ function EditorCampanha({
           <div className="flex items-center gap-2">
             {/* Sugestão OFERECIDA, não imposta: a campanha nasce em branco. */}
             {campanha.mensagens.filter(Boolean).length === 0 && (
-              <button
-                onClick={() => onChange({ ...campanha, mensagens: sugestaoDeTexto(campanha.modelo) })}
-                className="text-[10px] font-bold uppercase tracking-wide text-primary"
-              >
+              <Button size="xs" variant="link"
+                onClick={() => onChange({ ...campanha, mensagens: sugestaoDeTexto(campanha.modelo) })}>
                 Usar sugestão de texto
-              </button>
+              </Button>
             )}
             <p className="text-[10px] text-muted-foreground">
               {VARIAVEIS.filter(v => campanha.fonte !== 'lista' || !v.consumo).map(v => `{{${v.chave}}}`).join('  ')}
@@ -1390,7 +1366,7 @@ function EditorCampanha({
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
                   <span className="text-[10px] text-muted-foreground">{texto.length} caracteres</span>
                   {desconhecidas.length > 0 && (
-                    <span className="text-[10px] text-[#facc15]">{desconhecidas.map(d => `{{${d}}}`).join(', ')} não existe</span>
+                    <span className="text-[10px] text-[#FF6B35]">{desconhecidas.map(d => `{{${d}}}`).join(', ')} não existe</span>
                   )}
                   {indisponiveis.length > 0 && (
                     <span className="text-[10px] text-destructive">
@@ -1408,7 +1384,7 @@ function EditorCampanha({
         <Rotulo>Como chega no WhatsApp</Rotulo>
         <div className="mt-2 space-y-2">
           {campanha.mensagens.filter(Boolean).map((m, i) => (
-            <p key={i} className="rounded-[var(--radius)] bg-[#075E54]/15 px-3 py-2 text-xs leading-relaxed">
+            <p key={i} className="rounded-[var(--radius)] border-l-2 border-primary bg-surface-elevated px-3 py-2 text-xs leading-relaxed">
               {aplicarVars(m, vars, 'envio')}
             </p>
           ))}
@@ -1433,14 +1409,10 @@ function EditorCampanha({
         </div>
       )}
 
-      <button
-        onClick={() => onSalvar(campanha)}
-        disabled={salvando || erros.length > 0}
-        className="inline-flex h-10 w-full items-center justify-center gap-1.5 rounded-[var(--radius)] bg-primary text-xs font-bold uppercase text-primary-foreground disabled:opacity-50"
-      >
-        {salvando ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
-        Salvar campanha
-      </button>
+      <Button className="w-full uppercase" disabled={salvando || erros.length > 0}
+        onClick={() => onSalvar(campanha)}>
+        {salvando ? <Loader2 className="animate-spin" /> : <Save />} Salvar campanha
+      </Button>
     </div>
   );
 }
