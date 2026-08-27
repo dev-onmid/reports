@@ -11,6 +11,7 @@ import assert from 'node:assert';
 import {
   montarAlvos, proximaOcorrencia, proximasOcorrencias, validarPublicacao,
   resumoAgendamento, LEGENDA_MAX, TETO_META_24H, MIN_ANTECEDENCIA_MIN,
+  REELS_MIN_SEG, REELS_MAX_SEG, STORY_VIDEO_MAX_SEG,
 } from './build/post-agendamento.mjs';
 
 let n = 0;
@@ -201,5 +202,29 @@ ok(/sem dia escolhido/.test(resumoAgendamento({ modo: 'recorrente', dias: [], ho
    'recorrencia vazia se explica em vez de mostrar frase quebrada');
 
 eq(TETO_META_24H, 100, 'teto da Meta documentado no codigo');
+
+// ------------------------------------------------------------- video (reels)
+
+const VID = (dur) => ({ ehVideo: true, duracaoSeg: dur });
+const IMG = { ehVideo: false };
+
+ok(validarPublicacao({ ...base, tipo: 'feed' }, ALVO, AGORA, VID(30)).some(e => /Reels/.test(e)),
+   'video no feed manda trocar para Reels');
+ok(validarPublicacao({ ...base, tipo: 'reels' }, ALVO, AGORA, IMG).some(e => /v[ií]deo/i.test(e)),
+   'imagem em Reels e recusada');
+eq(validarPublicacao({ ...base, tipo: 'reels' }, ALVO, AGORA, VID(30)), [],
+   'Reels com video de 30s passa');
+ok(validarPublicacao({ ...base, tipo: 'reels' }, ALVO, AGORA, VID(REELS_MIN_SEG - 1)).some(e => /pelo menos/.test(e)),
+   'Reels curto demais e recusado');
+ok(validarPublicacao({ ...base, tipo: 'reels' }, ALVO, AGORA, VID(REELS_MAX_SEG + 1)).some(e => /at[eé]/i.test(e)),
+   'Reels longo demais e recusado');
+eq(validarPublicacao({ ...base, tipo: 'story', legenda: '' }, ALVO, AGORA, VID(45)), [],
+   'story em video de 45s passa');
+ok(validarPublicacao({ ...base, tipo: 'story', legenda: '' }, ALVO, AGORA, VID(STORY_VIDEO_MAX_SEG + 5)).some(e => /Reels/.test(e)),
+   'story em video acima de 60s aponta Reels como saida');
+eq(validarPublicacao({ ...base, tipo: 'reels', legenda: 'legenda ok' }, ALVO, AGORA, VID(30)), [],
+   'Reels COM legenda e valido (diferente de story)');
+ok(validarPublicacao({ ...base, tipo: 'reels', legenda: 'x'.repeat(LEGENDA_MAX + 1) }, ALVO, AGORA, VID(30)).length > 0,
+   'legenda de Reels tambem respeita o limite');
 
 console.log(`OK — ${n} asserts`);

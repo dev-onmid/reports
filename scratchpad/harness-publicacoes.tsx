@@ -58,6 +58,7 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     try { body = JSON.parse(String(init.body)); } catch { /* deixa cru */ }
     (window as unknown as { __calls: Chamada[] }).__calls.push({ url, method: init.method, body });
   }
+  if (url.includes('/api/publicacoes/upload')) return J({ ok: true, midiaId: 'vid-1', token: 'a'.repeat(32), kb: 2500 });
   if (url.includes('/api/publicacoes/contas')) return J({ ok: true, contas: CONTAS });
   if (/\/api\/publicacoes\/[\w-]+$/.test(url) && !url.endsWith('/contas')) {
     if (init?.method === 'POST') return J({ ok: true, materializados: 0, resultados: [] });

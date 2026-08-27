@@ -3,7 +3,7 @@ import { getFreshMetaToken } from '@/lib/meta-token';
 import { resolverContasIg } from '@/lib/instagram-monitor';
 import { proximaOcorrencia, TETO_META_24H, type Agendamento, type Alvo } from '@/lib/post-agendamento';
 import {
-  ensurePostSchema, inserirAlvos, publicadasNasUltimas24h, tokenDaMidia, urlPublicaDaMidia,
+  ensurePostSchema, infoDaMidia, inserirAlvos, publicadasNasUltimas24h, urlPublicaDaMidia,
   type AlvoRow, type PublicacaoRow,
 } from '@/lib/post-server';
 
@@ -144,13 +144,14 @@ export async function publicarAlvo(
     return { alvo: alvo.id, conta, ok: false, pulou: 'teto_24h', erro: `conta já recebeu ${jaHoje} publicações em 24h` };
   }
 
-  if (!pub.midia_id) return falhar(pool, alvo, 'publicação sem imagem');
-  const token = await tokenDaMidia(pool, pub.midia_id);
-  if (!token) return falhar(pool, alvo, 'imagem não encontrada');
-  const imageUrl = urlPublicaDaMidia(token, origin);
-  if (!imageUrl) {
-    return falhar(pool, alvo, 'APP_URL não é uma URL pública https — a Meta não conseguiria baixar a imagem');
+  if (!pub.midia_id) return falhar(pool, alvo, 'publicação sem mídia');
+  const midia = await infoDaMidia(pool, pub.midia_id);
+  if (!midia) return falhar(pool, alvo, 'mídia não encontrada');
+  const midiaUrl = urlPublicaDaMidia(midia.token, origin);
+  if (!midiaUrl) {
+    return falhar(pool, alvo, 'APP_URL não é uma URL pública https — a Meta não conseguiria baixar a mídia');
   }
+  const ehVideo = midia.mime.startsWith('video/');
 
   // Token da PÁGINA dona da conta — é a credencial que a publicação exige.
   const contas = await resolverContasIg(pool, [alvo.client_id], getFreshMetaToken);
@@ -166,10 +167,19 @@ export async function publicarAlvo(
   // 1) Container (reaproveita o de um tick anterior que não chegou a publicar).
   let containerId = alvo.container_id;
   if (!containerId) {
-    const body = new URLSearchParams({ image_url: imageUrl, access_token: pageToken });
-    // Story não aceita `caption` — mandar o campo faz a Meta recusar.
-    if (pub.tipo === 'story') body.set('media_type', 'STORIES');
-    else if (pub.legenda.trim()) body.set('caption', pub.legenda);
+    // Vídeo vai como `video_url` (a Meta baixa e PROCESSA — o poll abaixo é a
+    // espera desse processamento); imagem como `image_url`.
+    const body = new URLSearchParams({ access_token: pageToken });
+    body.set(ehVideo ? 'video_url' : 'image_url', midiaUrl);
+    if (pub.tipo === 'story') {
+      // Story não aceita `caption` — mandar o campo faz a Meta recusar.
+      body.set('media_type', 'STORIES');
+    } else if (pub.tipo === 'reels') {
+      body.set('media_type', 'REELS');
+      if (pub.legenda.trim()) body.set('caption', pub.legenda);
+    } else if (pub.legenda.trim()) {
+      body.set('caption', pub.legenda);
+    }
 
     const criado = await graph(`${GRAPH}/${alvo.ig_id}/media`, { method: 'POST', body });
     const erro = erroDaGraph(criado);

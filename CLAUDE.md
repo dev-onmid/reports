@@ -29,6 +29,19 @@ Decisões do Matheus: 1ª versão só **foto** (vídeo/Reels exigiria volume na 
 - **Cron na VPS**: `* * * * * ... /api/publicacoes/worker?secret=... # onmid-cron` (15ª linha; backup em `/root/crontab-backup-antes-publicacoes.txt`).
 - ⚠️ Ainda não exercitado com dado real: story (o caminho `media_type=STORIES` está escrito mas nenhum story real saiu ainda) e recorrência de série em produção — testar agendando um story recorrente na @onmidmkt antes de liberar pros gestores.
 
+### Reels + vídeo (2026-08-26, 2ª rodada do planejador)
+
+Pedido do Matheus na sequência ("e reels como faz?" → "bora criar"). Vídeo entra no MESMO motor; o que mudou:
+
+- **Vídeo mora em DISCO, não em BYTEA**: `post_midia.bytes` virou nullable e ganhou `arquivo`/`duracao_seg` (ALTERs no ensure — a tabela já existia). O diretório é `MIDIA_DIR ?? /app/midia`, que em produção é **volume montado no compose** (`/opt/onmid-reports/midia:/app/midia`) — o filesystem do container é efêmero e um redeploy apagaria os vídeos das séries recorrentes. ⚠️ O dono do volume no host precisa ser o UID do container (checar `docker exec onmid-reports id`), senão o upload falha com EACCES.
+- **Upload NÃO é multipart nem JSON**: `POST /api/publicacoes/upload` recebe o corpo CRU (`fetch(..., { body: file })`) e grava por **stream** contando bytes (cap 150 MB) — `req.formData()` materializaria 80 MB em memória num container com `mem_limit 2g`. Imagem continua no dataUrl do POST normal (cabe no JSON); o POST aceita `midiaId` como alternativa.
+- **`/api/midia/[token]` agora serve os dois**: BYTEA→resposta direta, arquivo→`Readable.toWeb(createReadStream(...))` com Content-Length.
+- **Regras de casamento tipo × mídia** (`validarPublicacao` ganhou 4º param `MidiaInfo`, validado na tela E no servidor): vídeo no feed → "é Reels, troque o tipo" (a tela troca sozinha ao escolher vídeo); imagem em Reels recusada; Reels 3s–15min; **story em vídeo ≤60s** (acima disso a mensagem aponta Reels). Reels TEM legenda (story não).
+- **Motor**: `media_type=REELS` + `video_url` (story em vídeo = `STORIES` + `video_url`). O poll de status é a espera do PROCESSAMENTO do vídeo pela Meta — demora mais que imagem, e o desenho de "container guardado + próximo tick continua" já cobria isso sem mudança.
+- **Sem conversão de vídeo no navegador**: só MP4/MOV entram (`lerMetadadosVideo` recusa WebM ANTES do upload de 80 MB); metadados (duração/dimensões) lidos via `<video preload=metadata>`.
+- ✅ Verificado: **49 asserts**; tsc + `next build` limpos (`/api/publicacoes/upload` registrada); browser com **MP4 REAL** (ffmpeg local, 720×1280 5s — o mock de fetch não intercepta XHR, é assim que o harness carrega o arquivo): upload com `?duracao=5`, tipo pulando pra REELS sozinho, "vídeo no feed" bloqueando o Revisar, payload com `midiaId` e sem `imagem`.
+- ⚠️ Pendência conhecida: vídeo órfão no disco não é limpo (cancelar publicação não apaga o arquivo) — irrelevante no volume de hoje, revisar se o disco crescer.
+
 
 ## Dashboard de Food/Delivery + editor de modelo (2026-08-15/16)
 

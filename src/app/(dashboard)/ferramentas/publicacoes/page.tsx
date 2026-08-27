@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
-import { prepararImagem, avisoProporcao, type ImagemPreparada } from '@/lib/post-imagem';
+import { prepararImagem, avisoProporcao, lerMetadadosVideo, type ImagemPreparada, type VideoLido } from '@/lib/post-imagem';
 import {
   LEGENDA_MAX, STORY_SEM_SUPORTE, montarAlvos, proximasOcorrencias, resumoAgendamento,
   validarPublicacao, type Agendamento, type ContaCliente, type TipoPublicacao,
@@ -206,9 +206,11 @@ function CardPublicacao({ p, onAbrir }: { p: Publicacao; onAbrir: () => void }) 
           <div className="flex items-center gap-1.5">
             <span className={cn(
               'rounded px-1.5 py-0.5 text-[10px] font-bold uppercase',
-              p.tipo === 'story' ? 'bg-[#7b2cff]/20 text-[#c9a2ff]' : 'bg-[#55f52f]/15 text-[#55f52f]',
+              p.tipo === 'story' ? 'bg-[#7b2cff]/20 text-[#c9a2ff]'
+                : p.tipo === 'reels' ? 'bg-sky-500/15 text-sky-400'
+                : 'bg-[#55f52f]/15 text-[#55f52f]',
             )}>
-              {p.tipo === 'story' ? 'Story' : 'Feed'}
+              {p.tipo === 'story' ? 'Story' : p.tipo === 'reels' ? 'Reels' : 'Feed'}
             </span>
             {p.status === 'cancelado' && (
               <span className="rounded bg-muted/40 px-1.5 py-0.5 text-[10px] font-bold uppercase">Cancelada</span>
@@ -255,6 +257,10 @@ function ModalCriar({
   const [tipo, setTipo] = useState<TipoPublicacao>('feed');
   const [legenda, setLegenda] = useState('');
   const [imagem, setImagem] = useState<ImagemPreparada | null>(null);
+  // Vídeo sobe NA HORA da escolha (o JSON do agendar não comporta 80 MB) e a
+  // publicação referencia o `midiaId` devolvido pelo upload.
+  const [video, setVideo] = useState<(VideoLido & { midiaId: string }) | null>(null);
+  const [enviandoVideo, setEnviandoVideo] = useState(false);
   const [erroImagem, setErroImagem] = useState('');
   const [selecionados, setSelecionados] = useState<string[]>([]);
   const [busca, setBusca] = useState('');
@@ -286,21 +292,48 @@ function ModalCriar({
 
   const erros = useMemo(
     () => validarPublicacao(
-      { tipo, legenda, midiaId: imagem ? 'ok' : '', clientIds: selecionados, agendamento },
+      { tipo, legenda, midiaId: imagem || video ? 'ok' : '', clientIds: selecionados, agendamento },
       alvos, new Date(),
+      video ? { ehVideo: true, duracaoSeg: video.duracaoSeg } : imagem ? { ehVideo: false } : null,
     ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [tipo, legenda, imagem, selecionados, alvos, modo, quando, dias, hora, ate],
+    [tipo, legenda, imagem, video, selecionados, alvos, modo, quando, dias, hora, ate],
   );
 
-  const aviso = imagem ? avisoProporcao(imagem.largura, imagem.altura, tipo) : null;
+  const aviso = video
+    ? avisoProporcao(video.largura, video.altura, tipo)
+    : imagem ? avisoProporcao(imagem.largura, imagem.altura, tipo) : null;
   const proximas = proximasOcorrencias(agendamento, new Date(), 3);
 
   async function escolherArquivo(file: File | undefined) {
     if (!file) return;
     setErroImagem('');
+    if (file.type.startsWith('video/')) {
+      try {
+        const meta = await lerMetadadosVideo(file);
+        setEnviandoVideo(true);
+        const res = await fetch(`/api/publicacoes/upload?duracao=${meta.duracaoSeg}`, {
+          method: 'POST', headers: { 'Content-Type': file.type }, body: file,
+        });
+        const j = await res.json();
+        if (!j.ok) throw new Error(j.error ?? 'Falha no envio do vídeo.');
+        setImagem(null);
+        setVideo({ ...meta, midiaId: j.midiaId });
+        // Vídeo escolhido com "Feed" marcado vira Reels sozinho — é o único
+        // destino de vídeo fora do story, e trocar por conta evita o erro chato.
+        setTipo(t => t === 'feed' ? 'reels' : t);
+      } catch (e) {
+        setVideo(null);
+        setErroImagem(e instanceof Error ? e.message : 'Falha ao ler o vídeo.');
+      } finally {
+        setEnviandoVideo(false);
+      }
+      return;
+    }
     try {
+      setVideo(null);
       setImagem(await prepararImagem(file));
+      setTipo(t => t === 'reels' ? 'feed' : t);
     } catch (e) {
       setImagem(null);
       setErroImagem(e instanceof Error ? e.message : 'Falha ao ler a imagem.');
@@ -316,7 +349,10 @@ function ModalCriar({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           tipo, legenda, clientIds: alvos.map(a => a.clientId), agendamento,
-          imagem: imagem ? { dataUrl: imagem.dataUrl, largura: imagem.largura, altura: imagem.altura } : undefined,
+          midiaId: video?.midiaId,
+          imagem: !video && imagem
+            ? { dataUrl: imagem.dataUrl, largura: imagem.largura, altura: imagem.altura }
+            : undefined,
         }),
       });
       const j = await res.json();
@@ -347,33 +383,50 @@ function ModalCriar({
               <div>
                 <div className="mb-1.5 text-xs font-bold uppercase text-muted-foreground">Imagem</div>
                 <button
+                  disabled={enviandoVideo}
                   onClick={() => inputFile.current?.click()}
-                  className="flex w-full items-center gap-3 rounded-lg border border-dashed border-border p-3 text-left hover:border-muted-foreground/50"
+                  className="flex w-full items-center gap-3 rounded-lg border border-dashed border-border p-3 text-left hover:border-muted-foreground/50 disabled:opacity-60"
                 >
-                  {imagem ? (
+                  {video ? (
+                    <video src={video.previewUrl} muted playsInline className="h-20 w-20 rounded object-cover" />
+                  ) : imagem ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={imagem.dataUrl} alt="" className="h-20 w-20 rounded object-cover" />
                   ) : (
                     <div className="flex h-20 w-20 items-center justify-center rounded bg-muted/30">
-                      <ImagePlus className="w-6 h-6 text-muted-foreground" />
+                      {enviandoVideo
+                        ? <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+                        : <ImagePlus className="w-6 h-6 text-muted-foreground" />}
                     </div>
                   )}
                   <div className="min-w-0 text-sm">
-                    {imagem ? (
+                    {enviandoVideo ? (
+                      <>
+                        <div className="font-medium">Enviando vídeo…</div>
+                        <div className="text-xs text-muted-foreground">Aguarde — o arquivo é grande.</div>
+                      </>
+                    ) : video ? (
+                      <>
+                        <div className="font-medium">
+                          Vídeo {video.largura}×{video.altura} · {Math.round(video.duracaoSeg)}s · {video.mb} MB
+                        </div>
+                        <div className="text-xs text-muted-foreground">Enviado. Clique para trocar.</div>
+                      </>
+                    ) : imagem ? (
                       <>
                         <div className="font-medium">{imagem.largura}×{imagem.altura} · {imagem.kb} KB</div>
                         <div className="text-xs text-muted-foreground">Convertida para JPEG. Clique para trocar.</div>
                       </>
                     ) : (
                       <>
-                        <div className="font-medium">Escolher imagem</div>
-                        <div className="text-xs text-muted-foreground">JPG, PNG ou WebP — convertemos para JPEG.</div>
+                        <div className="font-medium">Escolher imagem ou vídeo</div>
+                        <div className="text-xs text-muted-foreground">JPG/PNG/WebP (viram JPEG) ou MP4 (Reels e story).</div>
                       </>
                     )}
                   </div>
                 </button>
                 <input
-                  ref={inputFile} type="file" accept="image/*" className="hidden"
+                  ref={inputFile} type="file" accept="image/*,video/mp4,video/quicktime" className="hidden"
                   onChange={e => void escolherArquivo(e.target.files?.[0])}
                 />
                 {erroImagem && <p className="mt-1 text-xs text-red-400">{erroImagem}</p>}
@@ -388,7 +441,7 @@ function ModalCriar({
               <div>
                 <div className="mb-1.5 text-xs font-bold uppercase text-muted-foreground">Onde publicar</div>
                 <div className="flex gap-2">
-                  {([['feed', 'Feed'], ['story', 'Story']] as const).map(([k, l]) => (
+                  {([['feed', 'Feed'], ['story', 'Story'], ['reels', 'Reels']] as const).map(([k, l]) => (
                     <button
                       key={k}
                       onClick={() => setTipo(k)}
@@ -408,8 +461,8 @@ function ModalCriar({
                 )}
               </div>
 
-              {/* Legenda (feed) */}
-              {tipo === 'feed' && (
+              {/* Legenda (feed/reels — story não tem) */}
+              {tipo !== 'story' && (
                 <div>
                   <div className="mb-1.5 flex items-center justify-between">
                     <span className="text-xs font-bold uppercase text-muted-foreground">Legenda</span>
@@ -568,12 +621,16 @@ function ModalCriar({
               </div>
 
               <div className="flex gap-3">
-                {imagem && (
+                {video ? (
+                  <video src={video.previewUrl} muted playsInline className="h-24 w-24 rounded object-cover" />
+                ) : imagem && (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src={imagem.dataUrl} alt="" className="h-24 w-24 rounded object-cover" />
                 )}
                 <div className="min-w-0 text-sm">
-                  <div className="font-bold uppercase">{tipo === 'story' ? 'Story' : 'Post no feed'}</div>
+                  <div className="font-bold uppercase">
+                    {tipo === 'story' ? 'Story' : tipo === 'reels' ? 'Reels' : 'Post no feed'}
+                  </div>
                   <p className="mt-0.5 line-clamp-3 text-muted-foreground">{legenda.trim() || 'sem legenda'}</p>
                   <div className="mt-1 text-xs">{resumoAgendamento(agendamento)}</div>
                 </div>
@@ -686,7 +743,8 @@ function ModalDetalhe({ id, onFechar }: { id: string; onFechar: () => void }) {
             <>
               {pub && (
                 <p className="text-sm text-muted-foreground">
-                  {pub.tipo === 'story' ? 'Story' : 'Post no feed'} · {alvos.length} conta{alvos.length === 1 ? '' : 's'}
+                  {pub.tipo === 'story' ? 'Story' : pub.tipo === 'reels' ? 'Reels' : 'Post no feed'}
+                  {' '}· {alvos.length} conta{alvos.length === 1 ? '' : 's'}
                 </p>
               )}
               <div className="space-y-1">

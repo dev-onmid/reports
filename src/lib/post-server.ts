@@ -1,4 +1,7 @@
 import { randomBytes } from 'crypto';
+import { createWriteStream, promises as fs } from 'fs';
+import { join } from 'path';
+import type { Readable } from 'stream';
 import type { Pool } from 'pg';
 import type { Alvo, StatusAlvo, TipoPublicacao } from '@/lib/post-agendamento';
 
@@ -68,6 +71,13 @@ export function ensurePostSchema(pool: Pool): Promise<void> {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )`);
 
+    // Vídeo (2ª rodada): o arquivo mora em DISCO (volume da VPS), não em BYTEA —
+    // um Reel de 60s tem 30–80 MB e incharia o banco. `bytes` vira nullable e
+    // `arquivo` guarda o caminho. ALTERs porque a tabela já existe em produção.
+    await pool.query(`ALTER TABLE public.post_midia ALTER COLUMN bytes DROP NOT NULL`);
+    await pool.query(`ALTER TABLE public.post_midia ADD COLUMN IF NOT EXISTS arquivo TEXT`);
+    await pool.query(`ALTER TABLE public.post_midia ADD COLUMN IF NOT EXISTS duracao_seg REAL`);
+
     // ⚠️ A trava estrutural contra publicar duas vezes na mesma conta na mesma
     // rodada. O claim atômico do motor protege contra ticks cruzados; esta
     // unique protege contra a fila ser montada duas vezes (retry de criação,
@@ -124,20 +134,88 @@ export async function salvarMidia(
 
 export async function obterMidiaPorToken(
   pool: Pool, token: string,
-): Promise<{ mime: string; bytes: Buffer } | null> {
+): Promise<{ mime: string; bytes: Buffer | null; arquivo: string | null } | null> {
   if (!/^[0-9a-f]{32}$/.test(token)) return null;
   await ensurePostSchema(pool);
-  const { rows } = await pool.query<{ mime: string; bytes: Buffer }>(
-    `SELECT mime, bytes FROM public.post_midia WHERE token = $1`, [token],
+  const { rows } = await pool.query<{ mime: string; bytes: Buffer | null; arquivo: string | null }>(
+    `SELECT mime, bytes, arquivo FROM public.post_midia WHERE token = $1`, [token],
   );
   return rows[0] ?? null;
 }
 
-export async function tokenDaMidia(pool: Pool, midiaId: string): Promise<string | null> {
-  const { rows } = await pool.query<{ token: string }>(
-    `SELECT token FROM public.post_midia WHERE id = $1`, [midiaId],
+// -------------------------------------------------------------------- Vídeo
+
+/**
+ * Diretório dos vídeos. Em produção é um VOLUME montado no compose
+ * (`/opt/onmid-reports/midia` no host) — o filesystem do container é efêmero e
+ * um redeploy apagaria os vídeos das séries recorrentes.
+ */
+export function midiaDir(): string {
+  return process.env.MIDIA_DIR ?? '/app/midia';
+}
+
+const VIDEO_MIME_OK = /^video\/(mp4|quicktime)$/;
+export const VIDEO_BYTES_MAX = 150 * 1024 * 1024;
+
+/**
+ * Grava o vídeo em DISCO por stream — nunca carrega os 80 MB em memória
+ * (mem_limit do container é 2g, dividido com tudo o mais).
+ *
+ * Conta os bytes durante a gravação e ABORTA acima do cap: confiar no
+ * Content-Length seria confiar no cliente.
+ */
+export async function salvarVideoStream(
+  pool: Pool, stream: Readable, mime: string, duracaoSeg?: number | null, createdBy?: string,
+): Promise<MidiaSalva & { arquivo: string }> {
+  await ensurePostSchema(pool);
+  if (!VIDEO_MIME_OK.test(mime)) throw new Error('Vídeo precisa ser MP4 (ou MOV).');
+
+  const dir = midiaDir();
+  await fs.mkdir(dir, { recursive: true });
+  const token = randomBytes(16).toString('hex');
+  const ext = mime === 'video/quicktime' ? 'mov' : 'mp4';
+  const arquivo = join(dir, `${token}.${ext}`);
+
+  let total = 0;
+  await new Promise<void>((resolve, reject) => {
+    const out = createWriteStream(arquivo, { flags: 'wx' });
+    stream.on('data', (chunk: Buffer) => {
+      total += chunk.length;
+      if (total > VIDEO_BYTES_MAX) {
+        stream.destroy();
+        out.destroy();
+        reject(new Error(`Vídeo acima de ${Math.round(VIDEO_BYTES_MAX / 1024 / 1024)} MB.`));
+      }
+    });
+    stream.on('error', reject);
+    out.on('error', reject);
+    out.on('finish', resolve);
+    stream.pipe(out);
+  }).catch(async (err) => {
+    await fs.unlink(arquivo).catch(() => {});
+    throw err;
+  });
+  if (total < 10 * 1024) {
+    await fs.unlink(arquivo).catch(() => {});
+    throw new Error('Vídeo vazio ou corrompido.');
+  }
+
+  const { rows } = await pool.query<{ id: string }>(
+    `INSERT INTO public.post_midia (token, mime, bytes, arquivo, duracao_seg, created_by)
+     VALUES ($1, $2, NULL, $3, $4, $5) RETURNING id`,
+    [token, mime, arquivo, duracaoSeg ?? null, createdBy ?? null],
   );
-  return rows[0]?.token ?? null;
+  return { id: rows[0].id, token, kb: Math.round(total / 1024), arquivo };
+}
+
+export async function infoDaMidia(
+  pool: Pool, midiaId: string,
+): Promise<{ token: string; mime: string; duracao_seg: number | null } | null> {
+  await ensurePostSchema(pool);
+  const { rows } = await pool.query<{ token: string; mime: string; duracao_seg: number | null }>(
+    `SELECT token, mime, duracao_seg FROM public.post_midia WHERE id = $1`, [midiaId],
+  );
+  return rows[0] ?? null;
 }
 
 /**

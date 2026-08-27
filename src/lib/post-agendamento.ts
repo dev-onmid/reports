@@ -37,7 +37,18 @@ export const STORY_SEM_SUPORTE =
 
 // ----------------------------------------------------------------------- Tipos
 
-export type TipoPublicacao = 'feed' | 'story';
+export type TipoPublicacao = 'feed' | 'story' | 'reels';
+
+/**
+ * Limites de VÍDEO da Meta. Reels: 3s a 15 min; story em vídeo: até 60s.
+ * Validar aqui evita subir 80 MB para a Meta recusar no container.
+ */
+export const REELS_MIN_SEG = 3;
+export const REELS_MAX_SEG = 15 * 60;
+export const STORY_VIDEO_MAX_SEG = 60;
+
+/** O que a validação precisa saber da mídia escolhida. */
+export type MidiaInfo = { ehVideo: boolean; duracaoSeg?: number | null };
 
 export type StatusAlvo = 'pendente' | 'publicando' | 'publicado' | 'erro';
 
@@ -162,12 +173,32 @@ export function proximaOcorrencia(ag: Agendamento, agora: Date): Date | null {
  * seleção (depois do dedupe e dos descartes), não a intenção.
  */
 export function validarPublicacao(
-  input: PublicacaoInput, alvos: Alvo[], agora: Date,
+  input: PublicacaoInput, alvos: Alvo[], agora: Date, midia?: MidiaInfo | null,
 ): string[] {
   const erros: string[] = [];
 
-  if (!input.midiaId) erros.push('Escolha a imagem que será publicada.');
-  if (input.tipo !== 'feed' && input.tipo !== 'story') erros.push('Tipo de publicação inválido.');
+  if (!input.midiaId) erros.push('Escolha a imagem ou o vídeo que será publicado.');
+  if (!['feed', 'story', 'reels'].includes(input.tipo)) erros.push('Tipo de publicação inválido.');
+
+  // ⚠️ Casamento tipo × mídia. Vídeo no feed do Instagram É Reels (a Meta
+  // unificou) — aceitar "feed + vídeo" criaria um caminho que a API recusa
+  // com erro genérico no worker, longe de quem pode corrigir.
+  if (midia) {
+    const dur = midia.duracaoSeg ?? null;
+    if (input.tipo === 'feed' && midia.ehVideo) {
+      erros.push('Vídeo no feed do Instagram é Reels — troque o tipo para Reels.');
+    }
+    if (input.tipo === 'reels' && !midia.ehVideo) {
+      erros.push('Reels precisa de um vídeo — para imagem, use Feed ou Story.');
+    }
+    if (input.tipo === 'reels' && midia.ehVideo && dur !== null) {
+      if (dur < REELS_MIN_SEG) erros.push(`O vídeo tem ${Math.round(dur)}s — Reels exige pelo menos ${REELS_MIN_SEG}s.`);
+      if (dur > REELS_MAX_SEG) erros.push(`O vídeo tem ${Math.round(dur / 60)} min — Reels aceita até ${REELS_MAX_SEG / 60} min.`);
+    }
+    if (input.tipo === 'story' && midia.ehVideo && dur !== null && dur > STORY_VIDEO_MAX_SEG) {
+      erros.push(`O vídeo tem ${Math.round(dur)}s — story aceita até ${STORY_VIDEO_MAX_SEG}s. Para vídeo maior, use Reels.`);
+    }
+  }
 
   // ⚠️ Story não tem legenda no Instagram — a API nem aceita `caption` nesse
   // media_type. Recusar aqui evita o gestor escrever um texto que sumiria.

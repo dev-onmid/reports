@@ -33,7 +33,7 @@ export type ImagemPreparada = {
  * Avisar antes é melhor que descobrir depois de publicado — e publicado não
  * volta atrás.
  */
-export function avisoProporcao(largura: number, altura: number, tipo: 'feed' | 'story'): string | null {
+export function avisoProporcao(largura: number, altura: number, tipo: 'feed' | 'story' | 'reels'): string | null {
   if (!largura || !altura) return null;
   const r = largura / altura;
   if (tipo === 'feed') {
@@ -41,8 +41,12 @@ export function avisoProporcao(largura: number, altura: number, tipo: 'feed' | '
     if (r > 1.91) return 'A imagem é mais larga que 1.91:1 — o Instagram vai cortar as laterais.';
     return null;
   }
-  // Story: 9:16 ≈ 0.5625. Tolerância generosa antes de incomodar.
-  if (r > 0.7) return 'O story é vertical (9:16) — esta imagem vai aparecer com tarjas em cima e embaixo.';
+  // Story/Reels: 9:16 ≈ 0.5625. Tolerância generosa antes de incomodar.
+  if (r > 0.7) {
+    return tipo === 'reels'
+      ? 'Reels é vertical (9:16) — este vídeo vai aparecer com tarjas em cima e embaixo.'
+      : 'O story é vertical (9:16) — esta imagem vai aparecer com tarjas em cima e embaixo.';
+  }
   return null;
 }
 
@@ -72,7 +76,7 @@ function blobParaDataUrl(blob: Blob): Promise<string> {
 /** Converte qualquer imagem suportada pelo navegador em JPEG pronto para a Meta. */
 export async function prepararImagem(file: File): Promise<ImagemPreparada> {
   if (!file.type.startsWith('image/')) {
-    throw new Error('Envie uma imagem (JPG, PNG ou WebP). Vídeo ainda não é suportado.');
+    throw new Error('Envie uma imagem (JPG, PNG ou WebP) — vídeo entra pelo mesmo botão, em MP4.');
   }
   const img = await carregar(file);
   const escala = Math.min(1, LADO_MAX / Math.max(img.naturalWidth, img.naturalHeight));
@@ -100,4 +104,54 @@ export async function prepararImagem(file: File): Promise<ImagemPreparada> {
     }
   }
   throw new Error('A imagem é grande demais mesmo depois de comprimida. Reduza as dimensões e tente de novo.');
+}
+
+// ------------------------------------------------------------------- Vídeo
+
+export type VideoLido = {
+  duracaoSeg: number;
+  largura: number;
+  altura: number;
+  mb: number;
+  /** ObjectURL para preview local — revogar quando o modal fechar. */
+  previewUrl: string;
+};
+
+/** Formatos que a Meta publica (Reels/story). WebM fica de fora de propósito. */
+const VIDEO_MIME_OK = /^video\/(mp4|quicktime)$/;
+/** Cap do upload — Reels típico de CapCut/Premiere fica bem abaixo disso. */
+export const VIDEO_MB_MAX = 150;
+
+/**
+ * Lê duração e dimensões do vídeo SEM subir nada — metadados via <video>.
+ *
+ * ⚠️ Diferente da imagem, vídeo NÃO tem conversão no navegador: se o arquivo
+ * não é MP4/MOV, não há o que fazer aqui — a recusa precisa acontecer antes do
+ * upload de 80 MB, não no worker.
+ */
+export function lerMetadadosVideo(file: File): Promise<VideoLido> {
+  return new Promise((resolve, reject) => {
+    if (!VIDEO_MIME_OK.test(file.type)) {
+      reject(new Error('Vídeo precisa ser MP4 (ou MOV). Exporte de novo nesse formato.'));
+      return;
+    }
+    if (file.size > VIDEO_MB_MAX * 1024 * 1024) {
+      reject(new Error(`O vídeo tem ${Math.round(file.size / 1024 / 1024)} MB — o limite é ${VIDEO_MB_MAX} MB.`));
+      return;
+    }
+    const url = URL.createObjectURL(file);
+    const v = document.createElement('video');
+    v.preload = 'metadata';
+    v.onloadedmetadata = () => {
+      resolve({
+        duracaoSeg: v.duration,
+        largura: v.videoWidth,
+        altura: v.videoHeight,
+        mb: Math.round(file.size / 1024 / 1024 * 10) / 10,
+        previewUrl: url,
+      });
+    };
+    v.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Não consegui ler esse arquivo como vídeo.')); };
+    v.src = url;
+  });
 }

@@ -2,10 +2,10 @@ import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { webhookOrigin } from '@/lib/evolution-api';
 import {
-  montarAlvos, proximaOcorrencia, validarPublicacao,
+  montarAlvos, proximaOcorrencia, STORY_VIDEO_MAX_SEG, validarPublicacao,
   type Agendamento, type ContaCliente, type PublicacaoInput, type TipoPublicacao,
 } from '@/lib/post-agendamento';
-import { criarPublicacao, listarPublicacoes, salvarMidia, urlPublicaDaMidia } from '@/lib/post-server';
+import { criarPublicacao, infoDaMidia, listarPublicacoes, salvarMidia, urlPublicaDaMidia } from '@/lib/post-server';
 
 /**
  * Planejador de publicações — lista e criação.
@@ -35,13 +35,15 @@ type Body = {
   clientIds?: string[];
   agendamento?: Agendamento;
   imagem?: { dataUrl?: string; largura?: number; altura?: number };
+  /** Vídeo já enviado por /api/publicacoes/upload — o JSON não comporta 80 MB. */
+  midiaId?: string;
 };
 
 export async function POST(req: NextRequest) {
   const pool = makeServerPool();
   try {
     const body = await req.json().catch(() => ({})) as Body;
-    const tipo = body.tipo === 'story' ? 'story' : 'feed';
+    const tipo: TipoPublicacao = body.tipo === 'story' ? 'story' : body.tipo === 'reels' ? 'reels' : 'feed';
     const legenda = String(body.legenda ?? '');
     const clientIds = Array.isArray(body.clientIds) ? body.clientIds.filter(x => typeof x === 'string') : [];
     const ag = body.agendamento;
@@ -49,8 +51,30 @@ export async function POST(req: NextRequest) {
     if (!ag || (ag.modo !== 'unico' && ag.modo !== 'recorrente')) {
       return Response.json({ ok: false, error: 'Agendamento inválido.' }, { status: 400 });
     }
-    if (!body.imagem?.dataUrl) {
-      return Response.json({ ok: false, error: 'Envie a imagem da publicação.' }, { status: 400 });
+    if (!body.imagem?.dataUrl && !body.midiaId) {
+      return Response.json({ ok: false, error: 'Envie a imagem ou o vídeo da publicação.' }, { status: 400 });
+    }
+
+    // ⚠️ Recusa servidor-side do casamento tipo × mídia (a tela também valida,
+    // mas o servidor é quem não pode deixar passar): Reels exige vídeo, feed
+    // exige imagem. Vídeo chega por midiaId (upload prévio), imagem por dataUrl.
+    let midiaIdPronta: string | null = null;
+    if (body.midiaId) {
+      const info = await infoDaMidia(pool, body.midiaId);
+      if (!info) return Response.json({ ok: false, error: 'Mídia enviada não encontrada — suba o vídeo de novo.' }, { status: 400 });
+      const ehVideo = info.mime.startsWith('video/');
+      if (tipo === 'feed' && ehVideo) {
+        return Response.json({ ok: false, error: 'Vídeo no feed é Reels — troque o tipo.' }, { status: 400 });
+      }
+      if (tipo === 'reels' && !ehVideo) {
+        return Response.json({ ok: false, error: 'Reels precisa de um vídeo.' }, { status: 400 });
+      }
+      if (tipo === 'story' && ehVideo && (info.duracao_seg ?? 0) > STORY_VIDEO_MAX_SEG) {
+        return Response.json({ ok: false, error: `Story em vídeo aceita até ${STORY_VIDEO_MAX_SEG}s — use Reels.` }, { status: 400 });
+      }
+      midiaIdPronta = body.midiaId;
+    } else if (tipo === 'reels') {
+      return Response.json({ ok: false, error: 'Reels precisa de um vídeo.' }, { status: 400 });
     }
 
     // ⚠️ A URL da imagem precisa ser pública e https ANTES de gravar qualquer
@@ -87,10 +111,11 @@ export async function POST(req: NextRequest) {
     if (!proxima) return Response.json({ ok: false, error: 'Agendamento sem data futura.' }, { status: 400 });
 
     const criadoPor = req.headers.get('x-onmid-user-id') ?? undefined;
-    const midia = await salvarMidia(pool, body.imagem.dataUrl, body.imagem.largura, body.imagem.altura, criadoPor);
+    const midiaId = midiaIdPronta
+      ?? (await salvarMidia(pool, body.imagem!.dataUrl!, body.imagem!.largura, body.imagem!.altura, criadoPor)).id;
 
     const id = await criarPublicacao(pool, {
-      midiaId: midia.id, tipo, legenda, modo: ag.modo, proxima,
+      midiaId, tipo, legenda, modo: ag.modo, proxima,
       dias: ag.modo === 'recorrente' ? ag.dias : [],
       hora: ag.modo === 'recorrente' ? ag.hora : null,
       ate: ag.modo === 'recorrente' ? ag.ate : null,
