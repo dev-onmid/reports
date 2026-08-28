@@ -14,7 +14,7 @@
 
 import type { Pool } from 'pg';
 import {
-  MODELOS_FIDELIDADE, ORDEM_MODELOS, limparMensagens, normalizarParams, normalizarTravas,
+  MODELOS_FIDELIDADE, ORDEM_MODELOS, limparVariacoes, normalizarParams, normalizarTravas,
   normalizarCupom, paramsPadrao, TRAVAS_PADRAO, MODELOS,
   type FonteCampanha, type ModeloId, type ParamsRegua, type Travas,
 } from '@/lib/fidelidade';
@@ -61,6 +61,10 @@ export async function ensureFidelidadeSchema(pool: Pool) {
     `ALTER TABLE public.fidelidade_campanhas ADD COLUMN IF NOT EXISTS nome TEXT`,
     `ALTER TABLE public.fidelidade_campanhas ADD COLUMN IF NOT EXISTS proxima_execucao TIMESTAMPTZ`,
     `ALTER TABLE public.fidelidade_campanhas ADD COLUMN IF NOT EXISTS ultima_execucao TIMESTAMPTZ`,
+    // Uma arte por VARIAÇÃO (tokens de `post_midia`), alinhada com `mensagens`.
+    // A `imagem_url` antiga fica só como legado: nunca teve tela que a
+    // preenchesse, então não há linha em produção com valor nela.
+    `ALTER TABLE public.fidelidade_campanhas ADD COLUMN IF NOT EXISTS imagens JSONB`,
     // ⚠️ NÃO há unique por (cliente, modelo). O gestor cria quantas campanhas
     // quiser do mesmo público — duas ofertas diferentes para "inativo" é caso
     // legítimo. Quem impede a mesma pessoa de receber as duas é o COOLDOWN por
@@ -134,6 +138,9 @@ export async function ensureFidelidadeSchema(pool: Pool) {
     // texto da campanha mudar depois, a reconstrução passa a mentir sobre o
     // que a pessoa recebeu.
     `ALTER TABLE public.fidelidade_envios ADD COLUMN IF NOT EXISTS texto TEXT`,
+    // Pelo mesmo motivo do `texto`: a ARTE que foi junto. Sem ela o registro
+    // mostraria só a legenda, e "o que a pessoa recebeu" seria meia verdade.
+    `ALTER TABLE public.fidelidade_envios ADD COLUMN IF NOT EXISTS imagem TEXT`,
     // O índice do COOLDOWN — a consulta mais quente do motor.
     `CREATE INDEX IF NOT EXISTS fidelidade_envios_cooldown_idx
        ON public.fidelidade_envios (client_id, chave, enviado_em DESC)
@@ -171,8 +178,9 @@ export type CampanhaFidelidade = {
   nome: string;
   params: ParamsRegua;
   mensagens: string[];
+  /** Token da arte de cada variação, alinhado com `mensagens`. null = só texto. */
+  imagens: (string | null)[];
   cupom: string | null;
-  imagemUrl: string | null;
   diasSemana: number[];
   hora: string;
   tetoPublico: number | null;
@@ -206,8 +214,8 @@ export function campanhaPadrao(modelo: ModeloId): CampanhaFidelidade {
     // ⚠️ SEM texto: a segmentação vem pronta, o conteúdo é do gestor. Com o
     // texto de fábrica preenchido, a campanha parecia escrita por ele.
     mensagens: [],
+    imagens: [],
     cupom: null,
-    imagemUrl: null,
     diasSemana: [...m.cadenciaPadrao.diasSemana],
     hora: m.cadenciaPadrao.hora,
     tetoPublico: null,
@@ -220,12 +228,12 @@ export function campanhaPadrao(modelo: ModeloId): CampanhaFidelidade {
 
 type LinhaCampanha = {
   id: string; fonte: string; modelo: string | null; lista_id: string | null; nome: string | null;
-  params: unknown; mensagens: unknown; cupom: string | null; imagem_url: string | null;
+  params: unknown; mensagens: unknown; imagens: unknown; cupom: string | null;
   dias_semana: string | null; hora: string | null; teto_publico: number | null;
   ativa: boolean; ultima_execucao: string | Date | null; criado_em: string | Date | null;
 };
 
-const COLS_CAMPANHA = `id, fonte, modelo, lista_id, nome, params, mensagens, cupom, imagem_url,
+const COLS_CAMPANHA = `id, fonte, modelo, lista_id, nome, params, mensagens, imagens, cupom,
                        dias_semana, hora, teto_publico, ativa, ultima_execucao, criado_em`;
 
 function linhaParaCampanha(l: LinhaCampanha): CampanhaFidelidade {
@@ -234,6 +242,9 @@ function linhaParaCampanha(l: LinhaCampanha): CampanhaFidelidade {
   const fonte: FonteCampanha = l.fonte === 'lista' ? 'lista' : 'segmento';
   const padraoDias = modelo ? MODELOS_FIDELIDADE[modelo].cadenciaPadrao.diasSemana : [2];
   const padraoHora = modelo ? MODELOS_FIDELIDADE[modelo].cadenciaPadrao.hora : '18:00';
+  // Texto e arte saem da MESMA passada: a variação sem texto é descartada, e
+  // com ela a imagem dela — nunca sobra uma arte órfã colada em outro texto.
+  const variacoes = limparVariacoes(l.mensagens, l.imagens, modelo);
   return {
     id: l.id,
     fonte,
@@ -241,9 +252,9 @@ function linhaParaCampanha(l: LinhaCampanha): CampanhaFidelidade {
     listaId: l.lista_id,
     nome: l.nome?.trim() || (modelo ? MODELOS_FIDELIDADE[modelo].nome : 'Campanha'),
     params: modelo ? normalizarParams(modelo, l.params) : {},
-    mensagens: limparMensagens(l.mensagens, modelo),
+    mensagens: variacoes.map(v => v.texto),
+    imagens: variacoes.map(v => v.imagem),
     cupom: normalizarCupom(l.cupom),
-    imagemUrl: l.imagem_url,
     diasSemana: parseDias(l.dias_semana, padraoDias),
     hora: HORA_RE.test(l.hora ?? '') ? l.hora! : padraoHora,
     tetoPublico: l.teto_publico ?? null,
@@ -296,7 +307,9 @@ export async function salvarCampanha(
 
   const params = modelo ? normalizarParams(modelo, bruto.params) : {};
   // permitirVazio: campanha nova nasce sem texto, e quem escreve é o gestor.
-  const mensagens = limparMensagens(bruto.mensagens, modelo, { permitirVazio: true });
+  const variacoes = limparVariacoes(bruto.mensagens, bruto.imagens, modelo, { permitirVazio: true });
+  const mensagens = variacoes.map(v => v.texto);
+  const imagens = variacoes.map(v => v.imagem);
   const padrao = modelo ? MODELOS_FIDELIDADE[modelo].cadenciaPadrao : { diasSemana: [2], hora: '18:00' };
   const dias = parseDias(
     Array.isArray(bruto.diasSemana) ? (bruto.diasSemana as unknown[]).join(',') : null,
@@ -306,8 +319,6 @@ export async function salvarCampanha(
   const tetoBruto = Number(bruto.tetoPublico);
   const tetoPublico = Number.isFinite(tetoBruto) && tetoBruto > 0
     ? Math.min(100_000, Math.round(tetoBruto)) : null;
-  const imagemUrl = typeof bruto.imagemUrl === 'string' && bruto.imagemUrl.trim()
-    ? bruto.imagemUrl.trim() : null;
   const cupom = normalizarCupom(bruto.cupom);
   const listaId = fonte === 'lista' && typeof bruto.listaId === 'string' ? bruto.listaId : null;
   if (fonte === 'lista' && !listaId) throw new Error('Escolha a lista da campanha');
@@ -319,7 +330,7 @@ export async function salvarCampanha(
 
   const valores = [
     clientId, fonte, modelo, listaId, nome, JSON.stringify(params), JSON.stringify(mensagens),
-    cupom, imagemUrl, dias.join(','), hora, tetoPublico, ativa,
+    JSON.stringify(imagens), cupom, dias.join(','), hora, tetoPublico, ativa,
   ];
 
   const id = typeof bruto.id === 'string' && bruto.id ? bruto.id : null;
@@ -327,7 +338,7 @@ export async function salvarCampanha(
     const { rows } = await pool.query<LinhaCampanha>(
       `UPDATE public.fidelidade_campanhas SET
          fonte = $2, modelo = $3, lista_id = $4, nome = $5, params = $6::jsonb,
-         mensagens = $7::jsonb, cupom = $8, imagem_url = $9, dias_semana = $10,
+         mensagens = $7::jsonb, imagens = $8::jsonb, cupom = $9, dias_semana = $10,
          hora = $11, teto_publico = $12, ativa = $13, atualizado_em = NOW()
        WHERE id = $14 AND client_id = $1
        RETURNING ${COLS_CAMPANHA}`,
@@ -338,9 +349,9 @@ export async function salvarCampanha(
 
   const { rows } = await pool.query<LinhaCampanha>(
     `INSERT INTO public.fidelidade_campanhas
-       (client_id, fonte, modelo, lista_id, nome, params, mensagens, cupom, imagem_url,
+       (client_id, fonte, modelo, lista_id, nome, params, mensagens, imagens, cupom,
         dias_semana, hora, teto_publico, ativa)
-     VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8,$9,$10,$11,$12,$13)
+     VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8::jsonb,$9,$10,$11,$12,$13)
      RETURNING ${COLS_CAMPANHA}`,
     valores,
   );

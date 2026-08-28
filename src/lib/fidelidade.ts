@@ -544,6 +544,68 @@ export function limparMensagens(
   return modelo ? [...MODELOS_FIDELIDADE[modelo].mensagensPadrao] : [...MENSAGENS_LISTA_PADRAO];
 }
 
+// ------------------------------------------------------------------ Imagem
+
+/**
+ * Token da mídia pública (`/api/midia/<token>`), o mesmo formato que as
+ * Publicações usam. Guardamos o TOKEN, nunca a URL: a origem canônica pode
+ * mudar (mudou uma vez, na saída da Vercel) e a URL gravada apontaria para o
+ * lugar errado — o token não envelhece.
+ */
+const TOKEN_MIDIA_RE = /^[0-9a-f]{32}$/;
+
+export function tokenDeMidiaValido(v: unknown): v is string {
+  return typeof v === 'string' && TOKEN_MIDIA_RE.test(v.trim());
+}
+
+/** Uma variação da mensagem: o texto e, opcionalmente, a arte que vai junto. */
+export type VariacaoMensagem = { texto: string; imagem: string | null };
+
+/**
+ * Junta texto e imagem POR VARIAÇÃO, na mesma passada.
+ *
+ * ⚠️ Existe porque `limparMensagens` DESCARTA variação vazia — dois arrays
+ * paralelos sairiam desalinhados assim que alguém apagasse o texto do meio, e
+ * a arte da variação 3 apareceria colada no texto da 2. Aqui o par é formado
+ * antes do filtro, então texto e imagem nunca se separam.
+ */
+export function limparVariacoes(
+  mensagens: unknown, imagens: unknown, modelo: ModeloId | null,
+  opcoes: { permitirVazio?: boolean } = {},
+): VariacaoMensagem[] {
+  const textos = Array.isArray(mensagens) ? mensagens : [];
+  const artes = Array.isArray(imagens) ? imagens : [];
+  const pares = textos
+    .map((m, i) => ({
+      texto: typeof m === 'string' ? m.trim() : '',
+      imagem: tokenDeMidiaValido(artes[i]) ? String(artes[i]).trim() : null,
+    }))
+    .filter(v => v.texto.length > 0)
+    .slice(0, 3);
+  if (pares.length > 0) return pares;
+  if (opcoes.permitirVazio) return [];
+  return limparMensagens(mensagens, modelo).map(texto => ({ texto, imagem: null }));
+}
+
+/**
+ * A arte que acompanha a variação sorteada.
+ *
+ * ⚠️ Cai para a PRIMEIRA imagem preenchida quando aquela variação não tem uma
+ * própria. O gestor quase sempre sobe uma arte só, e o desenho tem de servir
+ * esse caso sem obrigá-lo a repetir o upload três vezes — mas quem sobe três
+ * ganha a variação completa (texto e arte mudando juntos), que é o que
+ * realmente descaracteriza o disparo em massa.
+ */
+export function imagemDaVariacao(
+  imagens: readonly (string | null)[] | null | undefined, variacao: number,
+): string | null {
+  if (!Array.isArray(imagens) || imagens.length === 0) return null;
+  const propria = imagens[variacao];
+  if (tokenDeMidiaValido(propria)) return propria.trim();
+  const qualquer = imagens.find(tokenDeMidiaValido);
+  return qualquer ? qualquer.trim() : null;
+}
+
 /** Sugestão de texto do modelo — oferecida por botão, nunca imposta. */
 export function sugestaoDeTexto(modelo: ModeloId | null): string[] {
   return modelo ? [...MODELOS_FIDELIDADE[modelo].mensagensPadrao] : [...MENSAGENS_LISTA_PADRAO];

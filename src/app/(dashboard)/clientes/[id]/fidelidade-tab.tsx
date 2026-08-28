@@ -1,7 +1,7 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
-import {
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ImagePlus,
   AlertTriangle, Clock, Crown, Loader2, ListChecks, Moon, MoreVertical,
   Pencil, Plus, PowerOff, RefreshCw, Repeat, Save, Search, ShieldCheck, Sparkles, Ticket,
   Upload, Users, Zap, type LucideIcon,
@@ -15,10 +15,12 @@ import { lerArquivoContatos, contatosParaTexto, type ContatoLido } from '@/lib/c
 import {
   MODELOS_FIDELIDADE, VARIAVEIS, DIAS_SEMANA_LABEL, PISO_INTERVALO_SEG,
   STATUS_ENVIO_LABEL, aplicarVars, capacidadeDaJanela, diasParaTerminar,
-  progressoDaExecucao, proximasExecucoes, rotuloMotivo, sugestaoDeTexto, varsDoDestinatario,
+  imagemDaVariacao, progressoDaExecucao, proximasExecucoes, rotuloMotivo, sugestaoDeTexto,
+  varsDoDestinatario,
   variaveisDesconhecidas, variaveisIndisponiveis, validarCampanha,
   type FonteCampanha, type ModeloId, type ParamsRegua, type Travas,
 } from '@/lib/fidelidade';
+import { prepararImagem } from '@/lib/post-imagem';
 
 /**
  * Aba Fidelidade — painel de campanhas.
@@ -53,8 +55,9 @@ type Campanha = {
   nome: string;
   params: ParamsRegua;
   mensagens: string[];
+  /** Arte de cada variação (token da mídia), alinhada com `mensagens`. */
+  imagens: (string | null)[];
   cupom: string | null;
-  imagemUrl: string | null;
   diasSemana: number[];
   hora: string;
   tetoPublico: number | null;
@@ -75,7 +78,8 @@ type Execucao = {
 type Envio = {
   id: string; campanha_id: string; campanha: string | null; nome: string | null;
   telefone: string; status: string; motivo: string | null; erro: string | null;
-  texto: string | null; cupom: string | null; criado_em: string; enviado_em: string | null;
+  texto: string | null; imagem: string | null; cupom: string | null;
+  criado_em: string; enviado_em: string | null;
 };
 
 type Painel = {
@@ -182,7 +186,9 @@ function Kpi({ label, valor, sub, alerta }: { label: string; valor: string; sub?
 }
 
 /** Métrica de card: rótulo em cima, número embaixo — a linha do painel de referência. */
-function Metrica({ label, valor, cor }: { label: string; valor: string; cor?: string }) {
+function Metrica({ label, valor, cor, dica }: {
+  label: string; valor: string; cor?: string; dica?: string;
+}) {
   return (
     <div className="min-w-0">
       <p className="truncate text-[10px] font-bold uppercase tracking-widest text-muted-foreground" title={label}>
@@ -191,7 +197,7 @@ function Metrica({ label, valor, cor }: { label: string; valor: string; cor?: st
       {/* ⚠️ `truncate` no VALOR: em 3 colunas, "R$ 1.283,50" encostava no
           número vizinho e os dois viravam um borrão. Melhor cortar com
           reticências e manter o título completo no hover. */}
-      <p className={cn('mt-1 truncate font-heading text-xl leading-none', cor)} title={valor}>
+      <p className={cn('mt-1 truncate font-heading text-xl leading-none', cor)} title={dica ?? valor}>
         {valor}
       </p>
     </div>
@@ -590,6 +596,7 @@ export function ClientFidelidadeTab({ clientId }: { clientId: string }) {
                     : (painel?.listas?.find(l => l.id === c.listaId)?.nome ?? 'Lista removida')}
                   execucao={c.id ? execPorCampanha.get(c.id) : undefined}
                   resultado={c.id ? painel?.resultados?.[c.id] : undefined}
+                  medivel={!!painel?.conectado}
                   travas={travas} salvando={salvando === (c.id ?? chaveCampanha(c))}
                   onEditar={() => setEditando(c.id ?? chaveCampanha(c))}
                   onDisparar={c.id && c.salva ? () => disparar(c.id!) : undefined}
@@ -621,6 +628,7 @@ export function ClientFidelidadeTab({ clientId }: { clientId: string }) {
             campanha={campEditando}
             amostra={painel?.segmentos?.find(s => s.modelo === campEditando.modelo)?.amostra ?? []}
             loja={painel?.loja ?? 'nossa loja'} ticketMedioLoja={painel?.ticketMedioLoja ?? 0}
+            clientId={clientId}
             salvando={salvando === (campEditando.id ?? chaveCampanha(campEditando))}
             onChange={(c) => setRascunhos(r => ({ ...r, [chaveCampanha(c)]: c }))}
             onSalvar={async (c) => { const ok = await patch(c, c.id ?? chaveCampanha(c)); if (ok) setEditando(null); }}
@@ -714,11 +722,12 @@ export function ClientFidelidadeTab({ clientId }: { clientId: string }) {
 // ─────────────────────────────────────────────────────── Card de campanha
 
 function CampanhaCard({
-  campanha, cor, publico, objetivo, execucao, resultado, travas, salvando,
+  campanha, cor, publico, objetivo, execucao, resultado, medivel, travas, salvando,
   onEditar, onDisparar, onAlternar, onVerEnvios, onExcluir,
 }: {
   campanha: Campanha; cor: string; publico: number; objetivo: string;
-  execucao?: Execucao; resultado?: Resultado; travas: Travas | null; salvando: boolean;
+  execucao?: Execucao; resultado?: Resultado; medivel: boolean;
+  travas: Travas | null; salvando: boolean;
   onEditar: () => void; onDisparar?: () => void; onAlternar: () => void;
   onVerEnvios?: () => void; onExcluir?: () => void;
 }) {
@@ -731,10 +740,17 @@ function CampanhaCard({
   const titulo = campanha.modelo ? MODELOS_FIDELIDADE[campanha.modelo].nome : campanha.nome;
   const enviadas = resultado?.enviadas ?? 0;
   const Icone = campanha.modelo ? ICONE_MODELO[campanha.modelo] : ListChecks;
+  // Miniatura do card: a primeira arte preenchida representa a campanha.
+  const arte = campanha.imagens.find(Boolean) ?? null;
   const semTexto = campanha.mensagens.filter(Boolean).length === 0;
   // ⚠️ Sem envio não há o que atribuir: receita e pedidos viram travessão, não
   // zero. "R$ 0,00" afirmaria que a campanha rodou e não vendeu.
-  const medido = enviadas > 0 ? resultado : undefined;
+  // ⚠️ Sem delivery conectado o resultado é IMEDIVÍVEL, não zero: não existe
+  // pedido para cruzar. Mostrar "R$ 0,00 / 0 pedidos / 0,0%" seria afirmar que
+  // a campanha não vendeu, quando o que acontece é que ninguém consegue saber.
+  const medido = enviadas > 0 && medivel ? resultado : undefined;
+  const dicaSemMedida = medivel ? undefined
+    : 'Sem Cardápio Web ou Anota AI conectado não há pedidos para cruzar — o resultado desta campanha não pode ser medido.';
 
   return (
     <Card className="flex flex-col" cor={cor}>
@@ -742,9 +758,9 @@ function CampanhaCard({
         {/* Ícone grande: o gestor reconhece o grupo pelo símbolo antes de ler. */}
         <div className="flex items-start gap-3">
           <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-[var(--radius)] bg-surface-elevated">
-            {campanha.imagemUrl
-              // eslint-disable-next-line @next/next/no-img-element -- URL externa do cliente; next/image exigiria allowlist de domínio
-              ? <img src={campanha.imagemUrl} alt="" className="h-full w-full object-cover" />
+            {arte
+              // eslint-disable-next-line @next/next/no-img-element -- servida pela rota pública /api/midia
+              ? <img src={urlDaArte(arte)} alt="" className="h-full w-full object-cover" />
               : <Icone className="h-7 w-7" style={{ color: cor }} />}
           </div>
 
@@ -778,11 +794,12 @@ function CampanhaCard({
         {/* As 5 métricas de RESULTADO — é isso que responde "valeu a pena?". */}
         <div className="mt-3 grid grid-cols-3 gap-x-2 gap-y-3 border-t border-border pt-3">
           <Metrica label="Msgs" valor={String(enviadas)} />
-          <Metrica label="Receita" valor={medido ? brl(medido.receita) : '—'} cor="text-primary" />
-          <Metrica label="Pedidos" valor={medido ? String(medido.pedidos) : '—'} />
-          <Metrica label="Conv."
+          <Metrica label="Receita" valor={medido ? brl(medido.receita) : '—'} cor="text-primary"
+            dica={dicaSemMedida} />
+          <Metrica label="Pedidos" valor={medido ? String(medido.pedidos) : '—'} dica={dicaSemMedida} />
+          <Metrica label="Conv." dica={dicaSemMedida}
             valor={medido?.conversao == null ? '—' : `${(medido.conversao * 100).toFixed(1)}%`} />
-          <Metrica label="Ticket"
+          <Metrica label="Ticket" dica={dicaSemMedida}
             valor={medido?.ticketMedio == null ? '—' : brl(medido.ticketMedio)} />
         </div>
 
@@ -1186,9 +1203,16 @@ function Acompanhar({
                       <tr className="border-b border-border/50 bg-background/30">
                         <td colSpan={6} className="px-3 py-3">
                           {e.texto ? (
-                            <p className="max-w-lg rounded-[var(--radius)] border-l-2 border-primary bg-surface-elevated px-3 py-2 text-xs leading-relaxed">
-                              {e.texto}
-                            </p>
+                            <div className="max-w-lg rounded-[var(--radius)] border-l-2 border-primary bg-surface-elevated px-3 py-2">
+                              {/* A arte gravada no ATO do envio — é o que a
+                                  pessoa viu, não a arte atual da campanha. */}
+                              {e.imagem && (
+                                // eslint-disable-next-line @next/next/no-img-element -- rota pública /api/midia
+                                <img src={urlDaArte(e.imagem)} alt=""
+                                  className="mb-2 max-h-32 rounded-[var(--radius)] object-cover" />
+                              )}
+                              <p className="text-xs leading-relaxed">{e.texto}</p>
+                            </div>
                           ) : (
                             <p className="text-[11px] text-muted-foreground">
                               {e.status === 'pendente'
@@ -1230,13 +1254,79 @@ function Acompanhar({
   );
 }
 
+/** A rota é PÚBLICA por token — o mesmo endereço serve a tela e o WhatsApp. */
+function urlDaArte(token: string): string {
+  return `/api/midia/${token}`;
+}
+
+/**
+ * Arte de UMA variação.
+ *
+ * ⚠️ Converte no NAVEGADOR antes de subir (`prepararImagem`): o projeto não tem
+ * lib de imagem, e é o canvas que redimensiona e comprime. Sem isso uma foto de
+ * celular de 8 MB bateria no teto de 4 MB do banco.
+ */
+function ArteVariacao({ clientId, token, onChange }: {
+  clientId: string; token: string | null; onChange: (t: string | null) => void;
+}) {
+  const [subindo, setSubindo] = useState(false);
+  const [erro, setErro] = useState<string | null>(null);
+  const input = useRef<HTMLInputElement>(null);
+
+  async function escolher(file: File | undefined) {
+    if (!file) return;
+    setErro(null); setSubindo(true);
+    try {
+      const img = await prepararImagem(file);
+      const r = await fetch(`/api/clients/${clientId}/fidelidade/imagem`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dataUrl: img.dataUrl, largura: img.largura, altura: img.altura }),
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error ?? 'Falha ao subir a imagem');
+      onChange(j.token as string);
+    } catch (e) {
+      setErro(String((e as Error).message ?? e));
+    } finally {
+      setSubindo(false);
+      if (input.current) input.current.value = '';
+    }
+  }
+
+  return (
+    <div className="flex items-start gap-2">
+      <input ref={input} type="file" accept="image/*" className="hidden"
+        onChange={(e) => void escolher(e.target.files?.[0])} />
+      {token ? (
+        <>
+          {/* eslint-disable-next-line @next/next/no-img-element -- rota pública /api/midia */}
+          <img src={urlDaArte(token)} alt="" className="h-14 w-14 rounded-[var(--radius)] object-cover" />
+          <div className="flex flex-col gap-1">
+            <Button size="xs" variant="ghost" onClick={() => input.current?.click()}>Trocar</Button>
+            <Button size="xs" variant="ghost" className="text-destructive"
+              onClick={() => onChange(null)}>Remover</Button>
+          </div>
+        </>
+      ) : (
+        <Button size="xs" variant="outline" disabled={subindo}
+          onClick={() => input.current?.click()}>
+          <ImagePlus className="h-3.5 w-3.5" />
+          {subindo ? 'Subindo…' : 'Imagem (opcional)'}
+        </Button>
+      )}
+      {erro && <span className="text-[10px] text-destructive">{erro}</span>}
+    </div>
+  );
+}
+
 // ───────────────────────────────────────────────────── Editor (painel lateral)
 
 function EditorCampanha({
-  campanha, amostra, loja, ticketMedioLoja, salvando, onChange, onSalvar,
+  campanha, amostra, loja, ticketMedioLoja, clientId, salvando, onChange, onSalvar,
 }: {
   campanha: Campanha; amostra: PessoaAmostra[]; loja: string; ticketMedioLoja: number;
-  salvando: boolean; onChange: (c: Campanha) => void; onSalvar: (c: Campanha) => void;
+  clientId: string; salvando: boolean;
+  onChange: (c: Campanha) => void; onSalvar: (c: Campanha) => void;
 }) {
   const meta = campanha.modelo ? MODELOS_FIDELIDADE[campanha.modelo] : null;
   const exemplo = amostra[0];
@@ -1363,6 +1453,15 @@ function EditorCampanha({
                   }}
                   className="w-full rounded-[var(--radius)] border border-border bg-background p-2 text-xs leading-relaxed"
                 />
+                <ArteVariacao
+                  clientId={clientId} token={campanha.imagens[i] ?? null}
+                  onChange={(t) => {
+                    const novas = [...campanha.imagens];
+                    while (novas.length <= i) novas.push(null);
+                    novas[i] = t;
+                    onChange({ ...campanha, imagens: novas });
+                  }}
+                />
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
                   <span className="text-[10px] text-muted-foreground">{texto.length} caracteres</span>
                   {desconhecidas.length > 0 && (
@@ -1383,10 +1482,17 @@ function EditorCampanha({
       <div>
         <Rotulo>Como chega no WhatsApp</Rotulo>
         <div className="mt-2 space-y-2">
-          {campanha.mensagens.filter(Boolean).map((m, i) => (
-            <p key={i} className="rounded-[var(--radius)] border-l-2 border-primary bg-surface-elevated px-3 py-2 text-xs leading-relaxed">
-              {aplicarVars(m, vars, 'envio')}
-            </p>
+          {campanha.mensagens.map((m, i) => m && (
+            <div key={i} className="rounded-[var(--radius)] border-l-2 border-primary bg-surface-elevated px-3 py-2">
+              {/* A arte entra ACIMA do texto, que vira legenda — é assim que a
+                  imagem com caption chega no WhatsApp. */}
+              {imagemDaVariacao(campanha.imagens, i) && (
+                // eslint-disable-next-line @next/next/no-img-element -- rota pública /api/midia
+                <img src={urlDaArte(imagemDaVariacao(campanha.imagens, i)!)} alt=""
+                  className="mb-2 max-h-40 w-full rounded-[var(--radius)] object-cover" />
+              )}
+              <p className="text-xs leading-relaxed">{aplicarVars(m, vars, 'envio')}</p>
+            </div>
           ))}
         </div>
         {usaNome && (

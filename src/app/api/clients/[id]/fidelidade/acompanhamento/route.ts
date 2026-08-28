@@ -20,7 +20,7 @@ const LIMITE = 100;
 type LinhaEnvio = {
   id: string; campanha_id: string; campanha: string | null; nome: string | null;
   telefone: string; status: string; motivo: string | null; erro: string | null;
-  texto: string | null; cupom: string | null; criado_em: Date; enviado_em: Date | null;
+  texto: string | null; imagem: string | null; cupom: string | null; criado_em: Date; enviado_em: Date | null;
 };
 
 export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
@@ -59,7 +59,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
       ).catch(() => ({ rows: [] })),
       pool.query<LinhaEnvio>(
         `SELECT e.id, e.campanha_id, f.nome AS campanha, e.nome, e.telefone, e.status,
-                e.motivo, e.erro, e.texto, e.cupom, e.criado_em, e.enviado_em
+                e.motivo, e.erro, e.texto, e.imagem, e.cupom, e.criado_em, e.enviado_em
            FROM public.fidelidade_envios e
            LEFT JOIN public.fidelidade_campanhas f ON f.id = e.campanha_id
           WHERE ${where}

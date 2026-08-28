@@ -35,7 +35,7 @@ const PESSOAS = (n: number, base: number) =>
 
 const campanhaSegmento = (modelo: string, params: Record<string, number | null>, msgs: string[], extra = {}) => ({
   id: `id-${modelo}`, fonte: 'segmento', modelo, listaId: null, nome: modelo,
-  params, mensagens: msgs, cupom: null, imagemUrl: null,
+  params, mensagens: msgs, imagens: [], cupom: null,
   diasSemana: [4], hora: '18:00', tetoPublico: null, ativa: false, salva: true,
   ultimaExecucao: null, criadoEm: '2026-05-14T12:00:00.000Z', ...extra,
 });
@@ -74,7 +74,7 @@ const RESPOSTA = {
         '{{primeiro_nome}}, tudo bem? A {{loja}} tem uma oferta esperando por você 😉',
         'Faz {{dias}} dias!',
       ],
-      cupom: 'SALAO15', imagemUrl: null, diasSemana: [2], hora: '18:00',
+      cupom: 'SALAO15', imagens: [], diasSemana: [2], hora: '18:00',
       tetoPublico: null, ativa: false, salva: true, ultimaExecucao: null,
       criadoEm: '2026-05-14T12:00:00.000Z',
     },
@@ -140,6 +140,18 @@ const ACOMP = {
 const chamadas: { url: string; body: unknown }[] = [];
 (window as unknown as { __chamadas: typeof chamadas }).__chamadas = chamadas;
 
+const MIDIA = new Map<string, string>();
+// O <img src="/api/midia/..."> é request NATIVA do navegador — não passa pelo
+// mock de window.fetch e bateria 404 no dev server. Aqui trocamos o src pelo
+// dataUrl guardado, para a imagem aparecer de verdade na verificação.
+(window as unknown as { __midia: Map<string, string> }).__midia = MIDIA;
+new MutationObserver(() => {
+  document.querySelectorAll<HTMLImageElement>('img[src*="/api/midia/"]').forEach((img) => {
+    const t = img.src.split('/api/midia/')[1];
+    const d = MIDIA.get(t);
+    if (d) img.src = d;
+  });
+}).observe(document.documentElement, { subtree: true, childList: true, attributes: true });
 const original = window.fetch.bind(window);
 window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
@@ -147,6 +159,26 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     chamadas.push({ url: `${init?.method ?? 'GET'} ${url}`, body: init?.body ? JSON.parse(String(init.body)) : null });
     await new Promise(r => setTimeout(r, 60));
     return new Response(JSON.stringify(ACOMP), { headers: { 'Content-Type': 'application/json' } });
+  }
+  // Upload da arte: guarda o dataUrl em memória e devolve um token, como a
+  // rota real. `/api/midia/<token>` passa a servir a imagem para o <img>.
+  if (url.includes('/fidelidade/imagem')) {
+    const body = init?.body ? JSON.parse(String(init.body)) : null;
+    const token = String(MIDIA.size + 1).padStart(32, 'a');
+    MIDIA.set(token, body.dataUrl);
+    chamadas.push({ url: `POST ${url}`, body: { kb: Math.round(body.dataUrl.length / 1400), largura: body.largura, altura: body.altura } });
+    await new Promise(r => setTimeout(r, 40));
+    return new Response(JSON.stringify({ token, url: `/api/midia/${token}`, kb: 40 }),
+      { headers: { 'Content-Type': 'application/json' } });
+  }
+  if (url.includes('/api/midia/')) {
+    const token = url.split('/api/midia/')[1];
+    const dataUrl = MIDIA.get(token);
+    if (!dataUrl) return new Response('nao encontrado', { status: 404 });
+    const bin = atob(dataUrl.split(',')[1]);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return new Response(bytes, { headers: { 'Content-Type': 'image/jpeg' } });
   }
   if (url.includes('/fidelidade/disparar')) {
     chamadas.push({ url: `POST ${url}`, body: init?.body ? JSON.parse(String(init.body)) : null });
@@ -162,7 +194,7 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       chamadas.push({ url: `PATCH ${url}`, body });
       const nova = {
         id: 'camp-nova', fonte: 'lista', modelo: null, listaId: body.listaId,
-        nome: body.nome, params: {}, mensagens: [], cupom: null, imagemUrl: null,
+        nome: body.nome, params: {}, mensagens: [], imagens: [], cupom: null,
         diasSemana: body.diasSemana, hora: body.hora, tetoPublico: null,
         ativa: false, salva: true, ultimaExecucao: null,
       };

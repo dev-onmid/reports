@@ -5,9 +5,11 @@ import { lerPedidosDelivery } from '@/lib/delivery-orders';
 import { agruparPorCliente, normalizarRegua, normalizarTelefoneBR } from '@/lib/cardapioweb-recorrencia';
 import { getConnection, ensureCardapioWebSchema } from '@/lib/cardapioweb';
 import {
-  aplicarVars, dentroDaJanela, diaPermitido, filtrarPublico, proximaExecucao,
-  varsDoDestinatario, type Destinatario, type Travas,
+  aplicarVars, dentroDaJanela, diaPermitido, filtrarPublico, imagemDaVariacao,
+  limparVariacoes, proximaExecucao, varsDoDestinatario, type Destinatario, type Travas,
 } from '@/lib/fidelidade';
+import { urlPublicaDaMidia } from '@/lib/post-server';
+import { webhookOrigin } from '@/lib/evolution-api';
 import {
   chavesComOptout, chavesEmCooldown, contatosDaLista, enviadasHoje, lerTravas,
 } from '@/lib/fidelidade-server';
@@ -23,12 +25,12 @@ import {
  */
 
 export const COLS_DEVIDA = `f.id, f.client_id, f.fonte, f.modelo, f.lista_id, f.nome, f.params,
-       f.mensagens, f.cupom, f.imagem_url, f.dias_semana, f.hora, f.teto_publico`;
+       f.mensagens, f.imagens, f.cupom, f.dias_semana, f.hora, f.teto_publico`;
 
 export type LinhaDevida = {
   id: string; client_id: string; fonte: string; modelo: string | null; lista_id: string | null;
-  nome: string | null; params: unknown; mensagens: unknown; cupom: string | null;
-  imagem_url: string | null; dias_semana: string | null; hora: string | null;
+  nome: string | null; params: unknown; mensagens: unknown; imagens: unknown;
+  cupom: string | null; dias_semana: string | null; hora: string | null;
   teto_publico: number | null;
 };
 
@@ -245,19 +247,35 @@ async function enviarProxima(
   // Modo 'envio': variável sem valor é APAGADA, nunca entregue como {{chave}}.
   const texto = aplicarVars(textos[variacao], vars, 'envio');
 
+  // A arte da variação sorteada. O token vira URL https na hora do envio: a
+  // Evolution/Z-API não recebe o arquivo, ela BAIXA de uma URL pública.
+  const token = imagemDaVariacao(
+    limparVariacoes(campanha.mensagens, campanha.imagens, null).map(v => v.imagem),
+    variacao,
+  );
+  // Origem canônica (APP_URL) — a mesma que trava o destino dos webhooks. Sem
+  // ela `urlPublicaDaMidia` devolve null e a mensagem sai SÓ EM TEXTO: entregar
+  // o texto vale mais que não entregar nada. Na prática não acontece, porque o
+  // upload já recusa quando a origem não é canônica.
+  const imagemUrl = token ? urlPublicaDaMidia(token, webhookOrigin('')) : null;
+
   const res = await sendFollowupMessage({
     instance: conexao.instance,
     phone: alvo.telefone,
-    tipo: campanha.imagem_url ? 'imagem' : 'texto',
-    conteudo: campanha.imagem_url ?? texto,
-    vars: { nome: alvo.nome ?? '', telefone: alvo.telefone, legenda: texto },
+    tipo: imagemUrl ? 'imagem' : 'texto',
+    conteudo: imagemUrl ?? texto,
+    // ⚠️ A chave é `caption`: é ela que os dois providers leem para a legenda
+    // da imagem. Com outro nome a arte sairia MUDA, sem uma palavra do texto —
+    // e o registro em `fidelidade_envios` mostraria a mensagem que ninguém viu.
+    vars: { nome: alvo.nome ?? '', telefone: alvo.telefone, caption: texto },
   });
 
   if (res.ok) {
     await pool.query(
       `UPDATE public.fidelidade_envios
-          SET status = 'enviada', enviado_em = NOW(), variacao = $2, texto = $3 WHERE id = $1`,
-      [alvo.id, variacao, texto],
+          SET status = 'enviada', enviado_em = NOW(), variacao = $2, texto = $3, imagem = $4
+        WHERE id = $1`,
+      [alvo.id, variacao, texto, token],
     );
     await pool.query(
       `UPDATE public.fidelidade_execucoes SET enviadas = enviadas + 1 WHERE id = $1`, [execucaoId],
@@ -266,8 +284,9 @@ async function enviarProxima(
     // O texto vai junto mesmo na falha: sem ele não dá para saber se o erro foi
     // do número ou do conteúdo da mensagem.
     await pool.query(
-      `UPDATE public.fidelidade_envios SET status = 'falha', erro = $2, texto = $3 WHERE id = $1`,
-      [alvo.id, String(res.error ?? 'falha'), texto],
+      `UPDATE public.fidelidade_envios SET status = 'falha', erro = $2, texto = $3, imagem = $4
+        WHERE id = $1`,
+      [alvo.id, String(res.error ?? 'falha'), texto, token],
     );
     await pool.query(
       `UPDATE public.fidelidade_execucoes SET falhas = falhas + 1 WHERE id = $1`, [execucaoId],
