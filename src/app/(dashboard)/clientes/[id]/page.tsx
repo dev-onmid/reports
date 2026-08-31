@@ -412,6 +412,94 @@ function FunnelTab({ clientId, clientName, goalConfig, isAdmin }: { clientId: st
 
   const inputCls = "bg-transparent focus:outline-none border-b border-transparent hover:border-border focus:border-primary transition-colors w-full";
 
+  // Redes sociais tem planejamento PRÓPRIO. O bloco padrão é todo construído em
+  // cima de venda — TKM, faturamento estimado, ROI, funil de conversão — e nada
+  // disso se aplica a uma meta de seguidor e alcance. Mostrar aqueles cards com
+  // meta social só produzia frase sem sentido ("Redes sociais necessárias").
+  if (goalConfig.type === 'social') {
+    const metaSeguidores = goalConfig.target;
+    const metaAlcance = goalConfig.targetAlcance ?? 0;
+    // ⚠️ Sem denominador o custo é DESCONHECIDO, não zero — vira "—".
+    const custoPorSeguidor = metaSeguidores > 0 && invPlaSimple > 0 ? invPlaSimple / metaSeguidores : null;
+    const cpmAlcance = metaAlcance > 0 && invPlaSimple > 0 ? invPlaSimple / (metaAlcance / 1000) : null;
+    const card = 'bg-card border border-border rounded-xl p-4';
+    const rotulo = 'text-[9px] font-bold uppercase tracking-widest text-muted-foreground mb-2';
+    const valor = 'font-heading font-normal text-xl leading-none';
+
+    return (
+      <div className="space-y-4 pt-2">
+        <p className="text-sm text-muted-foreground">
+          Planejamento de <strong className="text-foreground">redes sociais</strong> para{' '}
+          <strong className="text-foreground">{clientName}</strong>. As metas ficam nos campos
+          acima; aqui entra quanto será investido para alcançá-las.
+        </p>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div className={card}>
+            <p className={rotulo}>Meta de novos seguidores</p>
+            <p className={cn(valor, 'text-foreground')}>
+              {metaSeguidores > 0 ? metaSeguidores.toLocaleString('pt-BR') : '—'}
+            </p>
+            <p className="text-[11px] text-muted-foreground mt-1">
+              {metaSeguidores > 0 ? 'Ganho líquido no período' : 'Sem meta de seguidores'}
+            </p>
+          </div>
+          <div className={card}>
+            <p className={rotulo}>Meta de alcance</p>
+            <p className={cn(valor, 'text-foreground')}>
+              {metaAlcance > 0 ? metaAlcance.toLocaleString('pt-BR') : '—'}
+            </p>
+            <p className="text-[11px] text-muted-foreground mt-1">
+              {metaAlcance > 0 ? 'Contas alcançadas no período' : 'Sem meta de alcance'}
+            </p>
+          </div>
+          <div className="bg-primary/10 border border-primary/30 rounded-xl p-4">
+            <p className="text-[9px] font-bold uppercase tracking-widest text-primary mb-2">Inv. planejado</p>
+            <div className="flex items-baseline gap-1">
+              <span className="text-lg font-bold text-primary/60">R$</span>
+              <CurrencyInput
+                value={invPlaSimple}
+                onChange={setInvPlaSimple}
+                className={cn(valor, 'flex-1 min-w-0 text-primary', inputCls)}
+              />
+            </div>
+            <p className="text-[11px] text-muted-foreground mt-1">Impulsionamento no período</p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div className={card}>
+            <p className={rotulo}>Custo por novo seguidor</p>
+            <p className={cn(valor, custoPorSeguidor === null ? 'text-muted-foreground/40' : 'text-primary')}>
+              {custoPorSeguidor === null ? '—' : fmtBRL(custoPorSeguidor)}
+            </p>
+            <p className="text-[11px] text-muted-foreground mt-1">
+              {custoPorSeguidor === null
+                ? 'Preencha meta de seguidores e investimento'
+                : `${fmtBRL(invPlaSimple)} ÷ ${metaSeguidores.toLocaleString('pt-BR')} seguidores`}
+            </p>
+          </div>
+          <div className={card}>
+            <p className={rotulo}>Custo por mil alcançados</p>
+            <p className={cn(valor, cpmAlcance === null ? 'text-muted-foreground/40' : 'text-primary')}>
+              {cpmAlcance === null ? '—' : fmtBRL(cpmAlcance)}
+            </p>
+            <p className="text-[11px] text-muted-foreground mt-1">
+              {cpmAlcance === null
+                ? 'Preencha meta de alcance e investimento'
+                : `${fmtBRL(invPlaSimple)} ÷ ${(metaAlcance / 1000).toLocaleString('pt-BR')} mil`}
+            </p>
+          </div>
+        </div>
+
+        <p className="text-xs text-muted-foreground/80">
+          O realizado vem do Instagram do cliente pelo Monitor de Redes Sociais e aparece
+          no Radar ao lado destas metas.
+        </p>
+      </div>
+    );
+  }
+
   // Sem meta: o planejamento inteiro é derivado da meta, então mostrá-lo aqui
   // renderia "META (SEM META) 0" e "CUSTO POR SEM META" — números que não
   // querem dizer nada. O que sobra a dizer é o que fica valendo.
