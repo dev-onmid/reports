@@ -38,29 +38,31 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     let status: 'ok' | 'erro';
     let mensagem: string;
 
-    if (expirado && expirado.expirado) {
+    // ⚠️ Token de sessão: copiar de novo NÃO resolve, e mandar copiar de novo era
+    // o que esta mensagem fazia. Medido em 31/08 na PicoLocos: a chave que o
+    // painel da loja oferece é emitida pela `session-api` com 15 min e a
+    // api-parceiros a recusa com 401 mesmo DENTRO da validade. O que falta não
+    // é uma cópia nova — é a ONMID existir como parceira do lado deles.
+    const ehSessao = expirado != null
+      && (expirado.emissor === 'session-api'
+          || (expirado.minutosDeVida != null && expirado.minutosDeVida <= 60));
+
+    if (ehSessao) {
       status = 'erro';
-      mensagem = expirado.minutosDeVida != null && expirado.minutosDeVida <= 60
-        ? `Token de sessão (validade de ${expirado.minutosDeVida} min), expirado em ${expirado.emTexto}. `
-          + 'Use a "Chave de integração" em Configurações › Integrações do Anota AI, não um token copiado do navegador.'
-        : `Token expirado em ${expirado.emTexto}. Gere uma chave nova no Anota AI.`;
+      mensagem = `Este é um token de SESSÃO do painel do Anota AI (validade de ${expirado?.minutosDeVida ?? '~15'} min`
+        + `${expirado?.expirado ? `, expirado em ${expirado.emTexto}` : ', ainda válido'}) — não é credencial de parceiro. `
+        + 'A API de parceiros o recusa com 401 mesmo dentro da validade, então copiar a chave de novo não resolve. '
+        + 'Falta a ONMID estar cadastrada como parceira no Anota AI e a integração habilitada para esta loja '
+        + '(em "Minhas integrações", no painel da loja, hoje só aparece o iFood).';
+    } else if (expirado && expirado.expirado) {
+      status = 'erro';
+      mensagem = `Token expirado em ${expirado.emTexto}. Gere uma chave nova no Anota AI.`;
     } else {
       const r = await testarToken(loja.integration_token);
       status = r.ok ? 'ok' : 'erro';
-      if (r.ok) {
-        mensagem = `Conectado. ${r.pedidosHoje} pedido(s) na listagem de hoje.`;
-      } else if ((r.status === 401 || r.status === 403) && expirado?.minutosDeVida != null && expirado.minutosDeVida <= 60) {
-        // ⚠️ Medido em 31/08: token DENTRO da validade, recusado com 401
-        // "Failed to authenticate token" pela api-parceiros. O token do painel
-        // da loja é de sessão (iss session-api) e não é credencial de parceiro
-        // — repetir a cópia não muda nada, e a mensagem crua ("401") levaria o
-        // gestor a tentar de novo para sempre.
-        mensagem = `A API de parceiros recusou a credencial (${r.status}), mesmo dentro da validade. `
-          + `O token do painel da loja é de sessão (${expirado.minutosDeVida} min) e não substitui a credencial `
-          + 'de parceiro — a ONMID precisa estar cadastrada como parceira no Anota AI para esta loja.';
-      } else {
-        mensagem = `${r.status || ''} ${r.erro}`.trim();
-      }
+      mensagem = r.ok
+        ? `Conectado. ${r.pedidosHoje} pedido(s) na listagem de hoje.`
+        : `${r.status || ''} ${r.erro}`.trim();
     }
 
     await pool.query(
@@ -79,16 +81,20 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 }
 
 /** Lê exp/iat do JWT sem validar assinatura — é diagnóstico, não autenticação. */
-function expiracaoDoJwt(token: string): { expirado: boolean; emTexto: string; minutosDeVida: number | null } | null {
+function expiracaoDoJwt(token: string): {
+  expirado: boolean; emTexto: string; minutosDeVida: number | null; emissor: string | null;
+} | null {
   const partes = String(token).split('.');
   if (partes.length !== 3) return null;
   try {
-    const c = JSON.parse(Buffer.from(partes[1], 'base64url').toString()) as { exp?: number; iat?: number };
+    const c = JSON.parse(Buffer.from(partes[1], 'base64url').toString()) as
+      { exp?: number; iat?: number; iss?: string };
     if (!c.exp) return null;
     return {
       expirado: Date.now() > c.exp * 1000,
       emTexto: new Date(c.exp * 1000).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }),
       minutosDeVida: c.iat ? Math.round((c.exp - c.iat) / 60) : null,
+      emissor: c.iss ?? null,
     };
   } catch { return null; }
 }
