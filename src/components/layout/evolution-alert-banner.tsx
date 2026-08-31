@@ -64,7 +64,11 @@ export function EvolutionAlertBanner() {
   }
 
   const session = getAuthSession();
-  if (session?.role !== 'Administrador') return null;
+  // Todo o time da ONMID vê o aviso — um gestor precisa saber que a instância do
+  // cliente dele caiu, mesmo sem poder reconectar. Parceiro fica de fora: os nomes
+  // das instâncias são nomes de cliente, e a carteira não é dele.
+  if (!session || session.team === 'parceiro') return null;
+  const isAdmin = session.role === 'Administrador';
   if (alerts.length === 0 || !visible) return null;
 
   const shown = alerts.slice(0, 5);
@@ -93,14 +97,21 @@ export function EvolutionAlertBanner() {
             ))}
             {extra > 0 && <p className="text-[11px] text-muted-foreground/70">e mais {extra}…</p>}
           </div>
+          {!isAdmin && (
+            <p className="mt-2 text-[11px] leading-snug text-muted-foreground/80">
+              Reconectar exige acesso de administrador — avise quem administra o sistema.
+            </p>
+          )}
           <div className="mt-3 flex items-center gap-2">
-            <Link
-              href="/configuracoes?tab=instancias"
-              onClick={dismiss}
-              className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-bold text-black hover:bg-primary/90 transition-colors"
-            >
-              <Settings2 className="h-3.5 w-3.5" /> Gerenciar instâncias
-            </Link>
+            {isAdmin && (
+              <Link
+                href="/configuracoes?tab=instancias"
+                onClick={dismiss}
+                className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-bold text-black hover:bg-primary/90 transition-colors"
+              >
+                <Settings2 className="h-3.5 w-3.5" /> Gerenciar instâncias
+              </Link>
+            )}
             <button
               onClick={refresh}
               disabled={loading}
