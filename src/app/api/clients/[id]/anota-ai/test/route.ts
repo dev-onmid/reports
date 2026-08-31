@@ -38,22 +38,35 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     let status: 'ok' | 'erro';
     let mensagem: string;
 
-    // ⚠️ Token de sessão: copiar de novo NÃO resolve, e mandar copiar de novo era
-    // o que esta mensagem fazia. Medido em 31/08 na PicoLocos: a chave que o
-    // painel da loja oferece é emitida pela `session-api` com 15 min e a
-    // api-parceiros a recusa com 401 mesmo DENTRO da validade. O que falta não
-    // é uma cópia nova — é a ONMID existir como parceira do lado deles.
-    const ehSessao = expirado != null
-      && (expirado.emissor === 'session-api'
-          || (expirado.minutosDeVida != null && expirado.minutosDeVida <= 60));
+    // ⚠️ Há DOIS tokens no painel do Anota AI e só um funciona.
+    //
+    // O do topo ("Chave de integração com a Anota AI") é emitido pela
+    // `session-api` com 15 min de validade — medido em 31/08 na PicoLocos, a
+    // api-parceiros o recusa com 401 mesmo DENTRO da validade. Foi o que
+    // estava cadastrado desde junho, e é o que qualquer um copia primeiro,
+    // porque é o campo em destaque na tela.
+    //
+    // O que vale é o token da LINHA da integração, em "Minhas integrações" →
+    // aba **Outras** → "Onmid Reports" — uma aba que nem é a aberta por padrão
+    // (a padrão é iFood), então a linha passa despercebida com facilidade.
+    // ⚠️ O sinal exato é `idpartner`, não a validade nem o emissor.
+    //
+    // Comparado em 31/08 nas DUAS lojas da PicoLocos: o token que funciona
+    // (Guanabara) traz `idpartner + idpage` e não expira; o que falha (Prochet)
+    // traz `_id + tokenid + exp + iss:session-api` e NÃO traz `idpartner`.
+    // Os dois carregam o `idpage` correto da própria loja — conferir a loja não
+    // distingue nada. Quem separa é a presença do parceiro dentro do token.
+    const claims = claimsDoJwt(loja.integration_token);
+    const semParceiro = claims !== null && !claims.idpartner;
 
-    if (ehSessao) {
+    if (semParceiro) {
       status = 'erro';
-      mensagem = `Este é um token de SESSÃO do painel do Anota AI (validade de ${expirado?.minutosDeVida ?? '~15'} min`
-        + `${expirado?.expirado ? `, expirado em ${expirado.emTexto}` : ', ainda válido'}) — não é credencial de parceiro. `
-        + 'A API de parceiros o recusa com 401 mesmo dentro da validade, então copiar a chave de novo não resolve. '
-        + 'Falta a ONMID estar cadastrada como parceira no Anota AI e a integração habilitada para esta loja '
-        + '(em "Minhas integrações", no painel da loja, hoje só aparece o iFood).';
+      mensagem = `Token errado: este é o de SESSÃO do topo da tela (validade de ${expirado?.minutosDeVida ?? '~15'} min`
+        + `${expirado?.expirado ? `, expirado em ${expirado.emTexto}` : ', ainda válido'}), que a API recusa com 401 `
+        + 'mesmo dentro da validade — recopiá-lo não resolve. No painel DESTA loja, vá em Configurações › '
+        + 'Integrações › Minhas integrações › aba "Outras" e copie o token da LINHA "Onmid Reports". '
+        + 'É um token por loja, e não expira. Se a linha não existir para esta loja, habilite a integração '
+        + 'pelo botão "Integrar" antes.';
     } else if (expirado && expirado.expirado) {
       status = 'erro';
       mensagem = `Token expirado em ${expirado.emTexto}. Gere uma chave nova no Anota AI.`;
@@ -78,6 +91,15 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   } finally {
     await pool.end();
   }
+}
+
+/** Claims do JWT, sem validar assinatura — diagnóstico, não autenticação. */
+function claimsDoJwt(token: string): { idpartner?: string; idpage?: string } | null {
+  const partes = String(token).split('.');
+  if (partes.length !== 3) return null;
+  try {
+    return JSON.parse(Buffer.from(partes[1], 'base64url').toString()) as { idpartner?: string };
+  } catch { return null; }
 }
 
 /** Lê exp/iat do JWT sem validar assinatura — é diagnóstico, não autenticação. */
