@@ -453,7 +453,9 @@ function FunnelTab({ clientId, clientName, goalConfig, isAdmin }: { clientId: st
                 <span className="text-lg font-bold text-muted-foreground">R$</span>
                 <CurrencyInput value={tkm} onChange={setTkm} className={cn('font-heading font-normal text-xl leading-none flex-1 min-w-0 text-foreground', inputCls)} />
               </div>
-              <p className="text-[11px] text-muted-foreground mt-1">Valor médio por venda</p>
+              <p className="text-[11px] text-muted-foreground mt-1">
+                {tkm > 0 ? 'Valor médio por venda' : 'Sem meta — sai do Radar, fica só como performance'}
+              </p>
             </div>
             {/* Inv. Planejado — directly editable */}
             <div className="bg-primary/10 border border-primary/30 rounded-xl p-4">
@@ -546,6 +548,9 @@ function FunnelTab({ clientId, clientName, goalConfig, isAdmin }: { clientId: st
           { label: 'TKM (Ticket Médio)',        value: tkm,      set: setTkm,      color: 'text-foreground', desc: 'Valor médio por venda'     },
           { label: 'CPL META (Custo/Lead)',     value: cplMeta,  set: setCplMeta,  color: 'text-primary',    desc: 'CPL planejado'             },
         ].map(({ label, value, set, color, desc }) => (
+          // Deixar em 0 é uma resposta válida: significa "sem meta". O Radar então
+          // para de julgar essa métrica e mostra só o número de performance.
+
           <div key={label} className="bg-card border border-border rounded-xl p-4">
             <p className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground mb-2">{label}</p>
             <div className="flex items-baseline gap-1">
@@ -556,7 +561,9 @@ function FunnelTab({ clientId, clientName, goalConfig, isAdmin }: { clientId: st
                 className={cn('font-heading font-normal text-xl leading-none flex-1 min-w-0', color, inputCls)}
               />
             </div>
-            <p className="text-[11px] text-muted-foreground mt-1">{desc}</p>
+            <p className="text-[11px] text-muted-foreground mt-1">
+              {value > 0 ? desc : 'Sem meta — sai do Radar, fica só como performance'}
+            </p>
           </div>
         ))}
       </div>

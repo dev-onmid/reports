@@ -5,6 +5,7 @@ import Link from 'next/link';
 import {
   ArrowRight, TrendingUp, Users, Target, RefreshCw,
   Eye, Calendar, ShoppingBag, CheckCircle2, ChevronRight, Info, DollarSign, Users2,
+  SlidersHorizontal, ArrowUp, ArrowDown,
 } from 'lucide-react';
 import { useInvestmentPayments } from '@/lib/payment-store';
 import { clientResults, type ClientFunnel } from '@/lib/client-results-store';
@@ -12,6 +13,11 @@ import { useClients } from '@/lib/client-store';
 import { ClientAvatar } from '@/components/client-avatar';
 import { ResultsTabs } from '@/components/results-tabs';
 import { cn, formatCurrencyBRL } from '@/lib/utils';
+import {
+  ordenarLinhas, filtrarLinhas, categoriasDisponiveis, proximaOrdem,
+  situacaoDaMeta, METRICAS,
+  type ColunaRadar, type DirecaoOrdem, type FiltroSituacao, type MetricaRadar,
+} from '@/lib/radar-tabela';
 
 type ApiMetrics = {
   meta: { spend: number; impressions: number; clicks: number; leads: number; cpl: number } | null;
@@ -31,9 +37,14 @@ const DEFAULT_STAGES: FunnelStage[] = [
   { id: 's1', name: '1º — Fechamentos (Vendas)', conversion: 0 },
 ];
 
+// ⚠️ ZERO = "sem meta cadastrada", e é o padrão de propósito. Antes eram
+// 9000/30, então TODO cliente sem planejamento era julgado no Radar contra uma
+// meta que ninguém definiu — e aparecia vermelho por não bater um número
+// inventado. Métrica sem meta agora sai do julgamento e fica só como
+// performance (o número cru, em cinza).
 const DEFAULT_CLIENT_PLANNING: ClientPlanningConfig = {
-  tkm: 9000,
-  cplMeta: 30,
+  tkm: 0,
+  cplMeta: 0,
   stages: DEFAULT_STAGES,
 };
 
@@ -50,9 +61,12 @@ function readPlanningFromStorage(clientId: string): ClientPlanningConfig {
     const stored = localStorage.getItem(`clientPlanning_${clientId}`);
     if (!stored) return DEFAULT_CLIENT_PLANNING;
     const parsed = JSON.parse(stored) as Partial<ClientPlanningConfig>;
+    // Não coagir 0 para o padrão: zero salvo é a forma de dizer "sem meta".
+    const tkm = Number(parsed.tkm);
+    const cplMeta = Number(parsed.cplMeta);
     return {
-      tkm: Number(parsed.tkm) > 0 ? Number(parsed.tkm) : DEFAULT_CLIENT_PLANNING.tkm,
-      cplMeta: Number(parsed.cplMeta) > 0 ? Number(parsed.cplMeta) : DEFAULT_CLIENT_PLANNING.cplMeta,
+      tkm: Number.isFinite(tkm) && tkm >= 0 ? tkm : DEFAULT_CLIENT_PLANNING.tkm,
+      cplMeta: Number.isFinite(cplMeta) && cplMeta >= 0 ? cplMeta : DEFAULT_CLIENT_PLANNING.cplMeta,
       stages: sanitizePlanningStages(parsed.stages),
     };
   } catch { return DEFAULT_CLIENT_PLANNING; }
@@ -250,6 +264,15 @@ export default function ResultadosPage() {
   const [planningByClient, setPlanningByClient] = useState<Record<string, ClientPlanningConfig>>({});
   const [loadingMetrics, setLoadingMetrics] = useState(false);
 
+  // Filtro e ordenação da tabela (só apresentação — os KPIs do topo continuam
+  // somando a carteira inteira, senão o "total" mudaria conforme o filtro).
+  const [categoria, setCategoria] = useState('');
+  const [metrica, setMetrica] = useState<MetricaRadar>('resultado');
+  const [situacao, setSituacao] = useState<FiltroSituacao>('todas');
+  const [ordem, setOrdem] = useState<{ coluna: ColunaRadar | null; direcao: DirecaoOrdem }>(
+    { coluna: null, direcao: 'desc' },
+  );
+
   // useClients() não expõe flag de carregamento: sem isto o cabeçalho da tabela
   // fica flutuando sozinho enquanto /api/clients responde. Considera carregado
   // assim que chega o 1º cliente e, no máximo, após a janela do fetch inicial —
@@ -357,8 +380,21 @@ export default function ResultadosPage() {
       totalInvest, dispatchedInvest,
       pctResult, pctLeads, pctCpl, pctCac,
       gestor: hardcoded?.gestor ?? '',
+      // Campos planos que `radar-tabela` consome (ordenar/filtrar).
+      nome: client.name,
+      categoria: client.segment ?? '',
+      investimento: totalInvest,
+      fechamentos: funil.fechamentos,
+      pctFechamentos: funnelPcts[FUNNEL_KEYS.length - 1] ?? null,
     };
   });
+
+  const categorias = categoriasDisponiveis(rows);
+  const linhas = ordenarLinhas(
+    filtrarLinhas(rows, { categoria, metrica, situacao }),
+    ordem.coluna, ordem.direcao,
+  );
+  const filtrando = categoria !== '' || situacao !== 'todas';
 
   const totMeta   = rows.reduce((s, r) => s + r.metaTarget, 0);
   const totResult = rows.reduce((s, r) => s + r.resultado, 0);
@@ -424,6 +460,68 @@ export default function ResultadosPage() {
         </span>
       </div>
 
+      {/* ── Filtros ── */}
+      <div className="flex flex-wrap items-center gap-3 rounded-[var(--radius)] border border-border bg-card px-4 py-3">
+        <span className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+          <SlidersHorizontal className="h-3.5 w-3.5" /> Filtrar
+        </span>
+
+        <label className="flex items-center gap-2 text-xs text-muted-foreground">
+          Categoria
+          <select
+            value={categoria}
+            onChange={(e) => setCategoria(e.target.value)}
+            className="h-9 rounded-lg border border-border bg-background px-2 text-xs font-semibold text-foreground [color-scheme:dark]"
+          >
+            <option value="">Todas ({rows.length})</option>
+            {categorias.map((c) => (
+              <option key={c} value={c}>
+                {c} ({rows.filter((r) => r.categoria === c).length})
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className="flex items-center gap-2 text-xs text-muted-foreground">
+          Métrica
+          <select
+            value={metrica}
+            onChange={(e) => setMetrica(e.target.value as MetricaRadar)}
+            className="h-9 rounded-lg border border-border bg-background px-2 text-xs font-semibold text-foreground [color-scheme:dark]"
+          >
+            {METRICAS.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
+          </select>
+        </label>
+
+        <label className="flex items-center gap-2 text-xs text-muted-foreground">
+          Situação
+          <select
+            value={situacao}
+            onChange={(e) => setSituacao(e.target.value as FiltroSituacao)}
+            className="h-9 rounded-lg border border-border bg-background px-2 text-xs font-semibold text-foreground [color-scheme:dark]"
+          >
+            <option value="todas">Todas</option>
+            <option value="abaixo">Não está batendo a meta (&lt; 75%)</option>
+            <option value="critico">Só o crítico (&lt; 30%)</option>
+            <option value="ok">Batendo a meta (≥ 75%)</option>
+            <option value="sem_meta">Sem meta definida</option>
+          </select>
+        </label>
+
+        <span className="text-xs font-semibold text-muted-foreground">
+          {linhas.length} de {rows.length} clientes
+        </span>
+
+        {(filtrando || ordem.coluna) && (
+          <button
+            onClick={() => { setCategoria(''); setSituacao('todas'); setOrdem({ coluna: null, direcao: 'desc' }); }}
+            className="ml-auto rounded-lg border border-border px-3 py-1.5 text-xs font-bold text-muted-foreground hover:text-foreground transition-colors"
+          >
+            Limpar
+          </button>
+        )}
+      </div>
+
       {/* ── Table ──
           Cabeçalho fixo: um único container com overflow-auto (x+y) faz o scroll
           interno da tabela — evitar overflow-x-auto isolado, que por spec do CSS
@@ -434,24 +532,42 @@ export default function ResultadosPage() {
           <table className="min-w-[1100px] w-full">
             <thead>
               <tr className="border-b border-border">
-                {[
-                  { label: 'CLIENTE', info: '' },
-                  { label: 'META', info: '' },
-                  { label: 'RESULTADO', info: '' },
-                  { label: '%', info: '' },
-                  { label: 'LEADS', info: '' },
-                  { label: 'CPL', info: 'CPL — custo por lead no período: investimento ÷ leads. Menor = melhor.' },
-                  { label: 'CAC', info: 'CAC — custo por venda no período: investimento ÷ vendas fechadas. Menor = melhor.' },
-                  { label: 'FUNIL', info: '' },
-                  { label: 'INVESTIMENTO', info: 'Investimento — total previsto no período; abaixo, o quanto já foi enviado às plataformas.' },
+                {([
+                  { label: 'CLIENTE', info: '', sort: 'cliente' as ColunaRadar, padrao: 'asc' as DirecaoOrdem },
+                  { label: 'META', info: '', sort: 'meta' as ColunaRadar },
+                  { label: 'RESULTADO', info: '', sort: 'resultado' as ColunaRadar },
+                  { label: '%', info: '', sort: 'pct' as ColunaRadar },
+                  { label: 'LEADS', info: '', sort: 'leads' as ColunaRadar },
+                  { label: 'CPL', info: 'CPL — custo por lead no período: investimento ÷ leads. Menor = melhor.', sort: 'cpl' as ColunaRadar, padrao: 'asc' as DirecaoOrdem },
+                  { label: 'CAC', info: 'CAC — custo por venda no período: investimento ÷ vendas fechadas. Menor = melhor.', sort: 'cac' as ColunaRadar, padrao: 'asc' as DirecaoOrdem },
+                  { label: 'FUNIL', info: 'Ordena pelo último degrau (fechamentos).', sort: 'fechamentos' as ColunaRadar },
+                  { label: 'INVESTIMENTO', info: 'Investimento — total previsto no período; abaixo, o quanto já foi enviado às plataformas.', sort: 'investimento' as ColunaRadar },
                   { label: '', info: '' },
-                ].map((col) => (
-                  <th key={col.label} className="sticky top-0 z-10 bg-card px-4 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-muted-foreground whitespace-nowrap after:absolute after:inset-x-0 after:bottom-0 after:border-b after:border-border">
-                    {col.info ? (
-                      <span className="flex items-center gap-1" title={col.info}>{col.label} <Info className="w-3 h-3 opacity-50" /></span>
-                    ) : col.label}
-                  </th>
-                ))}
+                ] as { label: string; info: string; sort?: ColunaRadar; padrao?: DirecaoOrdem }[]).map((col) => {
+                  const ativa = col.sort && ordem.coluna === col.sort;
+                  const Seta = ordem.direcao === 'asc' ? ArrowUp : ArrowDown;
+                  const conteudo = (
+                    <span className={cn('flex items-center gap-1', ativa && 'text-primary')} title={col.info || undefined}>
+                      {col.label}
+                      {col.info && <Info className="w-3 h-3 opacity-50" />}
+                      {ativa && <Seta className="w-3 h-3" />}
+                    </span>
+                  );
+                  return (
+                    <th key={col.label} className="sticky top-0 z-10 bg-card px-4 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-muted-foreground whitespace-nowrap after:absolute after:inset-x-0 after:bottom-0 after:border-b after:border-border">
+                      {col.sort ? (
+                        <button
+                          type="button"
+                          onClick={() => setOrdem((o) => proximaOrdem(o, col.sort!, col.padrao ?? 'desc'))}
+                          title={col.info || `Ordenar por ${col.label.toLowerCase()}`}
+                          className="uppercase tracking-widest hover:text-foreground transition-colors"
+                        >
+                          {conteudo}
+                        </button>
+                      ) : conteudo}
+                    </th>
+                  );
+                })}
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
@@ -461,9 +577,15 @@ export default function ResultadosPage() {
               {!loadingClients && rows.length === 0 && (
                 <tr><td colSpan={10} className="px-4 py-12 text-center text-sm text-muted-foreground">Nenhum cliente encontrado.</td></tr>
               )}
-              {rows.map((row) => {
+              {!loadingClients && rows.length > 0 && linhas.length === 0 && (
+                <tr><td colSpan={10} className="px-4 py-12 text-center text-sm text-muted-foreground">
+                  Nenhum cliente nesse recorte. <button onClick={() => { setCategoria(''); setSituacao('todas'); }} className="font-bold text-primary hover:underline">Limpar filtros</button>
+                </td></tr>
+              )}
+              {linhas.map((row) => {
                 const resultC = pctColors(row.pctResult);
                 const leadsC = pctColors(row.pctLeads);
+                const semMetaResultado = situacaoDaMeta(row.pctResult) === 'sem_meta';
                 return (
                   <tr key={row.client.id} className={cn('border-l-[3px] hover:bg-muted/20 transition-colors', resultC.border)}>
                     <td className="px-4 py-3">
@@ -478,13 +600,21 @@ export default function ResultadosPage() {
                     <td className="px-4 py-3 text-sm font-semibold whitespace-nowrap">
                       {row.metaTarget > 0 ? formatCurrencyBRL(row.metaTarget) : <span className="text-muted-foreground/40">—</span>}
                     </td>
-                    <td className={cn('px-4 py-3 text-sm font-bold whitespace-nowrap', row.resultado > 0 ? resultC.text : 'text-red-400')}>
+                    {/* ⚠️ Sem meta ≠ falhou. Sem meta o valor aparece em cinza (só
+                        performance) e o % vira "—" neutro — antes ia vermelho, o que
+                        acusava de reprovado quem ninguém tinha medido. */}
+                    <td className={cn(
+                      'px-4 py-3 text-sm font-bold whitespace-nowrap',
+                      row.resultado > 0 ? (semMetaResultado ? 'text-foreground' : resultC.text) : 'text-muted-foreground/40',
+                    )}>
                       {row.resultado > 0 ? formatCurrencyBRL(row.resultado) : '—'}
                     </td>
                     <td className="px-4 py-3">
-                      {row.metaTarget > 0 && row.pctResult !== null ? (
+                      {semMetaResultado ? (
+                        <span className="text-sm font-bold text-muted-foreground/40" title="Sem meta definida no planejamento do cliente">—</span>
+                      ) : (
                         <span className={cn('text-sm font-bold', resultC.text)}>{row.pctResult}%</span>
-                      ) : <span className="text-red-400 text-sm font-bold">—</span>}
+                      )}
                     </td>
                     <td
                       className={cn('px-4 py-3 text-sm font-bold', row.pctLeads === null ? 'text-blue-400' : leadsC.text)}
