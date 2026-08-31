@@ -32,6 +32,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
     // Antes de gastar a chamada: se o token declara validade e ela já passou,
     // o diagnóstico é preciso e não depende da resposta da API deles.
+    // Lida SEMPRE: os metadados explicam tanto o token vencido quanto o vivo
+    // que a API recusa.
     const expirado = expiracaoDoJwt(loja.integration_token);
     let status: 'ok' | 'erro';
     let mensagem: string;
@@ -45,9 +47,20 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     } else {
       const r = await testarToken(loja.integration_token);
       status = r.ok ? 'ok' : 'erro';
-      mensagem = r.ok
-        ? `Conectado. ${r.pedidosHoje} pedido(s) na listagem de hoje.`
-        : `${r.status || ''} ${r.erro}`.trim();
+      if (r.ok) {
+        mensagem = `Conectado. ${r.pedidosHoje} pedido(s) na listagem de hoje.`;
+      } else if ((r.status === 401 || r.status === 403) && expirado?.minutosDeVida != null && expirado.minutosDeVida <= 60) {
+        // ⚠️ Medido em 31/08: token DENTRO da validade, recusado com 401
+        // "Failed to authenticate token" pela api-parceiros. O token do painel
+        // da loja é de sessão (iss session-api) e não é credencial de parceiro
+        // — repetir a cópia não muda nada, e a mensagem crua ("401") levaria o
+        // gestor a tentar de novo para sempre.
+        mensagem = `A API de parceiros recusou a credencial (${r.status}), mesmo dentro da validade. `
+          + `O token do painel da loja é de sessão (${expirado.minutosDeVida} min) e não substitui a credencial `
+          + 'de parceiro — a ONMID precisa estar cadastrada como parceira no Anota AI para esta loja.';
+      } else {
+        mensagem = `${r.status || ''} ${r.erro}`.trim();
+      }
     }
 
     await pool.query(
