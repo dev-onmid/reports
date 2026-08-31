@@ -46,13 +46,20 @@ const JANELA_HISTORICO_MESES = 6;
  * 09/08 e Tokiomaki em 31/07, com o cron reportando "sincronizado, sem erro" a
  * cada hora — porque, do ponto de vista dele, não havia nada a fazer.
  *
- * 3 dias cobre com folga a cadência de 1x/hora e ainda recupera uma parada de
- * fim de semana. O webhook continua sendo o caminho de tempo real; esta
- * varredura é a rede embaixo dele, igual à reconciliação do Agendor.
+ * ⚠️ A janela era de 3 dias, calibrada para "recuperar uma parada de fim de
+ * semana" — e não alcançava o buraco que JÁ EXISTIA quando ela subiu. Medido na
+ * Tokiomaki: o histórico deu por concluído com o cursor em 01/08, o webhook só
+ * passou a entregar em 24/08, e os 23 dias no meio (96 pedidos, ~R$ 10 mil)
+ * ficaram fora do alcance da varredura para sempre. 45 dias cobre um mês
+ * fechado inteiro com folga.
+ *
+ * O custo não escala com a janela: a listagem é 1 requisição por página e o
+ * DETALHE (a parte cara) só é buscado para pedido que ainda não temos. Em
+ * regime normal a varredura para na 1ª página — ver `janelaCompleta`.
  */
-const RECONCILIACAO_DIAS = 3;
+const RECONCILIACAO_DIAS = 45;
 /** Teto de páginas por execução: cada página é 1 das 5 req/min do histórico. */
-const RECONCILIACAO_PAGINAS = 2;
+const RECONCILIACAO_PAGINAS = 6;
 
 function autorizado(req: NextRequest): boolean {
   const esperados = [
@@ -74,6 +81,8 @@ type Resultado = {
   /** Pedidos novos achados pela varredura da janela recente. */
   recentes_importados?: number;
   recentes_vistos?: number;
+  /** true = a janela de reconciliação já bate com o total da API (nada faltando). */
+  janela_completa?: boolean;
   descontos_recapturados?: number;
   /** Quantos pedidos existem DE FATO no banco para esta loja. */
   pedidos_no_banco?: number;
@@ -243,18 +252,31 @@ async function avancarHistorico(
  */
 async function reconciliarRecentes(
   pool: ReturnType<typeof makeServerPool>, conn: CardapioWebConnection, orcamentoDetalhes: number,
-): Promise<{ importados: number; vistos: number }> {
-  if (orcamentoDetalhes <= 0) return { importados: 0, vistos: 0 };
+  prazoFinal?: number,
+): Promise<{ importados: number; vistos: number; janelaCompleta: boolean }> {
+  if (orcamentoDetalhes <= 0) return { importados: 0, vistos: 0, janelaCompleta: false };
 
   const fim = new Date();
   const inicio = new Date(fim);
   inicio.setDate(inicio.getDate() - RECONCILIACAO_DIAS);
 
+  // Quantos pedidos da janela já temos. Comparado com o total que a API declara,
+  // é o que permite parar na 1ª página quando não falta nada — sem isso, uma
+  // janela de 45 dias custaria 6 listagens por hora para não achar nada.
+  const { rows: [nosso] } = await pool.query<{ n: string }>(
+    `SELECT COUNT(*)::text AS n FROM public.cardapioweb_orders
+      WHERE client_id = $1 AND created_at >= $2 AND created_at <= $3`,
+    [conn.client_id, inicio.toISOString(), fim.toISOString()],
+  );
+  const temosNaJanela = Number(nosso?.n ?? 0);
+
   let importados = 0;
   let vistos = 0;
+  let janelaCompleta = false;
 
   for (let pagina = 1; pagina <= RECONCILIACAO_PAGINAS; pagina++) {
     if (orcamentoDetalhes - importados <= 0) break;
+    if (prazoFinal && Date.now() > prazoFinal) break;
     // Ritmo do histórico: 5 req/min por loja. Espaça a 2ª página.
     if (pagina > 1) await sleep(Math.ceil(60_000 / RATE.historicoPorMinuto));
 
@@ -275,6 +297,16 @@ async function reconciliarRecentes(
     vistos += lista.length;
     if (lista.length === 0) break;
 
+    // ⚠️ Nada faltando é o caso NORMAL — parar aqui é o que torna a janela larga
+    // barata. Só compara na 1ª página: dali em diante já estamos cavando.
+    if (pagina === 1) {
+      const totalDeles = lote.pagination?.total_orders ?? null;
+      if (totalDeles != null && temosNaJanela >= totalDeles) {
+        janelaCompleta = true;
+        break;
+      }
+    }
+
     const ids = lista.map(o => Number(o.id)).filter(Number.isFinite);
     const { rows: existentes } = await pool.query<{ order_id: string }>(
       `SELECT order_id FROM public.cardapioweb_orders WHERE client_id = $1 AND order_id = ANY($2::bigint[])`,
@@ -290,7 +322,7 @@ async function reconciliarRecentes(
         await upsertOrder(pool, conn.client_id, detalhe);
         importados++;
       } catch (err) {
-        if ((err as CardapioWebError).status === 429) return { importados, vistos };
+        if ((err as CardapioWebError).status === 429) return { importados, vistos, janelaCompleta };
         // Pedido individual com problema não trava a varredura.
       }
     }
@@ -299,7 +331,7 @@ async function reconciliarRecentes(
     if (lista.length < 100) break;
   }
 
-  return { importados, vistos };
+  return { importados, vistos, janelaCompleta };
 }
 
 export async function GET(req: NextRequest) {
@@ -331,9 +363,10 @@ export async function GET(req: NextRequest) {
         // de 5 meses atrás, e é esta varredura que mantém a loja viva depois
         // que o histórico termina.
         if (restante > 0 && Date.now() - inicio < ORCAMENTO_MS) {
-          const rec = await reconciliarRecentes(pool, conn, restante);
+          const rec = await reconciliarRecentes(pool, conn, restante, inicio + ORCAMENTO_MS);
           r.recentes_importados = rec.importados;
           r.recentes_vistos = rec.vistos;
+          r.janela_completa = rec.janelaCompleta;
           restante -= rec.importados;
         }
 
