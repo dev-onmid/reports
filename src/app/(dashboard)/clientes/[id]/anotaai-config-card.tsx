@@ -8,7 +8,7 @@
  */
 
 import { useEffect, useState } from 'react';
-import { Loader2, Pencil, Store, Trash2 } from 'lucide-react';
+import { Loader2, Pencil, PlugZap, Store, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 type AnotaAiStore = {
@@ -40,6 +40,30 @@ export function AnotaAiConfigCard({ clientId, onChanged }: { clientId: string; o
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [formAberto, setFormAberto] = useState(false);
+  const [testando, setTestando] = useState<string | null>(null);
+
+  // Testar é o que transforma "colar token" em algo verificável. Sem isso o
+  // único sinal de credencial morta é a coleta em zero — que parece loja
+  // parada, não integração quebrada.
+  async function testar(store: AnotaAiStore) {
+    setTestando(store.id);
+    try {
+      const res = await fetch(`/api/clients/${clientId}/anota-ai/test?storeId=${store.id}`, { method: 'POST' });
+      const data = await res.json() as { status?: string; mensagem?: string; error?: string };
+      setStores(prev => prev.map(s => s.id === store.id ? {
+        ...s,
+        lastTestStatus: data.status ?? 'erro',
+        lastTestMessage: data.mensagem ?? data.error ?? 'Falha no teste.',
+        lastTestAt: new Date().toISOString(),
+      } : s));
+    } catch {
+      setStores(prev => prev.map(s => s.id === store.id ? {
+        ...s, lastTestStatus: 'erro', lastTestMessage: 'Erro de rede ao testar.', lastTestAt: new Date().toISOString(),
+      } : s));
+    } finally {
+      setTestando(null);
+    }
+  }
 
   useEffect(() => {
     fetch(`/api/clients/${clientId}/anota-ai`)
@@ -121,25 +145,45 @@ export function AnotaAiConfigCard({ clientId, onChanged }: { clientId: string; o
         </p>
       ) : stores.length === 0 && !formAberto ? (
         <p className="mt-3 text-sm text-muted-foreground">
-          Nenhuma loja cadastrada. O ID e o token vêm do Portal de Integração do Anota Aí.
+          Nenhuma loja cadastrada. O ID da loja e a Chave de integração ficam no Anota AI em Configurações › Integrações.
         </p>
       ) : (
         <ul className="mt-3 space-y-2">
           {stores.map(store => (
-            <li key={store.id} className="flex flex-wrap items-center gap-2 rounded-[var(--radius)] border border-border/60 bg-background/40 px-3 py-2 text-sm">
-              <span className={cn('h-2 w-2 shrink-0 rounded-full', store.active ? 'bg-primary' : 'bg-muted-foreground')} />
-              <span className="font-semibold">{store.storeName}</span>
-              <span className="text-[11px] text-muted-foreground">
-                ID {store.storeId} · Token {maskToken(store.integrationToken)}
-              </span>
-              <span className="ml-auto flex items-center gap-1">
-                <button type="button" onClick={() => editar(store)} className="rounded border border-border p-1.5 text-muted-foreground hover:text-foreground">
-                  <Pencil className="h-3.5 w-3.5" />
-                </button>
-                <button type="button" onClick={() => void remover(store)} className="rounded border border-border p-1.5 text-muted-foreground hover:text-destructive">
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
-              </span>
+            <li key={store.id} className="rounded-[var(--radius)] border border-border/60 bg-background/40 px-3 py-2 text-sm">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className={cn('h-2 w-2 shrink-0 rounded-full', store.active ? 'bg-primary' : 'bg-muted-foreground')} />
+                <span className="font-semibold">{store.storeName}</span>
+                <span className="text-[11px] text-muted-foreground">
+                  ID {store.storeId} · Token {maskToken(store.integrationToken)}
+                </span>
+                <span className="ml-auto flex items-center gap-1">
+                  <button
+                    type="button" disabled={testando === store.id} onClick={() => void testar(store)}
+                    title="Testar conexão com o Anota AI"
+                    className="flex items-center gap-1 rounded border border-border px-2 py-1.5 text-[11px] font-bold uppercase tracking-wider text-muted-foreground hover:text-foreground disabled:opacity-40"
+                  >
+                    {testando === store.id
+                      ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      : <PlugZap className="h-3.5 w-3.5" />}
+                    Testar
+                  </button>
+                  <button type="button" onClick={() => editar(store)} className="rounded border border-border p-1.5 text-muted-foreground hover:text-foreground">
+                    <Pencil className="h-3.5 w-3.5" />
+                  </button>
+                  <button type="button" onClick={() => void remover(store)} className="rounded border border-border p-1.5 text-muted-foreground hover:text-destructive">
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </span>
+              </div>
+              {store.lastTestMessage && (
+                <p className={cn(
+                  'mt-1.5 text-[11px] leading-snug',
+                  store.lastTestStatus === 'ok' ? 'text-primary' : 'text-destructive',
+                )}>
+                  {store.lastTestStatus === 'ok' ? '✓ ' : '✕ '}{store.lastTestMessage}
+                </p>
+              )}
             </li>
           ))}
         </ul>
