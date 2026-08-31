@@ -34,10 +34,13 @@ export function casaSituacao(pct: number | null, filtro: FiltroSituacao): boolea
  */
 export function temAlgumaMeta(m: {
   metaTarget: number; metaLeads: number; metaCpl: number; metaCac: number;
+  /** Meta de alcance (redes sociais) — sozinha já mantém o cliente na tela. */
+  metaAlcance?: number;
   // Aceita o funil como lista OU como objeto por etapa (é assim que a tela guarda).
   metaFunil?: number[] | Record<string, number>;
 }): boolean {
   if (m.metaTarget > 0 || m.metaLeads > 0 || m.metaCpl > 0 || m.metaCac > 0) return true;
+  if ((m.metaAlcance ?? 0) > 0) return true;
   const funil = m.metaFunil ?? [];
   return (Array.isArray(funil) ? funil : Object.values(funil)).some((v) => v > 0);
 }

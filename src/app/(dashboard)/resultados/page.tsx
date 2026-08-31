@@ -25,7 +25,7 @@ type ApiMetrics = {
   crm?: { revenue: number; sales: number; leads: number; ticket: number } | null;
 };
 
-type GoalConfig = { type: string; target: number };
+type GoalConfig = { type: string; target: number; targetAlcance?: number };
 type FunnelStage = { id: string; name: string; conversion: number };
 type ClientPlanningConfig = { tkm: number; cplMeta: number; stages: FunnelStage[] };
 
@@ -250,6 +250,10 @@ export default function ResultadosPage() {
   // etapa semântica) — antes esta coluna vinha de mocks hardcoded em
   // client-results-store e ficava zerada pra todo cliente real.
   const [funilByClient, setFunilByClient] = useState<Record<string, ClientFunnel>>({});
+  // Snapshot do Monitor de Redes Sociais — é dele que sai o resultado das metas
+  // de rede social. ⚠️ Uma query só; resolver 40 contas ao vivo na Graph custaria
+  // dezenas de chamadas por abertura da tela.
+  const [socialByClient, setSocialByClient] = useState<Record<string, { ganho: number | null; alcance: number | null }>>({});
   useEffect(() => {
     fetch('/api/crm/summary')
       .then(r => r.ok ? r.json() as Promise<{ clientId: string; funil: ClientFunnel }[]> : [])
@@ -259,6 +263,15 @@ export default function ResultadosPage() {
         setFunilByClient(map);
       })
       .catch(() => setFunilByClient({}));
+
+    fetch('/api/social-monitor')
+      .then(r => r.ok ? r.json() as Promise<{ snapshots: { clientId: string; followersGained28d: number | null; reach28d: number | null }[] }> : { snapshots: [] })
+      .then(({ snapshots }) => {
+        const map: Record<string, { ganho: number | null; alcance: number | null }> = {};
+        for (const s of snapshots ?? []) map[s.clientId] = { ganho: s.followersGained28d ?? null, alcance: s.reach28d ?? null };
+        setSocialByClient(map);
+      })
+      .catch(() => setSocialByClient({}));
   }, []);
   const [goalsByClient, setGoalsByClient] = useState<Record<string, GoalConfig | null>>({});
   const [planningByClient, setPlanningByClient] = useState<Record<string, ClientPlanningConfig>>({});
@@ -350,6 +363,23 @@ export default function ResultadosPage() {
     const cac = api?.google?.cpa ?? hardcoded?.cac ?? 0;
     const resultado = api?.crm?.revenue ?? hardcoded?.resultado ?? 0;
 
+    // ── Meta de REDES SOCIAIS ──────────────────────────────────────────────
+    // Ela substitui META/RESULTADO/% da linha: para esse cliente o que se cobra
+    // é seguidor e alcance, não faturamento. O alcance vira a 2ª linha da célula
+    // de resultado — a tabela não tem coluna para ele e inventar uma quebraria
+    // o cabeçalho de todos os outros clientes.
+    const ehSocial = goal?.type === 'social';
+    const social = socialByClient[client.id];
+    const metaSeguidores = ehSocial ? (goal?.target ?? 0) : 0;
+    const metaAlcance = ehSocial ? (goal?.targetAlcance ?? 0) : 0;
+    const seguidores = ehSocial ? (social?.ganho ?? 0) : 0;
+    const alcance = ehSocial ? (social?.alcance ?? 0) : 0;
+    const pctAlcance = ehSocial ? calcPct(alcance, metaAlcance) : null;
+
+    // "Sem meta" é declaração explícita do gestor: nada é cobrado deste cliente,
+    // nem o que estiver parado no planejamento.
+    const semMetaDeclarada = goal?.type === 'none';
+
     // Goals: prefer localStorage config, fallback to hardcoded
     const metaTarget = goal?.type === 'revenue'
       ? goal.target
@@ -365,19 +395,31 @@ export default function ResultadosPage() {
     const metaCacFromPlanning = metaLeads > 0 && metaCpl > 0 && metaFunnelSales > 0
       ? (metaLeads * metaCpl) / metaFunnelSales
       : 0;
-    const metaCac = metaCacFromPlanning || hardcoded?.metaCac || 0;
+    const metaCacBruto = metaCacFromPlanning || hardcoded?.metaCac || 0;
 
-    const pctResult = calcPct(resultado, metaTarget);
-    const pctLeads  = calcPct(leads, metaLeads);
-    const pctCpl    = calcPct(cpl, metaCpl, true);
+    // "Sem meta" zera TUDO que é cobrança; os números medidos continuam iguais.
+    const metaTargetFinal = semMetaDeclarada ? 0 : (ehSocial ? metaSeguidores : metaTarget);
+    const resultadoFinal  = ehSocial ? seguidores : resultado;
+    const metaLeadsFinal  = semMetaDeclarada ? 0 : metaLeads;
+    const metaCplFinal    = semMetaDeclarada ? 0 : metaCpl;
+    const metaCac         = semMetaDeclarada ? 0 : metaCacBruto;
+    const metaFunilFinal  = semMetaDeclarada ? ZERO_FUNNEL : metaFunil;
+
+    const pctResult = calcPct(resultadoFinal, metaTargetFinal);
+    const pctLeads  = calcPct(leads, metaLeadsFinal);
+    const pctCpl    = calcPct(cpl, metaCplFinal, true);
     const pctCac    = calcPct(cac, metaCac, true);
-    const funnelPcts = FUNNEL_KEYS.map((k) => calcPct(funil[k], metaFunil[k]));
+    const funnelPcts = FUNNEL_KEYS.map((k) => calcPct(funil[k], metaFunilFinal[k]));
 
     return {
       client, hardcoded, api,
-      leads, cpl, cac, resultado,
-      metaTarget, metaLeads, metaCpl, metaCac,
-      funil, metaFunil, funnelPcts,
+      leads, cpl, cac,
+      resultado: resultadoFinal,
+      metaTarget: metaTargetFinal,
+      metaLeads: metaLeadsFinal, metaCpl: metaCplFinal, metaCac,
+      funil, metaFunil: metaFunilFinal, funnelPcts,
+      ehSocial, alcance, pctAlcance,
+      metaAlcance: semMetaDeclarada ? 0 : metaAlcance,
       totalInvest, dispatchedInvest,
       pctResult, pctLeads, pctCpl, pctCac,
       gestor: hardcoded?.gestor ?? '',
@@ -407,8 +449,11 @@ export default function ResultadosPage() {
   // Somam o universo da tela (clientes com meta), NÃO o recorte do filtro —
   // filtro é lente de leitura; o total precisa fechar com as linhas que a tela
   // se propõe a acompanhar.
-  const totMeta   = comMeta.reduce((s, r) => s + r.metaTarget, 0);
-  const totResult = comMeta.reduce((s, r) => s + r.resultado, 0);
+  // ⚠️ Só metas em DINHEIRO entram nos totais de R$. Meta de rede social é
+  // contada em seguidores — somá-la aqui viraria "R$ 1.000" de mentira no card.
+  const emReais   = comMeta.filter((r) => !r.ehSocial);
+  const totMeta   = emReais.reduce((s, r) => s + r.metaTarget, 0);
+  const totResult = emReais.reduce((s, r) => s + r.resultado, 0);
   const totLeads  = comMeta.reduce((s, r) => s + r.leads, 0);
   const totInvest = comMeta.reduce((s, r) => s + r.totalInvest, 0);
   const overallPct = calcPct(totResult, totMeta);
@@ -633,16 +678,35 @@ export default function ResultadosPage() {
                       </Link>
                     </td>
                     <td className="px-4 py-3 text-sm font-semibold whitespace-nowrap">
-                      {row.metaTarget > 0 ? formatCurrencyBRL(row.metaTarget) : <span className="text-muted-foreground/40">—</span>}
+                      {row.metaTarget > 0
+                        ? (row.ehSocial
+                            ? <>{row.metaTarget.toLocaleString('pt-BR')} <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">seguidores</span></>
+                            : formatCurrencyBRL(row.metaTarget))
+                        : <span className="text-muted-foreground/40">—</span>}
+                      {row.ehSocial && row.metaAlcance > 0 && (
+                        <p className="mt-0.5 text-[11px] font-semibold text-muted-foreground">
+                          {row.metaAlcance.toLocaleString('pt-BR')} de alcance
+                        </p>
+                      )}
                     </td>
                     {/* ⚠️ Sem meta ≠ falhou. Sem meta o valor aparece em cinza (só
                         performance) e o % vira "—" neutro — antes ia vermelho, o que
                         acusava de reprovado quem ninguém tinha medido. */}
-                    <td className={cn(
-                      'px-4 py-3 text-sm font-bold whitespace-nowrap',
-                      row.resultado > 0 ? (semMetaResultado ? 'text-foreground' : resultC.text) : 'text-muted-foreground/40',
-                    )}>
-                      {row.resultado > 0 ? formatCurrencyBRL(row.resultado) : '—'}
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      <p className={cn(
+                        'text-sm font-bold',
+                        row.resultado > 0 ? (semMetaResultado ? 'text-foreground' : resultC.text) : 'text-muted-foreground/40',
+                      )}>
+                        {row.resultado > 0
+                          ? (row.ehSocial ? `+${row.resultado.toLocaleString('pt-BR')}` : formatCurrencyBRL(row.resultado))
+                          : '—'}
+                      </p>
+                      {row.ehSocial && (
+                        <p className={cn('mt-0.5 text-[11px] font-semibold', pctColors(row.pctAlcance).text)}>
+                          {row.alcance > 0 ? row.alcance.toLocaleString('pt-BR') : '—'} de alcance
+                          {row.pctAlcance !== null && <span className="ml-1 opacity-80">({row.pctAlcance}%)</span>}
+                        </p>
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       {semMetaResultado ? (

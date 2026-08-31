@@ -11,6 +11,7 @@ async function ensureTables(pool: ReturnType<typeof makeServerPool>) {
       target      NUMERIC NOT NULL DEFAULT 0,
       partial     NUMERIC NOT NULL DEFAULT 0,
       realized    NUMERIC NOT NULL DEFAULT 0,
+      target_alcance NUMERIC NOT NULL DEFAULT 0,
       updated_at  TIMESTAMPTZ DEFAULT NOW()
     );
     CREATE TABLE IF NOT EXISTS public.client_planning (
@@ -21,6 +22,9 @@ async function ensureTables(pool: ReturnType<typeof makeServerPool>) {
       updated_at  TIMESTAMPTZ DEFAULT NOW()
     );
   `);
+  await pool.query(
+    `ALTER TABLE public.client_goals ADD COLUMN IF NOT EXISTS target_alcance NUMERIC NOT NULL DEFAULT 0`,
+  ).catch(() => {});
 }
 
 export async function GET(req: NextRequest) {
@@ -33,7 +37,8 @@ export async function GET(req: NextRequest) {
 
     const [goalsRes, planningRes] = await Promise.all([
       pool.query(
-        `SELECT client_id, type, label, format, target::float, partial::float, realized::float
+        `SELECT client_id, type, label, format, target::float, partial::float, realized::float,
+                target_alcance::float AS "targetAlcance"
            FROM public.client_goals WHERE client_id = ANY($1)`,
         [clientIds],
       ),

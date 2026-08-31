@@ -412,6 +412,26 @@ function FunnelTab({ clientId, clientName, goalConfig, isAdmin }: { clientId: st
 
   const inputCls = "bg-transparent focus:outline-none border-b border-transparent hover:border-border focus:border-primary transition-colors w-full";
 
+  // Sem meta: o planejamento inteiro é derivado da meta, então mostrá-lo aqui
+  // renderia "META (SEM META) 0" e "CUSTO POR SEM META" — números que não
+  // querem dizer nada. O que sobra a dizer é o que fica valendo.
+  if (goalConfig.type === 'none') {
+    return (
+      <div className="space-y-3 pt-2">
+        <p className="text-sm text-muted-foreground">
+          <strong className="text-foreground">{clientName}</strong> está marcado como
+          {' '}<strong className="text-foreground">sem meta</strong>. Não há planejamento a
+          preencher — ele sai do Radar e não é cobrado por nenhum número.
+        </p>
+        <p className="text-xs text-muted-foreground/80">
+          As integrações continuam coletando normalmente: dashboard, CRM, relatórios e
+          Monitor de Redes Sociais seguem funcionando. Escolha outro tipo de meta acima
+          para voltar a acompanhá-lo no Radar.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-5 pt-2">
       {/* Header row: context + simple mode toggle */}
@@ -1051,7 +1071,9 @@ function InvestmentPaymentsTab({ clientId, clientName }: { clientId: string; cli
   );
 }
 
-type ClientGoalType = 'revenue' | 'leads' | 'enrollments';
+// 'social'  → meta de redes sociais: `target` = novos seguidores, `targetAlcance` = alcance.
+// 'none'    → o cliente declaradamente NÃO tem meta; sai do Radar por inteiro.
+type ClientGoalType = 'revenue' | 'leads' | 'enrollments' | 'social' | 'none';
 type ClientGoalConfig = {
   type: ClientGoalType;
   label: string;
@@ -1059,6 +1081,8 @@ type ClientGoalConfig = {
   partial: number;
   realized: number;
   format: 'currency' | 'number';
+  /** Só usado em `type: 'social'` — a meta de alcance no período. */
+  targetAlcance?: number;
 };
 
 function autoPartial(target: number): number {
@@ -1112,6 +1136,8 @@ const GOAL_TYPE_OPTIONS: { type: ClientGoalType; label: string; format: ClientGo
   { type: 'leads', label: 'Leads', format: 'number' },
   { type: 'revenue', label: 'Faturamento', format: 'currency' },
   { type: 'enrollments', label: 'Matrículas', format: 'number' },
+  { type: 'social', label: 'Redes sociais', format: 'number' },
+  { type: 'none', label: 'Sem meta', format: 'number' },
 ];
 
 const DEFAULT_CLIENT_GOAL: ClientGoalConfig = {
@@ -1148,6 +1174,7 @@ function readSavedClientGoal(clientId: string, fallback: ClientGoalConfig): Clie
       target,
       partial: autoPartial(target),
       realized: Number(parsed.realized ?? fallback.realized ?? 0),
+      targetAlcance: Number(parsed.targetAlcance ?? 0) || 0,
     };
   } catch {
     return fallback;
@@ -1288,7 +1315,11 @@ function ClientGoalSettings({ goal, onChange }: {
 }) {
   function handleTypeChange(type: ClientGoalType) {
     const option = GOAL_TYPE_OPTIONS.find((o) => o.type === type)!;
-    onChange({ ...goal, type, label: option.label, format: option.format, partial: autoPartial(goal.target) });
+    // "Sem meta" zera os alvos — deixar número parado atrás do botão faria o
+    // cliente voltar cobrado ao trocar de tipo, sem ninguém ter digitado nada.
+    const target = type === 'none' ? 0 : goal.target;
+    const targetAlcance = type === 'none' ? 0 : goal.targetAlcance;
+    onChange({ ...goal, type, label: option.label, format: option.format, target, targetAlcance, partial: autoPartial(target) });
   }
 
   function handleTargetChange(target: number) {
@@ -1316,16 +1347,46 @@ function ClientGoalSettings({ goal, onChange }: {
           ))}
         </div>
       </div>
-      <div className="space-y-1.5">
-        <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">Meta</Label>
-        <Input
-          type="number"
-          value={goal.target || ''}
-          onChange={(e) => handleTargetChange(Number(e.target.value))}
-          className="bg-background w-44"
-          placeholder="0"
-        />
-      </div>
+      {goal.type === 'none' ? (
+        <p className="pb-2 text-xs text-muted-foreground">
+          Sem meta — este cliente sai do Radar.
+        </p>
+      ) : (
+        <>
+          <div className="space-y-1.5">
+            <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">
+              {goal.type === 'social' ? 'Novos seguidores' : 'Meta'}
+            </Label>
+            <Input
+              type="number"
+              value={goal.target || ''}
+              onChange={(e) => handleTargetChange(Number(e.target.value))}
+              className="bg-background w-44"
+              placeholder="0"
+            />
+          </div>
+          {/* Redes sociais é a única meta com DOIS números — seguidores e alcance
+              medem coisas diferentes e nenhum dos dois é derivável do outro. */}
+          {goal.type === 'social' && (
+            <div className="space-y-1.5">
+              <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">Alcance</Label>
+              <Input
+                type="number"
+                value={goal.targetAlcance || ''}
+                onChange={(e) => onChange({ ...goal, targetAlcance: Number(e.target.value) })}
+                className="bg-background w-44"
+                placeholder="0"
+              />
+            </div>
+          )}
+        </>
+      )}
+      {goal.type === 'social' && (
+        <p className="w-full text-[11px] text-muted-foreground">
+          Medido no Instagram do cliente pelo Monitor de Redes Sociais (janela de 28 dias).
+          Deixe um dos dois em branco para não cobrar aquele número.
+        </p>
+      )}
     </div>
   );
 }

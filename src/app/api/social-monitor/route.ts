@@ -18,6 +18,7 @@ type SnapshotRow = {
   avg_likes: string | null;   // NUMERIC chega como string no pg
   avg_comments: string | null;
   reach_28d: string | null;   // BIGINT chega como string no pg
+  followers_gained_28d: string | null;
   red_after_days: number;
   monitored: boolean;
   error: string | null;
@@ -43,6 +44,7 @@ export async function GET() {
       avgLikes: r.avg_likes !== null ? Number(r.avg_likes) : null,
       avgComments: r.avg_comments !== null ? Number(r.avg_comments) : null,
       reach28d: r.reach_28d !== null ? Number(r.reach_28d) : null,
+      followersGained28d: r.followers_gained_28d != null ? Number(r.followers_gained_28d) : null,
       redAfterDays: r.red_after_days,
       monitored: r.monitored,
       error: r.error,

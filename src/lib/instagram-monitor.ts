@@ -145,6 +145,10 @@ export async function ensureSocialMonitorSchema(pool: Pool) {
     // Tabela pode já existir sem a coluna (deploy anterior)
     `ALTER TABLE public.social_monitor_snapshots
        ADD COLUMN IF NOT EXISTS monitored BOOLEAN NOT NULL DEFAULT TRUE`,
+    // Ganho LÍQUIDO de seguidores no período. ⚠️ NÃO é `followers`, que é
+    // snapshot total e ignora since/until — comparar dois totais daria sempre 0.
+    `ALTER TABLE public.social_monitor_snapshots
+       ADD COLUMN IF NOT EXISTS followers_gained_28d BIGINT`,
     `CREATE INDEX IF NOT EXISTS social_monitor_last_post_idx
        ON public.social_monitor_snapshots (last_post_at)`,
   ];
@@ -166,6 +170,7 @@ export type SocialSnapshot = {
   avgLikes: number | null;
   avgComments: number | null;
   reach28d: number | null;
+  followersGained28d: number | null;
   error: string | null;
 };
 
@@ -191,7 +196,8 @@ function emptySnapshot(clientId: string, error: string | null): SocialSnapshot {
   return {
     clientId, igId: null, igUsername: null, profilePicture: null, followers: null,
     lastPostAt: null, lastPostPermalink: null, lastPostThumbnail: null, lastPostCaption: null,
-    posts30d: null, avgLikes: null, avgComments: null, reach28d: null, error,
+    posts30d: null, avgLikes: null, avgComments: null, reach28d: null,
+    followersGained28d: null, error,
   };
 }
 
@@ -206,12 +212,16 @@ async function fetchMedia(igId: string, pageToken: string, params: Record<string
   return data.data ?? [];
 }
 
-async function fetchReach28d(igId: string, pageToken: string): Promise<number | null> {
+/**
+ * Soma a série DIÁRIA de uma métrica de perfil nos últimos 28 dias.
+ * ⚠️ Sem `metric_type`: `follower_count` só responde como série diária.
+ */
+async function fetchMetricSum28d(igId: string, pageToken: string, metric: string): Promise<number | null> {
   try {
     const until = Math.floor(Date.now() / 1000);
     const since = until - 28 * 86400;
     const url = new URL(`https://graph.facebook.com/v21.0/${igId}/insights`);
-    url.searchParams.set('metric', 'reach');
+    url.searchParams.set('metric', metric);
     url.searchParams.set('period', 'day');
     url.searchParams.set('since', String(since));
     url.searchParams.set('until', String(until));
@@ -219,8 +229,9 @@ async function fetchReach28d(igId: string, pageToken: string): Promise<number | 
     const res = await fetch(url.toString(), { signal: AbortSignal.timeout(12000) });
     if (!res.ok) return null;
     const data = await res.json() as { data?: Array<{ name: string; values?: Array<{ value?: number }> }> };
-    const series = data.data?.find(m => m.name === 'reach')?.values ?? [];
-    return series.reduce((sum, v) => sum + (v.value ?? 0), 0);
+    const serie = data.data?.find(m => m.name === metric)?.values;
+    if (!serie) return null;   // métrica ausente ≠ zero
+    return serie.reduce((sum, v) => sum + (v.value ?? 0), 0);
   } catch { return null; }
 }
 
@@ -278,7 +289,13 @@ export async function fetchClientSnapshot(target: SnapshotTarget): Promise<Socia
     return snap;
   }
 
-  snap.reach28d = await fetchReach28d(ig.igId, ig.pageToken);
+  // As duas séries em paralelo — +1 chamada Graph por conta por coleta.
+  const [reach, ganho] = await Promise.all([
+    fetchMetricSum28d(ig.igId, ig.pageToken, 'reach'),
+    fetchMetricSum28d(ig.igId, ig.pageToken, 'follower_count'),
+  ]);
+  snap.reach28d = reach;
+  snap.followersGained28d = ganho;
   return snap;
 }
 
@@ -288,8 +305,8 @@ export async function upsertSnapshot(pool: Pool, snap: SocialSnapshot): Promise<
     `INSERT INTO public.social_monitor_snapshots (
        client_id, ig_id, ig_username, profile_picture_url, followers,
        last_post_at, last_post_permalink, last_post_thumbnail, last_post_caption,
-       posts_30d, avg_likes, avg_comments, reach_28d, error, fetched_at
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,now())
+       posts_30d, avg_likes, avg_comments, reach_28d, followers_gained_28d, error, fetched_at
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,now())
      ON CONFLICT (client_id) DO UPDATE SET
        ig_id = EXCLUDED.ig_id,
        ig_username = EXCLUDED.ig_username,
@@ -303,12 +320,14 @@ export async function upsertSnapshot(pool: Pool, snap: SocialSnapshot): Promise<
        avg_likes = EXCLUDED.avg_likes,
        avg_comments = EXCLUDED.avg_comments,
        reach_28d = EXCLUDED.reach_28d,
+       followers_gained_28d = EXCLUDED.followers_gained_28d,
        error = EXCLUDED.error,
        fetched_at = now()`,
     [
       snap.clientId, snap.igId, snap.igUsername, snap.profilePicture, snap.followers,
       snap.lastPostAt, snap.lastPostPermalink, snap.lastPostThumbnail, snap.lastPostCaption,
-      snap.posts30d, snap.avgLikes, snap.avgComments, snap.reach28d, snap.error,
+      snap.posts30d, snap.avgLikes, snap.avgComments, snap.reach28d,
+      snap.followersGained28d, snap.error,
     ],
   );
 }

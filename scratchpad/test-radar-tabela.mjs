@@ -129,3 +129,12 @@ console.log(`✅ ${n} asserts`);
      'objeto do funil com um degrau preenchido mantém o cliente');
   console.log('✅ +2 asserts (funil como objeto)');
 }
+
+// meta de rede social sozinha mantém o cliente na tela
+{
+  const { temAlgumaMeta } = await import('./build/radar-tabela.mjs');
+  const z = { metaTarget: 0, metaLeads: 0, metaCpl: 0, metaCac: 0 };
+  ok(temAlgumaMeta({ ...z, metaAlcance: 50000 }), 'só meta de alcance já conta');
+  ok(!temAlgumaMeta({ ...z, metaAlcance: 0 }), 'alcance 0 não conta');
+  console.log('✅ +2 asserts (meta de alcance)');
+}

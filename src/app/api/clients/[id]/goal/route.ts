@@ -14,6 +14,10 @@ async function ensureTable(pool: ReturnType<typeof makeServerPool>) {
       updated_at  TIMESTAMPTZ DEFAULT NOW()
     )
   `);
+  // Meta de redes sociais tem DOIS alvos; alcance mora em coluna própria.
+  await pool.query(
+    `ALTER TABLE public.client_goals ADD COLUMN IF NOT EXISTS target_alcance NUMERIC NOT NULL DEFAULT 0`,
+  ).catch(() => {});
 }
 
 export async function GET(
@@ -25,7 +29,8 @@ export async function GET(
   try {
     await ensureTable(pool);
     const { rows: [row] } = await pool.query(
-      `SELECT type, label, format, target::float, partial::float, realized::float
+      `SELECT type, label, format, target::float, partial::float, realized::float,
+              target_alcance::float AS "targetAlcance"
          FROM public.client_goals WHERE client_id = $1`,
       [id],
     );
@@ -42,18 +47,21 @@ export async function PUT(
   const { id } = await params;
   const body = await req.json() as {
     type: string; label: string; format: string;
-    target: number; partial: number; realized: number;
+    target: number; partial: number; realized: number; targetAlcance?: number;
   };
   const pool = makeServerPool();
   try {
     await ensureTable(pool);
     const { rows: [row] } = await pool.query(
-      `INSERT INTO public.client_goals (client_id, type, label, format, target, partial, realized, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+      `INSERT INTO public.client_goals (client_id, type, label, format, target, partial, realized, target_alcance, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
        ON CONFLICT (client_id) DO UPDATE
-         SET type = $2, label = $3, format = $4, target = $5, partial = $6, realized = $7, updated_at = NOW()
-       RETURNING type, label, format, target::float, partial::float, realized::float`,
-      [id, body.type, body.label, body.format, body.target, body.partial, body.realized],
+         SET type = $2, label = $3, format = $4, target = $5, partial = $6, realized = $7,
+             target_alcance = $8, updated_at = NOW()
+       RETURNING type, label, format, target::float, partial::float, realized::float,
+                 target_alcance::float AS "targetAlcance"`,
+      [id, body.type, body.label, body.format, body.target, body.partial, body.realized,
+       Number(body.targetAlcance) > 0 ? Number(body.targetAlcance) : 0],
     );
     return Response.json(row);
   } finally {
