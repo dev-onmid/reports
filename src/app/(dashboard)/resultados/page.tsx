@@ -15,7 +15,7 @@ import { ResultsTabs } from '@/components/results-tabs';
 import { cn, formatCurrencyBRL } from '@/lib/utils';
 import {
   ordenarLinhas, filtrarLinhas, categoriasDisponiveis, proximaOrdem,
-  situacaoDaMeta, METRICAS,
+  situacaoDaMeta, temAlgumaMeta, METRICAS,
   type ColunaRadar, type DirecaoOrdem, type FiltroSituacao, type MetricaRadar,
 } from '@/lib/radar-tabela';
 
@@ -272,6 +272,7 @@ export default function ResultadosPage() {
   const [ordem, setOrdem] = useState<{ coluna: ColunaRadar | null; direcao: DirecaoOrdem }>(
     { coluna: null, direcao: 'desc' },
   );
+  const [verSemMeta, setVerSemMeta] = useState(false);
 
   // useClients() não expõe flag de carregamento: sem isto o cabeçalho da tabela
   // fica flutuando sozinho enquanto /api/clients responde. Considera carregado
@@ -389,17 +390,27 @@ export default function ResultadosPage() {
     };
   });
 
-  const categorias = categoriasDisponiveis(rows);
+  // ⚠️ O universo do Radar são os clientes COM alguma meta. Quem não tem meta
+  // nenhuma não é caso desta tela — vira uma linha de traços que não informa
+  // nada e ainda suja os totais. Fica atrás do atalho "ver os sem meta".
+  const comMeta = rows.filter(temAlgumaMeta);
+  const semMeta = rows.filter((r) => !temAlgumaMeta(r));
+  const base = verSemMeta ? semMeta : comMeta;
+
+  const categorias = categoriasDisponiveis(base);
   const linhas = ordenarLinhas(
-    filtrarLinhas(rows, { categoria, metrica, situacao }),
+    filtrarLinhas(base, { categoria, metrica, situacao }),
     ordem.coluna, ordem.direcao,
   );
   const filtrando = categoria !== '' || situacao !== 'todas';
 
-  const totMeta   = rows.reduce((s, r) => s + r.metaTarget, 0);
-  const totResult = rows.reduce((s, r) => s + r.resultado, 0);
-  const totLeads  = rows.reduce((s, r) => s + r.leads, 0);
-  const totInvest = rows.reduce((s, r) => s + r.totalInvest, 0);
+  // Somam o universo da tela (clientes com meta), NÃO o recorte do filtro —
+  // filtro é lente de leitura; o total precisa fechar com as linhas que a tela
+  // se propõe a acompanhar.
+  const totMeta   = comMeta.reduce((s, r) => s + r.metaTarget, 0);
+  const totResult = comMeta.reduce((s, r) => s + r.resultado, 0);
+  const totLeads  = comMeta.reduce((s, r) => s + r.leads, 0);
+  const totInvest = comMeta.reduce((s, r) => s + r.totalInvest, 0);
   const overallPct = calcPct(totResult, totMeta);
   const overC = pctColors(overallPct);
 
@@ -473,10 +484,10 @@ export default function ResultadosPage() {
             onChange={(e) => setCategoria(e.target.value)}
             className="h-9 rounded-lg border border-border bg-background px-2 text-xs font-semibold text-foreground [color-scheme:dark]"
           >
-            <option value="">Todas ({rows.length})</option>
+            <option value="">Todas ({base.length})</option>
             {categorias.map((c) => (
               <option key={c} value={c}>
-                {c} ({rows.filter((r) => r.categoria === c).length})
+                {c} ({base.filter((r) => r.categoria === c).length})
               </option>
             ))}
           </select>
@@ -509,7 +520,7 @@ export default function ResultadosPage() {
         </label>
 
         <span className="text-xs font-semibold text-muted-foreground">
-          {linhas.length} de {rows.length} clientes
+          {linhas.length} de {base.length} clientes
         </span>
 
         {(filtrando || ordem.coluna) && (
@@ -521,6 +532,28 @@ export default function ResultadosPage() {
           </button>
         )}
       </div>
+
+      {/* Cliente sem meta nenhuma sai da tela — mas fica declarado, com atalho.
+          Sumir em silêncio é como um cliente passa meses sem meta cadastrada. */}
+      {(semMeta.length > 0 || verSemMeta) && (
+        <div className={cn(
+          'flex flex-wrap items-center gap-3 rounded-[var(--radius)] border px-4 py-2.5 text-xs',
+          verSemMeta ? 'border-amber-400/30 bg-amber-500/[0.07]' : 'border-border bg-card',
+        )}>
+          <Target className={cn('h-3.5 w-3.5', verSemMeta ? 'text-amber-300' : 'text-muted-foreground')} />
+          <span className="text-muted-foreground">
+            {verSemMeta
+              ? <><strong className="text-amber-200">{semMeta.length}</strong> cliente(s) sem meta nenhuma cadastrada — configure em Cliente › Planejamento.</>
+              : <><strong className="text-foreground">{semMeta.length}</strong> cliente(s) fora do Radar por não ter meta nenhuma cadastrada.</>}
+          </span>
+          <button
+            onClick={() => { setVerSemMeta((v) => !v); setCategoria(''); setSituacao('todas'); }}
+            className="rounded-lg border border-border px-3 py-1 font-bold text-muted-foreground hover:text-foreground transition-colors"
+          >
+            {verSemMeta ? 'Voltar ao Radar' : 'Ver quem são'}
+          </button>
+        </div>
+      )}
 
       {/* ── Table ──
           Cabeçalho fixo: um único container com overflow-auto (x+y) faz o scroll
@@ -574,10 +607,12 @@ export default function ResultadosPage() {
               {loadingClients && (
                 <tr><td colSpan={10} className="px-4 py-12 text-center text-sm text-muted-foreground">Carregando clientes…</td></tr>
               )}
-              {!loadingClients && rows.length === 0 && (
-                <tr><td colSpan={10} className="px-4 py-12 text-center text-sm text-muted-foreground">Nenhum cliente encontrado.</td></tr>
+              {!loadingClients && base.length === 0 && (
+                <tr><td colSpan={10} className="px-4 py-12 text-center text-sm text-muted-foreground">
+                  {verSemMeta ? 'Todos os clientes têm meta cadastrada.' : 'Nenhum cliente com meta cadastrada.'}
+                </td></tr>
               )}
-              {!loadingClients && rows.length > 0 && linhas.length === 0 && (
+              {!loadingClients && base.length > 0 && linhas.length === 0 && (
                 <tr><td colSpan={10} className="px-4 py-12 text-center text-sm text-muted-foreground">
                   Nenhum cliente nesse recorte. <button onClick={() => { setCategoria(''); setSituacao('todas'); }} className="font-bold text-primary hover:underline">Limpar filtros</button>
                 </td></tr>

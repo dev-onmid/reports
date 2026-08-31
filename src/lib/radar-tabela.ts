@@ -26,6 +26,22 @@ export function casaSituacao(pct: number | null, filtro: FiltroSituacao): boolea
   return s === filtro;
 }
 
+/**
+ * Cliente sem NENHUMA meta não é caso do Radar — ele sai da tela em vez de
+ * ocupar uma linha inteira de traços. Não é "esconder problema": a tela oferece
+ * um atalho para ver justamente esses, senão um cliente ficaria meses sem meta
+ * e ninguém perceberia.
+ */
+export function temAlgumaMeta(m: {
+  metaTarget: number; metaLeads: number; metaCpl: number; metaCac: number;
+  // Aceita o funil como lista OU como objeto por etapa (é assim que a tela guarda).
+  metaFunil?: number[] | Record<string, number>;
+}): boolean {
+  if (m.metaTarget > 0 || m.metaLeads > 0 || m.metaCpl > 0 || m.metaCac > 0) return true;
+  const funil = m.metaFunil ?? [];
+  return (Array.isArray(funil) ? funil : Object.values(funil)).some((v) => v > 0);
+}
+
 export type MetricaRadar = 'resultado' | 'leads' | 'cpl' | 'cac' | 'fechamentos';
 
 export const METRICAS: { id: MetricaRadar; label: string }[] = [

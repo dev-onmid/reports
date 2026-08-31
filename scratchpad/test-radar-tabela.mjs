@@ -105,3 +105,27 @@ eq(proximaOrdem({ coluna: null, direcao: 'desc' }, 'cliente', 'asc'), { coluna: 
    'nome começa em A→Z');
 
 console.log(`✅ ${n} asserts`);
+
+// ── cliente sem meta NENHUMA sai do Radar ──
+{
+  const { temAlgumaMeta } = await import('./build/radar-tabela.mjs');
+  const vazio = { metaTarget: 0, metaLeads: 0, metaCpl: 0, metaCac: 0, metaFunil: [0,0,0,0,0] };
+  ok(!temAlgumaMeta(vazio), 'nenhuma meta → fora do Radar');
+  ok(temAlgumaMeta({ ...vazio, metaTarget: 1000 }), 'meta de faturamento basta');
+  ok(temAlgumaMeta({ ...vazio, metaCpl: 20 }), 'só CPL já mantém o cliente na tela');
+  ok(temAlgumaMeta({ ...vazio, metaLeads: 5 }));
+  ok(temAlgumaMeta({ ...vazio, metaCac: 80 }));
+  ok(temAlgumaMeta({ ...vazio, metaFunil: [0,0,0,0,3] }), 'meta só num degrau do funil conta');
+  ok(!temAlgumaMeta({ metaTarget: 0, metaLeads: 0, metaCpl: 0, metaCac: 0 }), 'sem funil informado não quebra');
+  console.log(`✅ +${7} asserts (temAlgumaMeta)`);
+}
+
+// funil como OBJETO por etapa (formato real da tela)
+{
+  const { temAlgumaMeta } = await import('./build/radar-tabela.mjs');
+  const z = { metaTarget: 0, metaLeads: 0, metaCpl: 0, metaCac: 0 };
+  ok(!temAlgumaMeta({ ...z, metaFunil: { contatos:0, qualificados:0, agendamentos:0, comparecimentos:0, fechamentos:0 } }));
+  ok(temAlgumaMeta({ ...z, metaFunil: { contatos:0, qualificados:0, agendamentos:0, comparecimentos:0, fechamentos:4 } }),
+     'objeto do funil com um degrau preenchido mantém o cliente');
+  console.log('✅ +2 asserts (funil como objeto)');
+}
