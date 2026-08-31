@@ -1,5 +1,17 @@
 @AGENTS.md
 
+## Trocar de cliente pelo avatar do cabeçalho (2026-08-31)
+
+Pedido do Matheus: dentro do cliente, clicar na foto do avatar e escolher outro cliente, sem voltar pra lista.
+
+- **`src/components/client-switcher.tsx`**: avatar vira gatilho (anel + badge de setas no hover) e abre um dropdown com busca, lista da carteira ATIVA, marcação do cliente atual e navegação por teclado (setas + Enter, Esc fecha). Busca casa nome, categoria e segmento **sem acento** (reusa `normalizeClientName`).
+- **A aba atual viaja junto** (`router.push('/clientes/{id}?tab={tab}')`) — o inicializador de `tab` da página já lê esse parâmetro, então dá pra comparar o mesmo painel de dois clientes em sequência.
+- **⚠️ `template.tsx` novo no segmento `clientes/[id]` é o que torna a troca SEGURA**: sem ele o estado client-side preso ao cliente anterior (planejamento tkm/CPL, blocos do dashboard, categoria, aba) sobreviveria à navegação — layouts persistem e só o template recebe key por parâmetro de rota (`node_modules/next/dist/docs/01-app/03-api-reference/03-file-conventions/template.md`). Como esses valores são gravados por efeito, o vazamento não ficaria só na tela: seria SALVO no cliente novo.
+- **⚠️ Dropdown escrito à mão (backdrop `fixed inset-0` + `absolute`), NÃO o `Popover` do Base UI** — a primeira versão usou o Popover e o campo de busca **nunca recebia foco em abertura por clique**: o `FloatingFocusManager` roda não-modal e mantém o cursor no gatilho de propósito. Medido no browser: `autoFocus`, `initialFocus` (ref E função) e `focus()` em `requestAnimationFrame`/`onOpenChangeComplete` foram todos revertidos — o gestor abria e o que digitava se perdia. Sem o Popover, o `autoFocus` do input simplesmente funciona.
+- **⚠️ O cliente ABERTO entra na lista mesmo arquivado** (`clients` do store já exclui arquivado/inativo): dá pra chegar num arquivado por link direto, e ele sumir da própria lista faria parecer que a troca quebrou. Clicar no atual só fecha, sem navegar.
+- ✅ Verificado: tsc + `next build` limpos; harness no browser (bundle esbuild com `next/navigation` stubado pra capturar os `push`) — busca "sorrifacil" achando "Sorrifácil Londrina", Enter navegando com `?tab=rastreio` preservado, setas movendo o cursor (⚠️ a tecla no Browser pane é `ArrowDown`, não `Down`), Esc e clique fora fechando, clique no atual sem push, arquivado fora da lista, e 375px sem overflow (medido no DOM: caixa 320px em x=40).
+- ⚠️ Não verificado: a troca REAL ponta a ponta (exige banco — dev não tem `DATABASE_URL`). Conferir em produção que ao trocar de cliente o planejamento/dashboard do anterior não aparece no novo.
+
 ## Publicação no Instagram/Facebook — escopo destravado e provado (2026-08-26)
 
 Pedido do Matheus: agendador de posts em massa (stories com frequência, mesmo post em vários clientes), "melhor que o Meta Business". Rodada de VIABILIDADE — nada do planejador foi construído ainda; o que foi feito é o destrave da credencial.
