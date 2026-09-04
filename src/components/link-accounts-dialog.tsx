@@ -15,6 +15,7 @@ import type { GoogleConnection } from '@/lib/google-connections-store';
 import { type PlatformId, PLATFORM_INFO, PlatformIconButton } from '@/components/platform-icons';
 import type { MetaAdAccount } from '@/app/api/meta/ad-accounts/route';
 import type { MetaPage } from '@/app/api/meta/pages/route';
+import type { Ga4Property } from '@/app/api/google/ga4-properties/route';
 
 type AdsAccount = { id: string; name: string; status: string; isManager: boolean; mccId?: string; currency?: string };
 type GmbLocation = { locationId: string; accountId: string; name: string; address?: string; phone?: string };
@@ -23,7 +24,7 @@ type MetaConn = { id: string; label: string; userName: string; userPicture?: str
 const PLATFORM_LABEL = (p: PlatformId) => PLATFORM_INFO[p].label;
 
 const COMING_SOON_PLATFORMS: PlatformId[] = [];
-const LINKABLE_PLATFORMS: PlatformId[] = ['meta_ads', 'google_ads', 'google_business'];
+const LINKABLE_PLATFORMS: PlatformId[] = ['meta_ads', 'google_ads', 'google_business', 'ga4'];
 
 type SortDirection = 'az' | 'za';
 
@@ -961,6 +962,189 @@ function PlatformChooser({
   );
 }
 
+
+// ── GA4 (landing pages): vincula propriedades do Analytics ao cliente ─────────
+// account_id = id numérico da propriedade; a rota /api/clients/[id]/ga4 soma
+// todas as vinculadas (cliente com mais de uma LP).
+function Ga4Content({
+  clientId,
+  onDone,
+  onCancel,
+}: {
+  clientId: string;
+  onDone: () => void;
+  onCancel: () => void;
+}) {
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [conns, setConns] = useState<GoogleConnection[]>([]);
+  const [propsByConn, setPropsByConn] = useState<Record<string, Ga4Property[]>>({});
+  const [erros, setErros] = useState<Record<string, string>>({});
+  const [existingLinks, setExistingLinks] = useState<ClientAccountLink[]>([]);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [search, setSearch] = useState('');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('az');
+
+  useEffect(() => {
+    void loadData();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clientId]);
+
+  async function loadData() {
+    setLoading(true);
+    try {
+      const [linksRes, connsRes] = await Promise.all([
+        fetch(`/api/clients/${clientId}/links`),
+        fetch('/api/google/connections'),
+      ]);
+      const links: ClientAccountLink[] = linksRes.ok ? await linksRes.json() : [];
+      const all: GoogleConnection[] = connsRes.ok ? await connsRes.json() : [];
+      const ga4Links = links.filter((l) => l.platform === 'ga4');
+      setExistingLinks(ga4Links);
+      setSelected(new Set(ga4Links.map((l) => l.accountId)));
+      const ga4Conns = all.filter((c) => c.accountType === 'ga4');
+      setConns(ga4Conns);
+      const map: Record<string, Ga4Property[]> = {};
+      const errs: Record<string, string> = {};
+      await Promise.allSettled(
+        ga4Conns.map(async (conn) => {
+          const res = await fetch(`/api/google/ga4-properties?connectionId=${conn.id}`);
+          const data = await res.json() as Ga4Property[] | { error?: string };
+          if (res.ok) map[conn.id] = data as Ga4Property[];
+          else errs[conn.id] = (data as { error?: string }).error ?? 'Erro ao listar propriedades';
+        })
+      );
+      setPropsByConn(map);
+      setErros(errs);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function toggle(propertyId: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(propertyId)) next.delete(propertyId); else next.add(propertyId);
+      return next;
+    });
+  }
+
+  async function handleSave() {
+    setSaving(true);
+    try {
+      const existing = new Set(existingLinks.map((l) => l.accountId));
+      await Promise.allSettled(
+        [...selected]
+          .filter((id) => !existing.has(id))
+          .map((propertyId) => {
+            for (const [connId, props] of Object.entries(propsByConn)) {
+              const found = props.find((p) => p.propertyId === propertyId);
+              if (found) {
+                return addClientLink(clientId, {
+                  platform: 'ga4',
+                  connectionId: connId,
+                  accountId: found.propertyId,
+                  accountName: found.name,
+                  currency: 'BRL',
+                });
+              }
+            }
+            return Promise.resolve();
+          })
+      );
+      await Promise.allSettled(
+        existingLinks.filter((l) => !selected.has(l.accountId)).map((l) => removeClientLink(clientId, l.id))
+      );
+      onDone();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const total = Object.values(propsByConn).reduce((n, p) => n + p.length, 0);
+
+  if (loading) {
+    return (
+      <>
+        <div className="flex items-center justify-center py-10 gap-2 text-muted-foreground text-sm">
+          <RefreshCw className="w-4 h-4 animate-spin" /> Carregando propriedades...
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onCancel}>Cancelar</Button>
+        </DialogFooter>
+      </>
+    );
+  }
+
+  if (conns.length === 0 || total === 0) {
+    return (
+      <>
+        <p className="text-sm text-muted-foreground py-6 text-center">
+          {conns.length === 0
+            ? 'Nenhuma conta Google Analytics conectada. Em Integrações, clique em "Website / Analytics" e conecte a conta Google que enxerga as propriedades das landing pages.'
+            : 'A conta conectada não enxerga nenhuma propriedade GA4.'}
+        </p>
+        {Object.values(erros).map((e, i) => (
+          <p key={i} className="flex items-start gap-2 text-xs text-red-400 px-1"><AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />{e}</p>
+        ))}
+        <DialogFooter>
+          <Button variant="outline" onClick={onCancel}>Fechar</Button>
+        </DialogFooter>
+      </>
+    );
+  }
+
+  return (
+    <>
+      <AccountListControls
+        search={search}
+        onSearchChange={setSearch}
+        sortDirection={sortDirection}
+        onSortDirectionChange={setSortDirection}
+      />
+      <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
+        {conns.map((conn) => {
+          const props = sortByName(
+            filterBySearch(propsByConn[conn.id] ?? [], search, (p) => [p.name, p.account, p.propertyId]),
+            (p) => `${p.account} ${p.name}`,
+            sortDirection,
+          );
+          if (props.length === 0) return null;
+          return (
+            <div key={conn.id}>
+              <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1.5 px-1">
+                Google Analytics · {conn.email}
+              </p>
+              <div className="space-y-1">
+                {props.map((p) => (
+                  <button
+                    key={p.propertyId}
+                    onClick={() => toggle(p.propertyId)}
+                    className="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-muted/50 transition-colors text-left"
+                  >
+                    {selected.has(p.propertyId)
+                      ? <CheckSquare className="w-4 h-4 text-primary shrink-0" />
+                      : <Square className="w-4 h-4 text-muted-foreground shrink-0" />}
+                    <span className="text-sm flex-1 truncate">{p.name} <span className="text-muted-foreground">· {p.account}</span></span>
+                    <span className="text-[10px] text-muted-foreground font-mono">{p.propertyId}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <DialogFooter>
+        <Button variant="outline" onClick={onCancel}>Cancelar</Button>
+        <Button onClick={() => void handleSave()} disabled={saving} className="bg-primary text-primary-foreground hover:bg-primary/90">
+          {saving ? <RefreshCw className="w-3.5 h-3.5 animate-spin mr-1" /> : <Link2 className="w-3.5 h-3.5 mr-1" />}
+          Salvar vínculos
+        </Button>
+      </DialogFooter>
+    </>
+  );
+}
+
 export function LinkAccountsDialog({
   clientId,
   clientName,
@@ -1027,6 +1211,8 @@ export function LinkAccountsDialog({
           <MetaPagesContent platform="facebook" clientId={clientId} onDone={closeDialog} onCancel={closeDialog} />
         ) : activePlatform === 'instagram' ? (
           <MetaPagesContent platform="instagram" clientId={clientId} onDone={closeDialog} onCancel={closeDialog} />
+        ) : activePlatform === 'ga4' ? (
+          <Ga4Content clientId={clientId} onDone={closeDialog} onCancel={closeDialog} />
         ) : (
           <GoogleAdsContent clientId={clientId} onDone={closeDialog} onCancel={closeDialog} />
         )}

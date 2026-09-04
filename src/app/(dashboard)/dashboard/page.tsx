@@ -91,6 +91,8 @@ import { ModeloEditor, useModelo } from '@/components/dashboard/modelo-editor';
 import { iconePorNome } from '@/components/dashboard/controles-elemento';
 import { estiloDe, styleTexto, styleValor, type EstiloElemento } from '@/lib/dashboard-elementos';
 import { useDadosDelivery } from '@/components/dashboard/use-dados-delivery';
+import { Ga4LandingPanel } from '@/components/dashboard/ga4-landing-panel';
+import type { Ga4Consolidado } from '@/lib/ga4-landing';
 import {
   formatarMetrica, custoPorPedido, roas as roasFood,
 } from '@/lib/metricas-food';
@@ -5215,6 +5217,9 @@ export default function GeneralDashboard() {
   const [customDateFrom, setCustomDateFrom] = useState('');
   const [customDateTo, setCustomDateTo] = useState('');
   const [metricsByClient, setMetricsByClient] = useState<Record<string, ApiMetrics>>({});
+  // Landing page (GA4) por cliente — null = sem propriedade vinculada
+  const [ga4ByClient, setGa4ByClient] = useState<Record<string, { ga4: Ga4Consolidado | null; aviso?: string }>>({});
+  const [ga4Loading, setGa4Loading] = useState(false);
   const [goalsByClient, setGoalsByClient] = useState<Record<string, GoalConfig | null>>({});
   const [planningsByClient, setPlanningsByClient] = useState<Record<string, PlanningConfig>>({});
   const [crmSummary, setCrmSummary] = useState<Record<string, ClientSheetsSummary>>({});
@@ -5546,6 +5551,31 @@ export default function GeneralDashboard() {
       for (const r of results) if (r.status === 'fulfilled' && r.value !== null) map[r.value[0]] = r.value[1];
       setMetricsByClient(map);
     }).finally(() => { if (!cancelled) setMetricsLoading(false); });
+    return () => { cancelled = true; };
+  }, [selectedIds, period, customDateFrom, customDateTo, customReady]);
+
+  // Landing page (GA4): mesma régua de período do metrics; cliente sem vínculo devolve ga4:null
+  useEffect(() => {
+    let cancelled = false;
+    setGa4ByClient({});
+    if (selectedIds.size === 0 || !customReady) { setGa4Loading(false); return () => { cancelled = true; }; }
+    setGa4Loading(true);
+    const periodParams = period === 'custom' && customDateFrom && customDateTo
+      ? `period=${period}&dateFrom=${customDateFrom}&dateTo=${customDateTo}`
+      : `period=${period}`;
+    Promise.allSettled(
+      [...selectedIds].map(async (id) => {
+        const res = await fetch(`/api/clients/${id}/ga4?${periodParams}`);
+        if (cancelled) return null;
+        const data = res.ok ? await res.json() as { ga4: Ga4Consolidado | null; aviso?: string } : { ga4: null };
+        return [id, data] as const;
+      })
+    ).then(results => {
+      if (cancelled) return;
+      const map: Record<string, { ga4: Ga4Consolidado | null; aviso?: string }> = {};
+      for (const r of results) if (r.status === 'fulfilled' && r.value !== null) map[r.value[0]] = r.value[1];
+      setGa4ByClient(map);
+    }).finally(() => { if (!cancelled) setGa4Loading(false); });
     return () => { cancelled = true; };
   }, [selectedIds, period, customDateFrom, customDateTo, customReady]);
 
@@ -7061,6 +7091,23 @@ export default function GeneralDashboard() {
             </PremiumPanel>
             )}
 
+
+            {/* ── Landing page (GA4): o que acontece na LP entre o clique no
+                anúncio e o WhatsApp. Só aparece para cliente com propriedade
+                GA4 vinculada (Integrações → Google Analytics). Vários clientes
+                selecionados: um painel por cliente com vínculo. */}
+            {!modoFood && selectedClients.filter(c => ga4ByClient[c.id]?.ga4).map(client => (
+              <PremiumPanel key={`ga4-${client.id}`} className="border-[#F9AB00]/24 shadow-[0_0_40px_rgba(249,171,0,0.08)]">
+                <div className="flex items-center justify-between px-4 pt-4 pb-3">
+                  <h3 className="flex items-center gap-2 text-sm font-black uppercase tracking-[0.07em] text-[#f4f7f8]">
+                    <span className="inline-block h-2.5 w-2.5 rounded-sm bg-[#F9AB00]" /> Landing page
+                    {selectedClients.length > 1 && <span className="text-[#9aa4aa]">· {client.name}</span>}
+                  </h3>
+                  <span className="text-[10px] text-[#7c868c]">Google Analytics 4</span>
+                </div>
+                <Ga4LandingPanel dados={ga4ByClient[client.id]?.ga4 ?? null} loading={ga4Loading} aviso={ga4ByClient[client.id]?.aviso} />
+              </PremiumPanel>
+            ))}
 
             {selectedClients.length > 1 && (
               <PremiumPanel className="p-4">

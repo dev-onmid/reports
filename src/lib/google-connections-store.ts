@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
-export type GoogleAccountType = 'gmb' | 'google_ads';
+export type GoogleAccountType = 'gmb' | 'google_ads' | 'ga4';
 
 export type GoogleConnection = {
   id: string;
