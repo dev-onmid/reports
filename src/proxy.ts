@@ -106,6 +106,7 @@ const INTEGRATION_PREFIXES = [
   '/api/integrations/identificar',
   '/api/integrations/tldv-sync',
   '/api/integrations/tldv-backfill',
+  '/api/integrations/google-conversoes', // lps/bin/gtag: ações de conversão do Google Ads
 ];
 
 function matches(pathname: string, prefixes: string[]): boolean {
