@@ -1,3 +1,33 @@
+## Google Ads — ações de conversão para o rastreio das LPs (2026-09-04)
+
+Pedido do Matheus: o rastreio via GTM das landing pages (`~/Documents/lps`, prompt
+`PROMPT-RASTREIO-GTM.md`) precisa do par ID de conversão (AW-) + rótulo do Google
+Ads de cada cliente, e criar a ação quando não existe — sem abrir o painel. O login
+do Google Ads de cada cliente e o developer token já vivem aqui, então a porta é aqui.
+
+- **`GET/POST /api/integrations/google-conversoes`** (nova): máquina→máquina, header
+  `x-onmid-secret` = `MAKE_INTEGRATION_SECRET` (mesmo contrato das outras
+  `/api/integrations/*`; registrada em `INTEGRATION_PREFIXES` no proxy). GET
+  `?cliente=<id ou nome>` lista as ações WEB ativas; POST `{cliente, nome, categoria?,
+  contagem?, valor?}` cria — **idempotente por nome** (normalizado sem caixa/acento):
+  se já existe, devolve a existente com `criada:false`. Nome ambíguo → 409 com
+  candidatos; sem Google Ads vinculado → 404 com dica.
+- **`src/lib/google-conversion-actions.ts`** (nova, testável sem rede): o AW- e o
+  rótulo **só existem dentro do `tag_snippets[].event_snippet`** (`send_to`) — e com
+  conversão entre contas o AW- é o da MCC, não o customer id; por isso o parse vem do
+  snippet, nunca da conta. Prefere o snippet HTML ao AMP. Criação: WEBPAGE, ENABLED,
+  LEAD, uma por clique, `primaryForGoal:true` (entra nos lances), janela 30d, BRL.
+- Reaproveita `resolveGoogleAdsAccess`/`gadsSearch`/`DEV_TOKEN` de
+  `google-offline-conversions.ts` (agora exportados) — mesmo caminho de token/MCC da Luna.
+- Consumidor: `lps/bin/gtag ads <cliente>` e `gtag ads criar <cliente> "<nome>"`.
+- ✅ Verificado: 12 asserts (`scratchpad/test-google-conversoes.mjs`: formatos reais de
+  `send_to`, snippet ausente, HTML > AMP, cross-account, idempotência por nome, payload
+  do mutate com valor/categoria/contagem); tsc limpo; `next build` compilou (⚠️ rodado em worktree
+  com node_modules por symlink: Turbopack recusa o symlink e `--webpack` acusa 3 erros de tipo
+  PRÉ-EXISTENTES do validador legado em `crm/page.tsx`, `api/crm/disparos/audience` e
+  `api/users` — arquivos não tocados; o CI Turbopack de `main` passa). ⚠️ Só produção exercita a
+  Google Ads API de verdade — validar com `gtag ads <cliente>` após o deploy.
+
 @AGENTS.md
 
 ## Trocar de cliente pelo avatar do cabeçalho (2026-08-31)

@@ -12,7 +12,7 @@
 import type { Pool } from 'pg';
 import { getCached, setCached, TTL_4H } from '@/lib/api-cache';
 
-const DEV_TOKEN = process.env.GOOGLE_ADS_DEVELOPER_TOKEN ?? '1vR8GhAk4UMZoPaqo7Qq8Q';
+export const DEV_TOKEN = process.env.GOOGLE_ADS_DEVELOPER_TOKEN ?? '1vR8GhAk4UMZoPaqo7Qq8Q';
 
 export type ClickIds = { gclid?: string | null; wbraid?: string | null; gbraid?: string | null };
 
@@ -43,7 +43,7 @@ async function refreshGoogleAccessToken(row: TokenRow): Promise<string | null> {
   return row.access_token ?? null;
 }
 
-async function gadsSearch(customerId: string, query: string, token: string, loginCustomerId?: string) {
+export async function gadsSearch(customerId: string, query: string, token: string, loginCustomerId?: string) {
   const headers: Record<string, string> = {
     Authorization: `Bearer ${token}`,
     'developer-token': DEV_TOKEN,
