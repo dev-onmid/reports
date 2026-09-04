@@ -1189,36 +1189,42 @@ function GoogleConnectionsPanel({
   onRemove,
   onAddGoogleAds,
   onAddGMB,
+  onAddGa4,
 }: {
   connections: GoogleConnection[];
   onRemove: (id: string) => Promise<void>;
   onAddGoogleAds: () => void;
   onAddGMB: () => void;
+  onAddGa4: () => void;
 }) {
   const gmbConns = connections.filter((c) => c.accountType === 'gmb');
   const adsConns = connections.filter((c) => c.accountType === 'google_ads');
+  const ga4Conns = connections.filter((c) => c.accountType === 'ga4');
 
   async function handleRemove(conn: GoogleConnection) {
-    const label = conn.accountType === 'gmb' ? 'Google Meu Negócio' : 'Google Ads';
+    const label = conn.accountType === 'gmb' ? 'Google Meu Negócio' : conn.accountType === 'ga4' ? 'Google Analytics' : 'Google Ads';
     if (!window.confirm(`Desconectar "${conn.email}" (${label})?`)) return;
     await onRemove(conn.id);
   }
 
   type AdsAccount = { id: string; name: string; status: string; isManager: boolean; mccId?: string };
   type GmbLocation = { locationId: string; accountId: string; name: string; address?: string; phone?: string; websiteUrl?: string; metrics?: { impressions: number; websiteClicks: number; callClicks: number; directionRequests: number } };
+  type Ga4Prop = { propertyId: string; name: string; account: string };
 
   function ConnectionRow({ conn }: { conn: GoogleConnection }) {
     const isAds = conn.accountType === 'google_ads';
     const isGmb = conn.accountType === 'gmb';
+    const isGa4 = conn.accountType === 'ga4';
 
     const [adsAccounts, setAdsAccounts] = useState<AdsAccount[]>([]);
     const [gmbLocations, setGmbLocations] = useState<GmbLocation[]>([]);
+    const [ga4Props, setGa4Props] = useState<Ga4Prop[]>([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [showItems, setShowItems] = useState(false);
 
     async function loadItems() {
-      if ((isAds && adsAccounts.length > 0) || (isGmb && gmbLocations.length > 0)) {
+      if ((isAds && adsAccounts.length > 0) || (isGmb && gmbLocations.length > 0) || (isGa4 && ga4Props.length > 0)) {
         setShowItems((v) => !v); return;
       }
       setLoading(true);
@@ -1237,6 +1243,11 @@ function GoogleConnectionsPanel({
             throw new Error([d.error, d.detail].filter(Boolean).join(' — '));
           }
           setGmbLocations(data as GmbLocation[]);
+        } else if (isGa4) {
+          const res = await fetch(`/api/google/ga4-properties?connectionId=${conn.id}`);
+          const data = await res.json() as { error?: string } | Ga4Prop[];
+          if (!res.ok) throw new Error((data as { error?: string }).error ?? 'Erro ao buscar propriedades');
+          setGa4Props(data as Ga4Prop[]);
         }
         setShowItems(true);
       } catch (e) {
@@ -1264,17 +1275,18 @@ function GoogleConnectionsPanel({
               {conn.connectedAt ? new Date(conn.connectedAt).toLocaleDateString('pt-BR') : '—'}
               {isGmb && <span className="ml-2 font-bold text-[#34A853]">GMB</span>}
               {isAds && <span className="ml-2 font-bold text-[#4285F4]">Ads</span>}
+              {isGa4 && <span className="ml-2 font-bold text-[#F9AB00]">Analytics</span>}
             </p>
           </div>
           <div className="flex items-center gap-1 shrink-0">
-            {(isAds || isGmb) && (
+            {(isAds || isGmb || isGa4) && (
               <button
                 onClick={() => void loadItems()}
                 disabled={loading}
                 className="rounded-lg px-2 py-1 text-[10px] font-medium text-muted-foreground hover:bg-muted transition-colors flex items-center gap-1"
               >
                 {loading ? <RefreshCw className="w-3 h-3 animate-spin" /> : <ChevronDown className={cn('w-3 h-3 transition-transform', showItems && 'rotate-180')} />}
-                {isGmb ? 'Ver locais' : 'Ver contas'}
+                {isGmb ? 'Ver locais' : isGa4 ? 'Ver propriedades' : 'Ver contas'}
               </button>
             )}
             <CheckCircle2 className="w-3.5 h-3.5 text-primary" />
@@ -1302,6 +1314,16 @@ function GoogleConnectionsPanel({
                 <span className="text-muted-foreground font-mono shrink-0">{a.id}</span>
                 {a.isManager && <span className="text-[9px] bg-blue-500/20 text-blue-300 px-1.5 py-0.5 rounded font-bold">MCC</span>}
                 {a.mccId && !a.isManager && <span className="text-[9px] bg-muted text-muted-foreground px-1.5 py-0.5 rounded">via MCC</span>}
+              </div>
+            ))}
+            {isGa4 && !error && ga4Props.length === 0 && (
+              <p className="text-xs text-muted-foreground">Nenhuma propriedade encontrada.</p>
+            )}
+            {isGa4 && ga4Props.map((p) => (
+              <div key={p.propertyId} className="flex items-center gap-2 text-xs bg-muted/30 rounded-lg px-3 py-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#F9AB00] shrink-0" />
+                <span className="font-medium truncate flex-1">{p.name} <span className="text-muted-foreground">· {p.account}</span></span>
+                <span className="text-muted-foreground font-mono shrink-0">{p.propertyId}</span>
               </div>
             ))}
             {isGmb && !error && gmbLocations.length === 0 && (
@@ -1333,7 +1355,7 @@ function GoogleConnectionsPanel({
           <div>
             <p className="text-sm font-bold">Contas Google conectadas</p>
             <p className="text-xs text-muted-foreground mt-0.5">
-              {connections.length} conta{connections.length === 1 ? '' : 's'} — {gmbConns.length} GMB · {adsConns.length} Ads
+              {connections.length} conta{connections.length === 1 ? '' : 's'} — {gmbConns.length} GMB · {adsConns.length} Ads · {ga4Conns.length} Analytics
             </p>
           </div>
         </div>
@@ -1341,6 +1363,10 @@ function GoogleConnectionsPanel({
           <Button size="sm" onClick={onAddGMB} variant="outline" className="h-8 gap-1.5 text-xs">
             <Plus className="w-3.5 h-3.5" />
             GMB
+          </Button>
+          <Button size="sm" onClick={onAddGa4} variant="outline" className="h-8 gap-1.5 text-xs">
+            <Plus className="w-3.5 h-3.5" />
+            Analytics
           </Button>
           <Button size="sm" onClick={onAddGoogleAds} className="bg-primary text-primary-foreground hover:bg-primary/90 h-8 gap-1.5 text-xs">
             <Plus className="w-3.5 h-3.5" />
@@ -1370,6 +1396,18 @@ function GoogleConnectionsPanel({
             </p>
             <div className="divide-y divide-border">
               {adsConns.map((c) => <ConnectionRow key={c.id} conn={c} />)}
+            </div>
+          </>
+        )}
+
+        {ga4Conns.length > 0 && (
+          <>
+            <p className={cn('pb-1 text-[10px] font-bold uppercase tracking-widest text-muted-foreground flex items-center gap-2', (gmbConns.length + adsConns.length) > 0 ? 'pt-4 border-t border-border mt-2' : 'pt-4')}>
+              <LogoGoogle />
+              Google Analytics (landing pages)
+            </p>
+            <div className="divide-y divide-border">
+              {ga4Conns.map((c) => <ConnectionRow key={c.id} conn={c} />)}
             </div>
           </>
         )}
@@ -2343,7 +2381,7 @@ export function IntegrationsPanel() {
     }
   }
 
-  function openGoogleOAuth(type: 'gmb' | 'google_ads') {
+  function openGoogleOAuth(type: 'gmb' | 'google_ads' | 'ga4') {
     const popup = window.open(
       `/api/auth/google?type=${type}`,
       'google-oauth',
@@ -2355,7 +2393,7 @@ export function IntegrationsPanel() {
         window.removeEventListener('message', handleMessage);
         popup?.close();
         void reloadGoogle();
-        const label = event.data.accountType === 'gmb' ? 'Google Meu Negócio' : 'Google Ads';
+        const label = event.data.accountType === 'gmb' ? 'Google Meu Negócio' : event.data.accountType === 'ga4' ? 'Google Analytics' : 'Google Ads';
         setOauthBanner({ type: 'success', msg: `${label} conectado com sucesso!` });
       } else if (event.data?.type === 'google_oauth_error') {
         window.removeEventListener('message', handleMessage);
@@ -2378,6 +2416,10 @@ export function IntegrationsPanel() {
     }
     if (id === 'google-my-business') {
       openGoogleOAuth('gmb');
+      return;
+    }
+    if (id === 'website') {
+      openGoogleOAuth('ga4');
       return;
     }
     if (id === 'leadlovers') {
@@ -2595,6 +2637,7 @@ export function IntegrationsPanel() {
             onRemove={removeGoogle}
             onAddGoogleAds={() => openGoogleOAuth('google_ads')}
             onAddGMB={() => openGoogleOAuth('gmb')}
+            onAddGa4={() => openGoogleOAuth('ga4')}
           />
         )}
 

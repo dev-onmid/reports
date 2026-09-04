@@ -1,3 +1,56 @@
+## Landing page (GA4) no dashboard — integração Google Analytics (2026-09-04)
+
+Pedido do Matheus, depois do rastreio via GTM das LPs do Cinfel (`~/Documents/lps`,
+`PROMPT-RASTREIO-GTM.md`): "fazer uma integração no reports e na aba dashboard
+aparecer essas informações". As LPs mandam eventos padronizados ao GA4
+(`click_whatsapp`, `click_telefone`, `click_cta`, `view_secao`, `lead_form`) com
+parâmetros registrados como dimensões personalizadas (posicao, peca, veiculo,
+material, espessura, cta_id...). O reports passa a LER isso.
+
+- **Conexão Google tipo `ga4`** (`/api/auth/google?type=ga4`, escopo
+  `analytics.readonly`): `GoogleAccountType` ganhou `'ga4'`; no painel de
+  Integrações o card "Website / Analytics" (que era decorativo) abre esse OAuth,
+  há botão "Analytics" no painel de contas Google, seção própria e "Ver
+  propriedades" (`/api/google/ga4-properties?connectionId=` → Admin API
+  `accountSummaries`, cache 4h). Conectar com a conta ONMID que enxerga as
+  propriedades dos clientes (uma conexão serve todos).
+- **Vínculo por cliente**: platform `ga4` em `client_account_links`
+  (`account_id` = id numérico da propriedade, `account_name` = nome). Diálogo
+  `Ga4Content` em `link-accounts-dialog.tsx`, `PlatformId` ganhou `'ga4'`
+  (rótulo "Google Analytics (LP)", cor #F9AB00). Cliente com 2 LPs vincula 2
+  propriedades — a rota soma.
+- **`GET /api/clients/[id]/ga4?period&dateFrom&dateTo`** (nova): mesma régua de
+  período do metrics (`resolveMetaPeriod` → `faixasDoPeriodo`, com período
+  ANTERIOR do mesmo tamanho colado antes). Por propriedade, 5 + 5 `runReport`
+  em paralelo na Data API v1beta (totais e eventos com DUAS faixas — o GA4 põe
+  `dateRange` como primeira coluna; origens `sessionSource/sessionMedium` com
+  `keyEvents`; `customEvent:posicao`; diário; e um relatório por detalhe
+  `customEvent:{peca,veiculo,material,espessura,cta_id}` — detalhe que a LP não
+  preenche simplesmente não volta). Sem vínculo → `{ga4:null}`; token quebrado →
+  `aviso`. Cache 15 min. ⚠️ Dimensão personalizada precisa existir na
+  propriedade (o `gtag`/prompt já registra as 9); sem ela o relatório daquele
+  detalhe falha sozinho (`runReport` devolve null, os outros seguem).
+- **`src/lib/ga4-landing.ts`**: parse/consolidação puros (testáveis) +
+  `relatorioLanding`. `taxaContato = contatos/sessoes`, contatos = whatsapp +
+  telefone + lead_form (click_cta NÃO conta — é abrir modal/ficha).
+- **Dashboard** (`dashboard/page.tsx`): estado `ga4ByClient` buscado junto com
+  o metrics; bloco `PremiumPanel` "Landing page" (`Ga4LandingPanel`, em
+  `components/dashboard/ga4-landing-panel.tsx`) logo após o Google Ads, um por
+  cliente selecionado que tenha vínculo, escondido no `modoFood` e para quem não
+  tem GA4. KPIs com delta vs anterior, chips por LP quando há mais de uma, "De
+  onde vieram", "Onde clicam para falar" e os detalhes que existirem. Não entrou
+  no registry de cards/RGL de propósito: é uma lâmina fixa como a do Google Ads.
+- ✅ Verificado: **12 asserts** (`scratchpad/test-ga4-landing.mjs`: faixas
+  atual/anterior, dateRange nas duas faixas, contatos/taxa sem NaN, origens
+  vazias → "(direto)", `(not set)` fora, AAAAMMDD → ISO, consolidação de 2 LPs
+  com detalhes distintos); tsc limpo; **Data API real** nas 2 propriedades do
+  Cinfel aceitou todos os nomes de dimensão/métrica (zeros porque o GA4 leva até
+  24–48h para processar); harness no browser (`scratchpad/harness-ga4.tsx`,
+  cenários cheio/vazio/loading/aviso, 1280 e 375px). ⚠️ Não exercitado: o OAuth
+  `type=ga4` ponta a ponta e o diálogo de vínculo com banco (dev sem
+  `DATABASE_URL`) — validar em produção: Integrações → Website/Analytics →
+  conectar → vincular as propriedades do Cinfel → dashboard.
+
 ## Google Ads — ações de conversão para o rastreio das LPs (2026-09-04)
 
 Pedido do Matheus: o rastreio via GTM das landing pages (`~/Documents/lps`, prompt

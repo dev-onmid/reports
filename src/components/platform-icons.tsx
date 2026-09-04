@@ -6,7 +6,8 @@ export type PlatformId =
   | 'facebook'
   | 'instagram'
   | 'google_business'
-  | 'google_sheets';
+  | 'google_sheets'
+  | 'ga4';
 
 export const PLATFORM_INFO: Record<PlatformId, { label: string; bg: string }> = {
   google_ads:      { label: 'Google Ads',            bg: '#4285F4' },
@@ -15,6 +16,7 @@ export const PLATFORM_INFO: Record<PlatformId, { label: string; bg: string }> = 
   instagram:       { label: 'Instagram Insights',     bg: '#C13584' },
   google_business: { label: 'Google Meu Negócio',     bg: '#EA4335' },
   google_sheets:   { label: 'Google Sheets',          bg: '#0F9D58' },
+  ga4:             { label: 'Google Analytics (LP)',  bg: '#F9AB00' },
 };
 
 function PlatformLogo({ src, alt }: { src: string; alt: string }) {
@@ -89,6 +91,7 @@ const ICONS: Record<PlatformId, React.ReactNode> = {
   instagram:       <IconInstagram />,
   google_business: <IconGoogleBusiness />,
   google_sheets:   <IconSheets />,
+  ga4:             <IconGoogle />,
 };
 
 export function PlatformIconButton({
