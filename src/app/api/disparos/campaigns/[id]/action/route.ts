@@ -20,10 +20,26 @@ export async function POST(
     await pool.query(`ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS next_tick_at TIMESTAMPTZ`);
 
     const scope = await getCallerScope(request, pool);
+    // ⚠️ Resolve o MESMO nome que a tela mostra.
+    //
+    // `zapi_clients.name` é o nome da INSTÂNCIA de WhatsApp ("SAAC 2.0"); o
+    // nome que o modal exibe vem de `clients.name` ("Saac Equipamentos"), pela
+    // ponte `client_zapi_instances`. Validar só contra o primeiro deixava a
+    // trava IMPOSSÍVEL de satisfazer: a tela pedia um nome e o servidor exigia
+    // outro. Join idêntico ao da listagem (`campaigns/route.ts`) — se
+    // divergirem de novo, o mesmo impasse volta.
     const { rows: [campaign] } = await pool.query(
-      `SELECT c.status, cl.owner_id, cl.name AS client_name, cl.instance_id, cl.provider
+      `SELECT c.status, cl.owner_id, cl.name AS client_name, cl.instance_id, cl.provider,
+              oc.name AS onmid_client_name
          FROM public.zapi_campaigns c
-         JOIN public.zapi_clients cl ON cl.id = c.client_id WHERE c.id = $1`,
+         JOIN public.zapi_clients cl ON cl.id = c.client_id
+         LEFT JOIN LATERAL (
+           SELECT client_id FROM public.client_zapi_instances
+            WHERE instance_id = cl.instance_id AND ativo = true
+            ORDER BY created_at DESC LIMIT 1
+         ) link ON true
+         LEFT JOIN public.clients oc ON oc.id = link.client_id
+        WHERE c.id = $1`,
       [id],
     );
     if (!campaign) return Response.json({ error: 'Campanha não encontrada' }, { status: 404 });
@@ -38,10 +54,17 @@ export async function POST(
       // digitar o nome e provar que o WhatsApp está de pé. Pausar/cancelar NÃO
       // pedem nada (parar é sempre seguro; exigir ritual pra parar faria alguém
       // deixar rodando errado por atrito).
-      if (!nomeConfere(confirmClientName ?? '', campaign.client_name ?? '')) {
+      // Aceita os DOIS nomes: o do cliente (o que a tela mostra e o gestor
+      // reconhece) e o da instância. Os dois identificam a mesma campanha, e
+      // recusar o que está escrito na tela é impedir a operação, não protegê-la.
+      const nomeNaTela = campaign.onmid_client_name ?? campaign.client_name;
+      const digitado = confirmClientName ?? '';
+      const confere = nomeConfere(digitado, campaign.onmid_client_name ?? '')
+        || nomeConfere(digitado, campaign.client_name ?? '');
+      if (!confere) {
         return Response.json({
-          error: `Confirmação não confere. Digite exatamente o nome do cliente: ${campaign.client_name}`,
-          confirm_client_name: campaign.client_name,
+          error: `Confirmação não confere. Digite exatamente o nome do cliente: ${nomeNaTela}`,
+          confirm_client_name: nomeNaTela,
         }, { status: 400 });
       }
       if (campaign.provider === 'evolution') {
@@ -49,7 +72,7 @@ export async function POST(
         try { conectada = await checkEvolutionStatus(campaign.instance_id); } catch { conectada = false; }
         if (!conectada) {
           return Response.json({
-            error: `O WhatsApp de ${campaign.client_name} não está conectado (${campaign.instance_id}). `
+            error: `O WhatsApp de ${campaign.onmid_client_name ?? campaign.client_name} não está conectado (${campaign.instance_id}). `
                  + 'Reconecte em Configurações → Instâncias antes de retomar.',
             instancia_desconectada: true,
           }, { status: 409 });
