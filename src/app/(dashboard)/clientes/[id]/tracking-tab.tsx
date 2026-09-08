@@ -11,6 +11,7 @@ import { cn } from '@/lib/utils';
 import { ConversaoTile, GuideStepModal } from './conversao-guias';
 import { DatalyticsCard } from './datalytics-card';
 import { AgendorCard } from './agendor-card';
+import LpOrigensCard from './lp-origens-card';
 import { ClientDeliveryTab } from './delivery-tab';
 import { LandingPagesTab } from './landing-pages-tab';
 
@@ -214,7 +215,7 @@ function SectionHeader({ icon: Icon, title, subtitle, color = 'text-muted-foregr
 export function ClientTrackingTab({ clientId }: { clientId: string }) {
 
   // ── Sub-tab ────────────────────────────────────────────────────────────
-  const [activeTab, setActiveTab] = useState<'whatsapp' | 'conversoes' | 'datalytics' | 'agendor' | 'delivery' | 'heatmap' | 'log'>('whatsapp');
+  const [activeTab, setActiveTab] = useState<'whatsapp' | 'sites' | 'conversoes' | 'datalytics' | 'agendor' | 'delivery' | 'heatmap' | 'log'>('whatsapp');
 
   // ── Legacy tracking ────────────────────────────────────────────────────
   const [config, setConfig] = useState<TrackingConfig>({
@@ -555,6 +556,7 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
       <div className="flex items-center gap-0.5 rounded-xl border border-border bg-card p-1 w-fit">
         {([
           { id: 'whatsapp'  as const, label: 'WhatsApp',   icon: Wifi },
+          { id: 'sites' as const, label: 'Sites e LPs', icon: Globe },
           { id: 'conversoes' as const, label: 'Conversões', icon: Zap },
           { id: 'datalytics' as const, label: 'Datalytics', icon: Database },
           { id: 'agendor' as const, label: 'Agendor', icon: Building2 },
@@ -1073,6 +1075,8 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
       )}
 
       {/* ══════════ TAB: Datalytics ══════════ */}
+      {activeTab === 'sites' && <LpOrigensCard clientId={clientId} />}
+
       {activeTab === 'datalytics' && <DatalyticsCard clientId={clientId} />}
 
       {activeTab === 'agendor' && <AgendorCard clientId={clientId} />}

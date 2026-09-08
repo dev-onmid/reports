@@ -50,6 +50,9 @@ const PUBLIC_PREFIXES = [
   // Datalytics: token de 48 hex POR CLIENTE na URL é a credencial (mesma
   // classe de exposição de /api/webhooks/).
   '/api/integrations/datalytics/',
+  // Site/LP manda lead direto: quem chama é o navegador do visitante ou a
+  // função da própria página, sem sessão. O token de 48 hex é a credencial.
+  '/api/integrations/lp/',
   // Webhook do Agendor — token de 48 hex por cliente na URL é a credencial.
   '/api/integrations/agendor/',
 
