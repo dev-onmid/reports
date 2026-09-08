@@ -210,6 +210,18 @@ const FB_SCOPE = [
   // leads_retrieval: ler respostas de formulário (pode exigir App Review da Meta).
   'pages_manage_ads',
   'leads_retrieval',
+  // whatsapp_business_management: LER as contas do WhatsApp Business do negócio.
+  // Sem ela, `owned_whatsapp_business_accounts` devolve (#200) e não há como saber
+  // se já existe conta Business para amarrar à Página. A criação de conjunto com
+  // `destination_type=WHATSAPP` recusa com o subcode 2446885 ("o número vinculado
+  // é uma conta pessoal"), que culpa a PÁGINA e esconde a causa real.
+  // ⚠️ Mesmo padrão do 1815089 logo acima: erro que aponta para um ativo do
+  // cliente, causa que é escopo ausente no token. Antes de pedir ao cliente que
+  // migre o WhatsApp dele, conferir o escopo.
+  // Visto na conta do Leandro Ary (act_2259025481108440) em 2026-08-28: conjunto
+  // ATIVO entregando por esse mesmo número, mas criação nova bloqueada — o ativo
+  // era cópia herdada de antes da mudança de regra da Meta.
+  'whatsapp_business_management',
   'business_management',
   'pages_show_list',
   'pages_read_engagement',
