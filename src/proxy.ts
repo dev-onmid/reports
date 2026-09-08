@@ -38,6 +38,9 @@ const PUBLIC_PREFIXES = [
   // Analytics de landing page: rodam em domínio de terceiro (o site do cliente).
   '/api/lp/collect',
   '/api/lp/tag.js',
+  // Script universal de captura de lead: carregado pelo <script> do site do
+  // cliente, sem sessão. O token vai na query e é validado na ingestão.
+  '/api/lp/lead.js',
   '/api/lp/heatmap-data',
 
   // Webhooks de entrada — quem chama é Meta/Evolution/integrações, sem cookie.

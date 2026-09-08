@@ -30,6 +30,12 @@ import { resolverNomesGoogle, pareceIdGoogle } from '@/lib/google-ad-resolver';
 
 export const runtime = 'nodejs';
 
+// A resposta precisa ser legível pelo script rodando no domínio do CLIENTE.
+// Sem isso o envio funciona mas o site não consegue saber se deu certo.
+const CORS = { 'access-control-allow-origin': '*' };
+const resposta = (corpo: unknown, status = 200) =>
+  Response.json(corpo, { status, headers: CORS });
+
 type Corpo = Record<string, unknown>;
 
 const txt = (v: unknown): string | undefined => {
@@ -61,16 +67,20 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ token: str
   try {
     await ensureLpOrigensSchema(pool);
     const origem = await origemPorToken(pool, token);
-    if (!origem) return Response.json({ ok: false, erro: 'token_invalido' }, { status: 401 });
+    if (!origem) return resposta({ ok: false, erro: 'token_invalido' }, 401);
     if (!origem.enabled) {
-      return Response.json({ ok: false, erro: 'origem_desativada' });
+      return resposta({ ok: false, erro: 'origem_desativada' });
     }
 
-    try { raw = await req.json(); }
+    // Lê como TEXTO e parseia: o script universal manda text/plain de propósito
+    // — é requisição "simple" do CORS, sem preflight OPTIONS (o repo não tem
+    // nenhum handler OPTIONS e continua assim). req.json() exigiria
+    // application/json, que dispara preflight quando vem de outro domínio.
+    try { raw = JSON.parse(await req.text()); }
     catch {
       await registrarLog(pool, { origemId: origem.id, clientId: origem.client_id, raw: null,
         resultado: 'erro', detalhe: 'corpo não é JSON' });
-      return Response.json({ ok: false, erro: 'json_invalido' });
+      return resposta({ ok: false, erro: 'json_invalido' });
     }
     const c = (raw ?? {}) as Corpo;
 
@@ -83,7 +93,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ token: str
     if (!telefone && !email) {
       await registrarLog(pool, { origemId: origem.id, clientId: origem.client_id, raw,
         resultado: 'sem_contato', detalhe: 'payload sem telefone e sem e-mail' });
-      return Response.json({ ok: false, erro: 'sem_contato' });
+      return resposta({ ok: false, erro: 'sem_contato' });
     }
 
     const tracking = lerTracking(c);
@@ -201,12 +211,12 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ token: str
       leadId,
     });
 
-    return Response.json({ ok: true, lead_id: leadId, criado, cliente: origem.client_id, site: origem.nome });
+    return resposta({ ok: true, lead_id: leadId, criado, cliente: origem.client_id, site: origem.nome });
   } catch (err) {
     console.error('[lp origens] erro', err);
     await registrarLog(pool, { origemId: null, clientId: null, raw,
       resultado: 'erro', detalhe: err instanceof Error ? err.message : String(err) }).catch(() => {});
-    return Response.json({ ok: false, erro: 'erro_interno' }, { status: 500 });
+    return resposta({ ok: false, erro: 'erro_interno' }, 500);
   } finally {
     await pool.end().catch(() => {});
   }
@@ -218,10 +228,10 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ token: str
   const pool = makeServerPool();
   try {
     const origem = await origemPorToken(pool, token);
-    if (!origem) return Response.json({ ok: false, erro: 'token_invalido' }, { status: 401 });
-    return Response.json({ ok: true, site: origem.nome, ativo: origem.enabled, metodo: 'use POST' });
+    if (!origem) return resposta({ ok: false, erro: 'token_invalido' }, 401);
+    return resposta({ ok: true, site: origem.nome, ativo: origem.enabled, metodo: 'use POST' });
   } catch {
-    return Response.json({ ok: false, erro: 'erro_interno' }, { status: 500 });
+    return resposta({ ok: false, erro: 'erro_interno' }, 500);
   } finally {
     await pool.end().catch(() => {});
   }
