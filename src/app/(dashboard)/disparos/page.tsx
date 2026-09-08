@@ -2324,6 +2324,7 @@ function ExtratorTab({ onUseCampaign }: { onUseCampaign: (numbers: string) => vo
   const [chats, setChats] = useState<ChatItem[]>([]);
   const [chatsLoading, setChatsLoading] = useState(false);
   const [chatsError, setChatsError] = useState('');
+  const [chatsAviso, setChatsAviso] = useState('');
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [extracting, setExtracting] = useState(false);
@@ -2343,8 +2344,11 @@ function ExtratorTab({ onUseCampaign }: { onUseCampaign: (numbers: string) => vo
     fetch('/api/disparos/clients', { headers: callerHeaders() })
       .then((r) => r.json())
       .then((rows: ZClient[]) => {
-        setClients(rows);
-        if (rows.length > 0) setClientId(rows[0].id);
+        // Instância desativada não fala com provider nenhum — fica fora da lista
+        // pra ninguém escolher uma que só devolveria erro.
+        const ativas = rows.filter((c) => c.active !== false);
+        setClients(ativas);
+        if (ativas.length > 0) setClientId(ativas[0].id);
       })
       .catch(() => {});
   }, []);
@@ -2353,6 +2357,7 @@ function ExtratorTab({ onUseCampaign }: { onUseCampaign: (numbers: string) => vo
     if (!clientId) return;
     setChatsLoading(true);
     setChatsError('');
+    setChatsAviso('');
     setChats([]);
     setSelected(new Set());
     setExtracted([]);
@@ -2363,6 +2368,12 @@ function ExtratorTab({ onUseCampaign }: { onUseCampaign: (numbers: string) => vo
         setChatsError((data as { error: string }).error ?? 'Erro ao carregar');
       } else {
         setChats(data as ChatItem[]);
+        // Conversa em modo LID não expõe o telefone — o servidor conta quantas
+        // ficaram de fora em vez de devolver o LID como se fosse número.
+        const semTel = Number(res.headers.get('X-Sem-Telefone') ?? 0);
+        if (semTel > 0) {
+          setChatsAviso(`${semTel} conversa${semTel !== 1 ? 's' : ''} sem telefone visível (WhatsApp em modo LID) ficaram de fora.`);
+        }
       }
     } catch {
       setChatsError('Falha na conexão');
@@ -2482,7 +2493,7 @@ function ExtratorTab({ onUseCampaign }: { onUseCampaign: (numbers: string) => vo
             <Hash className="h-4 w-4" />
           </span>
           <h2 className="text-sm font-bold uppercase tracking-wider">Extrator de Números</h2>
-          <p className="text-xs text-muted-foreground">Extraia membros de grupos ou contatos de conversas via Z-API.</p>
+          <p className="text-xs text-muted-foreground">Extraia membros de grupos ou contatos de conversas das instâncias conectadas (Evolution ou Z-API).</p>
         </div>
 
         <div className="grid gap-4 sm:grid-cols-3">
@@ -2495,7 +2506,10 @@ function ExtratorTab({ onUseCampaign }: { onUseCampaign: (numbers: string) => vo
             >
               {clients.length === 0 && <option value="">Nenhuma instância</option>}
               {clients.map((c) => (
-                <option key={c.id} value={c.id}>{c.name}</option>
+                <option key={c.id} value={c.id}>
+                  {c.name} · {c.provider === 'evolution' ? 'Evolution' : 'Z-API'}
+                  {c.linked_client_name ? ` — ${c.linked_client_name}` : ''}
+                </option>
               ))}
             </select>
           </label>
@@ -2536,6 +2550,9 @@ function ExtratorTab({ onUseCampaign }: { onUseCampaign: (numbers: string) => vo
 
         {chatsError && (
           <p className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">{chatsError}</p>
+        )}
+        {chatsAviso && !chatsError && (
+          <p className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-400">⚠ {chatsAviso}</p>
         )}
       </div>
 

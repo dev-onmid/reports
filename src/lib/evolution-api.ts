@@ -319,3 +319,180 @@ export async function fetchEvolutionInstances(): Promise<EvolutionInstanceSummar
     };
   }).filter(i => i.name.length > 0);
 }
+
+// ─── Extrator de números (Disparos → Extrator) ────────────────────────────────
+// O Extrator nasceu Z-API-only; estes helpers dão o MESMO material pela Evolution
+// (que hoje é o provider principal), no formato que a tela já sabe renderizar.
+
+export interface EvolutionGroupSummary {
+  jid: string;      // 1203...@g.us
+  subject: string;
+  size: number | null;
+}
+
+export interface EvolutionGroupMember {
+  phone: string;    // só dígitos
+  name: string;
+  admin: boolean;
+}
+
+function digitsFromJid(jid: unknown): string {
+  return String(jid ?? '').split('@')[0].replace(/\D/g, '');
+}
+
+/** Grupos da instância. `getParticipants=false` mantém a resposta leve. */
+export async function fetchEvolutionGroups(instanceName: string): Promise<EvolutionGroupSummary[]> {
+  const res = await fetch(
+    `${base()}/group/fetchAllGroups/${encodeURIComponent(instanceName)}?getParticipants=false`,
+    { headers: headers(), cache: 'no-store' },
+  );
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`Evolution API ${res.status}: ${text.slice(0, 200)}`);
+  }
+  const raw = await res.json() as unknown;
+  const list: Array<Record<string, unknown>> = Array.isArray(raw)
+    ? raw as Array<Record<string, unknown>>
+    : (((raw as Record<string, unknown>)?.groups ?? []) as Array<Record<string, unknown>>);
+  return list
+    .map((g) => ({
+      jid: String(g.id ?? ''),
+      subject: String(g.subject ?? g.name ?? ''),
+      size: typeof g.size === 'number' ? g.size
+        : Array.isArray(g.participants) ? (g.participants as unknown[]).length : null,
+    }))
+    .filter((g) => g.jid.length > 0)
+    .sort((a, b) => a.subject.localeCompare(b.subject, 'pt-BR'));
+}
+
+/**
+ * Participantes de UM grupo. O endpoint dedicado (`/group/participants`) é o
+ * caminho normal; se a build da Evolution não o expuser, cai no fetchAllGroups
+ * com participantes e filtra o grupo pedido.
+ */
+export async function fetchEvolutionGroupParticipants(
+  instanceName: string,
+  groupJid: string,
+): Promise<EvolutionGroupMember[]> {
+  const jid = groupJid.replace(/-group$/i, '').includes('@g.us')
+    ? groupJid
+    : `${groupJid.replace(/-group$/i, '')}@g.us`;
+
+  // ⚠️ Em instância no modo LID o `id` do participante é o LID (identificador
+  // oculto), NÃO o telefone — mandar disparo pra ele seria mandar pra lixo.
+  // O telefone real vem em `phoneNumber` (…@s.whatsapp.net).
+  const parse = (arr: unknown): EvolutionGroupMember[] => {
+    if (!Array.isArray(arr)) return [];
+    return arr
+      .map((p) => {
+        const r = (p ?? {}) as Record<string, unknown>;
+        const admin = r.admin;
+        const fonte = [r.phoneNumber, r.jid, r.number, r.id]
+          .find((v) => typeof v === 'string' && !String(v).includes('@lid'));
+        return {
+          phone: digitsFromJid(fonte),
+          name: String(r.name ?? r.pushName ?? r.notify ?? ''),
+          admin: admin === 'admin' || admin === 'superadmin' || admin === true,
+        };
+      })
+      .filter((m) => m.phone.length >= 8);
+  };
+
+  const direct = await fetch(
+    `${base()}/group/participants/${encodeURIComponent(instanceName)}?groupJid=${encodeURIComponent(jid)}`,
+    { headers: headers(), cache: 'no-store' },
+  ).catch(() => null);
+  if (direct?.ok) {
+    const data = await direct.json().catch(() => null) as Record<string, unknown> | null;
+    const members = parse(data?.participants ?? data);
+    if (members.length > 0) return members;
+  }
+
+  const all = await fetch(
+    `${base()}/group/fetchAllGroups/${encodeURIComponent(instanceName)}?getParticipants=true`,
+    { headers: headers(), cache: 'no-store' },
+  ).catch(() => null);
+  if (all?.ok) {
+    const raw = await all.json().catch(() => null) as unknown;
+    const list: Array<Record<string, unknown>> = Array.isArray(raw)
+      ? raw as Array<Record<string, unknown>>
+      : (((raw as Record<string, unknown>)?.groups ?? []) as Array<Record<string, unknown>>);
+    const found = list.find((g) => String(g.id ?? '') === jid);
+    if (found) return parse(found.participants);
+  }
+
+  return [];
+}
+
+/**
+ * Conversas individuais (não-grupo). Varre as variações de endpoint das
+ * versões da Evolution — mesma estratégia do import do inbox do CRM.
+ *
+ * ⚠️ Instância em modo LID devolve `@lid` no lugar do telefone. O LID passa
+ * num filtro de "8 a 15 dígitos" e viraria número de disparo inválido, então
+ * ele volta SEPARADO (`lid`) com `phone: null` — quem chama decide se resolve.
+ */
+export interface EvolutionChatContact {
+  phone: string | null;
+  lid: string | null;
+  name: string;
+}
+
+export async function fetchEvolutionChatContacts(
+  instanceName: string,
+  limit = 500,
+): Promise<EvolutionChatContact[]> {
+  const inst = encodeURIComponent(instanceName);
+  const attempts: Array<{ url: string; method: string; body?: string }> = [
+    { url: `${base()}/chat/findChats/${inst}`, method: 'POST', body: JSON.stringify({ where: {}, skip: 0, take: limit }) },
+    { url: `${base()}/chat/findChats/${inst}`, method: 'POST', body: JSON.stringify({ where: {} }) },
+    { url: `${base()}/chat/findChats/${inst}`, method: 'GET' },
+    { url: `${base()}/chat/findContacts/${inst}`, method: 'POST', body: JSON.stringify({ where: {} }) },
+    { url: `${base()}/chat/findContacts/${inst}`, method: 'GET' },
+  ];
+
+  for (const { url, method, body } of attempts) {
+    const opts: RequestInit = { method, headers: headers(), cache: 'no-store' };
+    if (body) opts.body = body;
+    const res = await fetch(url, opts).catch(() => null);
+    if (!res?.ok) continue;
+    const json = await res.json().catch(() => null) as unknown;
+    const obj = (json ?? {}) as Record<string, unknown>;
+    const records: Array<Record<string, unknown>> = Array.isArray(json)
+      ? json as Array<Record<string, unknown>>
+      : (obj.chats as Array<Record<string, unknown>>)
+        ?? (obj.contacts as Array<Record<string, unknown>>)
+        ?? (obj.records as Array<Record<string, unknown>>)
+        ?? (obj.data as Array<Record<string, unknown>>)
+        ?? [];
+    if (!Array.isArray(records) || records.length === 0) continue;
+
+    const seen = new Set<string>();
+    const out: EvolutionChatContact[] = [];
+    for (const r of records) {
+      const jid = String(r.remoteJid ?? r.jid ?? '');
+      if (!jid || jid.includes('@g.us') || jid.includes('broadcast') || jid.includes('@newsletter')) continue;
+
+      const alt = String(r.remoteJidAlt ?? r.phoneNumber ?? '');
+      const real = [jid, alt].find((v) => v && !v.includes('@lid'));
+      const phone = real ? digitsFromJid(real) : null;
+      const lid = jid.includes('@lid') ? jid.split('@')[0] : null;
+      if (!phone && !lid) continue;
+      if (phone && phone.length < 8) continue;
+
+      const chave = phone ?? `lid:${lid}`;
+      if (seen.has(chave)) continue;
+      seen.add(chave);
+
+      const nome = r.pushName ?? r.name ?? r.profileName ?? null;
+      out.push({
+        phone: phone ?? null,
+        lid,
+        name: typeof nome === 'string' && nome.trim() && nome !== lid ? nome : (phone ?? ''),
+      });
+    }
+    if (out.length > 0) return out;
+  }
+
+  return [];
+}
