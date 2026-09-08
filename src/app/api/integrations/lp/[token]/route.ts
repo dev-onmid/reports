@@ -11,6 +11,7 @@ import {
   extractTrackingFromText, type MergedTracking,
 } from '@/lib/lead-tracking';
 import { regiaoFromPhone } from '@/lib/ddd-regioes';
+import { resolverNomesGoogle, pareceIdGoogle } from '@/lib/google-ad-resolver';
 
 /**
  * Recebe lead de site/landing page DIRETO, sem intermediário.
@@ -151,6 +152,20 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ token: str
     }
 
     // Pós-processamento best-effort: não derruba o 200 do formulário.
+
+    // O ValueTrack do Google só manda ID ({campaignid}) — não existe macro de
+    // nome, ao contrário do Meta. Traduz aqui para o CRM mostrar "Revenda
+    // Londrina Search" em vez de "22334455". Se a tradução falhar, o ID fica:
+    // rastreio com ID é pior de ler, mas continua sendo rastreio.
+    if (pareceIdGoogle(tracking.utm_campaign) || txt(c.campaignid)) {
+      const nomes = await resolverNomesGoogle(pool, origem.client_id, {
+        campaignId: txt(c.campaignid) ?? tracking.utm_campaign,
+        adgroupId: txt(c.adgroupid),
+      });
+      if (nomes?.campaign_name) tracking.utm_campaign = nomes.campaign_name;
+      if (nomes?.adgroup_name && !tracking.utm_term) tracking.utm_term = nomes.adgroup_name;
+    }
+
     const regiao = regiaoFromPhone(telefoneBruto ?? telefone ?? '');
     await applyLeadAttribution(pool, leadId, {
       tracking,
