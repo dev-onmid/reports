@@ -78,6 +78,13 @@ export function ensurePostSchema(pool: Pool): Promise<void> {
     await pool.query(`ALTER TABLE public.post_midia ADD COLUMN IF NOT EXISTS arquivo TEXT`);
     await pool.query(`ALTER TABLE public.post_midia ADD COLUMN IF NOT EXISTS duracao_seg REAL`);
 
+    // Facebook (3ª rodada): a publicação diz em quais REDES sai ('instagram' ou
+    // 'instagram,facebook') e cada alvo carrega a sua. Para rede='facebook',
+    // `ig_id` guarda o PAGE ID e `ig_username` o nome da Página — a unique
+    // (post_id, ocorrencia, ig_id) continua valendo porque os ids não colidem.
+    await pool.query(`ALTER TABLE public.post_agendado ADD COLUMN IF NOT EXISTS redes TEXT NOT NULL DEFAULT 'instagram'`);
+    await pool.query(`ALTER TABLE public.post_alvo ADD COLUMN IF NOT EXISTS rede TEXT NOT NULL DEFAULT 'instagram'`);
+
     // ⚠️ A trava estrutural contra publicar duas vezes na mesma conta na mesma
     // rodada. O claim atômico do motor protege contra ticks cruzados; esta
     // unique protege contra a fila ser montada duas vezes (retry de criação,
@@ -236,12 +243,12 @@ export function urlPublicaDaMidia(token: string, origin: string): string | null 
 export type PublicacaoRow = {
   id: string; midia_id: string | null; tipo: TipoPublicacao; legenda: string;
   modo: string; proxima_execucao: string | null; dias_semana: string | null;
-  hora: string | null; repetir_ate: string | null; client_ids: string[]; status: string;
+  hora: string | null; repetir_ate: string | null; client_ids: string[]; redes: string | null; status: string;
   criado_por: string | null; created_at: string;
 };
 
 export type AlvoRow = {
-  id: string; post_id: string; ocorrencia: string; client_id: string;
+  id: string; post_id: string; ocorrencia: string; client_id: string; rede: string;
   client_name: string | null; ig_id: string; ig_username: string | null;
   status: StatusAlvo; container_id: string | null; media_id: string | null;
   permalink: string | null; erro: string | null; tentativas: number;
@@ -253,19 +260,19 @@ export async function criarPublicacao(
   dados: {
     midiaId: string; tipo: TipoPublicacao; legenda: string; modo: 'unico' | 'recorrente';
     proxima: Date; dias: number[]; hora: string | null; ate: string | null;
-    clientIds: string[]; criadoPor?: string;
+    clientIds: string[]; redes: string[]; criadoPor?: string;
   },
   alvos: Alvo[],
 ): Promise<string> {
   await ensurePostSchema(pool);
   const { rows } = await pool.query<{ id: string }>(
     `INSERT INTO public.post_agendado
-       (midia_id, tipo, legenda, modo, proxima_execucao, dias_semana, hora, repetir_ate, client_ids, criado_por)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
+       (midia_id, tipo, legenda, modo, proxima_execucao, dias_semana, hora, repetir_ate, client_ids, redes, criado_por)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
     [
       dados.midiaId, dados.tipo, dados.legenda, dados.modo, dados.proxima.toISOString(),
       dados.dias.length ? dados.dias.join(',') : null, dados.hora, dados.ate,
-      dados.clientIds, dados.criadoPor ?? null,
+      dados.clientIds, dados.redes.join(','), dados.criadoPor ?? null,
     ],
   );
   const postId = rows[0].id;
@@ -286,12 +293,12 @@ export async function inserirAlvos(
   if (alvos.length === 0) return 0;
   const valores: unknown[] = [];
   const linhas = alvos.map((a, i) => {
-    const b = i * 6; // 6 colunas por linha — errar o passo aqui embaralha os valores entre alvos
-    valores.push(postId, ocorrencia.toISOString(), a.clientId, a.clientName, a.igId, a.username || null);
-    return `($${b + 1}, $${b + 2}, $${b + 3}, $${b + 4}, $${b + 5}, $${b + 6})`;
+    const b = i * 7; // 7 colunas por linha — errar o passo aqui embaralha os valores entre alvos
+    valores.push(postId, ocorrencia.toISOString(), a.clientId, a.clientName, a.igId, a.username || null, a.rede);
+    return `($${b + 1}, $${b + 2}, $${b + 3}, $${b + 4}, $${b + 5}, $${b + 6}, $${b + 7})`;
   });
   const { rowCount } = await pool.query(
-    `INSERT INTO public.post_alvo (post_id, ocorrencia, client_id, client_name, ig_id, ig_username)
+    `INSERT INTO public.post_alvo (post_id, ocorrencia, client_id, client_name, ig_id, ig_username, rede)
      VALUES ${linhas.join(', ')}
      ON CONFLICT (post_id, ocorrencia, ig_id) DO NOTHING`,
     valores,

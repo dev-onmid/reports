@@ -62,6 +62,41 @@ const CONTAS = [
   ok(/encontrado/.test(r.descartados[0].motivo), 'com motivo proprio');
 }
 
+// ------------------------------------------------------- montarAlvos multi-rede
+
+const CONTAS_FB = [
+  { clientId: 'a', clientName: 'Alfa', igId: '111', username: 'alfa', pageId: 'p111', pageName: 'Pagina Alfa' },
+  { clientId: 'b', clientName: 'Beta', igId: '222', username: 'beta', pageId: null,  pageName: null },
+  // Delta compartilha a PAGINA da Alfa (e a conta IG tambem)
+  { clientId: 'd', clientName: 'Delta', igId: '111', username: 'alfa', pageId: 'p111', pageName: 'Pagina Alfa' },
+];
+
+{
+  const r = montarAlvos(['a'], CONTAS_FB, ['instagram', 'facebook']);
+  eq(r.alvos.length, 2, 'cliente com pagina gera IG + FB');
+  eq(r.alvos.map(x => x.rede).sort(), ['facebook', 'instagram'], 'um alvo por rede');
+  const fb = r.alvos.find(x => x.rede === 'facebook');
+  eq(fb.igId, 'p111', 'alvo FB carrega o PAGE id na coluna de conta');
+  eq(fb.username, 'Pagina Alfa', 'e o nome da Pagina como rotulo');
+}
+{
+  const r = montarAlvos(['b'], CONTAS_FB, ['instagram', 'facebook']);
+  eq(r.alvos.length, 1, 'cliente sem pagina publica so no IG');
+  eq(r.alvos[0].rede, 'instagram', 'o alvo que sobrou e o do IG');
+  ok(r.descartados.some(d => d.rede === 'facebook' && /P[aá]gina/.test(d.motivo)),
+     'o FB dele e descartado COM motivo, nao silenciosamente');
+}
+{
+  const r = montarAlvos(['a', 'd'], CONTAS_FB, ['instagram', 'facebook']);
+  eq(r.alvos.length, 2, 'pagina compartilhada deduplica no FB igual ao IG');
+  eq(r.descartados.length, 2, 'os dois descartes (IG e FB do Delta) aparecem');
+}
+{
+  const r = montarAlvos(['a'], CONTAS_FB);
+  eq(r.alvos.length, 1, 'default continua so Instagram (compat)');
+  eq(r.alvos[0].rede, 'instagram', 'com a rede preenchida');
+}
+
 // ------------------------------------------------------------ proximaOcorrencia
 
 {

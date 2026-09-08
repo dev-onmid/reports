@@ -1,86 +1,3 @@
-## Landing page (GA4) no dashboard — integração Google Analytics (2026-09-04)
-
-Pedido do Matheus, depois do rastreio via GTM das LPs do Cinfel (`~/Documents/lps`,
-`PROMPT-RASTREIO-GTM.md`): "fazer uma integração no reports e na aba dashboard
-aparecer essas informações". As LPs mandam eventos padronizados ao GA4
-(`click_whatsapp`, `click_telefone`, `click_cta`, `view_secao`, `lead_form`) com
-parâmetros registrados como dimensões personalizadas (posicao, peca, veiculo,
-material, espessura, cta_id...). O reports passa a LER isso.
-
-- **Conexão Google tipo `ga4`** (`/api/auth/google?type=ga4`, escopo
-  `analytics.readonly`): `GoogleAccountType` ganhou `'ga4'`; no painel de
-  Integrações o card "Website / Analytics" (que era decorativo) abre esse OAuth,
-  há botão "Analytics" no painel de contas Google, seção própria e "Ver
-  propriedades" (`/api/google/ga4-properties?connectionId=` → Admin API
-  `accountSummaries`, cache 4h). Conectar com a conta ONMID que enxerga as
-  propriedades dos clientes (uma conexão serve todos).
-- **Vínculo por cliente**: platform `ga4` em `client_account_links`
-  (`account_id` = id numérico da propriedade, `account_name` = nome). Diálogo
-  `Ga4Content` em `link-accounts-dialog.tsx`, `PlatformId` ganhou `'ga4'`
-  (rótulo "Google Analytics (LP)", cor #F9AB00). Cliente com 2 LPs vincula 2
-  propriedades — a rota soma.
-- **`GET /api/clients/[id]/ga4?period&dateFrom&dateTo`** (nova): mesma régua de
-  período do metrics (`resolveMetaPeriod` → `faixasDoPeriodo`, com período
-  ANTERIOR do mesmo tamanho colado antes). Por propriedade, 5 + 5 `runReport`
-  em paralelo na Data API v1beta (totais e eventos com DUAS faixas — o GA4 põe
-  `dateRange` como primeira coluna; origens `sessionSource/sessionMedium` com
-  `keyEvents`; `customEvent:posicao`; diário; e um relatório por detalhe
-  `customEvent:{peca,veiculo,material,espessura,cta_id}` — detalhe que a LP não
-  preenche simplesmente não volta). Sem vínculo → `{ga4:null}`; token quebrado →
-  `aviso`. Cache 15 min. ⚠️ Dimensão personalizada precisa existir na
-  propriedade (o `gtag`/prompt já registra as 9); sem ela o relatório daquele
-  detalhe falha sozinho (`runReport` devolve null, os outros seguem).
-- **`src/lib/ga4-landing.ts`**: parse/consolidação puros (testáveis) +
-  `relatorioLanding`. `taxaContato = contatos/sessoes`, contatos = whatsapp +
-  telefone + lead_form (click_cta NÃO conta — é abrir modal/ficha).
-- **Dashboard** (`dashboard/page.tsx`): estado `ga4ByClient` buscado junto com
-  o metrics; bloco `PremiumPanel` "Landing page" (`Ga4LandingPanel`, em
-  `components/dashboard/ga4-landing-panel.tsx`) logo após o Google Ads, um por
-  cliente selecionado que tenha vínculo, escondido no `modoFood` e para quem não
-  tem GA4. KPIs com delta vs anterior, chips por LP quando há mais de uma, "De
-  onde vieram", "Onde clicam para falar" e os detalhes que existirem. Não entrou
-  no registry de cards/RGL de propósito: é uma lâmina fixa como a do Google Ads.
-- ✅ Verificado: **12 asserts** (`scratchpad/test-ga4-landing.mjs`: faixas
-  atual/anterior, dateRange nas duas faixas, contatos/taxa sem NaN, origens
-  vazias → "(direto)", `(not set)` fora, AAAAMMDD → ISO, consolidação de 2 LPs
-  com detalhes distintos); tsc limpo; **Data API real** nas 2 propriedades do
-  Cinfel aceitou todos os nomes de dimensão/métrica (zeros porque o GA4 leva até
-  24–48h para processar); harness no browser (`scratchpad/harness-ga4.tsx`,
-  cenários cheio/vazio/loading/aviso, 1280 e 375px). ⚠️ Não exercitado: o OAuth
-  `type=ga4` ponta a ponta e o diálogo de vínculo com banco (dev sem
-  `DATABASE_URL`) — validar em produção: Integrações → Website/Analytics →
-  conectar → vincular as propriedades do Cinfel → dashboard.
-
-## Google Ads — ações de conversão para o rastreio das LPs (2026-09-04)
-
-Pedido do Matheus: o rastreio via GTM das landing pages (`~/Documents/lps`, prompt
-`PROMPT-RASTREIO-GTM.md`) precisa do par ID de conversão (AW-) + rótulo do Google
-Ads de cada cliente, e criar a ação quando não existe — sem abrir o painel. O login
-do Google Ads de cada cliente e o developer token já vivem aqui, então a porta é aqui.
-
-- **`GET/POST /api/integrations/google-conversoes`** (nova): máquina→máquina, header
-  `x-onmid-secret` = `MAKE_INTEGRATION_SECRET` (mesmo contrato das outras
-  `/api/integrations/*`; registrada em `INTEGRATION_PREFIXES` no proxy). GET
-  `?cliente=<id ou nome>` lista as ações WEB ativas; POST `{cliente, nome, categoria?,
-  contagem?, valor?}` cria — **idempotente por nome** (normalizado sem caixa/acento):
-  se já existe, devolve a existente com `criada:false`. Nome ambíguo → 409 com
-  candidatos; sem Google Ads vinculado → 404 com dica.
-- **`src/lib/google-conversion-actions.ts`** (nova, testável sem rede): o AW- e o
-  rótulo **só existem dentro do `tag_snippets[].event_snippet`** (`send_to`) — e com
-  conversão entre contas o AW- é o da MCC, não o customer id; por isso o parse vem do
-  snippet, nunca da conta. Prefere o snippet HTML ao AMP. Criação: WEBPAGE, ENABLED,
-  LEAD, uma por clique, `primaryForGoal:true` (entra nos lances), janela 30d, BRL.
-- Reaproveita `resolveGoogleAdsAccess`/`gadsSearch`/`DEV_TOKEN` de
-  `google-offline-conversions.ts` (agora exportados) — mesmo caminho de token/MCC da Luna.
-- Consumidor: `lps/bin/gtag ads <cliente>` e `gtag ads criar <cliente> "<nome>"`.
-- ✅ Verificado: 12 asserts (`scratchpad/test-google-conversoes.mjs`: formatos reais de
-  `send_to`, snippet ausente, HTML > AMP, cross-account, idempotência por nome, payload
-  do mutate com valor/categoria/contagem); tsc limpo; `next build` compilou (⚠️ rodado em worktree
-  com node_modules por symlink: Turbopack recusa o symlink e `--webpack` acusa 3 erros de tipo
-  PRÉ-EXISTENTES do validador legado em `crm/page.tsx`, `api/crm/disparos/audience` e
-  `api/users` — arquivos não tocados; o CI Turbopack de `main` passa). ⚠️ Só produção exercita a
-  Google Ads API de verdade — validar com `gtag ads <cliente>` após o deploy.
-
 @AGENTS.md
 
 ## Trocar de cliente pelo avatar do cabeçalho (2026-08-31)
@@ -123,6 +40,19 @@ Decisões do Matheus: 1ª versão só **foto** (vídeo/Reels exigiria volume na 
 - ✅ **PROVADO EM PRODUÇÃO, ponta a ponta**: post agendado pela ROTA REAL (sessão forjada, cliente de teste `client-teste-publicacoes` com link IG direto pra @onmidmkt) para 2,5 min à frente, e **o cron publicou sozinho** — https://www.instagram.com/p/Dchh7m7oJQL/ (`media_id 18106306316582310`), com permalink gravado no alvo. Cliente de teste removido do banco depois; o registro em `post_alvo` fica (histórico honesto). ⚠️ Pegos no caminho: (1) **worker faltava em `CRON_PREFIXES`** — o cron recebia `{"error":"Não autenticado."}` do PROXY, não da rota; cron novo = SEMPRE lembrar do proxy (commit `0899388`); (2) cookie forjado usa campo **`uid`** e `exp` em SEGUNDOS (formato de `session.ts` — o forjador com `userId`/ms toma 401).
 - **Cron na VPS**: `* * * * * ... /api/publicacoes/worker?secret=... # onmid-cron` (15ª linha; backup em `/root/crontab-backup-antes-publicacoes.txt`).
 - ⚠️ Ainda não exercitado com dado real: story (o caminho `media_type=STORIES` está escrito mas nenhum story real saiu ainda) e recorrência de série em produção — testar agendando um story recorrente na @onmidmkt antes de liberar pros gestores.
+
+### Facebook (2026-09-07, 3ª rodada do planejador)
+
+Matheus notou que "só posta no Instagram" — era o combinado da 1ª rodada, e virou o gatilho da perna do FB. Checkbox **"Publicar também na Página do Facebook"**, só em **feed com imagem** (story/vídeo de Página são endpoints próprios, fora de propósito).
+
+- **⚠️ Fila NOSSA, não o `scheduled_publish_time` nativo** — mudança consciente sobre o plano original: o nativo exige ≥10 min de antecedência, não serve para recorrência e criaria um segundo caminho de status. O worker publica a foto na hora certa via `POST /{page_id}/photos` (`url` + `message` — em foto de Página o texto é `message`, não `caption`), UMA chamada, sem container/poll.
+- **`post_agendado.redes`** ('instagram' | 'instagram,facebook') e **`post_alvo.rede`**. ⚠️ Para rede='facebook', `ig_id` guarda o **PAGE ID** e `ig_username` o nome da Página — a coluna é uma só e a `rede` diz como ler; a unique `(post_id, ocorrencia, ig_id)` continua valendo porque os ids não colidem.
+- **`social_monitor_snapshots` ganhou `page_id`/`page_name`** (o `getIgAccount` sempre soube, só não era gravado). A tela continua lendo só do snapshot; cliente sem `page_id` mapeado é **descartado do FB com motivo** ("atualize o monitor de redes") em vez de virar alvo natimorto. ⚠️ Popular exige uma rodada do refresh do monitor após o deploy.
+- **`montarAlvos(clientIds, contas, redes)`**: dedupe por `(rede, chave)` — a mesma Página no IG e no FB são DUAS publicações legítimas; repetida DENTRO da rede continua descartada. Compat: default `['instagram']`.
+- **Motor**: a recusa "a conta mudou desde o agendamento" compara `pageId` (FB) ou `igId` (IG) conforme `alvo.rede`. `media_id` do FB = `post_id` da foto; permalink via `permalink_url`.
+- ⚠️ Publicar no IG **não replica** na Página — o "postar nos dois" do Business Suite é recurso do painel deles; por isso a Página é alvo próprio.
+- ✅ Verificado: 60 asserts; tsc + build limpos; browser (checkbox some no story/vídeo, "2 no Instagram + 1 no Facebook", descarte com motivo, confirmação em seções, payload `redes:['instagram','facebook']`).
+- ✅ **PROVADO EM PRODUÇÃO**: foto de teste publicada na Página "Onmid" pela fila real (cron) e **apagada via API em seguida** — Página, ao contrário do IG, TEM `DELETE /{post_id}`, o que tornou o teste de risco zero.
 
 ### Reels + vídeo (2026-08-26, 2ª rodada do planejador)
 
@@ -1805,3 +1735,17 @@ Reforma total da tela (a versão anterior — 4 abas Upload/Webhook/Cronograma/P
 
 - Ao final de cada sessão, atualize este arquivo com decisões novas, tecnologias adicionadas ou mudanças importantes feitas hoje.
 - Sempre use Sonnet 4.6 para raciocínio e Haiku 4.5 para tarefas simples.
+
+## Cinfel — o campo personalizado era lido; faltava REFAZER o backfill (2026-09-01)
+
+Print do Matheus: 01–31/08 R$ 23.322,60 no Agendor contra menos na dash; julho R$ 62.674,26 contra menos de R$ 5.000. "Estamos classificando por meio de campos adicionais Origem do lead."
+
+- **A dashboard estava FIEL ao banco** (jul R$ 4.897,73 / 4 ganhos, ago R$ 19.460,83 / 6). O defeito era de IMPORTAÇÃO.
+- **⚠️⚠️ ERRO MEU DE DIAGNÓSTICO, registrado de propósito**: afirmei que a API v3 não devolve campo personalizado de negócio. **Falso.** Testei `?include=`, `?fields=`, `?with=customFields`, `/deals/{id}/custom_fields` — e nenhum é o parâmetro certo. O parâmetro é **`withCustomFields=true`**, que o commit `2cc023e` já documentava e que `agendorFetch` já injeta em toda URL de `/deals`. Medido: `/deals/44049085?withCustomFields=true` → `{"origem_do_lead":{"id":70870,"value":"Google/Site"}}`. **Lição: antes de concluir que a API não expõe algo, ler o nosso próprio código — ele já pode ter resolvido.**
+- **Os ids do `filtro_origens` misturam duas listas, e está CERTO assim**: `2593340`/`2598060` são origem nativa (Redes sociais, Site/Google) e `70866`/`70867`/`70870` são opções do campo personalizado `#47784 "Origem do lead"` (Instagram, Facebook, Google/Site). `passaFiltros` compara contra os dois (`pessoa?.origemLeadId` e `negocio.origemPersonalizadaId`).
+- **A causa real era `backfill_concluido = true`**: negócio recusado no backfill NUNCA é reexaminado — a reconciliação só busca `updatedAtGt`. O commit `2cc023e` (25/08) consertou a leitura para negócio NOVO, mas o histórico de julho ficou congelado no critério antigo. Por isso agosto (parcialmente pós-deploy) estava bem mais perto que julho.
+- **Cobertura medida na conta (1.905 negócios)**: 702 com campo personalizado preenchido. Nos 123 ganhos de jul+ago: 36 Google/Site, 11 Mercado Livre, 11 Cliente da carteira, 8 Instagram, 3 Facebook, 50 vazios. **Passam no filtro 47 ganhos · R$ 115.800,56** (jul 24 · R$ 52.580,68; ago 23 · R$ 63.219,88) — contra 10 ganhos / R$ 24 mil que estavam gravados.
+- ⚠️ A origem NATIVA praticamente não é usada por eles: só 8 dos 123 ganhos a têm. Quem carrega a atribuição é o campo personalizado.
+- **Correção aplicada**: `backfill_pagina = 1, backfill_concluido = FALSE` para a Cinfel; o cron de 15 min re-varre as ~20 páginas com a leitura nova. Idempotente (dedupe por `agendor:{dealId}`) e **backfill nunca dispara conversão**, então não polui Meta/Google.
+- ⚠️ **Rótulo duplicado a resolver**: a origem nativa e a personalizada nomeiam o mesmo canal de formas diferentes ("Site/Google" × "Google/Site", "Redes sociais" × "Instagram"/"Facebook") — no donut de canais viram fatias separadas. Fundir precisa de decisão do Matheus.
+- ⚠️ Regra que vale para qualquer cliente: **mudar critério de filtro exige refazer o backfill**, senão a correção só vale daqui pra frente.

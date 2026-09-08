@@ -40,6 +40,13 @@ export const STORY_SEM_SUPORTE =
 export type TipoPublicacao = 'feed' | 'story' | 'reels';
 
 /**
+ * Onde publicar. ⚠️ Facebook só existe para FEED com imagem: publicar no IG
+ * NÃO replica na Página (o "postar nos dois" do Business Suite é recurso do
+ * painel deles), então a Página é um alvo próprio, com fila própria.
+ */
+export type Rede = 'instagram' | 'facebook';
+
+/**
  * Limites de VÍDEO da Meta. Reels: 3s a 15 min; story em vídeo: até 60s.
  * Validar aqui evita subir 80 MB para a Meta recusar no container.
  */
@@ -58,6 +65,9 @@ export type ContaCliente = {
   clientName: string;
   igId: string | null;
   username: string | null;
+  /** Página do Facebook dona da conta — só quem tem pode receber o post no FB. */
+  pageId?: string | null;
+  pageName?: string | null;
 };
 
 export type Agendamento =
@@ -72,12 +82,17 @@ export type PublicacaoInput = {
   agendamento: Agendamento;
 };
 
-export type Alvo = { clientId: string; clientName: string; igId: string; username: string };
+/**
+ * Um destino de publicação. Para `rede='facebook'`, `igId` carrega o PAGE ID e
+ * `username` o nome da Página — é assim que a linha vai pro banco (a coluna é
+ * uma só; a `rede` diz como ler).
+ */
+export type Alvo = { clientId: string; clientName: string; igId: string; username: string; rede: Rede };
 
 export type MontagemAlvos = {
   alvos: Alvo[];
   /** Clientes pedidos que ficaram de fora, com o motivo em português. */
-  descartados: { clientId: string; clientName: string; motivo: string }[];
+  descartados: { clientId: string; clientName: string; motivo: string; rede?: Rede }[];
 };
 
 // ------------------------------------------------------------------- Montagem
@@ -94,38 +109,48 @@ export type MontagemAlvos = {
  * que falha depois. Descobrir na hora da criação é o único momento em que dá para
  * corrigir; descobrir no worker vira um erro silencioso no histórico.
  */
-export function montarAlvos(clientIds: string[], contas: ContaCliente[]): MontagemAlvos {
+export function montarAlvos(
+  clientIds: string[], contas: ContaCliente[], redes: Rede[] = ['instagram'],
+): MontagemAlvos {
   const porCliente = new Map(contas.map(c => [c.clientId, c]));
   const alvos: Alvo[] = [];
   const descartados: MontagemAlvos['descartados'] = [];
-  const igVistos = new Map<string, string>(); // igId -> clientName que ficou com ele
+  // Chave inclui a REDE: a mesma Página pode aparecer no IG e no FB, e aí são
+  // duas publicações legítimas — o dedupe é contra repetir DENTRO da rede.
+  const vistos = new Map<string, string>();
 
-  for (const id of [...new Set(clientIds)]) {
-    const conta = porCliente.get(id);
-    if (!conta) {
-      descartados.push({ clientId: id, clientName: id, motivo: 'cliente não encontrado' });
-      continue;
+  for (const rede of [...new Set(redes)]) {
+    for (const id of [...new Set(clientIds)]) {
+      const conta = porCliente.get(id);
+      if (!conta) {
+        // Uma vez só, não uma por rede — viraria eco na tela.
+        if (rede === redes[0]) descartados.push({ clientId: id, clientName: id, motivo: 'cliente não encontrado' });
+        continue;
+      }
+      const chave = rede === 'facebook' ? (conta.pageId ?? null) : conta.igId;
+      const nome = rede === 'facebook' ? (conta.pageName ?? '') : (conta.username ?? '');
+      if (!chave) {
+        descartados.push({
+          clientId: id, clientName: conta.clientName, rede,
+          motivo: rede === 'facebook'
+            ? 'sem Página do Facebook mapeada — atualize o monitor de redes'
+            : 'sem conta de Instagram vinculada',
+        });
+        continue;
+      }
+      const dono = vistos.get(`${rede}:${chave}`);
+      if (dono) {
+        descartados.push({
+          clientId: id, clientName: conta.clientName, rede,
+          motivo: rede === 'facebook'
+            ? `mesma Página "${nome || chave}" já incluída por ${dono}`
+            : `mesma conta @${nome || chave} já incluída por ${dono}`,
+        });
+        continue;
+      }
+      vistos.set(`${rede}:${chave}`, conta.clientName);
+      alvos.push({ clientId: id, clientName: conta.clientName, igId: chave, username: nome, rede });
     }
-    if (!conta.igId) {
-      descartados.push({
-        clientId: id, clientName: conta.clientName,
-        motivo: 'sem conta de Instagram vinculada',
-      });
-      continue;
-    }
-    const dono = igVistos.get(conta.igId);
-    if (dono) {
-      descartados.push({
-        clientId: id, clientName: conta.clientName,
-        motivo: `mesma conta @${conta.username ?? conta.igId} já incluída por ${dono}`,
-      });
-      continue;
-    }
-    igVistos.set(conta.igId, conta.clientName);
-    alvos.push({
-      clientId: id, clientName: conta.clientName,
-      igId: conta.igId, username: conta.username ?? '',
-    });
   }
   return { alvos, descartados };
 }

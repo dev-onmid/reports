@@ -149,6 +149,12 @@ export async function ensureSocialMonitorSchema(pool: Pool) {
     // snapshot total e ignora since/until — comparar dois totais daria sempre 0.
     `ALTER TABLE public.social_monitor_snapshots
        ADD COLUMN IF NOT EXISTS followers_gained_28d BIGINT`,
+    // Página do Facebook dona da conta IG — o Planejador de Publicações usa
+    // para publicar no feed da Página sem resolver a Graph a cada abertura.
+    `ALTER TABLE public.social_monitor_snapshots
+       ADD COLUMN IF NOT EXISTS page_id TEXT`,
+    `ALTER TABLE public.social_monitor_snapshots
+       ADD COLUMN IF NOT EXISTS page_name TEXT`,
     `CREATE INDEX IF NOT EXISTS social_monitor_last_post_idx
        ON public.social_monitor_snapshots (last_post_at)`,
   ];
@@ -171,6 +177,8 @@ export type SocialSnapshot = {
   avgComments: number | null;
   reach28d: number | null;
   followersGained28d: number | null;
+  pageId: string | null;
+  pageName: string | null;
   error: string | null;
 };
 
@@ -197,7 +205,7 @@ function emptySnapshot(clientId: string, error: string | null): SocialSnapshot {
     clientId, igId: null, igUsername: null, profilePicture: null, followers: null,
     lastPostAt: null, lastPostPermalink: null, lastPostThumbnail: null, lastPostCaption: null,
     posts30d: null, avgLikes: null, avgComments: null, reach28d: null,
-    followersGained28d: null, error,
+    followersGained28d: null, pageId: null, pageName: null, error,
   };
 }
 
@@ -258,6 +266,8 @@ export async function fetchClientSnapshot(target: SnapshotTarget): Promise<Socia
     igUsername: ig.username,
     profilePicture: ig.picture ?? null,
     followers: ig.followers ?? null,
+    pageId: ig.pageId ?? null,
+    pageName: ig.pageName ?? null,
   };
 
   try {
@@ -305,8 +315,9 @@ export async function upsertSnapshot(pool: Pool, snap: SocialSnapshot): Promise<
     `INSERT INTO public.social_monitor_snapshots (
        client_id, ig_id, ig_username, profile_picture_url, followers,
        last_post_at, last_post_permalink, last_post_thumbnail, last_post_caption,
-       posts_30d, avg_likes, avg_comments, reach_28d, followers_gained_28d, error, fetched_at
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,now())
+       posts_30d, avg_likes, avg_comments, reach_28d, followers_gained_28d,
+       page_id, page_name, error, fetched_at
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,now())
      ON CONFLICT (client_id) DO UPDATE SET
        ig_id = EXCLUDED.ig_id,
        ig_username = EXCLUDED.ig_username,
@@ -321,13 +332,15 @@ export async function upsertSnapshot(pool: Pool, snap: SocialSnapshot): Promise<
        avg_comments = EXCLUDED.avg_comments,
        reach_28d = EXCLUDED.reach_28d,
        followers_gained_28d = EXCLUDED.followers_gained_28d,
+       page_id = EXCLUDED.page_id,
+       page_name = EXCLUDED.page_name,
        error = EXCLUDED.error,
        fetched_at = now()`,
     [
       snap.clientId, snap.igId, snap.igUsername, snap.profilePicture, snap.followers,
       snap.lastPostAt, snap.lastPostPermalink, snap.lastPostThumbnail, snap.lastPostCaption,
       snap.posts30d, snap.avgLikes, snap.avgComments, snap.reach28d,
-      snap.followersGained28d, snap.error,
+      snap.followersGained28d, snap.pageId, snap.pageName, snap.error,
     ],
   );
 }

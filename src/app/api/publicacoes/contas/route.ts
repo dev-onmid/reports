@@ -20,7 +20,7 @@ export async function GET(_req: NextRequest) {
   try {
     const { rows } = await pool.query(
       `SELECT c.id AS client_id, c.name AS client_name,
-              s.ig_id, s.ig_username, s.profile_picture_url, s.followers
+              s.ig_id, s.ig_username, s.profile_picture_url, s.followers, s.page_id, s.page_name
          FROM public.clients c
          LEFT JOIN public.social_monitor_snapshots s ON s.client_id = c.id
         WHERE COALESCE(c.status, 'Ativo') NOT IN ('Arquivado', 'Inativo')
@@ -35,6 +35,8 @@ export async function GET(_req: NextRequest) {
         username: r.ig_username || null,
         picture: r.profile_picture_url || null,
         followers: r.followers ?? null,
+        pageId: r.page_id || null,
+        pageName: r.page_name || null,
       })),
     });
   } catch {

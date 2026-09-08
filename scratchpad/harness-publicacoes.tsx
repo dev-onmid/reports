@@ -13,7 +13,7 @@ import { createRoot } from 'react-dom/client';
 import PublicacoesPage from '../src/app/(dashboard)/ferramentas/publicacoes/page';
 
 const CONTAS = [
-  { clientId: 'c1', clientName: 'Cinfel', igId: '111', username: 'cinfeloffroad', picture: null, followers: 13622 },
+  { clientId: 'c1', clientName: 'Cinfel', igId: '111', username: 'cinfeloffroad', picture: null, followers: 13622, pageId: 'pg111', pageName: 'Cinfel Off Road' },
   { clientId: 'c2', clientName: 'La Pasta Gialla', igId: '222', username: 'lapastagiallamaringa', picture: null, followers: 8100 },
   { clientId: 'c3', clientName: 'Istambul', igId: '333', username: 'istambulgastrobar', picture: null, followers: 6068 },
   // Mesma conta da Cinfel: precisa cair no dedupe de `montarAlvos`.

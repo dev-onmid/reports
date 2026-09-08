@@ -56,11 +56,16 @@ export async function materializarDevidas(pool: Pool, agora: Date): Promise<numb
       // RE-resolve a conta a cada rodada: o pageToken é temporário e o cliente
       // pode ter trocado de conta desde que a série foi criada.
       const contas = await resolverContasIg(pool, pub.client_ids, getFreshMetaToken);
+      const redes = (pub.redes ?? 'instagram').split(',').filter(r => r === 'instagram' || r === 'facebook');
       const alvos: Alvo[] = [];
       for (const clientId of pub.client_ids) {
         const c = contas.get(clientId);
-        if (c?.igId) {
-          alvos.push({ clientId, clientName: '', igId: c.igId, username: c.username ?? '' });
+        if (!c) continue;
+        if (redes.includes('instagram') && c.igId) {
+          alvos.push({ clientId, clientName: '', igId: c.igId, username: c.username ?? '', rede: 'instagram' });
+        }
+        if (redes.includes('facebook') && c.pageId) {
+          alvos.push({ clientId, clientName: '', igId: c.pageId, username: c.pageName ?? '', rede: 'facebook' });
         }
       }
       criados += await inserirAlvos(pool, pub.id, ocorrencia, alvos);
@@ -157,12 +162,39 @@ export async function publicarAlvo(
   const contas = await resolverContasIg(pool, [alvo.client_id], getFreshMetaToken);
   const resolvida = contas.get(alvo.client_id);
   if (!resolvida?.pageToken) return falhar(pool, alvo, 'não consegui resolver a conta do Instagram deste cliente');
-  if (resolvida.igId !== alvo.ig_id) {
+  const esperado = alvo.rede === 'facebook' ? resolvida.pageId : resolvida.igId;
+  if (esperado !== alvo.ig_id) {
     // ⚠️ Recusa de propósito: a conta mudou entre o agendamento e a publicação.
     // Publicar na conta nova sem ninguém saber seria pior que não publicar.
-    return falhar(pool, alvo, `a conta mudou desde o agendamento (@${resolvida.username}) — recrie a publicação`);
+    const nome = alvo.rede === 'facebook' ? resolvida.pageName : `@${resolvida.username}`;
+    return falhar(pool, alvo, `a conta mudou desde o agendamento (${nome}) — recrie a publicação`);
   }
   const pageToken = resolvida.pageToken;
+
+  // ── Facebook: foto no feed da Página, em UMA chamada — sem container/poll.
+  // O texto vai em `message` (não `caption`), e só imagem passa: vídeo de
+  // Página é outro endpoint e ficou fora desta rodada de propósito.
+  if (alvo.rede === 'facebook') {
+    if (ehVideo) return falhar(pool, alvo, 'vídeo na Página do Facebook ainda não é suportado — publique só no Instagram');
+    const fbBody = new URLSearchParams({ url: midiaUrl, access_token: pageToken });
+    if (pub.legenda.trim()) fbBody.set('message', pub.legenda);
+    const foto = await graph(`${GRAPH}/${alvo.ig_id}/photos`, { method: 'POST', body: fbBody });
+    const erroFb = erroDaGraph(foto);
+    if (erroFb || !foto.id) return falhar(pool, alvo, erroFb ?? 'a Meta não confirmou a foto na Página');
+    const postId = String(foto.post_id ?? foto.id);
+    let permalinkFb: string | null = null;
+    try {
+      const perma = await graph(`${GRAPH}/${postId}?fields=permalink_url&access_token=${pageToken}`);
+      permalinkFb = typeof perma.permalink_url === 'string' ? perma.permalink_url : null;
+    } catch { /* link é conveniência */ }
+    await pool.query(
+      `UPDATE public.post_alvo
+          SET status = 'publicado', media_id = $2, permalink = $3, erro = NULL, publicado_em = NOW()
+        WHERE id = $1`,
+      [alvo.id, postId, permalinkFb],
+    );
+    return { alvo: alvo.id, conta: alvo.ig_username ?? alvo.ig_id, ok: true, mediaId: postId };
+  }
 
   // 1) Container (reaproveita o de um tick anterior que não chegou a publicar).
   let containerId = alvo.container_id;

@@ -8,7 +8,7 @@ import { cn } from '@/lib/utils';
 import { prepararImagem, avisoProporcao, lerMetadadosVideo, type ImagemPreparada, type VideoLido } from '@/lib/post-imagem';
 import {
   LEGENDA_MAX, STORY_SEM_SUPORTE, montarAlvos, proximasOcorrencias, resumoAgendamento,
-  validarPublicacao, type Agendamento, type ContaCliente, type TipoPublicacao,
+  validarPublicacao, type Agendamento, type ContaCliente, type Rede, type TipoPublicacao,
 } from '@/lib/post-agendamento';
 import {
   AlertTriangle, AtSign, CalendarClock, CheckCircle2, ChevronLeft, Clock, ImagePlus,
@@ -32,6 +32,7 @@ type Publicacao = {
 
 type AlvoDetalhe = {
   id: string; client_id: string; client_name: string | null; ig_username: string | null; ig_id: string;
+  rede?: string;
   status: string; erro: string | null; permalink: string | null;
   publicado_em: string | null; ocorrencia: string;
 };
@@ -261,6 +262,7 @@ function ModalCriar({
   // publicação referencia o `midiaId` devolvido pelo upload.
   const [video, setVideo] = useState<(VideoLido & { midiaId: string }) | null>(null);
   const [enviandoVideo, setEnviandoVideo] = useState(false);
+  const [facebookTambem, setFacebookTambem] = useState(false);
   const [erroImagem, setErroImagem] = useState('');
   const [selecionados, setSelecionados] = useState<string[]>([]);
   const [busca, setBusca] = useState('');
@@ -286,9 +288,18 @@ function ModalCriar({
     ? { modo: 'unico', quando: inputParaIso(quando) }
     : { modo: 'recorrente', dias, hora, ate: ate || null };
 
+  // Derivado, nunca resetado por efeito: trocar para story/reels simplesmente
+  // torna o checkbox inaplicável — o estado dele fica guardado para quando voltar.
+  const redes: Rede[] = facebookTambem && tipo === 'feed' && !video
+    ? ['instagram', 'facebook'] : ['instagram'];
+
   const { alvos, descartados } = useMemo(
-    () => montarAlvos(selecionados, contas), [selecionados, contas],
+    () => montarAlvos(selecionados, contas, redes),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [selecionados, contas, redes.join(',')],
   );
+  const alvosIg = alvos.filter(a => a.rede === 'instagram');
+  const alvosFb = alvos.filter(a => a.rede === 'facebook');
 
   const erros = useMemo(
     () => validarPublicacao(
@@ -348,7 +359,7 @@ function ModalCriar({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          tipo, legenda, clientIds: alvos.map(a => a.clientId), agendamento,
+          tipo, legenda, clientIds: [...new Set(alvos.map(a => a.clientId))], agendamento, redes,
           midiaId: video?.midiaId,
           imagem: !video && imagem
             ? { dataUrl: imagem.dataUrl, largura: imagem.largura, altura: imagem.altura }
@@ -459,6 +470,16 @@ function ModalCriar({
                     <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" /> {STORY_SEM_SUPORTE}
                   </p>
                 )}
+                {tipo === 'feed' && !video && (
+                  <label className="mt-2 flex cursor-pointer items-center gap-2 text-sm">
+                    <input
+                      type="checkbox" checked={facebookTambem}
+                      onChange={e => setFacebookTambem(e.target.checked)}
+                    />
+                    Publicar também na Página do <span className="font-bold">Facebook</span>
+                    <span className="text-xs text-muted-foreground">(mesma imagem e legenda)</span>
+                  </label>
+                )}
               </div>
 
               {/* Legenda (feed/reels — story não tem) */}
@@ -484,7 +505,7 @@ function ModalCriar({
               <div>
                 <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
                   <span className="text-xs font-bold uppercase text-muted-foreground">
-                    Contas ({alvos.length} selecionada{alvos.length === 1 ? '' : 's'})
+                    Contas ({alvosIg.length} no Instagram{alvosFb.length > 0 ? ` + ${alvosFb.length} no Facebook` : ''})
                   </span>
                   <div className="flex gap-2">
                     <button
@@ -638,13 +659,25 @@ function ModalCriar({
 
               <div>
                 <div className="mb-1.5 text-xs font-bold uppercase text-muted-foreground">
-                  Vai publicar em {alvos.length} conta{alvos.length === 1 ? '' : 's'}
+                  Vai publicar em {alvos.length} destino{alvos.length === 1 ? '' : 's'}
                 </div>
                 <div className="max-h-48 space-y-1 overflow-y-auto rounded-md border border-border p-2">
-                  {alvos.map(a => (
-                    <div key={a.clientId} className="flex items-center justify-between px-1 py-1 text-sm">
+                  {alvosIg.length > 0 && (
+                    <div className="px-1 pb-0.5 text-[10px] font-bold uppercase text-muted-foreground">Instagram</div>
+                  )}
+                  {alvosIg.map(a => (
+                    <div key={`ig-${a.clientId}`} className="flex items-center justify-between px-1 py-1 text-sm">
                       <span className="truncate">{a.clientName}</span>
                       <span className="shrink-0 text-xs text-muted-foreground">@{a.username || a.igId}</span>
+                    </div>
+                  ))}
+                  {alvosFb.length > 0 && (
+                    <div className="px-1 pb-0.5 pt-1.5 text-[10px] font-bold uppercase text-sky-400">Facebook (Página)</div>
+                  )}
+                  {alvosFb.map(a => (
+                    <div key={`fb-${a.clientId}`} className="flex items-center justify-between px-1 py-1 text-sm">
+                      <span className="truncate">{a.clientName}</span>
+                      <span className="shrink-0 text-xs text-muted-foreground">{a.username || a.igId}</span>
                     </div>
                   ))}
                 </div>
@@ -753,7 +786,12 @@ function ModalDetalhe({ id, onFechar }: { id: string; onFechar: () => void }) {
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-1.5">
                         <span className="truncate font-medium">{a.client_name || a.client_id}</span>
-                        <span className="text-xs text-muted-foreground">@{a.ig_username ?? a.ig_id}</span>
+                        {a.rede === 'facebook' ? (
+                          <span className="rounded bg-sky-500/15 px-1 py-0.5 text-[10px] font-bold uppercase text-sky-400">FB</span>
+                        ) : null}
+                        <span className="text-xs text-muted-foreground">
+                          {a.rede === 'facebook' ? (a.ig_username ?? a.ig_id) : `@${a.ig_username ?? a.ig_id}`}
+                        </span>
                       </div>
                       <div className={cn('text-xs', STATUS_COR[a.status] ?? 'text-muted-foreground')}>
                         {a.status === 'publicado'

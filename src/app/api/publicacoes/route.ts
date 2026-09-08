@@ -3,7 +3,7 @@ import { makeServerPool } from '@/lib/server-db';
 import { webhookOrigin } from '@/lib/evolution-api';
 import {
   montarAlvos, proximaOcorrencia, STORY_VIDEO_MAX_SEG, validarPublicacao,
-  type Agendamento, type ContaCliente, type PublicacaoInput, type TipoPublicacao,
+  type Agendamento, type ContaCliente, type PublicacaoInput, type Rede, type TipoPublicacao,
 } from '@/lib/post-agendamento';
 import { criarPublicacao, infoDaMidia, listarPublicacoes, salvarMidia, urlPublicaDaMidia } from '@/lib/post-server';
 
@@ -37,6 +37,8 @@ type Body = {
   imagem?: { dataUrl?: string; largura?: number; altura?: number };
   /** Vídeo já enviado por /api/publicacoes/upload — o JSON não comporta 80 MB. */
   midiaId?: string;
+  /** Onde publicar. Default ['instagram']; 'facebook' só com feed + imagem. */
+  redes?: string[];
 };
 
 export async function POST(req: NextRequest) {
@@ -46,6 +48,14 @@ export async function POST(req: NextRequest) {
     const tipo: TipoPublicacao = body.tipo === 'story' ? 'story' : body.tipo === 'reels' ? 'reels' : 'feed';
     const legenda = String(body.legenda ?? '');
     const clientIds = Array.isArray(body.clientIds) ? body.clientIds.filter(x => typeof x === 'string') : [];
+    const redes: Rede[] = (Array.isArray(body.redes) ? body.redes : ['instagram'])
+      .filter((r): r is Rede => r === 'instagram' || r === 'facebook');
+    if (redes.length === 0) redes.push('instagram');
+    // ⚠️ Facebook só em FEED com imagem: story de Página e vídeo de Página são
+    // endpoints próprios e ficaram fora — recusar aqui evita alvo natimorto.
+    if (redes.includes('facebook') && tipo !== 'feed') {
+      return Response.json({ ok: false, error: 'Facebook só está disponível para post de feed (imagem).' }, { status: 400 });
+    }
     const ag = body.agendamento;
 
     if (!ag || (ag.modo !== 'unico' && ag.modo !== 'recorrente')) {
@@ -91,7 +101,7 @@ export async function POST(req: NextRequest) {
     // Contas vêm do snapshot; o motor re-resolve e recusa divergência na hora
     // de publicar (ver `publicarAlvo`).
     const { rows } = await pool.query(
-      `SELECT c.id AS client_id, c.name AS client_name, s.ig_id, s.ig_username
+      `SELECT c.id AS client_id, c.name AS client_name, s.ig_id, s.ig_username, s.page_id, s.page_name
          FROM public.clients c
          LEFT JOIN public.social_monitor_snapshots s ON s.client_id = c.id
         WHERE c.id = ANY($1)`,
@@ -100,9 +110,10 @@ export async function POST(req: NextRequest) {
     const contas: ContaCliente[] = rows.map(r => ({
       clientId: r.client_id, clientName: r.client_name ?? r.client_id,
       igId: r.ig_id || null, username: r.ig_username || null,
+      pageId: r.page_id || null, pageName: r.page_name || null,
     }));
 
-    const { alvos, descartados } = montarAlvos(clientIds, contas);
+    const { alvos, descartados } = montarAlvos(clientIds, contas, redes);
     const input: PublicacaoInput = { tipo, legenda, midiaId: 'pendente', clientIds, agendamento: ag };
     const erros = validarPublicacao(input, alvos, new Date());
     if (erros.length) return Response.json({ ok: false, error: erros[0], erros, descartados }, { status: 400 });
@@ -119,7 +130,8 @@ export async function POST(req: NextRequest) {
       dias: ag.modo === 'recorrente' ? ag.dias : [],
       hora: ag.modo === 'recorrente' ? ag.hora : null,
       ate: ag.modo === 'recorrente' ? ag.ate : null,
-      clientIds: alvos.map(a => a.clientId),
+      clientIds: [...new Set(alvos.map(a => a.clientId))],
+      redes,
       criadoPor,
     }, alvos);
 
