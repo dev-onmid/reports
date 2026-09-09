@@ -115,12 +115,18 @@ export async function trocarCodePorTokenLongo(code: string, redirectUri: string)
   }
 
   const longoRes = await fetch(
-    `${IG_GRAPH}/access_token?grant_type=ig_exchange_token&client_secret=${creds.secret}&access_token=${curto.access_token}`,
+    `${IG_GRAPH}/access_token?grant_type=ig_exchange_token&client_secret=${creds.secret}` +
+    `&access_token=${encodeURIComponent(curto.access_token)}`,
     { signal: AbortSignal.timeout(20_000) },
   );
-  const longo = await longoRes.json() as { access_token?: string; expires_in?: number; error?: { message?: string } };
+  const longoTexto = await longoRes.text();
+  let longo: { access_token?: string; expires_in?: number; error?: { message?: string } } = {};
+  try { longo = JSON.parse(longoTexto); } catch { /* corpo não-JSON vai pro log abaixo */ }
   if (!longo.access_token) {
-    throw new Error(longo.error?.message ?? 'falha ao trocar pelo token de 60 dias');
+    // Log com o passo e o corpo cru — sem isso o erro da Meta chega genérico
+    // na tela e não dá para saber QUAL chamada falhou (visto em 09/09).
+    console.error('[instagram-direct] troca pelo token longo falhou:', longoRes.status, longoTexto.slice(0, 400));
+    throw new Error(`troca pelo token de 60 dias: ${longo.error?.message ?? `HTTP ${longoRes.status}`}`);
   }
 
   return {
@@ -133,12 +139,17 @@ export async function trocarCodePorTokenLongo(code: string, redirectUri: string)
 /** Perfil da conta autorizada. `user_id` é o id usado nos paths de publicação. */
 export async function buscarPerfilDireto(token: string): Promise<{ igUserId: string; username: string }> {
   const res = await fetch(
-    `${IG_GRAPH}/v21.0/me?fields=user_id,username&access_token=${token}`,
+    `${IG_GRAPH}/v21.0/me?fields=user_id,username&access_token=${encodeURIComponent(token)}`,
     { signal: AbortSignal.timeout(15_000) },
   );
-  const j = await res.json() as { user_id?: string | number; id?: string; username?: string; error?: { message?: string } };
+  const texto = await res.text();
+  let j: { user_id?: string | number; id?: string; username?: string; error?: { message?: string } } = {};
+  try { j = JSON.parse(texto); } catch { /* corpo não-JSON vai pro log abaixo */ }
   const igUserId = j.user_id ?? j.id;
-  if (!igUserId) throw new Error(j.error?.message ?? 'não consegui ler o perfil da conta');
+  if (!igUserId) {
+    console.error('[instagram-direct] leitura do perfil falhou:', res.status, texto.slice(0, 400));
+    throw new Error(`leitura do perfil: ${j.error?.message ?? `HTTP ${res.status}`}`);
+  }
   return { igUserId: String(igUserId), username: j.username ?? '' };
 }
 
