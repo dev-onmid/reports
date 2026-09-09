@@ -129,12 +129,15 @@ export async function trocarCodePorTokenLongo(code: string, redirectUri: string)
     signal: AbortSignal.timeout(20_000),
   });
   const curto = await curtoRes.json() as {
-    access_token?: string; permissions?: string[] | string;
+    access_token?: string; permissions?: string[] | string; expires_in?: number;
     error_message?: string; error?: { message?: string };
   };
   if (!curto.access_token) {
     throw new Error(curto.error_message ?? curto.error?.message ?? 'o Instagram não devolveu o token');
   }
+  // Diagnóstico sem vazar o token: a validade declarada aqui decide o caminho abaixo.
+  console.log('[instagram-direct] token do code ok; expires_in =', curto.expires_in ?? '(ausente)',
+    '| permissions =', curto.permissions);
 
   const longoRes = await tokenCall('access_token', {
     grant_type: 'ig_exchange_token',
@@ -143,17 +146,32 @@ export async function trocarCodePorTokenLongo(code: string, redirectUri: string)
   });
   let longo: { access_token?: string; expires_in?: number; error?: { message?: string } } = {};
   try { longo = JSON.parse(longoRes.texto); } catch { /* corpo não-JSON vai pro log abaixo */ }
+  const permissions = Array.isArray(curto.permissions) ? curto.permissions.join(',') : String(curto.permissions ?? '');
+
   if (!longo.access_token) {
-    // Log com o passo e o corpo cru — sem isso o erro da Meta chega genérico
-    // na tela e não dá para saber QUAL chamada falhou (visto em 09/09).
     console.error('[instagram-direct] troca pelo token longo falhou:', longoRes.status, longoRes.texto.slice(0, 400));
+    // ⚠️ "Unsupported request" (IGApiException 100) com token VÁLIDO = a troca
+    // não se aplica a este token (medido em 09/09: GET e POST recusados, mas o
+    // mesmo endpoint aceita token-lixo com erro de parse — ou seja, a recusa é
+    // do GRANT, não do método). Nesses apps o token do code já nasce com a
+    // validade final — segue com ele e deixa a renovação do worker cuidar do
+    // resto. Qualquer outro erro continua sendo fatal.
+    if (/unsupported request/i.test(longoRes.texto)) {
+      const expiresIn = curto.expires_in ?? 60 * 86400;
+      console.log('[instagram-direct] usando o token do code direto; validade declarada (s):', expiresIn);
+      return {
+        accessToken: curto.access_token,
+        expiraEm: new Date(Date.now() + expiresIn * 1000).toISOString(),
+        permissions,
+      };
+    }
     throw new Error(`troca pelo token de 60 dias: ${longo.error?.message ?? `HTTP ${longoRes.status}`}`);
   }
 
   return {
     accessToken: longo.access_token,
     expiraEm: new Date(Date.now() + (longo.expires_in ?? 60 * 86400) * 1000).toISOString(),
-    permissions: Array.isArray(curto.permissions) ? curto.permissions.join(',') : String(curto.permissions ?? ''),
+    permissions,
   };
 }
 
