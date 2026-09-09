@@ -26,6 +26,9 @@ const PUBLIC_PREFIXES = [
   '/api/auth/me',
   // OAuth: o Google redireciona o browser pra cá sem cookie nosso garantido.
   '/api/auth/google/callback',
+  // OAuth do Instagram Login (conta SEM Página): mesmo caso — o Instagram
+  // redireciona sem cookie; a credencial é o `state` assinado com HMAC.
+  '/api/auth/instagram/callback',
 
   // Portal do cliente — o token na URL é a credencial.
   '/api/portal/',

@@ -12,7 +12,7 @@ import {
 } from '@/lib/post-agendamento';
 import {
   AlertTriangle, AtSign, CalendarClock, CheckCircle2, ChevronLeft, Clock, ImagePlus,
-  Loader2, Plus, RefreshCw, Search, Send, Trash2, XCircle,
+  Link2, Loader2, Plus, RefreshCw, Search, Send, Trash2, XCircle,
 } from 'lucide-react';
 
 /**
@@ -79,6 +79,23 @@ export default function PublicacoesPage() {
   const [criando, setCriando] = useState(false);
   const [detalhe, setDetalhe] = useState<string | null>(null);
   const [filtro, setFiltro] = useState<'todas' | 'agendadas' | 'publicadas'>('todas');
+  const [conectando, setConectando] = useState(false);
+  const [oauthMsg, setOauthMsg] = useState<{ ok: boolean; texto: string } | null>(null);
+
+  // Retorno do OAuth do Instagram (conta sem Página): o callback redireciona
+  // para cá com ?ig_conectado= ou ?ig_erro=. Lê uma vez e limpa a URL.
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search);
+    const ok = q.get('ig_conectado');
+    const erro = q.get('ig_erro');
+    if (ok) setOauthMsg({ ok: true, texto: `Conta @${ok} conectada — já aparece na lista para publicar.` });
+    else if (erro) setOauthMsg({ ok: false, texto: `O Instagram recusou a conexão: ${erro}` });
+    if (ok || erro) {
+      q.delete('ig_conectado'); q.delete('ig_erro');
+      const resto = q.toString();
+      window.history.replaceState({}, '', window.location.pathname + (resto ? `?${resto}` : ''));
+    }
+  }, []);
 
   const carregar = useCallback(async () => {
     setCarregando(true);
@@ -118,11 +135,27 @@ export default function PublicacoesPage() {
           <Button variant="outline" size="sm" onClick={() => void carregar()} disabled={carregando}>
             <RefreshCw className={cn('w-4 h-4', carregando && 'animate-spin')} />
           </Button>
+          <Button variant="outline" size="sm" onClick={() => setConectando(true)}>
+            <Link2 className="w-4 h-4 mr-1" /> Conectar IG sem Página
+          </Button>
           <Button size="sm" onClick={() => setCriando(true)}>
             <Plus className="w-4 h-4 mr-1" /> Nova publicação
           </Button>
         </div>
       </div>
+
+      {oauthMsg && (
+        <div className={cn(
+          'flex items-start gap-2 rounded-lg border p-3 text-sm',
+          oauthMsg.ok ? 'border-[#55f52f]/30 bg-[#55f52f]/10' : 'border-red-500/30 bg-red-500/10',
+        )}>
+          {oauthMsg.ok
+            ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-[#55f52f]" />
+            : <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-400" />}
+          <span className="flex-1">{oauthMsg.texto}</span>
+          <button className="text-muted-foreground hover:text-foreground" onClick={() => setOauthMsg(null)}>✕</button>
+        </div>
+      )}
 
       <div className="flex gap-2">
         {([['todas', 'Todas'], ['agendadas', 'Agendadas'], ['publicadas', 'Publicadas']] as const).map(([k, l]) => (
@@ -162,6 +195,9 @@ export default function PublicacoesPage() {
         </div>
       )}
 
+      {conectando && (
+        <ModalConectarIg contas={contas} onFechar={() => setConectando(false)} />
+      )}
       {criando && (
         <ModalCriar
           contas={contas}
@@ -246,6 +282,63 @@ function CardPublicacao({ p, onAbrir }: { p: Publicacao; onAbrir: () => void }) 
         )}
       </div>
     </div>
+  );
+}
+
+// -------------------------------------------------------- Modal conectar IG
+
+/**
+ * Conexão DIRETA via Instagram Login — o caminho para conta SEM Página do
+ * Facebook (restrição de vínculo). Quem clica precisa ter a SENHA do Instagram
+ * da conta: o login acontece no próprio Instagram, nunca aqui.
+ */
+function ModalConectarIg({ contas, onFechar }: { contas: ContaCliente[]; onFechar: () => void }) {
+  const [clienteId, setClienteId] = useState('');
+
+  return (
+    <Dialog open onOpenChange={o => { if (!o) onFechar(); }}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="font-bebas text-2xl uppercase tracking-wide">
+            Conectar Instagram sem Página
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3 text-sm">
+          <p className="text-muted-foreground">
+            Para conta de Instagram que <strong className="text-foreground">não tem (ou não pode ter) Página
+            do Facebook vinculada</strong>. Você será levado ao login do Instagram — entre com a conta
+            do próprio cliente e autorize. A conta precisa ser <strong className="text-foreground">profissional</strong> (Business ou Creator).
+          </p>
+          <div>
+            <div className="mb-1.5 text-xs font-bold uppercase text-muted-foreground">Cliente</div>
+            <select
+              value={clienteId}
+              onChange={e => setClienteId(e.target.value)}
+              className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm"
+            >
+              <option value="">Escolha o cliente…</option>
+              {contas.map(c => (
+                <option key={c.clientId} value={c.clientId}>
+                  {c.clientName}{c.direto ? ` — já conectado (@${c.username})` : ''}
+                </option>
+              ))}
+            </select>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Cliente já conectado? Conectar de novo substitui a conta — use para reconectar quando o acesso expirar.
+          </p>
+        </div>
+        <div className="flex justify-end gap-2 border-t border-border pt-3">
+          <Button variant="outline" size="sm" onClick={onFechar}>Cancelar</Button>
+          <Button
+            size="sm" disabled={!clienteId}
+            onClick={() => { window.location.href = `/api/auth/instagram/start?clientId=${encodeURIComponent(clienteId)}`; }}
+          >
+            <Link2 className="mr-1 h-4 w-4" /> Ir para o login do Instagram
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -545,6 +638,9 @@ function ModalCriar({
                             on ? s.filter(x => x !== c.clientId) : [...s, c.clientId])}
                         />
                         <span className="min-w-0 flex-1 truncate text-sm">{c.clientName}</span>
+                        {c.direto && (
+                          <span className="shrink-0 rounded bg-[#55f52f]/15 px-1 py-0.5 text-[9px] font-bold uppercase text-[#55f52f]" title="Conectada via Instagram Login, sem Página">direto</span>
+                        )}
                         <span className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
                           <AtSign className="h-3 w-3" />{c.username ?? c.igId}
                         </span>
@@ -555,6 +651,12 @@ function ModalCriar({
                 {descartados.length > 0 && (
                   <p className="mt-1 text-xs text-amber-400">
                     {descartados.length} fora: {descartados.map(d => `${d.clientName} (${d.motivo})`).join('; ')}
+                  </p>
+                )}
+                {contas.some(c => c.diretoErro) && (
+                  <p className="mt-1 flex items-start gap-1 text-xs text-red-400">
+                    <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+                    Conexão direta expirada em: {contas.filter(c => c.diretoErro).map(c => c.clientName).join(', ')} — reconecte em &quot;Conectar IG sem Página&quot;.
                   </p>
                 )}
               </div>

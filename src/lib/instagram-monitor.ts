@@ -15,6 +15,12 @@ export type ResolvedIgAccount = {
   igId: string; username: string; picture?: string; followers?: number; pageToken: string;
   /** Página do Facebook dona da conta IG — usada pelo Sorteador pra listar posts/comentários do FB. */
   pageId?: string; pageName?: string;
+  /**
+   * 'direto' = conta autorizada via Instagram Login (SEM Página): `pageToken`
+   * carrega o token DA CONTA e as chamadas vão para graph.instagram.com.
+   * Ausente/'pagina' = caminho clássico por page token (graph.facebook.com).
+   */
+  via?: 'pagina' | 'direto';
 };
 
 const PAGE_FIELDS = 'id,name,access_token,instagram_business_account{id,username,profile_picture_url,followers_count}';
@@ -444,7 +450,24 @@ export async function resolverContasIg(
   clientIds: string[],
   getFreshToken: (conn: ConnRow) => Promise<string>,
 ): Promise<Map<string, ResolvedIgAccount | null>> {
-  const insumos = await resolverInsumosMeta(pool, clientIds, getFreshToken);
+  // Conta com conexão DIRETA (Instagram Login, sem Página) vence: autorização
+  // explícita da própria conta > heurística por Página — e nem gasta chamada
+  // na Graph do Facebook.
+  const { contasDiretas } = await import('@/lib/instagram-direct');
+  const diretas = await contasDiretas(pool, clientIds).catch(() => new Map());
+  const saidaDireta = new Map<string, ResolvedIgAccount | null>();
+  for (const [clientId, conta] of diretas) {
+    saidaDireta.set(clientId, {
+      igId: conta.igUserId,
+      username: conta.username ?? conta.igUserId,
+      pageToken: conta.accessToken,
+      via: 'direto',
+    });
+  }
+  const restantes = clientIds.filter(id => !saidaDireta.has(id));
+  if (restantes.length === 0) return saidaDireta;
+
+  const insumos = await resolverInsumosMeta(pool, restantes, getFreshToken);
   const cache = new Map<string, Promise<ResolvedIgAccount | null>>();
   const saida = new Map<string, ResolvedIgAccount | null>();
 
@@ -460,5 +483,6 @@ export async function resolverContasIg(
     }
     saida.set(ins.clientId, await cache.get(ins.cacheKey)!);
   }));
+  for (const [k, v] of saidaDireta) saida.set(k, v);
   return saida;
 }

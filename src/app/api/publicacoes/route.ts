@@ -5,6 +5,7 @@ import {
   montarAlvos, proximaOcorrencia, STORY_VIDEO_MAX_SEG, validarPublicacao,
   type Agendamento, type ContaCliente, type PublicacaoInput, type Rede, type TipoPublicacao,
 } from '@/lib/post-agendamento';
+import { ensureInstagramDirectSchema } from '@/lib/instagram-direct';
 import { criarPublicacao, infoDaMidia, listarPublicacoes, salvarMidia, urlPublicaDaMidia } from '@/lib/post-server';
 
 /**
@@ -98,11 +99,18 @@ export async function POST(req: NextRequest) {
       }, { status: 400 });
     }
 
-    // Contas vêm do snapshot; o motor re-resolve e recusa divergência na hora
-    // de publicar (ver `publicarAlvo`).
+    // Contas vêm do snapshot OU da conexão direta (Instagram Login, sem
+    // Página — a direta vence); o motor re-resolve e recusa divergência na
+    // hora de publicar (ver `publicarAlvo`).
+    await ensureInstagramDirectSchema(pool);
     const { rows } = await pool.query(
-      `SELECT c.id AS client_id, c.name AS client_name, s.ig_id, s.ig_username, s.page_id, s.page_name
+      `SELECT c.id AS client_id, c.name AS client_name,
+              COALESCE(NULLIF(d.ig_user_id, ''), s.ig_id) AS ig_id,
+              COALESCE(NULLIF(d.username, ''), s.ig_username) AS ig_username,
+              s.page_id, s.page_name
          FROM public.clients c
+         LEFT JOIN public.instagram_direct_connections d
+                ON d.client_id = c.id AND d.status = 'connected'
          LEFT JOIN public.social_monitor_snapshots s ON s.client_id = c.id
         WHERE c.id = ANY($1)`,
       [clientIds],

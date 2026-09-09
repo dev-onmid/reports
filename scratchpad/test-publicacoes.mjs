@@ -96,6 +96,15 @@ const CONTAS_FB = [
   eq(r.alvos.length, 1, 'default continua so Instagram (compat)');
   eq(r.alvos[0].rede, 'instagram', 'com a rede preenchida');
 }
+{
+  // Conta DIRETA (Instagram Login, sem Pagina): IG entra, FB explica que nao se aplica.
+  const contas = [{ clientId: 'x', clientName: 'Xis', igId: '999', username: 'xis.oficial', direto: true }];
+  const r = montarAlvos(['x'], contas, ['instagram', 'facebook']);
+  eq(r.alvos.length, 1, 'conta direta gera so o alvo do IG');
+  eq(r.alvos[0].igId, '999', 'com o ig_user_id da conexao direta');
+  ok(r.descartados.some(d => d.rede === 'facebook' && /n[aã]o se aplica/.test(d.motivo)),
+     'o FB e descartado dizendo que nao se aplica (nao manda atualizar monitor)');
+}
 
 // ------------------------------------------------------------ proximaOcorrencia
 

@@ -68,6 +68,10 @@ export type ContaCliente = {
   /** Página do Facebook dona da conta — só quem tem pode receber o post no FB. */
   pageId?: string | null;
   pageName?: string | null;
+  /** Conta autorizada via Instagram Login (sem Página do Facebook). */
+  direto?: boolean;
+  /** Conexão direta com token morto — precisa reconectar. */
+  diretoErro?: boolean;
 };
 
 export type Agendamento =
@@ -133,7 +137,9 @@ export function montarAlvos(
         descartados.push({
           clientId: id, clientName: conta.clientName, rede,
           motivo: rede === 'facebook'
-            ? 'sem Página do Facebook mapeada — atualize o monitor de redes'
+            ? (conta.direto
+                ? 'conta conectada sem Página — o Facebook não se aplica'
+                : 'sem Página do Facebook mapeada — atualize o monitor de redes')
             : 'sem conta de Instagram vinculada',
         });
         continue;

@@ -19,6 +19,10 @@ const CONTAS = [
   // Mesma conta da Cinfel: precisa cair no dedupe de `montarAlvos`.
   { clientId: 'c4', clientName: 'Cinfel Filial', igId: '111', username: 'cinfeloffroad', picture: null, followers: 13622 },
   { clientId: 'c5', clientName: 'Sem Instagram', igId: null, username: null, picture: null, followers: null },
+  // Conta SEM Pagina, conectada via Instagram Login
+  { clientId: 'c6', clientName: 'Restrita Direto', igId: '999', username: 'restrita.oficial', picture: null, followers: 500, direto: true },
+  // Conexao direta com token morto
+  { clientId: 'c7', clientName: 'Direto Expirado', igId: null, username: null, picture: null, followers: null, diretoErro: true },
 ];
 
 const PUBS = [

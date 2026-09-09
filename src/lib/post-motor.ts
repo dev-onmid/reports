@@ -2,6 +2,7 @@ import type { Pool } from 'pg';
 import { getFreshMetaToken } from '@/lib/meta-token';
 import { resolverContasIg } from '@/lib/instagram-monitor';
 import { proximaOcorrencia, TETO_META_24H, type Agendamento, type Alvo } from '@/lib/post-agendamento';
+import { renovarTokensVencendo } from '@/lib/instagram-direct';
 import {
   ensurePostSchema, infoDaMidia, inserirAlvos, publicadasNasUltimas24h, urlPublicaDaMidia,
   type AlvoRow, type PublicacaoRow,
@@ -21,6 +22,8 @@ import {
  */
 
 const GRAPH = 'https://graph.facebook.com/v21.0';
+/** Conta conectada via Instagram Login (sem Página) fala com a Graph do IG. */
+const GRAPH_IG = 'https://graph.instagram.com/v21.0';
 const MAX_TENTATIVAS = 3;
 /** Quanto tempo esperar o container ficar pronto DENTRO de um tick. */
 const POLL_MS = 18_000;
@@ -170,6 +173,9 @@ export async function publicarAlvo(
     return falhar(pool, alvo, `a conta mudou desde o agendamento (${nome}) — recrie a publicação`);
   }
   const pageToken = resolvida.pageToken;
+  // Conta direta (Instagram Login, sem Página) publica em graph.instagram.com
+  // com o token da própria conta; o resto do fluxo é idêntico.
+  const base = resolvida.via === 'direto' ? GRAPH_IG : GRAPH;
 
   // ── Facebook: foto no feed da Página, em UMA chamada — sem container/poll.
   // O texto vai em `message` (não `caption`), e só imagem passa: vídeo de
@@ -213,7 +219,7 @@ export async function publicarAlvo(
       body.set('caption', pub.legenda);
     }
 
-    const criado = await graph(`${GRAPH}/${alvo.ig_id}/media`, { method: 'POST', body });
+    const criado = await graph(`${base}/${alvo.ig_id}/media`, { method: 'POST', body });
     const erro = erroDaGraph(criado);
     if (erro || !criado.id) return falhar(pool, alvo, erro ?? 'a Meta não devolveu o container');
     containerId = String(criado.id);
@@ -224,7 +230,7 @@ export async function publicarAlvo(
   const limite = Date.now() + POLL_MS;
   let pronto = false;
   while (Date.now() < limite) {
-    const st = await graph(`${GRAPH}/${containerId}?fields=status_code,status&access_token=${pageToken}`);
+    const st = await graph(`${base}/${containerId}?fields=status_code,status&access_token=${pageToken}`);
     const code = String(st.status_code ?? '');
     if (code === 'FINISHED') { pronto = true; break; }
     if (code === 'ERROR' || code === 'EXPIRED') {
@@ -244,7 +250,7 @@ export async function publicarAlvo(
   }
 
   // 3) Publicar.
-  const publicado = await graph(`${GRAPH}/${alvo.ig_id}/media_publish`, {
+  const publicado = await graph(`${base}/${alvo.ig_id}/media_publish`, {
     method: 'POST',
     body: new URLSearchParams({ creation_id: containerId, access_token: pageToken }),
   });
@@ -254,7 +260,7 @@ export async function publicarAlvo(
   const mediaId = String(publicado.id);
   let permalink: string | null = null;
   try {
-    const p = await graph(`${GRAPH}/${mediaId}?fields=permalink&access_token=${pageToken}`);
+    const p = await graph(`${base}/${mediaId}?fields=permalink&access_token=${pageToken}`);
     permalink = typeof p.permalink === 'string' ? p.permalink : null;
   } catch { /* link é conveniência — não falhar a publicação por causa dele */ }
 
@@ -279,6 +285,9 @@ export async function processarFila(
 ): Promise<{ materializados: number; resultados: ResultadoAlvo[] }> {
   const inicio = Date.now();
   const budget = opcoes.budgetMs ?? 45_000;
+  // Token do Instagram Login dura 60 dias — renovar aqui (quase sempre 0 linhas)
+  // evita cron novo e garante que a conta sem Página nunca morre por vencimento.
+  await renovarTokensVencendo(pool).catch(err => console.error('[publicacoes] renovação IG direto', err));
   const materializados = opcoes.postId ? 0 : await materializarDevidas(pool, new Date());
 
   const { rows: alvos } = await pool.query<AlvoRow & { pub: PublicacaoRow }>(
