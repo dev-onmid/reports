@@ -80,6 +80,28 @@ export function stateVerificar(state: string, agora = Date.now()): string | null
 
 const IG_GRAPH = 'https://graph.instagram.com';
 
+/**
+ * Chamada aos endpoints de TOKEN do graph.instagram.com.
+ *
+ * ⚠️ A doc mostra GET com query params, mas na prática a Meta responde
+ * "Unsupported request - method type: get" para vários apps (visto aqui em
+ * 09/09 e em issues públicas — ex. NangoHQ/nango#5531). Tenta GET como a doc
+ * manda e, nesse erro específico, refaz como POST com corpo form-encoded.
+ */
+async function tokenCall(path: string, params: Record<string, string>): Promise<{ status: number; texto: string }> {
+  const qs = new URLSearchParams(params).toString();
+  const viaGet = await fetch(`${IG_GRAPH}/${path}?${qs}`, { signal: AbortSignal.timeout(20_000) });
+  const textoGet = await viaGet.text();
+  if (!/method type:\s*get/i.test(textoGet)) return { status: viaGet.status, texto: textoGet };
+
+  const viaPost = await fetch(`${IG_GRAPH}/${path}`, {
+    method: 'POST',
+    body: new URLSearchParams(params),
+    signal: AbortSignal.timeout(20_000),
+  });
+  return { status: viaPost.status, texto: await viaPost.text() };
+}
+
 export type TokenLongo = {
   accessToken: string;
   /** ISO do vencimento (≈60 dias). */
@@ -114,18 +136,17 @@ export async function trocarCodePorTokenLongo(code: string, redirectUri: string)
     throw new Error(curto.error_message ?? curto.error?.message ?? 'o Instagram não devolveu o token');
   }
 
-  const longoRes = await fetch(
-    `${IG_GRAPH}/access_token?grant_type=ig_exchange_token&client_secret=${creds.secret}` +
-    `&access_token=${encodeURIComponent(curto.access_token)}`,
-    { signal: AbortSignal.timeout(20_000) },
-  );
-  const longoTexto = await longoRes.text();
+  const longoRes = await tokenCall('access_token', {
+    grant_type: 'ig_exchange_token',
+    client_secret: creds.secret,
+    access_token: curto.access_token,
+  });
   let longo: { access_token?: string; expires_in?: number; error?: { message?: string } } = {};
-  try { longo = JSON.parse(longoTexto); } catch { /* corpo não-JSON vai pro log abaixo */ }
+  try { longo = JSON.parse(longoRes.texto); } catch { /* corpo não-JSON vai pro log abaixo */ }
   if (!longo.access_token) {
     // Log com o passo e o corpo cru — sem isso o erro da Meta chega genérico
     // na tela e não dá para saber QUAL chamada falhou (visto em 09/09).
-    console.error('[instagram-direct] troca pelo token longo falhou:', longoRes.status, longoTexto.slice(0, 400));
+    console.error('[instagram-direct] troca pelo token longo falhou:', longoRes.status, longoRes.texto.slice(0, 400));
     throw new Error(`troca pelo token de 60 dias: ${longo.error?.message ?? `HTTP ${longoRes.status}`}`);
   }
 
@@ -228,11 +249,12 @@ export async function renovarTokensVencendo(pool: Pool): Promise<number> {
   for (const r of rows) {
     await pool.query(`UPDATE public.instagram_direct_connections SET last_refresh_at = NOW() WHERE id = $1`, [r.id]);
     try {
-      const res = await fetch(
-        `${IG_GRAPH}/refresh_access_token?grant_type=ig_refresh_token&access_token=${r.access_token}`,
-        { signal: AbortSignal.timeout(20_000) },
-      );
-      const j = await res.json() as { access_token?: string; expires_in?: number; error?: { message?: string; code?: number } };
+      const res = await tokenCall('refresh_access_token', {
+        grant_type: 'ig_refresh_token',
+        access_token: r.access_token,
+      });
+      let j: { access_token?: string; expires_in?: number; error?: { message?: string; code?: number } } = {};
+      try { j = JSON.parse(res.texto); } catch { /* fica sem access_token e cai no ramo de erro */ }
       if (j.access_token) {
         await pool.query(
           `UPDATE public.instagram_direct_connections
