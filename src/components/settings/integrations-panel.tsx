@@ -4,18 +4,20 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   AlertCircle,
+  ArrowRight,
   Building2,
   Camera,
   ChevronDown,
+  ChevronRight,
   CheckCircle2,
-  ExternalLink,
+  HelpCircle,
+  MoreVertical,
+  Users,
   FileSpreadsheet,
-  LayoutGrid,
   Megaphone,
   MoreHorizontal,
   Plus,
   RefreshCw,
-  Sparkles,
   Trash2,
   Upload,
   X,
@@ -602,6 +604,40 @@ const LogoWebsite = ({ size = 'sm' }: { size?: 'sm' | 'lg' }) => (
     <circle cx="12" cy="12" r="10" />
     <line x1="2" y1="12" x2="22" y2="12" />
     <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+  </svg>
+);
+
+/** Google Sheets — importação de planilhas. */
+const LogoSheets = ({ size = 'sm' }: { size?: 'sm' | 'lg' }) => (
+  <svg viewBox="0 0 24 24" className={size === 'lg' ? 'w-8 h-8' : 'w-7 h-7'}>
+    <path fill="#0F9D58" d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2Z" />
+    <path fill="#087f4a" d="M14.5 2 20 7.5h-5.5V2Z" />
+    <path fill="#fff" d="M8 11h8v7H8v-7Zm1.2 1.2v1.4h2.2v-1.4H9.2Zm3.4 0v1.4h2.2v-1.4h-2.2Zm-3.4 2.6v1.4h2.2v-1.4H9.2Zm3.4 0v1.4h2.2v-1.4h-2.2Z" />
+  </svg>
+);
+
+/** Google Analytics — as barras âmbar do GA4. */
+const LogoAnalytics = ({ size = 'sm' }: { size?: 'sm' | 'lg' }) => (
+  <svg viewBox="0 0 24 24" className={size === 'lg' ? 'w-8 h-8' : 'w-7 h-7'}>
+    <rect x="15.5" y="3"  width="5" height="18" rx="2.5" fill="#F9AB00" />
+    <rect x="9.5"  y="9"  width="5" height="12" rx="2.5" fill="#E37400" />
+    <rect x="3.5"  y="14" width="5" height="7"  rx="2.5" fill="#E37400" opacity=".75" />
+  </svg>
+);
+
+/** Leadlovers. */
+const LogoLeadlovers = ({ size = 'sm' }: { size?: 'sm' | 'lg' }) => (
+  <svg viewBox="0 0 24 24" className={size === 'lg' ? 'w-8 h-8' : 'w-7 h-7'}>
+    <path d="M12 2.6 20.5 7v10L12 21.4 3.5 17V7L12 2.6Z" fill="none" stroke="#F43F5E" strokeWidth="1.9" strokeLinejoin="round" />
+    <path d="M12 15.6c-1.9-1.4-3.4-2.6-3.4-4.1a1.9 1.9 0 0 1 3.4-1.2 1.9 1.9 0 0 1 3.4 1.2c0 1.5-1.5 2.7-3.4 4.1Z" fill="#F43F5E" />
+  </svg>
+);
+
+/** ClickUp. */
+const LogoClickUp = ({ size = 'sm' }: { size?: 'sm' | 'lg' }) => (
+  <svg viewBox="0 0 24 24" className={size === 'lg' ? 'w-8 h-8' : 'w-7 h-7'}>
+    <path d="M3.4 17.3 6.6 14.9c1.4 1.9 3 2.8 4.7 2.8 1.7 0 3.2-.9 4.6-2.7l3.2 2.4c-2 2.7-4.5 4.1-7.8 4.1-3.2 0-5.8-1.4-7.9-4.2Z" fill="#49CCF9" />
+    <path d="M11.3 6.6 5.7 11.5 3.1 8.5 11.3 1.4l8.2 7.1-2.6 3-5.6-4.9Z" fill="#FD71AF" />
   </svg>
 );
 
@@ -2236,7 +2272,7 @@ function SpreadsheetImportPanel() {
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type IntegrationId = 'meta-ads' | 'google-ads' | 'google-my-business' | 'website' | 'leadlovers' | 'clickup';
+type IntegrationId = 'meta-ads' | 'google-ads' | 'google-my-business' | 'website' | 'spreadsheet' | 'leadlovers' | 'clickup';
 
 type Integration = {
   id: IntegrationId;
@@ -2250,58 +2286,67 @@ const BASE_INTEGRATIONS: Integration[] = [
   {
     id: 'meta-ads',
     name: 'Meta Ads',
-    description: 'Sincronize campanhas, leads e métricas dos seus anúncios no Meta.',
+    description: 'Gerencie suas campanhas, leads e métricas.',
     category: 'Anúncios',
     logo: <LogoMeta size="lg" />,
   },
   {
     id: 'google-ads',
     name: 'Google Ads',
-    description: 'Importe campanhas, palavras-chave e conversões do Google Ads.',
+    description: 'Acompanhe campanhas, palavras-chave e conversões.',
     category: 'Anúncios',
     logo: <LogoGoogle size="lg" />,
   },
   {
-    id: 'google-my-business',
-    name: 'Google Meu Negócio',
-    description: 'Avaliações, buscas e desempenho do perfil da sua empresa no Google.',
-    category: 'Presença Digital',
-    logo: <LogoGoogleMyBusiness size="lg" />,
+    id: 'spreadsheet',
+    name: 'Importação de planilhas',
+    description: 'Importe e sincronize dados de campanhas, leads ou clientes.',
+    category: 'Importação',
+    logo: <LogoSheets size="lg" />,
   },
   {
     id: 'website',
     name: 'Website / Analytics',
-    description: 'Conecte o Google Analytics ou GTM para rastrear visitas e conversões.',
-    category: 'Presença Digital',
-    logo: <LogoWebsite size="lg" />,
+    description: 'Google Analytics e GTM para rastrear visitas e conversões.',
+    category: 'Analytics',
+    logo: <LogoAnalytics size="lg" />,
+  },
+  {
+    id: 'google-my-business',
+    name: 'Google Meu Negócio',
+    description: 'Avaliações, buscas e desempenho do perfil da empresa.',
+    category: 'Analytics',
+    logo: <LogoGoogleMyBusiness size="lg" />,
   },
   {
     id: 'leadlovers',
     name: 'Leadlovers',
-    description: 'Envie contatos para o Leadlovers via webhook com cronograma inteligente.',
+    description: 'Envio de contatos via webhook com cronograma inteligente.',
     category: 'Automação',
-    logo: (
-      <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-[#1a1a2e] border border-[#00a8ff]/30">
-        <span className="text-sm font-extrabold text-[#00a8ff]">LL</span>
-      </div>
-    ),
+    logo: <LogoLeadlovers size="lg" />,
   },
   {
     id: 'clickup',
     name: 'ClickUp',
-    description: 'Conecte o workspace e vincule cada cliente à sua lista de tarefas.',
-    category: 'Automação',
-    logo: (
-      <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-[#1a1a2e] border border-[#7b68ee]/40">
-        <span className="text-sm font-extrabold text-[#7b68ee]">CU</span>
-      </div>
-    ),
+    description: 'Conecte o workspace e vincule cada cliente à sua lista.',
+    category: 'Gestão',
+    logo: <LogoClickUp size="lg" />,
   },
 ];
 
-const CATEGORIES = ['Todos', 'Anúncios', 'Presença Digital', 'Automação'];
+const CATEGORIES = ['Todas', 'Anúncios', 'Analytics', 'Automação', 'Gestão', 'Importação'];
 
-function IntegrationStatusBadge({ connected }: { connected: boolean }) {
+function IntegrationStatusBadge({ connected, neutro }: { connected: boolean; neutro?: boolean }) {
+  // ⚠️ Importação de planilhas não é uma CONEXÃO (não há conta autorizada): dizer
+  // "Conectado" ali seria inventar um vínculo que não existe.
+  if (neutro) {
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background/60 px-3 py-1 text-xs font-bold text-muted-foreground">
+        <FileSpreadsheet className="h-3.5 w-3.5" />
+        Disponível
+      </span>
+    );
+  }
   return connected ? (
     <span className="inline-flex items-center gap-1.5 rounded-md border border-primary/35 bg-primary/12 px-3 py-1 text-xs font-bold text-primary shadow-[0_0_14px_rgba(85,245,47,0.14)]">
       <CheckCircle2 className="h-3.5 w-3.5" />
@@ -2326,19 +2371,34 @@ export function IntegrationsPanel() {
   const { connections: googleConns, loading: googleLoading, remove: removeGoogle, reload: reloadGoogle } = useGoogleConnections();
   const { integration: googleAdsInfo, disconnect: disconnectGoogleAds } = useGoogleAds();
 
-  const [activeCategory, setActiveCategory] = useState('Todos');
+  const [activeCategory, setActiveCategory] = useState('Todas');
   const [metaModal, setMetaModal] = useState(false);
   const [googleModal, setGoogleModal] = useState(false);
   const [googleDisplayInfo, setGoogleDisplayInfo] = useState<GoogleAdsIntegration | null>(null);
   const [selectedMetaId, setSelectedMetaId] = useState<string | null>(null);
   const [oauthBanner, setOauthBanner] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
-  const [clickupConnected, setClickupConnected] = useState(false);
+  // Painel de gestão de cada integração abre sob demanda pelo "Gerenciar" do card
+  // — a grade é a tela; sem isso, os quatro painéis empilhados voltariam a
+  // esconder o próprio catálogo.
+  const [expandedId, setExpandedId] = useState<IntegrationId | null>(null);
+  const [clickupInfo, setClickupInfo] = useState<{ workspace_name?: string; user_name?: string; linked?: number } | null>(null);
+  const [leadloversOn, setLeadloversOn] = useState(false);
+  const [comoFunciona, setComoFunciona] = useState(false);
+  const [verTodas, setVerTodas] = useState(false);
+  const clickupConnected = !!clickupInfo;
 
-  // ClickUp não tem hook próprio: um GET leve só pra decidir o selo do card.
+  // ClickUp e Leadlovers não têm hook próprio: GETs leves pro selo e pra lista
+  // de contas do card.
   useEffect(() => {
     fetch('/api/clickup/config', { headers: callerHeaders() })
       .then((r) => (r.ok ? r.json() : null))
-      .then((d) => setClickupConnected(!!d?.connection))
+      .then((d) => setClickupInfo(d?.connection
+        ? { workspace_name: d.connection.workspace_name, user_name: d.connection.user_name, linked: d.linked_clients }
+        : null))
+      .catch(() => {});
+    fetch('/api/leadlovers/config', { headers: callerHeaders() })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setLeadloversOn(!!d))
       .catch(() => {});
   }, []);
 
@@ -2432,8 +2492,58 @@ export function IntegrationsPanel() {
     }
   }
 
+  // Contas REAIS já carregadas pelos hooks — nada de fetch novo só pra desenhar
+  // o card. Integração sem conta mostra o convite, não um número inventado.
+  type Conta = { id: string; nome: string; sub: string; logo?: React.ReactNode };
+  function accountsFor(id: IntegrationId): { length: number; itens: Conta[]; rotulo: string; vazio: string } {
+    // Rótulo pronto: 'workspace' é masculino e 'conta'/'planilha' femininos —
+    // montar por concatenação dava "1 workspace conectada".
+    const rot = (n: number, um: string, varios: string) => (n === 0 ? '' : `${n} ${n === 1 ? um : varios}`);
+    const g = (tipo: string): Conta[] =>
+      googleConns.filter((c) => c.accountType === tipo)
+        .map((c) => ({ id: c.id, nome: c.displayName || c.email, sub: c.email }));
+
+    switch (id) {
+      case 'meta-ads':
+        return { length: metaConns.length, itens: metaConns.map((c) => ({ id: c.id, nome: c.label || c.userName, sub: `ID: ${c.userId}` })),
+          rotulo: rot(metaConns.length, 'conta conectada', 'contas conectadas'), vazio: 'Conecte sua conta Meta e sincronize campanhas e leads.' };
+      case 'google-ads': {
+        const it = g('google_ads');
+        return { length: it.length, itens: it, rotulo: rot(it.length, 'conta conectada', 'contas conectadas'),
+          vazio: 'Conecte sua conta Google e acompanhe suas campanhas.' };
+      }
+      case 'website': {
+        const it = g('ga4').map((c) => ({ ...c, sub: 'GA4' }));
+        return { length: it.length, itens: it, rotulo: rot(it.length, 'conta conectada', 'contas conectadas'),
+          vazio: 'Conecte o Google Analytics para rastrear visitas e conversões.' };
+      }
+      case 'google-my-business': {
+        const it = g('gmb');
+        return { length: it.length, itens: it, rotulo: rot(it.length, 'conta conectada', 'contas conectadas'),
+          vazio: 'Conecte o perfil da empresa no Google.' };
+      }
+      case 'clickup':
+        return { length: clickupInfo ? 1 : 0,
+          itens: clickupInfo ? [{ id: 'cu', nome: clickupInfo.workspace_name ?? 'Workspace', sub: `${clickupInfo.linked ?? 0} listas sincronizadas` }] : [],
+          rotulo: rot(clickupInfo ? 1 : 0, 'workspace conectado', 'workspaces conectados'), vazio: 'Conecte o workspace e vincule seus clientes.' };
+      case 'leadlovers':
+        return { length: leadloversOn ? 1 : 0,
+          itens: leadloversOn ? [{ id: 'll', nome: 'Leadlovers', sub: 'Webhook configurado' }] : [],
+          rotulo: rot(leadloversOn ? 1 : 0, 'conta conectada', 'contas conectadas'), vazio: 'Conecte sua conta e automatize seus leads.' };
+      case 'spreadsheet':
+        return { length: 0, itens: [], rotulo: '',
+          vazio: 'Abra para enviar uma planilha de campanhas, leads ou clientes.' };
+    }
+  }
+
+  /** Integrações cujo painel de gestão abre aqui dentro (as demais são páginas próprias). */
+  const PANEL_IDS: IntegrationId[] = ['meta-ads', 'google-ads', 'website', 'google-my-business', 'spreadsheet'];
+
+  const totalContas = BASE_INTEGRATIONS.reduce((s, i) => s + accountsFor(i.id).length, 0);
+  const integracoesComConta = BASE_INTEGRATIONS.filter((i) => accountsFor(i.id).length > 0).length;
+
   const filtered =
-    activeCategory === 'Todos'
+    activeCategory === 'Todas'
       ? BASE_INTEGRATIONS
       : BASE_INTEGRATIONS.filter((i) => i.category === activeCategory);
 
@@ -2443,11 +2553,16 @@ export function IntegrationsPanel() {
     (gmbConnected ? 1 : 0) +
     (clickupConnected ? 1 : 0);
 
+  // ⚠️ O selo tem de concordar com a lista de contas do MESMO card: Website
+  // aparecia "Desconectado" com uma conta GA4 listada ao lado, porque estas
+  // três não estavam na função. Selo e contas saem da mesma fonte.
   function isConnected(id: IntegrationId): boolean {
     if (id === 'meta-ads') return metaConnected;
     if (id === 'google-ads') return googleAdsConnected;
     if (id === 'google-my-business') return gmbConnected;
     if (id === 'clickup') return clickupConnected;
+    if (id === 'website') return googleConns.some((c) => c.accountType === 'ga4');
+    if (id === 'leadlovers') return leadloversOn;
     return false;
   }
 
@@ -2466,39 +2581,53 @@ export function IntegrationsPanel() {
         />
       )}
 
-      <div className="space-y-7">
+      <div className="space-y-6">
 
         {/* ── HEADER ─────────────────────────────────────────────────────────── */}
-        <div className="grid gap-6 xl:grid-cols-[1fr_560px] xl:items-end">
-          <div>
-            <h1 className="font-heading font-normal text-xl uppercase leading-none tracking-wide text-foreground">Integrações</h1>
-            <p className="mt-3 max-w-2xl text-base text-muted-foreground">
-              Conecte suas plataformas para sincronizar dados automaticamente e potencializar seus resultados.
-            </p>
-          </div>
-
-          <div
-            className="flex items-center justify-between gap-5 rounded-[var(--radius)] border border-violet-400/35 bg-card px-6 py-5"
-            style={{
-              background: 'radial-gradient(circle at 8% 50%, rgba(124,58,237,0.22), transparent 34%), linear-gradient(135deg, rgba(124,58,237,0.12), rgba(15,18,29,0.82))',
-              boxShadow: '0 0 34px rgba(124,58,237,0.16), inset 0 0 0 1px rgba(255,255,255,0.025)',
-            }}
-          >
-            <div className="flex items-center gap-5">
-              <span className="flex h-14 w-14 items-center justify-center rounded-full border border-primary/35 bg-primary/10 text-primary shadow-[0_0_22px_rgba(85,245,47,0.16)]">
-                <LayoutGrid className="h-6 w-6" />
-              </span>
-              <div>
-                <p className="font-heading font-normal text-xl leading-none text-foreground">{totalConnected} de 4</p>
-                <p className="mt-1 text-base font-medium text-muted-foreground">Plataformas conectadas</p>
-              </div>
+        <div>
+          <p className="flex items-center gap-2 text-sm text-muted-foreground">
+            Configurações
+            <ChevronRight className="h-3.5 w-3.5 opacity-60" />
+            <span className="text-foreground">Integrações</span>
+          </p>
+          <div className="mt-4 flex flex-wrap items-start justify-between gap-4">
+            <div>
+              {/* h2: a página de Configurações já tem o h1 — mesmo visual, sem dois h1. */}
+              <h2 className="text-3xl font-bold tracking-tight text-foreground">Integrações</h2>
+              <p className="mt-1.5 text-base text-muted-foreground">
+                Conecte suas ferramentas e centralize seus dados no ONMID.
+              </p>
             </div>
-            <button className="flex h-12 items-center gap-4 rounded-[var(--radius)] border border-border bg-background/35 px-6 text-sm font-bold text-foreground transition-colors hover:border-primary/35">
-              Ver status das integrações
-              <span className="text-xl leading-none">→</span>
-            </button>
+            <div className="flex shrink-0 items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setComoFunciona((v) => !v)}
+                className="flex h-11 items-center gap-2 rounded-xl border border-border bg-card px-5 text-sm font-semibold text-foreground transition-colors hover:border-primary/40"
+              >
+                <HelpCircle className="h-4 w-4 text-muted-foreground" />
+                Como funciona?
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveCategory('Todas')}
+                className="flex h-11 items-center gap-2 rounded-xl bg-primary px-5 text-sm font-bold text-black shadow-[0_0_18px_rgba(85,245,47,0.22)] transition-colors hover:bg-primary/90"
+              >
+                <Plus className="h-4 w-4" />
+                Adicionar integração
+              </button>
+            </div>
           </div>
         </div>
+
+        {comoFunciona && (
+          <div className="rounded-xl border border-border bg-card p-5 text-sm leading-relaxed text-muted-foreground">
+            Cada card abaixo é uma ferramenta. <strong className="text-foreground">Conectar</strong> autoriza a ONMID a
+            ler os dados daquela conta (uma vez, por login da própria plataforma).{' '}
+            <strong className="text-foreground">Gerenciar</strong> abre as contas já conectadas para adicionar, remover
+            ou revisar. Depois de conectar aqui, o vínculo de cada conta com um cliente é feito na aba
+            <strong className="text-foreground"> Clientes</strong>, pelos ícones do card.
+          </div>
+        )}
 
         {/* OAuth feedback banner */}
         {oauthBanner && (
@@ -2523,159 +2652,211 @@ export function IntegrationsPanel() {
         )}
 
         {/* ── FILTER TABS ─────────────────────────────────────────────────────── */}
-        <div className="flex gap-3 flex-wrap">
-          {CATEGORIES.map((cat) => (
-            <button
-              key={cat}
-              onClick={() => setActiveCategory(cat)}
-              className={cn(
-                'h-10 rounded-xl border px-5 text-sm font-bold transition-all',
-                activeCategory === cat
-                  ? 'border-primary/35 bg-primary/18 text-primary shadow-[0_0_16px_rgba(85,245,47,0.16)]'
-                  : 'border-border bg-card/70 text-muted-foreground hover:text-foreground'
-              )}
-            >
-              {cat}
-            </button>
-          ))}
+        <div className="flex flex-wrap items-center gap-7 border-b border-border">
+          {CATEGORIES.map((cat) => {
+            const n = cat === 'Todas'
+              ? BASE_INTEGRATIONS.length
+              : BASE_INTEGRATIONS.filter((i) => i.category === cat).length;
+            const on = activeCategory === cat;
+            return (
+              <button
+                key={cat}
+                onClick={() => setActiveCategory(cat)}
+                className={cn(
+                  'relative -mb-px flex items-center gap-2 pb-3 text-sm font-semibold transition-colors',
+                  on ? 'text-primary' : 'text-muted-foreground hover:text-foreground',
+                )}
+              >
+                {cat}
+                <span className={cn(
+                  'rounded-md px-1.5 py-0.5 text-[11px] font-bold',
+                  on ? 'bg-primary/15 text-primary' : 'bg-muted/60 text-muted-foreground',
+                )}>
+                  {n}
+                </span>
+                {on && <span className="absolute inset-x-0 -bottom-px h-0.5 rounded-full bg-primary" />}
+              </button>
+            );
+          })}
         </div>
 
         {/* ── INTEGRATION CARDS ───────────────────────────────────────────────── */}
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-5 xl:grid-cols-2">
           {filtered.map((integration) => {
             const connected = isConnected(integration.id);
-            const isWebsite = integration.id === 'website';
-            const isGMB = integration.id === 'google-my-business';
-            const isMeta = integration.id === 'meta-ads';
-            const isGoogleAds = integration.id === 'google-ads';
-            const glow = isMeta ? '#0668E1' : isGoogleAds ? '#34A853' : isGMB ? '#4285F4' : '#a78bfa';
+            const contas = accountsFor(integration.id);
+            const gerenciavel = PANEL_IDS.includes(integration.id);
 
             return (
               <div
                 key={integration.id}
-                className="relative flex min-h-[250px] flex-col gap-5 overflow-hidden rounded-[var(--radius)] border border-border bg-card p-6"
-                style={{
-                  background: `radial-gradient(circle at 16% 18%, ${glow}20, transparent 30%), linear-gradient(145deg, rgba(17,22,35,0.9), rgba(8,11,18,0.96))`,
-                  boxShadow: `0 0 28px ${glow}0f, inset 0 0 0 1px rgba(255,255,255,0.025)`,
-                }}
+                className="overflow-hidden rounded-2xl border border-border bg-card"
               >
-                {/* Top: logo + status badge */}
-                <div className="flex items-start justify-between">
-                  <div className="flex h-16 w-16 items-center justify-center">
-                    {integration.logo}
+                <div className="grid sm:grid-cols-[1.15fr_1fr]">
+                  {/* ── esquerda: identidade + ação ── */}
+                  <div className="flex flex-col p-6">
+                    <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-border bg-background/60">
+                      {integration.logo}
+                    </div>
+                    <div className="mt-4 flex flex-wrap items-center gap-2.5">
+                      <h3 className="text-lg font-bold text-foreground">{integration.name}</h3>
+                      <IntegrationStatusBadge connected={connected} neutro={integration.id === 'spreadsheet'} />
+                    </div>
+                    <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+                      {integration.description}
+                    </p>
+                    <button
+                      onClick={() => {
+                        if (!connected && integration.id !== 'spreadsheet') { handleCardAction(integration.id); return; }
+                        if (gerenciavel) { setExpandedId((cur) => (cur === integration.id ? null : integration.id)); return; }
+                        handleCardAction(integration.id);
+                      }}
+                      className="mt-auto flex h-11 w-full max-w-[190px] items-center justify-between gap-3 rounded-xl border border-border bg-background/40 px-4 text-sm font-bold text-foreground transition-colors hover:border-primary/40"
+                    >
+                      {connected || integration.id === 'spreadsheet' ? 'Gerenciar' : 'Conectar'}
+                      <ArrowRight className="h-4 w-4 text-muted-foreground" />
+                    </button>
                   </div>
-                  <IntegrationStatusBadge connected={connected} />
+
+                  {/* ── direita: contas conectadas ── */}
+                  <div className="border-t border-border p-6 sm:border-l sm:border-t-0">
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="text-sm text-muted-foreground">
+                        {contas.rotulo}
+                      </p>
+                      {contas.length > 0 && (
+                        <button
+                          type="button"
+                          title="Gerenciar contas"
+                          onClick={() => {
+                            if (gerenciavel) setExpandedId((cur) => (cur === integration.id ? null : integration.id));
+                            else handleCardAction(integration.id);
+                          }}
+                          className="-mr-1 -mt-1 rounded-lg p-1.5 text-muted-foreground transition-colors hover:text-foreground"
+                        >
+                          <MoreVertical className="h-4 w-4" />
+                        </button>
+                      )}
+                    </div>
+
+                    {contas.length > 0 ? (
+                      <ul className="mt-4 space-y-3.5">
+                        {contas.itens.slice(0, 3).map((c) => (
+                          <li key={c.id} className="flex items-center gap-3">
+                            <span className={cn(
+                              'flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-lg text-[11px] font-bold text-white',
+                              c.logo ? 'border border-border bg-background/60' : accountColorClass(c.id),
+                            )}>
+                              {c.logo ?? accountInitials(c.nome)}
+                            </span>
+                            <span className="min-w-0">
+                              <span className="block truncate text-sm font-bold text-foreground">{c.nome}</span>
+                              <span className="block truncate text-xs text-muted-foreground">{c.sub}</span>
+                            </span>
+                          </li>
+                        ))}
+                        {contas.length > 3 && (
+                          <li className="text-xs font-semibold text-muted-foreground">
+                            e mais {contas.length - 3}…
+                          </li>
+                        )}
+                      </ul>
+                    ) : (
+                      <p className="mt-4 max-w-[190px] text-sm leading-relaxed text-muted-foreground">
+                        {contas.vazio}
+                      </p>
+                    )}
+                  </div>
                 </div>
 
-                {/* Name + category + description */}
-                <div className="flex-1 space-y-3">
-                  <div className="flex items-center gap-2">
-                    <h3 className="font-heading font-normal text-xl text-foreground">{integration.name}</h3>
-                    <span className="rounded-md bg-muted/60 px-2 py-1 text-xs font-bold text-muted-foreground">
-                      {integration.category}
-                    </span>
+                {/* Painel de gestão da própria integração, aberto pelo card */}
+                {expandedId === integration.id && (
+                  <div className="border-t border-border bg-background/30 p-5">
+                    {integration.id === 'meta-ads' && (
+                      <MetaConnectionsPanel
+                        connections={metaConns}
+                        onRemove={removeMeta}
+                        onAdd={() => setMetaModal(true)}
+                        selectedId={selectedMetaId ?? metaConns[0]?.id ?? null}
+                        onSelect={setSelectedMetaId}
+                      />
+                    )}
+                    {(integration.id === 'google-ads' || integration.id === 'website' || integration.id === 'google-my-business') && (
+                      <div className="space-y-5">
+                        <GoogleConnectionsPanel
+                          connections={googleConns}
+                          onRemove={removeGoogle}
+                          onAddGoogleAds={() => openGoogleOAuth('google_ads')}
+                          onAddGMB={() => openGoogleOAuth('gmb')}
+                          onAddGa4={() => openGoogleOAuth('ga4')}
+                        />
+                        {integration.id === 'google-ads' && googleDisplayInfo?.status === 'connected' && (
+                          <GoogleAdsAssetsPanel google={googleDisplayInfo} />
+                        )}
+                      </div>
+                    )}
+                    {integration.id === 'spreadsheet' && <SpreadsheetImportPanel />}
                   </div>
-                  <p className="text-sm leading-relaxed text-muted-foreground">
-                    {integration.description}
-                  </p>
-                </div>
-
-                {/* Action button */}
-                {isWebsite ? (
-                  <button
-                    disabled
-                    className="flex h-11 w-full cursor-not-allowed items-center justify-center gap-2 rounded-lg border border-border bg-background/30 text-sm font-bold text-muted-foreground"
-                  >
-                    Conectar agora
-                    <Plus className="h-4 w-4" />
-                  </button>
-                ) : connected && isGMB ? (
-                  <button
-                    onClick={() => handleCardAction(integration.id)}
-                    className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-primary text-sm font-bold text-black shadow-[0_0_18px_rgba(85,245,47,0.22)] transition-colors hover:bg-primary/90"
-                  >
-                    Abrir painel
-                    <ExternalLink className="h-4 w-4" />
-                  </button>
-                ) : connected ? (
-                  <button
-                    onClick={() => handleCardAction(integration.id)}
-                    className="flex h-11 w-full items-center justify-center gap-3 rounded-lg border border-primary/35 bg-background/25 text-sm font-bold text-foreground transition-colors hover:bg-primary/10"
-                  >
-                    Gerenciar integração
-                    <span className="text-primary">→</span>
-                  </button>
-                ) : (
-                  <button
-                    onClick={() => handleCardAction(integration.id)}
-                    className="flex h-11 w-full items-center justify-center gap-2 rounded-lg border border-border bg-background/25 text-sm font-bold text-foreground transition-colors hover:border-primary/35"
-                  >
-                    Conectar agora
-                    <Plus className="h-4 w-4" />
-                  </button>
                 )}
               </div>
             );
           })}
         </div>
 
-        {/* ── META CONNECTIONS PANEL (new design) ─────────────────────────────── */}
-        {(metaConnected || metaLoading) && (
-          <MetaConnectionsPanel
-            connections={metaConns}
-            onRemove={removeMeta}
-            onAdd={() => setMetaModal(true)}
-            selectedId={selectedMetaId ?? metaConns[0]?.id ?? null}
-            onSelect={setSelectedMetaId}
-          />
-        )}
-
-        {/* Google connections panel */}
-        {(googleConns.length > 0 || googleLoading) && (
-          <GoogleConnectionsPanel
-            connections={googleConns}
-            onRemove={removeGoogle}
-            onAddGoogleAds={() => openGoogleOAuth('google_ads')}
-            onAddGMB={() => openGoogleOAuth('gmb')}
-            onAddGa4={() => openGoogleOAuth('ga4')}
-          />
-        )}
-
-        {/* Legacy Google Ads accounts panel — shown when google ads connected via old flow */}
-        {googleDisplayInfo && googleDisplayInfo.status === 'connected' && (
-          <GoogleAdsAssetsPanel google={googleDisplayInfo} />
-        )}
-
-        {/* ── SPREADSHEET CRM ─────────────────────────────────────────────────── */}
-        <SpreadsheetImportPanel />
-
-        {/* ── FOOTER ──────────────────────────────────────────────────────────── */}
-        <div
-          className="flex items-center justify-between gap-4 rounded-[var(--radius)] border border-border bg-card px-6 py-5"
-          style={{
-            background: 'radial-gradient(circle at 2% 50%, rgba(124,58,237,0.16), transparent 26%), rgba(15,18,29,0.86)',
-            boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.025)',
-          }}
-        >
-          <div className="flex items-center gap-3">
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-violet-500/18 text-violet-300 shadow-[0_0_18px_rgba(124,58,237,0.22)]">
-              <Sparkles className="w-5 h-5" />
+        {/* ── RODAPÉ: contas conectadas ───────────────────────────────────────── */}
+        <div className="flex flex-wrap items-center justify-between gap-5 rounded-2xl border border-border bg-card px-6 py-5">
+          <div className="flex items-center gap-4">
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-border bg-background/60 text-muted-foreground">
+              <Users className="h-5 w-5" />
             </span>
             <div>
-              <p className="text-lg font-bold">Sincronização automática e segura</p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Seus dados são sincronizados com segurança e atualizados automaticamente em segundo plano.
+              <p className="text-base font-bold text-foreground">Contas conectadas</p>
+              <p className="mt-0.5 text-sm text-muted-foreground">
+                Visualize todas as contas e workspaces conectados nas suas integrações.
               </p>
             </div>
           </div>
-          <a
-            href="#"
-            className="flex h-11 shrink-0 items-center gap-2 rounded-lg border border-border bg-background/35 px-5 text-sm font-bold text-foreground transition-colors hover:border-violet-400/40"
-          >
-            Saiba mais sobre integrações
-            <ExternalLink className="h-4 w-4" />
-          </a>
+          <div className="flex items-center gap-5">
+            <div className="flex items-center gap-2">
+              {BASE_INTEGRATIONS.filter((i) => accountsFor(i.id).length > 0).map((i) => (
+                <span key={i.id} className="flex h-8 w-8 items-center justify-center" title={i.name}>
+                  {i.logo}
+                </span>
+              ))}
+            </div>
+            <div className="text-right">
+              <p className="text-sm font-bold text-foreground">{totalContas} conta{totalContas === 1 ? '' : 's'} ativa{totalContas === 1 ? '' : 's'}</p>
+              <p className="text-xs text-muted-foreground">em {integracoesComConta} integraç{integracoesComConta === 1 ? 'ão' : 'ões'}</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setVerTodas((v) => !v)}
+              className="flex h-11 items-center gap-2 rounded-xl border border-border bg-background/40 px-5 text-sm font-bold text-foreground transition-colors hover:border-primary/40"
+            >
+              {verTodas ? 'Ocultar' : 'Ver todas'}
+              <ArrowRight className="h-4 w-4 text-muted-foreground" />
+            </button>
+          </div>
         </div>
+
+        {verTodas && (
+          <div className="grid gap-3 rounded-2xl border border-border bg-card p-5 sm:grid-cols-2 xl:grid-cols-3">
+            {BASE_INTEGRATIONS.flatMap((i) =>
+              accountsFor(i.id).itens.map((c) => (
+                <div key={`${i.id}-${c.id}`} className="flex items-center gap-3 rounded-xl border border-border bg-background/40 p-3">
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center">{i.logo}</span>
+                  <span className="min-w-0">
+                    <span className="block truncate text-sm font-bold text-foreground">{c.nome}</span>
+                    <span className="block truncate text-xs text-muted-foreground">{i.name} · {c.sub}</span>
+                  </span>
+                </div>
+              )),
+            )}
+            {totalContas === 0 && (
+              <p className="text-sm text-muted-foreground">Nenhuma conta conectada ainda.</p>
+            )}
+          </div>
+        )}
 
       </div>
     </>
