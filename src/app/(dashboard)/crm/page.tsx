@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo, useRef } from 'react';
+import { useAbaPersistida } from '@/lib/aba-persistida';
 import {
   DndContext, PointerSensor, useSensor, useSensors,
   useDraggable, useDroppable, DragOverlay,
@@ -76,6 +77,8 @@ type CrmFunnel = { id: string; name: string; created_at: string };
 type CrmStage  = { id: string; label: string; color: string; position: number; etapa_funil?: EtapaFunil | null };
 type LocalStage = CrmStage & { _isNew?: boolean };
 type CrmTab = 'leads' | 'capture' | 'chat' | 'followup' | 'attendance' | 'disparos' | 'ads';
+const ABAS_CRM = ['leads', 'capture', 'chat', 'followup', 'attendance', 'disparos', 'ads'] as const;
+const VISOES_CRM = ['list', 'kanban'] as const;
 type DatePreset = 'all' | 'today' | 'yesterday' | 'last7' | 'last14' | 'last30' | 'thisMonth' | 'lastMonth' | 'custom';
 
 type AttendanceMetrics = {
@@ -2147,14 +2150,12 @@ export default function CrmPage({ lockedClientId, embedded = false }: CrmPagePro
   });
   // Kanban é SEMPRE a visão padrão ao entrar no CRM (pedido do Matheus) —
   // o toggle pra lista vale só durante a sessão, sem persistir.
-  const [viewMode, setViewMode] = useState<'list' | 'kanban'>('kanban');
-  const [crmView, setCrmView] = useState<CrmTab>(() => {
-    if (typeof window === 'undefined') return 'leads';
-    // Chegou por deep-link de lead → abre direto na conversa, senão a aba
-    // salva venceria e o lead pedido não apareceria em lugar nenhum.
-    if (new URLSearchParams(window.location.search).get('lead')) return 'chat';
-    const v = localStorage.getItem('crm:tab');
-    return (v === 'leads' || v === 'capture' || v === 'chat' || v === 'followup' || v === 'attendance' || v === 'disparos') ? v : 'leads';
+  const [viewMode, setViewMode] = useAbaPersistida('crm-visao', VISOES_CRM, 'kanban', { param: 'visao' });
+  // Chegou por deep-link de lead → abre direto na conversa (`forcar`), senão a
+  // aba salva venceria e o lead pedido não apareceria em lugar nenhum.
+  const [crmView, setCrmView] = useAbaPersistida('crm', ABAS_CRM, 'leads', {
+    param: 'view',
+    forcar: () => (new URLSearchParams(window.location.search).get('lead') ? 'chat' : null),
   });
   const [kanbanEditLead, setKanbanEditLead] = useState<CrmLead | null>(null);
 
@@ -2273,10 +2274,6 @@ export default function CrmPage({ lockedClientId, embedded = false }: CrmPagePro
   useEffect(() => {
     try { if (clientId) localStorage.setItem('crm:last-client', clientId); } catch { /* ignore */ }
   }, [clientId]);
-
-  useEffect(() => {
-    try { localStorage.setItem('crm:tab', crmView); } catch { /* ignore */ }
-  }, [crmView]);
 
   function openClientCrm(id: string) {
     if (lockedClientId) return;

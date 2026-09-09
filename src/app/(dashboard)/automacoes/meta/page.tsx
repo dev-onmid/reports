@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 import { DictateButton } from '@/components/ui/dictate-button';
+import { useAbaPersistida } from '@/lib/aba-persistida';
 import {
   Plus, Trash2, Check, RefreshCw, AlertCircle,
   CheckCircle2, MinusCircle, ToggleLeft, ToggleRight,
@@ -108,12 +109,14 @@ function RulePill({ children, tone = 'slate' }: { children: ReactNode; tone?: 'g
   );
 }
 
+const ABAS_META = ['rules', 'logs', 'setup'] as const;
+
 export default function MetaAutomacoesPage() {
   const [automations, setAutomations] = useState<Automation[]>([]);
   const [logs, setLogs] = useState<Log[]>([]);
   const [verifyToken, setVerifyToken] = useState('');
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<'rules' | 'logs' | 'setup'>('rules');
+  const [tab, setTab] = useAbaPersistida('automacoes-meta', ABAS_META, 'rules');
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ ...EMPTY_FORM });
   const [saving, setSaving] = useState(false);

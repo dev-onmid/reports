@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { getAuthSession } from '@/lib/auth-store';
 import { effectiveField, normalizeContact, looksLikeHeaderRow, inferContactsFromRows } from '@/lib/leadlovers-fields';
+import { useAbaPersistida } from '@/lib/aba-persistida';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -1096,6 +1097,8 @@ function PainelTab({
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
+const ABAS_LEADLOVERS = ['campanhas', 'painel'] as const;
+
 type Tab = 'campanhas' | 'painel';
 
 const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
@@ -1107,7 +1110,7 @@ export default function LeadloversPage() {
   const router = useRouter();
   const userId = getAuthSession()?.userId ?? null;
 
-  const [tab, setTab] = useState<Tab>('campanhas');
+  const [tab, setTab] = useAbaPersistida('leadlovers', ABAS_LEADLOVERS, 'campanhas');
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(true);

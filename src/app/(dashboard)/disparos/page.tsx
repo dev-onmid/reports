@@ -21,6 +21,7 @@ import { DictateButton } from '@/components/ui/dictate-button';
 import { SeletorCliente } from '@/components/disparos/seletor-cliente';
 import { ConfirmarClienteModal } from '@/components/disparos/confirmar-cliente-modal';
 import type { DestinoCliente, InstanciaOrfa } from '@/lib/disparos-destinos';
+import { useAbaPersistida } from '@/lib/aba-persistida';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -2721,7 +2722,7 @@ const TABS = ['dashboard', 'clientes', 'nova', 'extrator'] as const;
 type Tab = typeof TABS[number];
 
 export default function DisparosPage() {
-  const [tab, setTab] = useState<Tab>('dashboard');
+  const [tab, setTab] = useAbaPersistida('disparos', TABS, 'dashboard');
   const [prefill, setPrefill] = useState<CampaignPrefill | null>(null);
   const [editCampaign, setEditCampaign] = useState<Campaign | null>(null);
 

@@ -46,6 +46,7 @@ import {
 } from '@/lib/payment-store';
 import { getHoliday, previousBusinessDay, formatDateBR as formatHolidayDateBR } from '@/lib/holidays';
 import { cn, formatCurrencyBRL, formatCurrencyInputBRL, parseCurrencyBRL } from '@/lib/utils';
+import { useAbaPersistida } from '@/lib/aba-persistida';
 
 // ── Ads account balance ───────────────────────────────────────────────────────
 type AdsBalancePlatform = 'meta' | 'google';
@@ -853,6 +854,8 @@ function ClientInvestmentSummary({
     </div>
   );
 }
+
+const VISOES_PAGAMENTO = ['dia', 'semana', 'mes'] as const;
 
 type ViewMode = 'dia' | 'semana' | 'mes';
 
@@ -1836,7 +1839,7 @@ export default function PagamentosPage() {
   // Opens on today / the current month. This used to be a hardcoded 2026-05-06
   // (a leftover makeDate stub), so the screen always booted in May.
   const [selectedDate, setSelectedDate] = useState(() => toISODate(new Date()));
-  const [viewMode, setViewMode] = useState<ViewMode>('mes');
+  const [viewMode, setViewMode] = useAbaPersistida('pagamentos-visao', VISOES_PAGAMENTO, 'mes', { param: 'visao' });
   const [dragOverDate, setDragOverDate] = useState<string | null>(null);
   const [expandedDates, setExpandedDates] = useState<Set<string>>(new Set());
   const [statusFilter, setStatusFilter] = useState<PaymentStatus | 'Todos'>('Todos');

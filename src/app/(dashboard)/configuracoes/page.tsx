@@ -32,6 +32,7 @@ import { IntegrationsPanel } from '@/components/settings/integrations-panel';
 import { LogsPanel } from '@/components/settings/logs-panel';
 import type { User as UserType, Permission, Team } from '@/lib/mock-data';
 import { cn } from '@/lib/utils';
+import { useAbaPersistida } from '@/lib/aba-persistida';
 import { callerHeaders } from '@/lib/auth-store';
 import { notificar } from '@/components/ui/toast';
 import { USD_TO_BRL } from '@/lib/ai-usage-config';
@@ -500,21 +501,18 @@ function InstancesTab() {
   );
 }
 
+const ABAS_CONFIG = ['usuarios', 'permissoes', 'ia', 'instancias', 'otimizador', 'integracoes', 'logs', 'legal'] as const;
+
 export default function ConfiguracoesPage() {
   const [users, setUsers] = useState<UserRow[]>([]);
   const [permissions, setPermissions] = useState<Record<string, Permission>>(initialPermissions);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'usuarios' | 'permissoes' | 'ia' | 'instancias' | 'otimizador' | 'integracoes' | 'logs' | 'legal'>(() => {
-    // Deep-link ?tab= (o popup de instâncias desconectadas aponta pra cá; os
-    // redirects de /integracoes e /logs também)
-    if (typeof window !== 'undefined') {
-      const t = new URLSearchParams(window.location.search).get('tab');
-      if (t === 'instancias' || t === 'ia' || t === 'otimizador' || t === 'permissoes' || t === 'integracoes' || t === 'logs' || t === 'legal') return t;
-    }
-    return 'usuarios';
-  });
+  // Deep-link ?tab= (o popup de instâncias desconectadas aponta pra cá; os
+  // redirects de /integracoes e /logs também) — e agora a aba também é GRAVADA
+  // na URL, então o F5 devolve o usuário onde ele estava.
+  const [activeTab, setActiveTab] = useAbaPersistida('configuracoes', ABAS_CONFIG, 'usuarios');
 
   // Otimizador WhatsApp config
   type OtimizadorWaConfig = {

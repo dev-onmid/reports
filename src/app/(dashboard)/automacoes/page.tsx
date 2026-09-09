@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import MultiChannelBuilder, { type GmailAccount, type ZapiClient, type MetaConn } from './MultiChannelBuilder';
 import type { Node, Edge } from '@xyflow/react';
+import { useAbaPersistida } from '@/lib/aba-persistida';
 
 type MCAutomation = {
   id: string;
@@ -132,6 +133,8 @@ const EVENT_DOCS = [
   },
 ];
 
+const ABAS_AUTOMACOES = ['webhooks', 'multi', 'logs', 'docs'] as const;
+
 export default function AutomacoesPage() {
   const [configs, setConfigs] = useState<WebhookConfig[]>([]);
   const [logs, setLogs] = useState<WebhookLog[]>([]);
@@ -148,7 +151,7 @@ export default function AutomacoesPage() {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [expandedDoc, setExpandedDoc] = useState<string | null>(null);
   const [expandedLog, setExpandedLog] = useState<string | null>(null);
-  const [tab, setTab] = useState<'webhooks' | 'multi' | 'logs' | 'docs'>('webhooks');
+  const [tab, setTab] = useAbaPersistida('automacoes', ABAS_AUTOMACOES, 'webhooks');
   const [builder, setBuilder] = useState<BuilderState>({ open: false });
 
   async function load() {

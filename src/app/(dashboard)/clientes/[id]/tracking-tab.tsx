@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback, useRef } from 'react';
+import { useAbaPersistida } from '@/lib/aba-persistida';
 import {
   Copy, Check, Trash2, Plus, RefreshCw, Eye, EyeOff,
   Settings2, MessageCircle, ShoppingCart, X, TrendingUp, Wifi, WifiOff, QrCode,
@@ -212,10 +213,14 @@ function SectionHeader({ icon: Icon, title, subtitle, color = 'text-muted-foregr
 
 // ── Main component ────────────────────────────────────────────────────────────
 
+const SUBABAS_RASTREIO = ['whatsapp', 'sites', 'conversoes', 'datalytics', 'agendor', 'delivery', 'heatmap', 'log'] as const;
+
 export function ClientTrackingTab({ clientId }: { clientId: string }) {
 
   // ── Sub-tab ────────────────────────────────────────────────────────────
-  const [activeTab, setActiveTab] = useState<'whatsapp' | 'sites' | 'conversoes' | 'datalytics' | 'agendor' | 'delivery' | 'heatmap' | 'log'>('whatsapp');
+  // `sub` e não `tab`: a aba do CLIENTE já ocupa `?tab=` — o mesmo nome faria
+  // uma sobrescrever a outra na URL.
+  const [activeTab, setActiveTab] = useAbaPersistida('cliente-rastreio', SUBABAS_RASTREIO, 'whatsapp', { param: 'sub' });
 
   // ── Legacy tracking ────────────────────────────────────────────────────
   const [config, setConfig] = useState<TrackingConfig>({

@@ -1,6 +1,7 @@
 "use client";
 
 import { use, useEffect, useRef, useState, type ComponentType, type CSSProperties, type PointerEvent } from 'react';
+import { useAbaPersistida } from '@/lib/aba-persistida';
 import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { mockDashboardData, mockClients, type ClientStatus, type DashboardType } from '@/lib/mock-data';
@@ -2045,13 +2046,10 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
 
   // Deep-link `?tab=` (ex.: o card de delivery do dashboard aponta pra
   // /clientes/{id}?tab=delivery). Lido uma vez no mount; inválido → default.
-  const [tab, setTab] = useState<Tab>(() => {
-    if (typeof window === 'undefined') return 'planejamento';
-    const t = new URLSearchParams(window.location.search).get('tab');
-    // Delivery e Landing Pages viraram sub-abas da Integrações (2026-08-21) —
-    // links antigos caem no lugar novo, não no default.
-    if (t === 'delivery' || t === 'lps') return 'rastreio';
-    return TABS.includes(t as Tab) ? (t as Tab) : 'planejamento';
+  // Delivery e Landing Pages viraram sub-abas da Integrações (2026-08-21) —
+  // links antigos caem no lugar novo, não no default.
+  const [tab, setTab] = useAbaPersistida('cliente', TABS, 'planejamento', {
+    normalizar: (v) => (v === 'delivery' || v === 'lps' ? 'rastreio' : v),
   });
   const [configOpen, setConfigOpen] = useState(false);
   const [linkDialogOpen, setLinkDialogOpen] = useState(false);

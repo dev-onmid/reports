@@ -19,6 +19,7 @@ import { exportReportToPdf } from '@/lib/export-report-pdf';
 import { REPORT_SECTIONS } from '@/lib/report-sections';
 import { useIsMobile } from '@/lib/use-is-mobile';
 import { notificar } from '@/components/ui/toast';
+import { useAbaPersistida } from '@/lib/aba-persistida';
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -92,10 +93,12 @@ const REPORT_COVER_OPTIONS: { id: string; url: string; dark: boolean }[] = [
 
 // ── Page ────────────────────────────────────────────────────────────────────
 
+const ABAS_RELATORIOS = ['relatorios', 'automacoes'] as const;
+
 export default function RelatoriosPage() {
   const { clients } = useClients();
   const [diagnostics, setDiagnostics] = useState<DiagnosticReport[]>([]);
-  const [tab, setTab] = useState<'relatorios' | 'automacoes'>('relatorios');
+  const [tab, setTab] = useAbaPersistida('relatorios', ABAS_RELATORIOS, 'relatorios');
 
   // Geração avulsa
   const [showGenModal, setShowGenModal] = useState(false);

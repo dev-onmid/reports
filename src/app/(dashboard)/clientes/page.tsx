@@ -41,6 +41,7 @@ import { LinkAccountsDialog } from '@/components/link-accounts-dialog';
 import { PlatformIconButton, ALL_PLATFORMS, type PlatformId } from '@/components/platform-icons';
 import { ClientAvatar } from '@/components/client-avatar';
 import { cn } from '@/lib/utils';
+import { useAbaPersistida } from '@/lib/aba-persistida';
 
 type ActivityLog = {
   id: string;
@@ -58,6 +59,8 @@ type FinancialInfo = {
   label: string; value: string; sub: string; tone: string; loading: boolean;
   channels?: ChannelBalance[];
 };
+
+const VISOES_CLIENTES = ['list', 'grid'] as const;
 
 export default function ClientesPage() {
   const {
@@ -84,7 +87,7 @@ export default function ClientesPage() {
   const [segmentFilter, setSegmentFilter]               = useState('');
   const [categories, setCategories]                     = useState<{ id: string; name: string; is_default: boolean }[]>([]);
   const [gestorFilter, setGestorFilter]           = useState('');
-  const [viewMode, setViewMode]                   = useState<'list' | 'grid'>('grid');
+  const [viewMode, setViewMode]                   = useAbaPersistida('clientes-visao', VISOES_CLIENTES, 'grid', { param: 'visao' });
   const [sortOrder, setSortOrder]                 = useState<'az' | 'za'>('az');
   // Quantos clientes aparecem por tela — preferência do usuário, salva no
   // navegador (0 = sem paginação, mostra todos). Default 20: a lista antes
