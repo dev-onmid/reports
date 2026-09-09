@@ -259,6 +259,8 @@ function StatusFilterToggle({ value, onChange }: {
 }
 
 // ── Integrations data ──────────────────────────────────────────────────────────
+// ⚠️ NÃO MONTADO (2026-09-08): alimentava a grade de contas do modal Configurar,
+// que saiu. Vínculo de conta é só pelos ícones / "Vincular Contas".
 const integracoes = [
   { id: 1, name: 'Meta Ads',            status: 'Conectado',    logo: <img src="/brand/meta-ads-logo.webp" alt="Meta Ads" className="h-8 w-10 object-contain" /> },
   { id: 2, name: 'Google Ads',          status: 'Desconectado', logo: <img src="/brand/google-ads-logo.png" alt="Google Ads" className="h-8 w-10 object-contain" /> },
@@ -1504,6 +1506,10 @@ const AD_ACCOUNT_STATUS_LABEL: Record<number, string> = {
   1: 'Ativa', 2: 'Desativada', 3: 'Não gasta', 7: 'Cancelada',
 };
 
+// ⚠️ NÃO MONTADO (2026-09-08). Vincular conta de anúncio passou a acontecer só
+// pelos ícones do cliente (lista) e pelo botão "Vincular Contas" do topo, que
+// abrem o LinkAccountsDialog — a grade de contas saiu do modal Configurar a
+// pedido do Matheus. Preservado com o motivo, no padrão do repo.
 function MetaAdsConnectionDialog({
   open,
   onClose,
@@ -1669,6 +1675,10 @@ function MetaAdsConnectionDialog({
   );
 }
 
+// ⚠️ NÃO MONTADO (2026-09-08). Vincular conta de anúncio passou a acontecer só
+// pelos ícones do cliente (lista) e pelo botão "Vincular Contas" do topo, que
+// abrem o LinkAccountsDialog — a grade de contas saiu do modal Configurar a
+// pedido do Matheus. Preservado com o motivo, no padrão do repo.
 function GoogleAdsConnectionDialog({
   open,
   onClose,
@@ -1839,18 +1849,8 @@ function GoogleAdsConnectionDialog({
 
 const CLIENT_BILLING_MODE_PREFIX = 'clientAdsBillingMode_';
 
-function ClientIntegrationsTab({ clientId, clientName }: { clientId: string; clientName: string }) {
-  const { getConnection, getClientAccounts, getClientMetrics } = useMetaAdsConnections();
-  const googleAds = useGoogleAds();
-  const [metaDialogOpen, setMetaDialogOpen] = useState(false);
-  const [googleDialogOpen, setGoogleDialogOpen] = useState(false);
+function ClientBillingSection({ clientId }: { clientId: string }) {
   const [billingMode, setBillingMode] = useState<'prepaid' | 'card'>('prepaid');
-  const metaConnection = getConnection(clientId);
-  const metaAccounts = getClientAccounts(clientId);
-  const metaMetrics = getClientMetrics(clientId);
-  const googleConnection = googleAds.getConnection(clientId);
-  const googleAccounts = googleAds.getClientAccounts(clientId);
-  const googleMetrics = googleAds.getClientMetrics(clientId);
 
   useEffect(() => {
     const stored = localStorage.getItem(`${CLIENT_BILLING_MODE_PREFIX}${clientId}`);
@@ -1918,98 +1918,6 @@ function ClientIntegrationsTab({ clientId, clientName }: { clientId: string; cli
       </Card>
 
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 pt-1">
-        {integracoes.map((int) => {
-          const isMetaAds = int.name === 'Meta Ads';
-          const isGoogleAds = int.name === 'Google Ads';
-          const status = isMetaAds
-            ? metaConnection ? 'Conectado' : 'Desconectado'
-            : isGoogleAds
-              ? googleConnection ? 'Conectado' : 'Desconectado'
-            : int.status;
-          const connected = status === 'Conectado';
-
-          return (
-            <Card key={int.id} className="bg-card border-border">
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <div className="w-11 h-11 rounded-xl bg-background border border-border flex items-center justify-center">
-                    {int.logo}
-                  </div>
-                  <span className={cn(
-                    'text-[10px] font-bold uppercase tracking-widest px-2 py-1 rounded-full border',
-                    connected ? 'bg-primary/20 text-primary border-primary/30' : 'bg-muted text-muted-foreground border-border',
-                  )}>
-                    {status}
-                  </span>
-                </div>
-                <CardTitle className="mt-3">{int.name}</CardTitle>
-                <CardDescription>Sincronização de {clientName} com {int.name}</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                {isMetaAds && metaConnection && (
-                  <div className="grid gap-2 rounded-lg border border-border bg-background p-3 text-xs text-muted-foreground">
-                    <div className="flex items-center justify-between gap-3">
-                      <span>Contas vinculadas</span>
-                      <strong className="text-foreground">{metaAccounts.length}</strong>
-                    </div>
-                    <div className="flex items-center justify-between gap-3">
-                      <span>Leads Meta Ads</span>
-                      <strong className="text-primary">{metaMetrics.leads.toLocaleString('pt-BR')}</strong>
-                    </div>
-                    <div className="flex items-center justify-between gap-3">
-                      <span>CPL médio</span>
-                      <strong className={metaMetrics.cpl > 25 ? 'text-red-400' : 'text-primary'}>
-                        {formatCurrencyBRL(metaMetrics.cpl)}
-                      </strong>
-                    </div>
-                  </div>
-                )}
-                {isGoogleAds && googleConnection && (
-                  <div className="grid gap-2 rounded-lg border border-border bg-background p-3 text-xs text-muted-foreground">
-                    <div className="flex items-center justify-between gap-3">
-                      <span>Contas vinculadas</span>
-                      <strong className="text-foreground">{googleAccounts.length}</strong>
-                    </div>
-                    <div className="flex items-center justify-between gap-3">
-                      <span>Conversões</span>
-                      <strong className="text-primary">{googleMetrics.conversions.toLocaleString('pt-BR')}</strong>
-                    </div>
-                    <div className="flex items-center justify-between gap-3">
-                      <span>CPC médio</span>
-                      <strong className="text-foreground">{formatCurrencyBRL(googleMetrics.cpc)}</strong>
-                    </div>
-                  </div>
-                )}
-                <Button
-                  variant={connected ? 'outline' : 'default'}
-                  className="w-full text-xs font-bold uppercase h-9"
-                  onClick={() => {
-                    if (isMetaAds) setMetaDialogOpen(true);
-                    if (isGoogleAds) setGoogleDialogOpen(true);
-                  }}
-                  disabled={!isMetaAds && !isGoogleAds}
-                >
-                  {connected ? 'Configurar / Desconectar' : 'Conectar Conta'}
-                </Button>
-              </CardContent>
-            </Card>
-          );
-        })}
-      </div>
-
-      <MetaAdsConnectionDialog
-        open={metaDialogOpen}
-        onClose={() => setMetaDialogOpen(false)}
-        clientId={clientId}
-        clientName={clientName}
-      />
-      <GoogleAdsConnectionDialog
-        open={googleDialogOpen}
-        onClose={() => setGoogleDialogOpen(false)}
-        clientId={clientId}
-        clientName={clientName}
-      />
     </>
   );
 }
@@ -2032,12 +1940,12 @@ function ClientConfigModal({ open, onClose, clientId, clientName }: {
             Configurar cliente
           </DialogTitle>
           <p className="text-sm text-muted-foreground">
-            {clientName} — conexões, forma de cobrança e senhas. Delivery (Cardápio Web/Anota Aí) configura-se na aba Integrações.
+            {clientName} — forma de cobrança e senhas. Vincular contas de anúncio é pelos ícones do cliente (ou “Vincular Contas”, no topo); delivery, na aba Integrações.
           </p>
         </DialogHeader>
         {open && (
           <div className="space-y-6 pt-2">
-            <ClientIntegrationsTab clientId={clientId} clientName={clientName} />
+            <ClientBillingSection clientId={clientId} />
             <div>
               <div className="mb-3 flex items-center gap-2">
                 <BookMarked className="h-4 w-4 text-primary" />

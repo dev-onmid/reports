@@ -72,6 +72,17 @@ function IconGoogleBusiness() {
   );
 }
 
+/** Barras ascendentes do Google Analytics — glifo branco sobre o círculo âmbar. */
+function IconGa4() {
+  return (
+    <svg viewBox="0 0 20 20" className="w-3.5 h-3.5">
+      <rect x="4"    y="11" width="3" height="5"   rx="1.4" fill="white" />
+      <rect x="8.5"  y="7.5" width="3" height="8.5" rx="1.4" fill="white" />
+      <rect x="13"   y="4"  width="3" height="12"  rx="1.4" fill="white" />
+    </svg>
+  );
+}
+
 function IconSheets() {
   return (
     <svg viewBox="0 0 20 20" fill="none" className="w-3.5 h-3.5">
@@ -91,7 +102,7 @@ const ICONS: Record<PlatformId, React.ReactNode> = {
   instagram:       <IconInstagram />,
   google_business: <IconGoogleBusiness />,
   google_sheets:   <IconSheets />,
-  ga4:             <IconGoogle />,
+  ga4:             <IconGa4 />,
 };
 
 export function PlatformIconButton({
@@ -127,4 +138,7 @@ export const ALL_PLATFORMS: PlatformId[] = [
   'instagram',
   'google_business',
   'google_sheets',
+  // GA4 estava fora da fileira: o fluxo de vínculo existia em LINKABLE_PLATFORMS
+  // (link-accounts-dialog) mas não havia por onde chegar nele pelo card do cliente.
+  'ga4',
 ];
