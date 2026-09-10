@@ -196,7 +196,7 @@ export default function PublicacoesPage() {
       )}
 
       {conectando && (
-        <ModalConectarIg contas={contas} onFechar={() => setConectando(false)} />
+        <ModalConectarIg contas={contas} onFechar={() => setConectando(false)} onMudou={() => void carregar()} />
       )}
       {criando && (
         <ModalCriar
@@ -292,8 +292,26 @@ function CardPublicacao({ p, onAbrir }: { p: Publicacao; onAbrir: () => void }) 
  * Facebook (restrição de vínculo). Quem clica precisa ter a SENHA do Instagram
  * da conta: o login acontece no próprio Instagram, nunca aqui.
  */
-function ModalConectarIg({ contas, onFechar }: { contas: ContaCliente[]; onFechar: () => void }) {
+function ModalConectarIg({ contas, onFechar, onMudou }: { contas: ContaCliente[]; onFechar: () => void; onMudou: () => void }) {
   const [clienteId, setClienteId] = useState('');
+  const [removendo, setRemovendo] = useState(false);
+  const selecionado = contas.find(c => c.clientId === clienteId);
+
+  async function desvincular() {
+    if (!selecionado) return;
+    if (!confirm(`Desvincular a conta direta de ${selecionado.clientName}? As publicações agendadas para ela vão falhar até reconectar. A autorização no Instagram continua até ser removida em Configurações → Site e apps.`)) return;
+    setRemovendo(true);
+    try {
+      await fetch('/api/auth/instagram/desconectar', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clientId: selecionado.clientId }),
+      });
+      onMudou();
+      onFechar();
+    } finally {
+      setRemovendo(false);
+    }
+  }
 
   return (
     <Dialog open onOpenChange={o => { if (!o) onFechar(); }}>
@@ -328,14 +346,21 @@ function ModalConectarIg({ contas, onFechar }: { contas: ContaCliente[]; onFecha
             Cliente já conectado? Conectar de novo substitui a conta — use para reconectar quando o acesso expirar.
           </p>
         </div>
-        <div className="flex justify-end gap-2 border-t border-border pt-3">
-          <Button variant="outline" size="sm" onClick={onFechar}>Cancelar</Button>
-          <Button
-            size="sm" disabled={!clienteId}
-            onClick={() => { window.location.href = `/api/auth/instagram/start?clientId=${encodeURIComponent(clienteId)}`; }}
-          >
-            <Link2 className="mr-1 h-4 w-4" /> Ir para o login do Instagram
-          </Button>
+        <div className="flex items-center justify-between gap-2 border-t border-border pt-3">
+          {(selecionado?.direto || selecionado?.diretoErro) ? (
+            <Button variant="ghost" size="sm" className="text-red-400" disabled={removendo} onClick={() => void desvincular()}>
+              <Trash2 className="mr-1 h-4 w-4" /> Desvincular
+            </Button>
+          ) : <span />}
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={onFechar}>Cancelar</Button>
+            <Button
+              size="sm" disabled={!clienteId}
+              onClick={() => { window.location.href = `/api/auth/instagram/start?clientId=${encodeURIComponent(clienteId)}`; }}
+            >
+              <Link2 className="mr-1 h-4 w-4" /> Ir para o login do Instagram
+            </Button>
+          </div>
         </div>
       </DialogContent>
     </Dialog>
