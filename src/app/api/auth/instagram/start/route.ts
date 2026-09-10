@@ -41,7 +41,10 @@ export async function GET(req: NextRequest) {
   url.searchParams.set('client_id', creds.appId);
   url.searchParams.set('redirect_uri', `${origin}/api/auth/instagram/callback`);
   url.searchParams.set('response_type', 'code');
-  url.searchParams.set('scope', 'instagram_business_basic,instagram_business_content_publish');
+  // manage_insights: alcance/seguidores por dia para o monitor e o dashboard —
+  // sem ele o /insights responde "Application does not have permission" (code
+  // 10, medido em 10/09 na @onmidmkt).
+  url.searchParams.set('scope', 'instagram_business_basic,instagram_business_content_publish,instagram_business_manage_insights');
   url.searchParams.set('state', stateAssinar(clientId));
   url.searchParams.set('force_reauth', '1');
   return Response.redirect(url.toString(), 302);
