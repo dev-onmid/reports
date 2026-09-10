@@ -23,6 +23,41 @@ async function getFreshAccessToken(conn: { access_token: string; refresh_token: 
 
 type Summary = { account?: string; displayName?: string; propertySummaries?: Array<{ property?: string; displayName?: string }> };
 
+/**
+ * ⚠️ 403 do Google tem DUAS causas que pedem ações opostas, e tratá-las como
+ * uma só manda o gestor pro caminho errado.
+ *
+ * Medido em 10/09: a conexão tinha `analytics.readonly` no escopo (confirmado no
+ * refresh do token) e mesmo assim tomava 403 — a Admin API estava DESLIGADA no
+ * projeto do Cloud (`reason: SERVICE_DISABLED`). A mensagem antiga mandava
+ * "reconecte marcando o acesso ao Google Analytics", que não resolve nada: dá
+ * para reconectar dez vezes que o 403 volta igual, porque o problema é do
+ * projeto, não da conta.
+ */
+function mensagemDoErro(status: number, corpo: string): string {
+  if (status !== 403) return `Google Analytics respondeu ${status}`;
+  try {
+    const j = JSON.parse(corpo) as {
+      error?: { message?: string; details?: Array<{ reason?: string; metadata?: Record<string, string> }> };
+    };
+    const detalhes = j.error?.details ?? [];
+    const desligada = detalhes.find((d) => d.reason === 'SERVICE_DISABLED');
+    if (desligada) {
+      const url = desligada.metadata?.activationUrl;
+      return 'A Google Analytics Admin API está DESLIGADA no projeto do Google Cloud — não é a conexão. '
+        + 'Ative-a no Console (o link vem na resposta do Google) e tente de novo em alguns minutos.'
+        + (url ? ` Link: ${url}` : '');
+    }
+    // 403 sem SERVICE_DISABLED: aí sim é a conta/escopo.
+    const msg = j.error?.message?.trim();
+    return msg
+      ? `Google Analytics recusou (403): ${msg}`
+      : 'A conta conectada não tem permissão de Analytics — reconecte marcando o acesso ao Google Analytics.';
+  } catch {
+    return 'A conta conectada não tem permissão de Analytics — reconecte marcando o acesso ao Google Analytics.';
+  }
+}
+
 export async function GET(request: NextRequest) {
   const connectionId = request.nextUrl.searchParams.get('connectionId');
   if (!connectionId) return Response.json({ error: 'Missing connectionId' }, { status: 400 });
@@ -58,9 +93,8 @@ export async function GET(request: NextRequest) {
     if (!res) return Response.json({ error: 'Sem resposta do Google Analytics' }, { status: 502 });
     if (!res.ok) {
       const txt = await res.text().catch(() => '');
-      const msg = res.status === 403 ? 'A conta conectada não tem permissão de Analytics — reconecte marcando o acesso ao Google Analytics.' : `Google Analytics respondeu ${res.status}`;
       console.error('[google/ga4-properties]', res.status, txt.slice(0, 300));
-      return Response.json({ error: msg }, { status: res.status });
+      return Response.json({ error: mensagemDoErro(res.status, txt) }, { status: res.status });
     }
     const data = await res.json() as { accountSummaries?: Summary[]; nextPageToken?: string };
     for (const a of data.accountSummaries ?? []) {
