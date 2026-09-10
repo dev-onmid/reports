@@ -33,16 +33,30 @@ export async function GET(req: NextRequest) {
   const pool = makeServerPool();
   try {
     const token = await trocarCodePorTokenLongo(code, `${origin}/api/auth/instagram/callback`);
-    const perfil = await buscarPerfilDireto(token.accessToken);
+    // O /me é a forma BONITA de obter id+username, mas há apps em que a Meta
+    // recusa toda leitura com "Unsupported request" (nível de acesso). O
+    // próprio oauth/access_token já devolve o user_id — então o perfil é
+    // BEST-EFFORT: sem ele a conexão salva mesmo assim (com o token guardado
+    // dá para diagnosticar do servidor, sem queimar novos logins do usuário).
+    let igUserId = token.igUserId;
+    let username = '';
+    try {
+      const perfil = await buscarPerfilDireto(token.accessToken);
+      igUserId = perfil.igUserId;
+      username = perfil.username;
+    } catch (err) {
+      console.error('[instagram callback] perfil indisponível, usando user_id do OAuth:', err);
+    }
+    if (!igUserId) throw new Error('o Instagram não devolveu o id da conta');
     await salvarConexaoDireta(pool, {
       clientId,
-      igUserId: perfil.igUserId,
-      username: perfil.username,
+      igUserId,
+      username,
       accessToken: token.accessToken,
       expiraEm: token.expiraEm,
       scopes: token.permissions,
     });
-    return voltar(origin, { ig_conectado: perfil.username || perfil.igUserId });
+    return voltar(origin, { ig_conectado: username || igUserId });
   } catch (err) {
     console.error('[instagram callback]', err);
     return voltar(origin, { ig_erro: String(err instanceof Error ? err.message : err).slice(0, 200) });

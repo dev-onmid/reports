@@ -107,6 +107,8 @@ export type TokenLongo = {
   /** ISO do vencimento (≈60 dias). */
   expiraEm: string;
   permissions: string;
+  /** ig user id que o próprio oauth/access_token devolve — dispensa o /me. */
+  igUserId: string | null;
 };
 
 /**
@@ -129,7 +131,7 @@ export async function trocarCodePorTokenLongo(code: string, redirectUri: string)
     signal: AbortSignal.timeout(20_000),
   });
   const curto = await curtoRes.json() as {
-    access_token?: string; permissions?: string[] | string; expires_in?: number;
+    access_token?: string; user_id?: string | number; permissions?: string[] | string; expires_in?: number;
     error_message?: string; error?: { message?: string };
   };
   if (!curto.access_token) {
@@ -163,6 +165,7 @@ export async function trocarCodePorTokenLongo(code: string, redirectUri: string)
         accessToken: curto.access_token,
         expiraEm: new Date(Date.now() + expiresIn * 1000).toISOString(),
         permissions,
+        igUserId: curto.user_id != null ? String(curto.user_id) : null,
       };
     }
     throw new Error(`troca pelo token de 60 dias: ${longo.error?.message ?? `HTTP ${longoRes.status}`}`);
@@ -172,6 +175,7 @@ export async function trocarCodePorTokenLongo(code: string, redirectUri: string)
     accessToken: longo.access_token,
     expiraEm: new Date(Date.now() + (longo.expires_in ?? 60 * 86400) * 1000).toISOString(),
     permissions,
+    igUserId: curto.user_id != null ? String(curto.user_id) : null,
   };
 }
 
