@@ -1,3 +1,22 @@
+## Google Ads — destinos das campanhas para o rastreio das LPs (2026-09-11)
+
+Pedido do Matheus (SAAC): "temos campanhas para sites diferentes e precisamos
+ter rastreio em cada um". Para saber PARA ONDE cada campanha manda o clique sem
+abrir o painel, o `lps/bin/gtag ads destinos <cliente>` consulta o reports.
+
+- **`GET /api/integrations/google-destinos?cliente=`** (nova; `x-onmid-secret`,
+  em `INTEGRATION_PREFIXES`): campanhas ATIVAS com URLs finais + métricas de 30
+  dias, e a visão invertida `destinos` (URL → campanhas). Duas GAQL porque a
+  estrutura muda: `ad_group_ad.ad.final_urls` (Pesquisa/Display/Vídeo) e
+  `asset_group.final_urls` (Performance Max não tem ad_group_ad). URLs
+  normalizadas (sem query/fragment/barra final) — a mesma LP com `?utm_*`
+  diferente é UM destino. ⚠️ Métrica é por campanha; na visão por destino ela é
+  dividida igualmente entre os destinos da campanha (aproximação declarada).
+- `src/lib/google-destinos.ts` (puro + `listarDestinos`), reaproveita
+  `gadsSearch`/`resolveGoogleAdsAccess`/`resolverCliente`.
+- ✅ Verificado: 5 asserts (`scratchpad/test-google-destinos.mjs`); tsc. ⚠️ Só
+  produção exercita a Google Ads API — validar com `gtag ads destinos saac`.
+
 @AGENTS.md
 
 ## Trocar de cliente pelo avatar do cabeçalho (2026-08-31)
