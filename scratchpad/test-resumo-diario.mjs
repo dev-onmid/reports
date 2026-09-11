@@ -58,6 +58,35 @@ ok(R.contemDataRelativa('Leads ontem: 4'), 'pega ontem');
 ok(R.contemDataRelativa('Prioridade de HOJE'), 'pega hoje');
 ok(!R.contemDataRelativa('Leads em 09/09: 4'), 'data literal passa');
 
+// ── janela: fim de semana não envia; segunda pega a semana anterior inteira
+const seg = R.decidirJanela('2026-09-14'); // segunda
+eq(seg.enviar, true, 'segunda envia');
+eq(seg.tipo, 'semanal', 'segunda é semanal');
+eq(seg.atual.inicio, '2026-09-07', 'semana começa na segunda anterior');
+eq(seg.atual.fim, '2026-09-13', 'semana termina no domingo');
+eq(seg.anterior.inicio, '2026-08-31', 'comparação é a semana antes');
+eq(seg.anterior.fim, '2026-09-06', 'comparação termina no domingo anterior');
+eq(R.diasDo(seg.atual).length, 7, 'sete dias');
+
+const ter = R.decidirJanela('2026-09-15'); // terça
+eq(ter.tipo, 'diario', 'terça é diária');
+eq(ter.atual.inicio, '2026-09-14', 'terça olha a segunda');
+eq(ter.anterior.inicio, '2026-09-13', 'compara com domingo');
+
+const sex = R.decidirJanela('2026-09-11'); // sexta
+eq(sex.tipo, 'diario', 'sexta é diária');
+eq(sex.atual.fim, '2026-09-10', 'sexta olha a quinta');
+
+eq(R.decidirJanela('2026-09-12').enviar, false, 'sábado não envia');
+eq(R.decidirJanela('2026-09-13').enviar, false, 'domingo não envia');
+// virada de mês e de ano na janela semanal
+eq(R.decidirJanela('2026-01-05').atual.inicio, '2025-12-29', 'semana atravessa o ano');
+
+// ── rótulo de período
+eq(R.rotularPeriodo({ inicio: '2026-09-10', fim: '2026-09-10' }), 'quinta-feira, 10/09', 'dia único');
+eq(R.rotularPeriodo({ inicio: '2026-09-07', fim: '2026-09-13' }), '07/09 a 13/09 (7 dias)', 'intervalo');
+eq(R.rotuloCurto({ inicio: '2026-09-07', fim: '2026-09-13' }), '07/09–13/09', 'rótulo curto de intervalo');
+
 // ── agrupamento: classificação é por CAMPANHA na janela, não por dia
 const conta = {
   clientId: 'c1', nome: 'Teste', cplMeta: 10, tipoDashboard: 'leads', accountId: 'act_1',
@@ -69,6 +98,13 @@ const conta = {
 const ag = R.agruparPorTipo(conta, k => R.classificarMeta(k.nome, k.objetivo, k.resultados, k.compras));
 eq(R.baldeDo(ag, '2026-09-10', 'lead').gasto, 50, 'dia sem resultado continua no balde de lead');
 eq(R.baldeDo(ag, '2026-09-10', 'engajamento').gasto, 0, 'não vazou para engajamento');
+eq(R.baldeDoPeriodo(ag, { inicio: '2026-09-09', fim: '2026-09-10' }, 'lead').gasto, 90, 'período soma os dois dias');
+eq(R.baldeDoPeriodo(ag, { inicio: '2026-09-09', fim: '2026-09-10' }, 'lead').resultados, 8, 'resultados somam');
+// ⚠️ na janela semanal, campanha com um dia zerado NÃO pode entrar no radar
+const agregada = R.agregarCampanhas(R.baldeDoPeriodo(ag, { inicio: '2026-09-09', fim: '2026-09-10' }, 'lead'));
+eq(agregada.length, 1, 'as duas linhas viram uma campanha');
+eq(agregada[0].resultados, 8, 'resultados da campanha somados');
+eq(agregada.filter(k => k.resultados === 0).length, 0, 'campanha não entra no radar de desperdício');
 
 // ── texto gerado com os dados REAIS de 10/09
 // Só roda quando os dumps existem (são gerados por uma coleta manual); sem eles
@@ -124,11 +160,12 @@ for (const c of G.contas) {
   for (const t of ['branding', 'trafego']) { const b = R.baldeDo(d, G.d1, t); if (b.gasto > 0) gB.push(simples(c.name, b)); }
 }
 
+const P1 = { inicio: M.d1, fim: M.d1 }, P2 = { inicio: M.d2, fim: M.d2 };
 const porGasto = a => a.sort((x, y) => y.gasto - x.gasto);
 const textos = {
-  leads: R.montarResumoLeads({ d1: M.d1, d2: M.d2, gasto: mG, resultados: mR, gastoAnterior: mGa, resultadosAnterior: mRa, linhas: leads, desperdicio: porGasto(desp) }),
-  venda: R.montarResumoVenda({ d1: M.d1, d2: M.d2, gasto: vG, compras: vC, receita: vRc, gastoAnterior: vGa, comprasAnterior: vCa, receitaAnterior: vRa, linhas: porGasto(vendas), semCompra: porGasto(semCompra), trafego: porGasto(traf), branding: porGasto(brand), engajamento: porGasto(eng) }),
-  google: R.montarResumoGoogle({ d1: G.d1, d2: G.d2, gasto: gG, conversoes: gC, gastoAnterior: gGa, conversoesAnterior: gCa, cplMediaMeta: mR > 0 ? mG / mR : null, linhas: gL, semConversao: porGasto(gS), branding: porGasto(gB), totalMeta, totalGoogle }),
+  leads: R.montarResumoLeads({ atual: P1, anterior: P2, gasto: mG, resultados: mR, gastoAnterior: mGa, resultadosAnterior: mRa, linhas: leads, desperdicio: porGasto(desp) }),
+  venda: R.montarResumoVenda({ atual: P1, anterior: P2, gasto: vG, compras: vC, receita: vRc, gastoAnterior: vGa, comprasAnterior: vCa, receitaAnterior: vRa, linhas: porGasto(vendas), semCompra: porGasto(semCompra), trafego: porGasto(traf), branding: porGasto(brand), engajamento: porGasto(eng) }),
+  google: R.montarResumoGoogle({ atual: P1, anterior: P2, gasto: gG, conversoes: gC, gastoAnterior: gGa, conversoesAnterior: gCa, cplMediaMeta: mR > 0 ? mG / mR : null, linhas: gL, semConversao: porGasto(gS), branding: porGasto(gB), totalMeta, totalGoogle }),
 };
 
 for (const [rot, t] of Object.entries(textos)) {

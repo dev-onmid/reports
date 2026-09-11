@@ -1,22 +1,29 @@
 /**
- * Resumo diário de tráfego — puxa Meta + Google do dia anterior, aplica a régua
- * de `resumo-diario.ts` e manda os 3 resumos (LEADS, VENDA, GOOGLE) no grupo.
+ * Resumo de tráfego — puxa Meta + Google, aplica a régua de `resumo-diario.ts`
+ * e manda os 3 resumos (LEADS, VENDA, GOOGLE) no grupo do WhatsApp.
  *
- * Cron na VPS às 07h15 BRT (10h15 UTC) — NÃO no GitHub Actions, que estrangula
- * os crons deste repo (ver CLAUDE.md, nota de 31/07).
+ * A JANELA MUDA COM O DIA DA SEMANA (`decidirJanela`):
+ *   terça a sexta ... o dia anterior
+ *   segunda ......... a semana anterior inteira (segunda a domingo)
+ *   sábado/domingo .. não envia
+ *
+ * Cron na VPS às 07h15 BRT (10h15 UTC), de segunda a sexta — NÃO no GitHub
+ * Actions, que estrangula os crons deste repo (ver CLAUDE.md, nota de 31/07).
  *
  * `?dry=1` devolve os textos sem enviar nada.
- * `?data=YYYY-MM-DD` força o dia analisado (padrão: dia anterior em BRT).
+ * `?hoje=YYYY-MM-DD` finge outra data (útil para conferir a janela de segunda).
+ * `?forcar=1` ignora a trava de fim de semana.
  */
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { getFreshMetaToken } from '@/lib/meta-token';
 import { sendTextByInstanceId } from '@/lib/whatsapp-send';
 import {
-  agruparPorTipo, baldeDo, classificarGoogle, classificarMeta, contemDataRelativa,
-  montarResumoGoogle, montarResumoLeads, montarResumoVenda, statusCpl, statusCustoCompra,
+  agregarCampanhas, agruparPorTipo, baldeDoPeriodo, classificarGoogle, classificarMeta,
+  contemDataRelativa, decidirJanela, montarResumoGoogle, montarResumoLeads, montarResumoVenda,
+  statusCpl, statusCustoCompra,
   type Balde, type CampanhaDia, type ContaDiaria, type LinhaDesperdicio, type LinhaLead,
-  type LinhaSimples, type LinhaVenda,
+  type LinhaSimples, type LinhaVenda, type Periodo,
 } from '@/lib/resumo-diario';
 
 export const maxDuration = 300;
@@ -35,16 +42,9 @@ function autorizado(req: NextRequest): boolean {
   return esperados.some(s => s === q || s === bearer);
 }
 
-/** Dia (YYYY-MM-DD) com N dias de recuo, em BRT (UTC-3). */
-function diaBRT(recuo: number): string {
-  const d = new Date(Date.now() - 3 * 3600 * 1000);
-  d.setUTCDate(d.getUTCDate() - recuo);
-  return d.toISOString().slice(0, 10);
-}
-function diaAnteriorA(iso: string): string {
-  const d = new Date(`${iso}T12:00:00Z`);
-  d.setUTCDate(d.getUTCDate() - 1);
-  return d.toISOString().slice(0, 10);
+/** Hoje (YYYY-MM-DD) em BRT (UTC-3). */
+function hojeBRT(): string {
+  return new Date(Date.now() - 3 * 3600 * 1000).toISOString().slice(0, 10);
 }
 
 // Famílias canônicas — mesma regra de `meta-results.ts`: dentro da família conta
@@ -78,12 +78,12 @@ type ContaVinculada = {
 };
 
 async function buscarCampanhasMeta(
-  conta: ContaVinculada, token: string, d1: string, d2: string,
+  conta: ContaVinculada, token: string, desde: string, ate: string,
 ): Promise<CampanhaDia[]> {
   const campos = 'campaign_name,objective,spend,actions,action_values,impressions,clicks,reach';
   const url = `https://graph.facebook.com/v21.0/${conta.accountId}/insights`
     + `?level=campaign&time_increment=1&fields=${campos}&limit=500`
-    + `&time_range=${encodeURIComponent(JSON.stringify({ since: d2, until: d1 }))}`
+    + `&time_range=${encodeURIComponent(JSON.stringify({ since: desde, until: ate }))}`
     + `&access_token=${encodeURIComponent(token)}`;
   const res = await fetch(url);
   const data = await res.json().catch(() => ({}));
@@ -175,8 +175,17 @@ export async function GET(req: NextRequest) {
 
   const inicio = Date.now();
   const seco = req.nextUrl.searchParams.get('dry') === '1';
-  const d1 = req.nextUrl.searchParams.get('data') ?? diaBRT(1);
-  const d2 = diaAnteriorA(d1);
+  const forcar = req.nextUrl.searchParams.get('forcar') === '1';
+  const hoje = req.nextUrl.searchParams.get('hoje') ?? hojeBRT();
+  const janela = decidirJanela(hoje);
+  const { atual, anterior } = janela;
+
+  // Sábado e domingo não têm relatório. `forcar=1` existe para teste manual.
+  if (!janela.enviar && !forcar) {
+    return Response.json({ ok: true, pulado: 'fim de semana', hoje, diaDaSemana: new Date(`${hoje}T12:00:00Z`).getUTCDay() });
+  }
+  // A busca cobre as duas janelas de uma vez.
+  const inicioBusca = anterior.inicio, fimBusca = atual.fim;
 
   const pool = makeServerPool();
   const avisos: string[] = [];
@@ -210,7 +219,7 @@ export async function GET(req: NextRequest) {
           if (contasVistas.has(c.accountId)) return;
           contasVistas.add(c.accountId);
           try {
-            const campanhas = await buscarCampanhasMeta(c, token, d1, d2);
+            const campanhas = await buscarCampanhasMeta(c, token, inicioBusca, fimBusca);
             const conta: ContaDiaria = { ...c, campanhas };
             agrupadosMeta.set(c.clientId, {
               conta: c,
@@ -237,7 +246,7 @@ export async function GET(req: NextRequest) {
     if (creds.length) {
       const QUERY = `SELECT campaign.name, campaign.advertising_channel_type, segments.date,
           metrics.cost_micros, metrics.conversions, metrics.all_conversions, metrics.clicks, metrics.impressions
-        FROM campaign WHERE segments.date BETWEEN '${d2}' AND '${d1}'`;
+        FROM campaign WHERE segments.date BETWEEN '${inicioBusca}' AND '${fimBusca}'`;
       type Tentativa = { cred: CredGoogle; login: string | null };
       let atalho: Tentativa | null = null;
       for (const c of contasGoogle) {
@@ -280,10 +289,10 @@ export async function GET(req: NextRequest) {
     let totalMeta = 0;
 
     for (const { conta, dados } of agrupadosMeta.values()) {
-      const L = baldeDo(dados, d1, 'lead'), L2 = baldeDo(dados, d2, 'lead');
-      const V = baldeDo(dados, d1, 'venda'), V2 = baldeDo(dados, d2, 'venda');
+      const L = baldeDoPeriodo(dados, atual, 'lead'), L2 = baldeDoPeriodo(dados, anterior, 'lead');
+      const V = baldeDoPeriodo(dados, atual, 'venda'), V2 = baldeDoPeriodo(dados, anterior, 'venda');
       for (const t of ['lead', 'venda', 'trafego', 'branding', 'engajamento'] as const) {
-        totalMeta += baldeDo(dados, d1, t).gasto;
+        totalMeta += baldeDoPeriodo(dados, atual, t).gasto;
       }
       mGasto += L.gasto; mRes += L.resultados; mGastoAnt += L2.gasto; mResAnt += L2.resultados;
       vGasto += V.gasto; vCompras += V.compras; vReceita += V.receita;
@@ -299,7 +308,8 @@ export async function GET(req: NextRequest) {
         };
         (custo === null ? semCompra : vendas).push(linha);
       }
-      const perdidas = L.campanhas.filter(k => k.resultados === 0);
+      // Agregada: na janela semanal, um dia sem resultado não condena a campanha.
+      const perdidas = agregarCampanhas(L).filter(k => k.resultados === 0);
       if (perdidas.length) {
         desperdicio.push({
           nome: conta.nome, gasto: perdidas.reduce((s, k) => s + k.gasto, 0),
@@ -307,7 +317,7 @@ export async function GET(req: NextRequest) {
         });
       }
       for (const [tipo, alvo] of [['trafego', trafego], ['branding', branding], ['engajamento', engajamento]] as const) {
-        const b = baldeDo(dados, d1, tipo);
+        const b = baldeDoPeriodo(dados, atual, tipo);
         if (b.gasto > 0) alvo.push(linhaSimples(conta.nome, b));
       }
     }
@@ -316,15 +326,15 @@ export async function GET(req: NextRequest) {
     const gLinhas: LinhaLead[] = [], gSemConv: LinhaSimples[] = [], gBranding: LinhaSimples[] = [];
     let gGasto = 0, gConv = 0, gGastoAnt = 0, gConvAnt = 0, totalGoogle = 0;
     for (const { conta, dados } of agrupadosGoogle.values()) {
-      const P = baldeDo(dados, d1, 'lead'), P2 = baldeDo(dados, d2, 'lead');
-      for (const t of ['lead', 'trafego', 'branding'] as const) totalGoogle += baldeDo(dados, d1, t).gasto;
+      const P = baldeDoPeriodo(dados, atual, 'lead'), P2 = baldeDoPeriodo(dados, anterior, 'lead');
+      for (const t of ['lead', 'trafego', 'branding'] as const) totalGoogle += baldeDoPeriodo(dados, atual, t).gasto;
       gGasto += P.gasto; gConv += P.resultados; gGastoAnt += P2.gasto; gConvAnt += P2.resultados;
       if (P.gasto > 0) {
         const l = linhaLead(conta.nome, conta.cplMeta, P, P2);
         if (l.cpl === null) gSemConv.push(linhaSimples(conta.nome, P)); else gLinhas.push(l);
       }
       for (const t of ['branding', 'trafego'] as const) {
-        const b = baldeDo(dados, d1, t);
+        const b = baldeDoPeriodo(dados, atual, t);
         if (b.gasto > 0) gBranding.push(linhaSimples(conta.nome, b));
       }
     }
@@ -332,17 +342,17 @@ export async function GET(req: NextRequest) {
     const ordenarGasto = <T extends { gasto: number }>(a: T[]) => a.sort((x, y) => y.gasto - x.gasto);
     const textos = {
       leads: montarResumoLeads({
-        d1, d2, gasto: mGasto, resultados: mRes, gastoAnterior: mGastoAnt, resultadosAnterior: mResAnt,
+        atual, anterior, gasto: mGasto, resultados: mRes, gastoAnterior: mGastoAnt, resultadosAnterior: mResAnt,
         linhas: leads, desperdicio: ordenarGasto(desperdicio),
       }),
       venda: montarResumoVenda({
-        d1, d2, gasto: vGasto, compras: vCompras, receita: vReceita,
+        atual, anterior, gasto: vGasto, compras: vCompras, receita: vReceita,
         gastoAnterior: vGastoAnt, comprasAnterior: vComprasAnt, receitaAnterior: vReceitaAnt,
         linhas: ordenarGasto(vendas), semCompra: ordenarGasto(semCompra),
         trafego: ordenarGasto(trafego), branding: ordenarGasto(branding), engajamento: ordenarGasto(engajamento),
       }),
       google: montarResumoGoogle({
-        d1, d2, gasto: gGasto, conversoes: gConv, gastoAnterior: gGastoAnt, conversoesAnterior: gConvAnt,
+        atual, anterior, gasto: gGasto, conversoes: gConv, gastoAnterior: gGastoAnt, conversoesAnterior: gConvAnt,
         cplMediaMeta: mRes > 0 ? mGasto / mRes : null,
         linhas: gLinhas, semConversao: ordenarGasto(gSemConv), branding: ordenarGasto(gBranding),
         totalMeta, totalGoogle,
@@ -356,7 +366,7 @@ export async function GET(req: NextRequest) {
 
     if (seco) {
       return Response.json({
-        ok: true, dry: true, d1, d2, avisos,
+        ok: true, dry: true, tipo: janela.tipo, hoje, atual, anterior, avisos,
         contas: { meta: agrupadosMeta.size, google: agrupadosGoogle.size },
         tamanhos: Object.fromEntries(Object.entries(textos).map(([k, v]) => [k, v.length])),
         textos,
@@ -377,7 +387,7 @@ export async function GET(req: NextRequest) {
       if (!r.ok) avisos.push(`envio ${rot}: ${r.error}`);
       await new Promise(res => setTimeout(res, 2500));
     }
-    return Response.json({ ok: true, d1, d2, grupo, enviados, avisos, tookMs: Date.now() - inicio });
+    return Response.json({ ok: true, tipo: janela.tipo, hoje, atual, anterior, grupo, enviados, avisos, tookMs: Date.now() - inicio });
   } catch (e) {
     return Response.json({ ok: false, erro: (e as Error).message, avisos }, { status: 500 });
   } finally {
