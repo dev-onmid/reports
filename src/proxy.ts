@@ -87,6 +87,7 @@ const CRON_PREFIXES = [
   '/api/cardapioweb/sync-cron',
   '/api/agendor/sync-cron',
   '/api/otimizacoes/resumo-diario-cron',
+  '/api/relatorio-diario/cron',
   '/api/anotaai/sync-cron',
   '/api/crm/backfill-ctwa',
   '/api/crm/sanear-kanban',
