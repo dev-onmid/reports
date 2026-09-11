@@ -171,6 +171,97 @@ export function baldeDo(
   return porDia[dia]?.[tipo] ?? (BALDE_VAZIO as Balde);
 }
 
+// ─── Janela do relatório ──────────────────────────────────────────────────
+
+/** Intervalo fechado de dias, em ISO. Um único dia tem inicio === fim. */
+export type Periodo = { inicio: string; fim: string };
+
+const DIA_MS = 86_400_000;
+/** Meio-dia UTC evita que horário de verão empurre a data para o dia vizinho. */
+const aoMeioDia = (iso: string) => new Date(`${iso}T12:00:00Z`);
+const paraIso = (d: Date) => d.toISOString().slice(0, 10);
+export const somarDias = (iso: string, n: number) => paraIso(new Date(aoMeioDia(iso).getTime() + n * DIA_MS));
+/** 0 = domingo … 6 = sábado. */
+export const diaDaSemana = (iso: string) => aoMeioDia(iso).getUTCDay();
+
+export type Janela = {
+  enviar: boolean;
+  tipo: 'diario' | 'semanal' | 'nenhum';
+  atual: Periodo;
+  anterior: Periodo;
+};
+
+/**
+ * Decide o que o relatório de hoje cobre (pedido do Matheus, 11/09/2026):
+ *
+ * - sábado e domingo ....... não envia nada
+ * - segunda ................ a SEMANA ANTERIOR INTEIRA (segunda a domingo),
+ *                            comparada com a semana antes dela
+ * - terça a sexta .......... o dia anterior, comparado com o dia antes dele
+ *
+ * ⚠️ Na segunda o dia anterior seria domingo — dia de comportamento atípico e
+ * que ninguém acompanhou desde sexta. A janela semanal existe por isso.
+ */
+export function decidirJanela(hoje: string): Janela {
+  const dow = diaDaSemana(hoje);
+  if (dow === 0 || dow === 6) {
+    const vazio = { inicio: hoje, fim: hoje };
+    return { enviar: false, tipo: 'nenhum', atual: vazio, anterior: vazio };
+  }
+  if (dow === 1) {
+    return {
+      enviar: true, tipo: 'semanal',
+      atual: { inicio: somarDias(hoje, -7), fim: somarDias(hoje, -1) },
+      anterior: { inicio: somarDias(hoje, -14), fim: somarDias(hoje, -8) },
+    };
+  }
+  return {
+    enviar: true, tipo: 'diario',
+    atual: { inicio: somarDias(hoje, -1), fim: somarDias(hoje, -1) },
+    anterior: { inicio: somarDias(hoje, -2), fim: somarDias(hoje, -2) },
+  };
+}
+
+/** Todos os dias ISO do período, inclusive as pontas. */
+export function diasDo(p: Periodo): string[] {
+  const out: string[] = [];
+  for (let d = p.inicio; d <= p.fim; d = somarDias(d, 1)) out.push(d);
+  return out;
+}
+
+/** Soma os baldes de um tipo ao longo do período inteiro. */
+export function baldeDoPeriodo(
+  porDia: Record<string, Record<TipoCampanha, Balde>>, p: Periodo, tipo: TipoCampanha,
+): Balde {
+  const total = baldeVazio();
+  for (const dia of diasDo(p)) {
+    const b = porDia[dia]?.[tipo];
+    if (!b) continue;
+    total.gasto += b.gasto; total.resultados += b.resultados; total.compras += b.compras;
+    total.receita += b.receita; total.cliques += b.cliques; total.alcance += b.alcance;
+    total.impressoes += b.impressoes;
+    total.campanhas.push(...b.campanhas);
+  }
+  return total;
+}
+
+/**
+ * Junta as linhas diárias da MESMA campanha.
+ *
+ * ⚠️ Obrigatório na janela semanal: sem isso, campanha que ficou um dia sem
+ * resultado entraria no radar de "gastou e não entregou" mesmo tendo entregado
+ * nos outros seis.
+ */
+export function agregarCampanhas(b: Balde): Array<{ nome: string; gasto: number; resultados: number; cliques: number }> {
+  const porNome = new Map<string, { nome: string; gasto: number; resultados: number; cliques: number }>();
+  for (const k of b.campanhas) {
+    const g = porNome.get(k.nome) ?? { nome: k.nome, gasto: 0, resultados: 0, cliques: 0 };
+    g.gasto += k.gasto; g.resultados += k.resultados; g.cliques += k.cliques;
+    porNome.set(k.nome, g);
+  }
+  return [...porNome.values()];
+}
+
 // ─── Régua ────────────────────────────────────────────────────────────────
 
 export function statusCpl(cpl: number | null, meta: number | null): Status {
@@ -207,6 +298,7 @@ export function contemDataRelativa(texto: string): boolean {
   return /\bontem\b|\bhoje\b|\bamanh[ãa]\b/i.test(texto);
 }
 
+const curto = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}`;
 const DIAS = ['domingo', 'segunda-feira', 'terça-feira', 'quarta-feira', 'quinta-feira', 'sexta-feira', 'sábado'];
 
 /** Rotula 'YYYY-MM-DD' como "quinta-feira, 10/09" sem depender de fuso. */
@@ -216,10 +308,20 @@ export function rotularDia(iso: string): string {
   return `${semana}, ${String(d).padStart(2, '0')}/${String(m).padStart(2, '0')}`;
 }
 
-function cabecalho(d1: string, d2: string): string {
+/** "quinta-feira, 10/09" para um dia; "07/09 a 13/09 (7 dias)" para um intervalo. */
+export function rotularPeriodo(p: Periodo): string {
+  if (p.inicio === p.fim) return rotularDia(p.inicio);
+  return `${curto(p.inicio)} a ${curto(p.fim)} (${diasDo(p).length} dias)`;
+}
+/** Rótulo enxuto usado no meio da frase: "09/09" ou "31/08–06/09". */
+export function rotuloCurto(p: Periodo): string {
+  return p.inicio === p.fim ? curto(p.inicio) : `${curto(p.inicio)}–${curto(p.fim)}`;
+}
+
+function cabecalho(atual: Periodo, anterior: Periodo): string {
   return [
-    `📅 *Dados de:* ${rotularDia(d1)}`,
-    `📅 *Comparados com:* ${rotularDia(d2)}`,
+    `📅 *Dados de:* ${rotularPeriodo(atual)}`,
+    `📅 *Comparados com:* ${rotularPeriodo(anterior)}`,
     '',
     '━━━━━━━━━━━',
     '✅ dentro da meta',
@@ -240,7 +342,7 @@ export type LinhaVenda = {
 export type LinhaSimples = { nome: string; gasto: number; cliques: number; alcance: number; impressoes: number; resultados: number };
 export type LinhaDesperdicio = { nome: string; gasto: number; campanhas: number; cliques: number };
 
-function blocoLeadDetalhado(l: LinhaLead, d2: string): string {
+function blocoLeadDetalhado(l: LinhaLead, rotuloAnterior: string): string {
   const linhas = [
     `${EMOJI[l.status]} *${l.nome.toUpperCase()}*`,
     `Custo por lead: *R$ ${brl(l.cpl ?? 0)}*`,
@@ -257,7 +359,7 @@ function blocoLeadDetalhado(l: LinhaLead, d2: string): string {
   const queda = variacao === null ? ''
     : variacao === 0 ? ' _(igual)_'
     : ` _(${variacao > 0 ? 'subiu' : 'caiu'} ${Math.abs(variacao)}%)_`;
-  linhas.push(`Leads em ${d2.slice(8, 10)}/${d2.slice(5, 7)}: ${l.resultadosAnterior}${queda}`);
+  linhas.push(`Leads em ${rotuloAnterior}: ${l.resultadosAnterior}${queda}`);
   linhas.push(`Investimento: R$ ${brl(l.gasto)}`);
   return linhas.join('\n');
 }
@@ -266,22 +368,23 @@ const linhaCompacta = (l: LinhaLead) =>
   `• *${l.nome}* — R$ ${brl(l.cpl ?? 0)} · meta ${l.meta ? `R$ ${brl(l.meta)}` : '—'} · ${l.resultados}`;
 
 export function montarResumoLeads(input: {
-  d1: string; d2: string;
+  atual: Periodo; anterior: Periodo;
   gasto: number; resultados: number; gastoAnterior: number; resultadosAnterior: number;
   linhas: LinhaLead[]; desperdicio: LinhaDesperdicio[];
 }): string {
-  const { d1, d2 } = input;
+  const { atual, anterior } = input;
+  const dm = rotuloCurto(anterior);
   const cpl = div(input.gasto, input.resultados);
   const cplAnt = div(input.gastoAnterior, input.resultadosAnterior);
-  const p: string[] = ['🎯 *RESUMO LEADS — META ADS*', '', cabecalho(d1, d2), '', '*VISÃO GERAL*',
+  const p: string[] = ['🎯 *RESUMO LEADS — META ADS*', '', cabecalho(atual, anterior), '', '*VISÃO GERAL*',
     '_Somente campanhas de lead e conversa_',
     `Investimento: R$ ${brl(input.gasto)}`,
     `Quantidade de leads: *${input.resultados}*`,
-    `_em ${d2.slice(8, 10)}/${d2.slice(5, 7)} foram ${input.resultadosAnterior}_`,
+    `_em ${dm} foram ${input.resultadosAnterior}_`,
     `Custo por lead: *R$ ${brl(cpl ?? 0)}*`];
   if (cpl !== null && cplAnt !== null) {
     const v = ((cpl - cplAnt) / cplAnt) * 100;
-    p.push(`_em ${d2.slice(8, 10)}/${d2.slice(5, 7)} foi R$ ${brl(cplAnt)} → ${v <= 0 ? 'caiu' : 'subiu'} ${Math.abs(v).toFixed(0)}%_ ${v <= 0 ? '✅' : '🔴'}`);
+    p.push(`_em ${dm} foi R$ ${brl(cplAnt)} → ${v <= 0 ? 'caiu' : 'subiu'} ${Math.abs(v).toFixed(0)}%_ ${v <= 0 ? '✅' : '🔴'}`);
   }
 
   const ordem = (s: Status) => (s === 'fora' ? 0 : s === 'atencao' ? 1 : 2);
@@ -291,7 +394,7 @@ export function montarResumoLeads(input: {
 
   if (fora.length) {
     p.push('', '━━━━━━━━━━━', '🔴 *FORA DA META*', '');
-    p.push(fora.map(l => blocoLeadDetalhado(l, d2)).join('\n\n'));
+    p.push(fora.map(l => blocoLeadDetalhado(l, dm)).join('\n\n'));
   }
   if (atencao.length) {
     p.push('', '━━━━━━━━━━━', '🟡 *ATENÇÃO*', '_custo por lead · meta · leads_', '');
@@ -311,17 +414,17 @@ export function montarResumoLeads(input: {
 }
 
 export function montarResumoVenda(input: {
-  d1: string; d2: string;
+  atual: Periodo; anterior: Periodo;
   gasto: number; compras: number; receita: number;
   gastoAnterior: number; comprasAnterior: number; receitaAnterior: number;
   linhas: LinhaVenda[]; semCompra: LinhaVenda[];
   trafego: LinhaSimples[]; branding: LinhaSimples[]; engajamento: LinhaSimples[];
 }): string {
-  const { d1, d2 } = input;
-  const dm = `${d2.slice(8, 10)}/${d2.slice(5, 7)}`;
+  const { atual, anterior } = input;
+  const dm = rotuloCurto(anterior);
   const custo = div(input.gasto, input.compras);
   const custoAnt = div(input.gastoAnterior, input.comprasAnterior);
-  const p: string[] = ['🛒 *RESUMO VENDA — META ADS*', '', cabecalho(d1, d2),
+  const p: string[] = ['🛒 *RESUMO VENDA — META ADS*', '', cabecalho(atual, anterior),
     `Teto de custo por compra: *R$ ${brl(TETO_CUSTO_COMPRA)}*`, '', '*VISÃO GERAL*',
     `Investimento: R$ ${brl(input.gasto)}`,
     `Quantidade de compras: *${input.compras}*`,
@@ -369,17 +472,17 @@ export function montarResumoVenda(input: {
 }
 
 export function montarResumoGoogle(input: {
-  d1: string; d2: string;
+  atual: Periodo; anterior: Periodo;
   gasto: number; conversoes: number; gastoAnterior: number; conversoesAnterior: number;
   cplMediaMeta: number | null;
   linhas: LinhaLead[]; semConversao: LinhaSimples[]; branding: LinhaSimples[];
   totalMeta: number; totalGoogle: number;
 }): string {
-  const { d1, d2 } = input;
-  const dm = `${d2.slice(8, 10)}/${d2.slice(5, 7)}`;
+  const { atual, anterior } = input;
+  const dm = rotuloCurto(anterior);
   const custo = div(input.gasto, input.conversoes);
   const custoAnt = div(input.gastoAnterior, input.conversoesAnterior);
-  const p: string[] = ['🔍 *RESUMO GOOGLE ADS*', '', cabecalho(d1, d2), '', '*VISÃO GERAL*',
+  const p: string[] = ['🔍 *RESUMO GOOGLE ADS*', '', cabecalho(atual, anterior), '', '*VISÃO GERAL*',
     '_Somente Pesquisa e Performance Max_',
     `Investimento: *R$ ${brl(input.gasto)}*`,
     `_em ${dm} foi R$ ${brl(input.gastoAnterior)}_`,
@@ -421,7 +524,7 @@ export function montarResumoGoogle(input: {
     p.push(input.branding.map(x => `• ${x.nome} — R$ ${brl(x.gasto)} · ${inteiro(x.cliques)} cliques`).join('\n'));
     p.push('_Campanha de vídeo constrói lembrança, não converte._');
   }
-  p.push('', '━━━━━━━━━━━', `💰 *INVESTIMENTO TOTAL DE ${d1.slice(8, 10)}/${d1.slice(5, 7)}*`,
+  p.push('', '━━━━━━━━━━━', `💰 *INVESTIMENTO TOTAL DE ${rotuloCurto(atual)}*`,
     `Meta Ads: R$ ${brl(input.totalMeta)}`,
     `Google Ads: R$ ${brl(input.totalGoogle)}`,
     `*Total: R$ ${brl(input.totalMeta + input.totalGoogle)}*`);
