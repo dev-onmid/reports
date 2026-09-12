@@ -168,7 +168,7 @@ export type ResultadoVolta = {
   leadsCriados: number;
   leadsAtualizados: number;
   errosCrm: number;
-  funil?: { modo: string; criadas: number; removidas: number; reordenadas: number; preservadas: string[] };
+  funil?: { modo: string; criadas: number; removidas: number; reordenadas: number; preservadas: { label: string; leads: number; gatilhos: number }[] };
   erro?: string;
 };
 

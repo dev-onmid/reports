@@ -31,8 +31,14 @@ export type PlanoFunil = {
   reposicionar: { id: string; position: number }[];
   /** 'adotado' = só as etapas do externo; 'mesclado' = sobrou etapa em uso, preservada no fim. */
   modo: 'adotado' | 'mesclado';
-  /** Rótulos preservados por terem lead ou gatilho, mesmo não existindo no externo. */
-  preservadas: string[];
+  /**
+   * Etapas mantidas apesar de não existirem no CRM externo, COM O MOTIVO.
+   *
+   * ⚠️ O motivo não é enfeite: "ficou uma coluna que eu não quero" é
+   * indistinguível de bug sem ele. Com lead/gatilho na mensagem, quem
+   * configurou sabe se move o lead, apaga o gatilho, ou se é etapa própria.
+   */
+  preservadas: { label: string; leads: number; gatilhos: number }[];
 };
 
 export function normalizarRotulo(s: string): string {
@@ -110,11 +116,12 @@ export function planejarFunil(
     .sort((a, b) => a.position - b.position);
 
   const remover: string[] = [];
-  const preservadas: string[] = [];
+  const preservadas: PlanoFunil['preservadas'] = [];
   let proxima = limpas.length;
   for (const a of forasteiras) {
     if (descartavel(a, uso)) { remover.push(a.id); continue; }
-    preservadas.push(a.label);
+    const u = uso.get(normalizarRotulo(a.label));
+    preservadas.push({ label: a.label, leads: u?.leads ?? 0, gatilhos: u?.gatilhos ?? 0 });
     if (a.position !== proxima) reposicionar.push({ id: a.id, position: proxima });
     proxima++;
   }

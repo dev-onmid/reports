@@ -40,7 +40,7 @@ const SULTS = ['Novo lead', 'Abordagem D1', 'Reunião Agendada', 'Contrato', 'Pe
   const uso = new Map([['em atendimento', { leads: 1, gatilhos: 0 }]]);
   const p = planejarFunil(PADRAO, SULTS, uso);
   eq(p.modo, 'mesclado', 'sobrou etapa em uso');
-  eq(p.preservadas, ['Em Atendimento'], 'a etapa com lead é preservada');
+  eq(p.preservadas, [{ label: 'Em Atendimento', leads: 1, gatilhos: 0 }], 'preservada COM o motivo');
   eq(p.remover.length, 8, 'as outras 8 de clínica saem');
   ok(!p.remover.includes('p0'), 'a que tem lead NUNCA é removida');
   eq(p.criar.map(c => c.position), [0, 1, 2, 3, 4], 'as do SULTS assumem o começo');
@@ -52,7 +52,7 @@ const SULTS = ['Novo lead', 'Abordagem D1', 'Reunião Agendada', 'Contrato', 'Pe
 {
   const uso = new Map([['agendado', { leads: 0, gatilhos: 1 }]]);
   const p = planejarFunil(PADRAO, SULTS, uso);
-  eq(p.preservadas, ['Agendado'], 'etapa com gatilho é preservada');
+  eq(p.preservadas, [{ label: 'Agendado', leads: 0, gatilhos: 1 }], 'gatilho aparece no motivo');
   ok(!p.remover.includes('p1'), 'não é removida');
   eq(p.remover.length, 8, 'as demais saem');
 }
@@ -64,7 +64,7 @@ const SULTS = ['Novo lead', 'Abordagem D1', 'Reunião Agendada', 'Contrato', 'Pe
     ['em atendimento', { leads: 1, gatilhos: 0 }],
   ]);
   const p = planejarFunil(PADRAO, SULTS, uso);
-  eq(p.preservadas, ['Em Atendimento', 'Fechado'], 'na ordem em que estavam');
+  eq(p.preservadas.map(x => x.label), ['Em Atendimento', 'Fechado'], 'na ordem em que estavam');
   const pos = Object.fromEntries(p.reposicionar.map(r => [r.id, r.position]));
   eq(pos.p0, 5, 'Em Atendimento primeiro entre as preservadas');
   eq(pos.p3, 6, 'Fechado depois');
@@ -103,7 +103,7 @@ const SULTS = ['Novo lead', 'Abordagem D1', 'Reunião Agendada', 'Contrato', 'Pe
   const comCustom = [...PADRAO, et('g1', 'Visita Técnica', 9)];
   const p = planejarFunil(comCustom, SULTS, SEM_USO);
   eq(p.modo, 'mesclado', 'etapa de gestor sobrevive');
-  eq(p.preservadas, ['Visita Técnica'], 'preservada por não ser padrão');
+  eq(p.preservadas, [{ label: 'Visita Técnica', leads: 0, gatilhos: 0 }], 'preservada por não ser padrão');
   ok(!p.remover.includes('g1'), 'nunca removida');
   eq(p.remover.length, 9, 'as 9 padrão sem uso saem');
   const pos = Object.fromEntries(p.reposicionar.map(r => [r.id, r.position]));
