@@ -268,7 +268,16 @@ export default function SultsCard({ clientId }: { clientId: string }) {
       const d = await r.json();
       if (d.erro) { setMsg(d.erro); } else {
         setCfg(d);
-        const res = d.resultado ?? {};
+        const res = d.resultado;
+        if (!res) {
+          // Sem resultado = a conexão não entrou na varredura. Antes isso
+          // aparecia como "0 negócios lidos", indistinguível de funil vazio.
+          setMsg(acao === 'sincronizar'
+            ? 'A conexão não entrou na varredura — confira se a Volta está Ativa e o token salvo.'
+            : 'A conexão não entrou na fila — a Ida precisa estar Ativa, com responsável e etapa escolhidos.');
+          setOcupado(false);
+          return;
+        }
         setMsg(acao === 'sincronizar'
           ? `${res.lidos ?? 0} negócios lidos · ${res.movimentos ?? 0} movimentações novas${res.varreduraCompleta === false ? ' (parcial — o cron continua de onde parou)' : ''}`
           : `${res.enviados ?? 0} enviados · ${res.descartados ?? 0} descartados · ${res.erros ?? 0} com erro`);
@@ -351,7 +360,9 @@ export default function SultsCard({ clientId }: { clientId: string }) {
               onChange={e => patch({ funil_id: e.target.value || null, etapa_id: null })}>
               <option value="">Todos os funis</option>
               {(cat?.funis ?? []).map(f => (
-                <option key={f.id} value={f.id}>{f.nome} ({f.qtd})</option>
+                <option key={f.id} value={f.id} title={`id ${f.id}`}>
+                  {f.nome} — {f.qtd} negócios
+                </option>
               ))}
             </select>
           </label>
@@ -361,7 +372,11 @@ export default function SultsCard({ clientId }: { clientId: string }) {
             <select className={CAMPO} value={String(cfg.etapa_id ?? '')}
               onChange={e => patch({ etapa_id: e.target.value || null })}>
               <option value="">— escolha —</option>
-              {etapas.map(e => <option key={e.id} value={e.id}>{e.nome} ({e.id})</option>)}
+              {etapas.map(e => (
+                <option key={e.id} value={e.id} title={`id ${e.id}`}>
+                  {e.nome} — {e.qtd} negócios
+                </option>
+              ))}
             </select>
           </label>
 
@@ -371,7 +386,9 @@ export default function SultsCard({ clientId }: { clientId: string }) {
               onChange={e => patch({ responsavel_id: e.target.value || null })}>
               <option value="">— escolha —</option>
               {(cat?.responsaveis ?? []).map(r => (
-                <option key={r.id} value={r.id}>{r.nome} ({r.qtd})</option>
+                <option key={r.id} value={r.id} title={`id ${r.id}`}>
+                  {r.nome} — {r.qtd} negócios
+                </option>
               ))}
             </select>
           </label>
