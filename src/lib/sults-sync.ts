@@ -168,7 +168,7 @@ export type ResultadoVolta = {
   leadsCriados: number;
   leadsAtualizados: number;
   errosCrm: number;
-  funil?: { modo: string; criadas: number; removidas: number; reordenadas: number };
+  funil?: { modo: string; criadas: number; removidas: number; reordenadas: number; preservadas: string[] };
   erro?: string;
 };
 
@@ -263,8 +263,18 @@ async function sincronizarCliente(
           if (Date.now() >= fim) break;
           try {
             const res = await ingerirNegocioSults(pool, conn.client_id, s);
-            if (res?.criado) r.leadsCriados++;
-            else if (res) r.leadsAtualizados++;
+            if (res) {
+              if (res.criado) r.leadsCriados++; else r.leadsAtualizados++;
+              // ⚠️ Grava o vínculo no espelho: é o que marca "já ingerido" para
+              // a próxima varredura, e é a chave que liga `sults_negocios` a
+              // `crm_leads` em qualquer relatório.
+              estado.ingeridos.add(s.negocioId);
+              await pool.query(
+                `UPDATE public.sults_negocios SET lead_id = $3::uuid
+                  WHERE client_id = $1 AND negocio_id = $2`,
+                [conn.client_id, s.negocioId, res.leadId],
+              ).catch(() => null);
+            }
           } catch (err) {
             r.errosCrm++;
             if (!r.erro) r.erro = `CRM (negócio ${s.negocioId}): ${(err as Error).message}`;
@@ -294,6 +304,15 @@ type EstadoAnterior = {
   etapas: Map<number, { etapaId: number | null; etapaNome: string | null;
                         situacaoId: number | null; situacaoNome: string | null }>;
   leads: Map<number, string>;
+  /**
+   * Negócios que JÁ viraram lead no CRM daqui.
+   *
+   * ⚠️ É o que conserta o acervo órfão: a fila do CRM era "novo ou mudou de
+   * etapa", então ligar a ingestão DEPOIS do espelho pronto deixava os 1.833
+   * já espelhados de fora para sempre — não eram novos e não tinham mudado.
+   * Agora a pergunta é "já virou lead?", que é a pergunta certa.
+   */
+  ingeridos: Set<number>;
 };
 
 /**
@@ -308,9 +327,9 @@ type EstadoAnterior = {
 async function carregarEstado(pool: Pool, clientId: string): Promise<EstadoAnterior> {
   const { rows: negs } = await pool.query<{
     negocio_id: string; etapa_id: number | null; etapa_nome: string | null;
-    situacao_id: number | null; situacao_nome: string | null;
+    situacao_id: number | null; situacao_nome: string | null; lead_id: string | null;
   }>(
-    `SELECT negocio_id, etapa_id, etapa_nome, situacao_id, situacao_nome
+    `SELECT negocio_id, etapa_id, etapa_nome, situacao_id, situacao_nome, lead_id
        FROM public.sults_negocios WHERE client_id = $1`, [clientId],
   );
   // O elo com o lead do reports: quem criamos pelo worker de ida tem linha em
@@ -326,6 +345,7 @@ async function carregarEstado(pool: Pool, clientId: string): Promise<EstadoAnter
       situacaoId: n.situacao_id, situacaoNome: n.situacao_nome,
     }])),
     leads: new Map(envs.map(e => [Number(e.negocio_id), e.lead_id])),
+    ingeridos: new Set(negs.filter(n => n.lead_id).map(n => Number(n.negocio_id))),
   };
 }
 
@@ -346,9 +366,11 @@ async function gravarPagina(
   for (const s of snaps) {
     const ant = estado.etapas.get(s.negocioId);
     if (!ant) novos++;
-    // Só negócio novo ou que mexeu vai para o CRM: reingerir os 2.644 a cada
-    // 10 minutos seria milhares de transações para não mudar nada.
-    if (!ant || ant.etapaId !== s.etapaId || ant.situacaoId !== s.situacaoId) paraCrm.push(s);
+    // Vai para o CRM quem ainda não virou lead, além de quem mexeu. Reingerir
+    // os 2.644 a cada 10 minutos seria milhares de transações para nada — mas
+    // "nunca foi ingerido" é condição permanente até deixar de ser.
+    const mexeu = !ant || ant.etapaId !== s.etapaId || ant.situacaoId !== s.situacaoId;
+    if (mexeu || !estado.ingeridos.has(s.negocioId)) paraCrm.push(s);
     const anterior: SnapshotNegocio | null = ant ? { ...s, ...ant } : null;
     const m = diffNegocio(anterior, s, agora);
     if (m) movs.push({ s, m });

@@ -308,6 +308,7 @@ export default function SultsCard({ clientId }: { clientId: string }) {
         const f = res.funil;
         const funil = f && (f.criadas || f.removidas || f.reordenadas)
           ? ` · funil ${f.modo}: ${f.criadas} etapas criadas, ${f.removidas} removidas, ${f.reordenadas} reordenadas`
+            + (f.preservadas?.length ? ` (preservadas por estarem em uso: ${f.preservadas.join(', ')})` : '')
           : '';
         const crm = (res.leadsCriados || res.leadsAtualizados || res.errosCrm)
           ? ` · CRM: ${res.leadsCriados ?? 0} leads criados, ${res.leadsAtualizados ?? 0} atualizados${res.errosCrm ? `, ${res.errosCrm} com erro` : ''}`

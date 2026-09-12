@@ -29,8 +29,10 @@ export type PlanoFunil = {
   remover: string[];
   criar: { label: string; position: number; etapa: EtapaFunil }[];
   reposicionar: { id: string; position: number }[];
-  /** 'adotado' = o funil vira o do CRM externo; 'anexado' = só completa o que falta. */
-  modo: 'adotado' | 'anexado';
+  /** 'adotado' = só as etapas do externo; 'mesclado' = sobrou etapa em uso, preservada no fim. */
+  modo: 'adotado' | 'mesclado';
+  /** Rótulos preservados por terem lead ou gatilho, mesmo não existindo no externo. */
+  preservadas: string[];
 };
 
 export function normalizarRotulo(s: string): string {
@@ -68,6 +70,13 @@ function descartavel(e: EtapaAtual, uso: Map<string, UsoEtapa>): boolean {
  * Decide o que fazer com o funil diante das etapas do CRM externo.
  *
  * `externas` vem NA ORDEM do funil de lá — é ela que o board passa a refletir.
+ *
+ * ⚠️ A decisão é POR ETAPA, não tudo-ou-nada. A primeira versão exigia que o
+ * funil inteiro estivesse intocado para ser adotado, e bastava UM lead numa
+ * etapa padrão para o cliente ficar com as 9 colunas de clínica mais as do CRM
+ * externo embaralhadas atrás — exatamente o que a adoção existe para evitar.
+ * Agora: etapa padrão sem uso sai, etapa em uso fica (empurrada para o fim), e
+ * as do externo assumem as primeiras posições na ordem de lá.
  */
 export function planejarFunil(
   atuais: EtapaAtual[],
@@ -75,47 +84,46 @@ export function planejarFunil(
   uso: Map<string, UsoEtapa>,
 ): PlanoFunil {
   const limpas = externas.map(e => e.trim()).filter(Boolean);
-  const vazio: PlanoFunil = { remover: [], criar: [], reposicionar: [], modo: 'anexado' };
-  if (!limpas.length) return vazio;
+  if (!limpas.length) {
+    return { remover: [], criar: [], reposicionar: [], modo: 'mesclado', preservadas: [] };
+  }
 
   const porRotulo = new Map(atuais.map(a => [normalizarRotulo(a.label), a]));
   const externasNorm = limpas.map(normalizarRotulo);
   const conjuntoExterno = new Set(externasNorm);
 
-  // O funil é "nosso" enquanto toda etapa for ou padrão intocada, ou uma das
-  // etapas do CRM externo. Uma etapa criada por gestor (ou padrão já em uso)
-  // tira a integração do volante.
-  const gerenciado = atuais.every(
-    a => conjuntoExterno.has(normalizarRotulo(a.label)) || descartavel(a, uso),
-  );
-
-  if (!gerenciado) {
-    // Só completa o que falta, no fim, preservando a ordem do externo entre si.
-    const base = atuais.reduce((m, a) => Math.max(m, a.position), -1);
-    const criar = limpas
-      .filter((_, i) => !porRotulo.has(externasNorm[i]))
-      .map((label, i) => ({
-        label, position: base + 1 + i, etapa: classificarEtapa(label),
-      }));
-    return { ...vazio, criar };
-  }
-
   const criar: PlanoFunil['criar'] = [];
   const reposicionar: PlanoFunil['reposicionar'] = [];
+
+  // 1. As etapas do externo ocupam o começo, na ordem de lá.
   limpas.forEach((label, i) => {
     const atual = porRotulo.get(externasNorm[i]);
-    if (!atual) {
-      criar.push({ label, position: i, etapa: classificarEtapa(label) });
-    } else if (atual.position !== i) {
-      reposicionar.push({ id: atual.id, position: i });
-    }
+    if (!atual) criar.push({ label, position: i, etapa: classificarEtapa(label) });
+    else if (atual.position !== i) reposicionar.push({ id: atual.id, position: i });
   });
 
-  const remover = atuais
-    .filter(a => !conjuntoExterno.has(normalizarRotulo(a.label)) && descartavel(a, uso))
-    .map(a => a.id);
+  // 2. O que não é do externo: sai se for padrão sem uso, fica se tiver lead ou
+  //    gatilho. Quem fica vai para depois das do externo, mantendo a ordem
+  //    relativa — mexer nela além do necessário seria mexer no trabalho alheio.
+  const forasteiras = atuais
+    .filter(a => !conjuntoExterno.has(normalizarRotulo(a.label)))
+    .sort((a, b) => a.position - b.position);
 
-  return { remover, criar, reposicionar, modo: 'adotado' };
+  const remover: string[] = [];
+  const preservadas: string[] = [];
+  let proxima = limpas.length;
+  for (const a of forasteiras) {
+    if (descartavel(a, uso)) { remover.push(a.id); continue; }
+    preservadas.push(a.label);
+    if (a.position !== proxima) reposicionar.push({ id: a.id, position: proxima });
+    proxima++;
+  }
+
+  return {
+    remover, criar, reposicionar,
+    modo: preservadas.length ? 'mesclado' : 'adotado',
+    preservadas,
+  };
 }
 
 export { COR as CORES_ETAPA };

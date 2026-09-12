@@ -27,30 +27,47 @@ const SULTS = ['Novo lead', 'Abordagem D1', 'Reunião Agendada', 'Contrato', 'Pe
 {
   const p = planejarFunil(PADRAO, SULTS, SEM_USO);
   eq(p.modo, 'adotado', 'funil intocado é adotado');
+  eq(p.preservadas, [], 'nada preservado');
   eq(p.remover.length, 9, 'as 9 etapas de clínica saem');
   eq(p.criar.map(c => c.label), SULTS, 'cria as 5 do SULTS');
   eq(p.criar.map(c => c.position), [0, 1, 2, 3, 4], 'NA ORDEM do funil de lá');
   eq(p.reposicionar, [], 'nada a reposicionar — tudo é novo');
 }
 
-// ⚠️ etapa padrão COM LEAD não é apagada — e tira a integração do volante
+// ⚠️ O caso do print: UM lead numa etapa padrão não pode bloquear a adoção.
+// A decisão é por etapa — a usada fica, as outras 8 saem.
 {
-  const uso = new Map([['fechado', { leads: 12, gatilhos: 0 }]]);
+  const uso = new Map([['em atendimento', { leads: 1, gatilhos: 0 }]]);
   const p = planejarFunil(PADRAO, SULTS, uso);
-  eq(p.modo, 'anexado', 'etapa em uso protege o funil inteiro');
-  eq(p.remover, [], 'nada é removido');
-  eq(p.criar.map(c => c.label), SULTS, 'as do SULTS são anexadas');
-  eq(p.criar.map(c => c.position), [9, 10, 11, 12, 13], 'anexadas depois das existentes');
-  eq(p.reposicionar, [], 'ordem de quem já estava não é mexida');
+  eq(p.modo, 'mesclado', 'sobrou etapa em uso');
+  eq(p.preservadas, ['Em Atendimento'], 'a etapa com lead é preservada');
+  eq(p.remover.length, 8, 'as outras 8 de clínica saem');
+  ok(!p.remover.includes('p0'), 'a que tem lead NUNCA é removida');
+  eq(p.criar.map(c => c.position), [0, 1, 2, 3, 4], 'as do SULTS assumem o começo');
+  const pos = Object.fromEntries(p.reposicionar.map(r => [r.id, r.position]));
+  eq(pos.p0, 5, 'a preservada vai para depois das do externo');
 }
 
-// ⚠️ etapa padrão sem lead MAS com gatilho de automação também é protegida
+// ⚠️ gatilho de automação protege tanto quanto lead
 {
   const uso = new Map([['agendado', { leads: 0, gatilhos: 1 }]]);
   const p = planejarFunil(PADRAO, SULTS, uso);
-  eq(p.modo, 'anexado', 'gatilho protege tanto quanto lead');
-  ok(!p.remover.includes('p1'), 'a etapa com gatilho fica');
-  eq(p.remover, [], 'e como o funil não é gerenciado, nada sai');
+  eq(p.preservadas, ['Agendado'], 'etapa com gatilho é preservada');
+  ok(!p.remover.includes('p1'), 'não é removida');
+  eq(p.remover.length, 8, 'as demais saem');
+}
+
+// ⚠️ ordem relativa das preservadas é mantida
+{
+  const uso = new Map([
+    ['fechado', { leads: 3, gatilhos: 0 }],
+    ['em atendimento', { leads: 1, gatilhos: 0 }],
+  ]);
+  const p = planejarFunil(PADRAO, SULTS, uso);
+  eq(p.preservadas, ['Em Atendimento', 'Fechado'], 'na ordem em que estavam');
+  const pos = Object.fromEntries(p.reposicionar.map(r => [r.id, r.position]));
+  eq(pos.p0, 5, 'Em Atendimento primeiro entre as preservadas');
+  eq(pos.p3, 6, 'Fechado depois');
 }
 
 // ═══ segunda varredura: já adotado, nada muda
@@ -81,12 +98,16 @@ const SULTS = ['Novo lead', 'Abordagem D1', 'Reunião Agendada', 'Contrato', 'Pe
   eq(pos.x1, 4, 'Perca vai para o fim');
 }
 
-// ═══ etapa criada pelo gestor tira a integração do volante
+// ═══ etapa criada pelo gestor: sem uso, não é padrão → fica, mas no fim
 {
   const comCustom = [...PADRAO, et('g1', 'Visita Técnica', 9)];
   const p = planejarFunil(comCustom, SULTS, SEM_USO);
-  eq(p.modo, 'anexado', 'etapa que o gestor criou protege o funil');
-  eq(p.remover, [], 'nada removido');
+  eq(p.modo, 'mesclado', 'etapa de gestor sobrevive');
+  eq(p.preservadas, ['Visita Técnica'], 'preservada por não ser padrão');
+  ok(!p.remover.includes('g1'), 'nunca removida');
+  eq(p.remover.length, 9, 'as 9 padrão sem uso saem');
+  const pos = Object.fromEntries(p.reposicionar.map(r => [r.id, r.position]));
+  eq(pos.g1, 5, 'vai para depois das 5 do SULTS');
 }
 
 // ═══ acento e caixa não duplicam coluna
@@ -102,7 +123,7 @@ const SULTS = ['Novo lead', 'Abordagem D1', 'Reunião Agendada', 'Contrato', 'Pe
 eq(normalizarRotulo('  Reunião   Agendada '), 'reuniao agendada', 'normalização');
 
 // ═══ bordas
-eq(planejarFunil(PADRAO, [], SEM_USO).modo, 'anexado', 'sem etapas externas não faz nada');
+eq(planejarFunil(PADRAO, [], SEM_USO).criar, [], 'sem etapas externas não cria nada');
 eq(planejarFunil(PADRAO, [], SEM_USO).remover, [], 'e não remove nada');
 eq(planejarFunil(PADRAO, ['  ', ''], SEM_USO).criar, [], 'rótulo vazio é ignorado');
 {
