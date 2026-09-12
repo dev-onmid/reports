@@ -2416,7 +2416,7 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
             onClick={() => setConfigOpen(true)}
           >
             <Settings className="w-4 h-4 text-primary" />
-            Configurar
+            Configurações
           </Button>
         </div>
       </div>
