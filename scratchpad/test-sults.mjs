@@ -11,7 +11,7 @@ import assert from 'node:assert';
 import {
   montarPayloadSults, telefoneSults, temperaturaSults, origemSults,
   descricaoAtribuicao, tituloNegocio,
-  normalizarNegocio, diffNegocio, entradaNaEtapa,
+  normalizarNegocio, diffNegocio, entradaNaEtapa, agregarCatalogo,
 } from './build/sults.mjs';
 
 let n = 0;
@@ -267,6 +267,62 @@ eq(diffNegocio(snap(25, 'Leads Novos'), snap(25, 'Leads Novos'), AGORA), null, '
   const m = diffNegocio(snap(30, 'B'), snap(25, 'A'), AGORA);
   ok(m, 'voltar de etapa conta');
   eq(m.etapaParaId, 25, 'etapa para (regressão)');
+}
+
+
+// ═══ catálogo deduzido ════════════════════════════════════════════════════
+
+{
+  const negs = [
+    { id: 1, etapa: { id: 16, nome: 'Novo lead', funil: { id: 4, nome: 'Comercial' } },
+      responsavel: { id: 125, nome: 'Daniele' }, origem: { id: 2, nome: 'Facebook' } },
+    { id: 2, etapa: { id: 50, nome: 'Reunião Agendada', funil: { id: 4, nome: 'Comercial' } },
+      responsavel: { id: 125, nome: 'Daniele' }, campanha: { id: 7, nome: 'Set' } },
+    { id: 3, etapa: { id: 16, nome: 'Novo lead', funil: { id: 4, nome: 'Comercial' } },
+      responsavel: { id: 49, nome: 'João' }, origem: { id: 1, nome: 'Instagram' } },
+    { id: 4, etapa: { id: 27, nome: 'Mapeamento', funil: { id: 6, nome: 'Maringá' } },
+      responsavel: { id: 125, nome: 'Daniele' } },
+  ];
+  const c = agregarCatalogo(negs);
+  eq(c.amostra, 4, 'amostra');
+  eq(c.funis[0].id, 4, 'funil de maior volume vem primeiro');
+  eq(c.funis[0].qtd, 3, 'contagem do funil');
+  eq(c.funis[1].id, 6, 'segundo funil');
+  eq(c.funis[0].etapas.map(e => e.id), [16, 50],
+    'etapas ordenadas por ID (ordem do funil), não por volume');
+  eq(c.funis[0].etapas[0].qtd, 2, 'etapa repetida conta');
+  eq(c.responsaveis[0], { id: 125, nome: 'Daniele', qtd: 3 }, 'responsável mais ativo primeiro');
+  eq(c.responsaveis.length, 2, 'dois responsáveis');
+  eq(c.origens.map(o => o.id).sort(), [1, 2], 'origens');
+  eq(c.campanhas, [{ id: 7, nome: 'Set', qtd: 1 }], 'campanhas');
+}
+
+// ⚠️ etapa sem funil não pode sumir do menu
+{
+  const c = agregarCatalogo([{ id: 1, etapa: { id: 99, nome: 'Solta' } }]);
+  eq(c.funis.length, 1, 'pseudo-funil criado');
+  eq(c.funis[0].id, 0, 'id 0 = sem funil');
+  eq(c.funis[0].etapas[0].id, 99, 'etapa preservada');
+}
+
+// lixo não quebra e não polui
+{
+  const c = agregarCatalogo([
+    {}, { id: 5 }, { id: 6, responsavel: { id: 0, nome: 'zero' } },
+    { id: 7, origem: { id: null } }, { id: 8, etapa: { nome: 'sem id' } },
+  ]);
+  eq(c.responsaveis, [], 'id 0 é descartado');
+  eq(c.origens, [], 'id nulo descartado');
+  eq(c.funis, [], 'etapa sem id não cria funil');
+  eq(c.amostra, 5, 'amostra conta as linhas mesmo assim');
+}
+eq(agregarCatalogo([]).funis, [], 'lista vazia');
+eq(agregarCatalogo(undefined).amostra, 0, 'undefined não quebra');
+
+// nome ausente vira rótulo legível em vez de vazio
+{
+  const c = agregarCatalogo([{ id: 1, responsavel: { id: 42 } }]);
+  eq(c.responsaveis[0].nome, '#42', 'sem nome vira #id');
 }
 
 console.log(`ok — ${n} asserts`);

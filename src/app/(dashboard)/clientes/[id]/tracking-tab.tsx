@@ -12,6 +12,7 @@ import { cn } from '@/lib/utils';
 import { ConversaoTile, GuideStepModal } from './conversao-guias';
 import { DatalyticsCard } from './datalytics-card';
 import { AgendorCard } from './agendor-card';
+import SultsCard from './sults-card';
 import LpOrigensCard from './lp-origens-card';
 import { ClientDeliveryTab } from './delivery-tab';
 import { LandingPagesTab } from './landing-pages-tab';
@@ -213,7 +214,7 @@ function SectionHeader({ icon: Icon, title, subtitle, color = 'text-muted-foregr
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-const SUBABAS_RASTREIO = ['whatsapp', 'sites', 'conversoes', 'datalytics', 'agendor', 'delivery', 'heatmap', 'log'] as const;
+const SUBABAS_RASTREIO = ['whatsapp', 'sites', 'conversoes', 'datalytics', 'agendor', 'sults', 'delivery', 'heatmap', 'log'] as const;
 
 export function ClientTrackingTab({ clientId }: { clientId: string }) {
 
@@ -565,6 +566,7 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
           { id: 'conversoes' as const, label: 'Conversões', icon: Zap },
           { id: 'datalytics' as const, label: 'Datalytics', icon: Database },
           { id: 'agendor' as const, label: 'Agendor', icon: Building2 },
+          { id: 'sults' as const, label: 'SULTS', icon: Building2 },
           { id: 'delivery' as const, label: 'Delivery', icon: Store },
           { id: 'heatmap' as const, label: 'Mapa de Calor', icon: Flame },
           { id: 'log'       as const, label: 'Log',         icon: BarChart3 },
@@ -1085,6 +1087,8 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
       {activeTab === 'datalytics' && <DatalyticsCard clientId={clientId} />}
 
       {activeTab === 'agendor' && <AgendorCard clientId={clientId} />}
+
+      {activeTab === 'sults' && <SultsCard clientId={clientId} />}
 
       {activeTab === 'delivery' && <ClientDeliveryTab clientId={clientId} />}
 

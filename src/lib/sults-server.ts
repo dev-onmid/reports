@@ -199,3 +199,41 @@ export async function criarNegocioSults(apiToken: string, payload: unknown): Pro
   const id = Number(r?.id);
   return Number.isFinite(id) && id > 0 ? id : null;
 }
+
+/**
+ * Baixa uma amostra de negócios para deduzir o catálogo (funis, etapas,
+ * responsáveis, origens, campanhas).
+ *
+ * ⚠️ Páginas ESPALHADAS, não as primeiras N. A listagem vem em ordem de id, ou
+ * seja, cronológica: ler só o começo mostra o funil como ele era quando a conta
+ * nasceu. Medido no CondoStore — as 100 primeiras linhas escondiam a maior
+ * origem da conta ("Landing Page (Google)", 164 negócios) e metade das etapas.
+ */
+export async function amostrarNegociosSults(
+  apiToken: string, opts: { paginas?: number; funilId?: number | null } = {},
+): Promise<unknown[]> {
+  const alvo = Math.max(1, Math.min(opts.paginas ?? 6, 12));
+  const base = (p: number) => {
+    const q = new URLSearchParams({ start: String(p), limit: '100' });
+    if (opts.funilId) q.set('funil', String(opts.funilId));
+    return `${SULTS_API}/expansao/negocio?${q}`;
+  };
+
+  const primeira = await sultsFetch<{ data?: unknown[]; totalPage?: number }>(apiToken, base(0));
+  const total = Number.isFinite(primeira?.totalPage) ? Number(primeira?.totalPage) : 1;
+  const out = [...(primeira?.data ?? [])];
+  if (total <= 1) return out;
+
+  // Espalha uniformemente pelo intervalo, sempre incluindo a última página
+  // (onde moram os negócios mais recentes — e as etapas criadas por último).
+  const restantes = Math.min(alvo, total) - 1;
+  const passos = new Set<number>();
+  for (let i = 1; i <= restantes; i++) {
+    passos.add(Math.min(total - 1, Math.round((i * (total - 1)) / restantes)));
+  }
+  for (const p of passos) {
+    const r = await sultsFetch<{ data?: unknown[] }>(apiToken, base(p)).catch(() => null);
+    if (r?.data) out.push(...r.data);
+  }
+  return out;
+}
