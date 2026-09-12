@@ -32,6 +32,9 @@ type Config = {
   enabled?: boolean;
   sync_ativo?: boolean;
   ingerir_crm?: boolean;
+  sync_pagina?: number;
+  catalogo?: Catalogo | null;
+  catalogo_em?: string | null;
   api_token_masked?: string | null;
   responsavel_id?: number | null;
   etapa_id?: number | null;
@@ -54,6 +57,19 @@ function fmt(iso: string | null | undefined): string {
     return new Date(iso).toLocaleString('pt-BR',
       { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
   } catch { return iso; }
+}
+
+/** "há 4 min" diz se está vivo; "11/09, 23:20" faz o leitor calcular sozinho. */
+function desde(iso: string | null | undefined): string {
+  if (!iso) return 'nunca';
+  const ms = Date.now() - new Date(iso).getTime();
+  if (!Number.isFinite(ms) || ms < 0) return fmt(iso);
+  const min = Math.floor(ms / 60000);
+  if (min < 1) return 'agora mesmo';
+  if (min < 60) return `há ${min} min`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `há ${h}h`;
+  return fmt(iso);
 }
 
 const CAMPO = 'h-9 w-full rounded-none border border-border bg-surface-elevated px-2 text-sm';
@@ -222,6 +238,16 @@ export default function SultsCard({ clientId }: { clientId: string }) {
   }, [clientId]);
 
   useEffect(() => { void carregar(); }, [carregar]);
+
+  // O catálogo guardado desenha os menus imediatamente. Só quando não existe é
+  // que vale gastar as requisições à API do cliente — e uma vez só.
+  useEffect(() => {
+    if (!cfg?.conectado) return;
+    if (cfg.catalogo) { setCat(cfg.catalogo); return; }
+    if (cat || ocupado) return;
+    void buscarCatalogo();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cfg?.conectado, cfg?.catalogo]);
 
   const buscarCatalogo = useCallback(async () => {
     setOcupado(true); setMsg('Lendo o funil do cliente…');
@@ -451,7 +477,7 @@ export default function SultsCard({ clientId }: { clientId: string }) {
             {Number(s.presos ?? 0) > 0 && (
               <div className="text-amber-400">presos em envio: {s.presos} — exigem conferência manual</div>
             )}
-            <div>última rodada: {fmt(cfg.ultima_varredura_em)}</div>
+            <div>última rodada: {desde(cfg.ultima_varredura_em)}</div>
           </dl>
           {cfg.ultimo_erro && <p className="mt-2 text-[11px] text-red-400">{cfg.ultimo_erro}</p>}
           <button type="button" disabled={!cfg.enabled || ocupado}
@@ -476,7 +502,15 @@ export default function SultsCard({ clientId }: { clientId: string }) {
           <dl className="space-y-0.5 text-xs text-muted-foreground">
             <div>negócios espelhados: <strong className="text-foreground">{s.negocios ?? '0'}</strong></div>
             <div>movimentações registradas: <strong className="text-foreground">{s.movimentos ?? '0'}</strong></div>
-            <div>última varredura: {fmt(cfg.ultima_volta_em)}</div>
+            {cfg.ingerir_crm && (
+              <div>leads no CRM daqui: <strong className="text-foreground">{s.leads_crm ?? '0'}</strong></div>
+            )}
+            <div>última varredura: {desde(cfg.ultima_volta_em)}</div>
+            {(cfg.sync_pagina ?? 0) > 0 && (
+              <div className="text-amber-400">
+                varredura em andamento — retoma na página {cfg.sync_pagina}
+              </div>
+            )}
           </dl>
           {cfg.ultimo_erro_volta && <p className="mt-2 text-[11px] text-red-400">{cfg.ultimo_erro_volta}</p>}
           <button type="button" disabled={!cfg.sync_ativo || ocupado}

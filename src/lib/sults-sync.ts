@@ -47,7 +47,14 @@ export function ensureSultsSyncSchema(pool: Pool): Promise<void> {
           -- Trazer o negócio para a tabela de leads (dashboard, funil e
           -- Performance Comercial) é opcional: só faz sentido para
           -- cliente que qualifica DENTRO do SULTS.
-          ADD COLUMN IF NOT EXISTS ingerir_crm BOOLEAN NOT NULL DEFAULT FALSE
+          ADD COLUMN IF NOT EXISTS ingerir_crm BOOLEAN NOT NULL DEFAULT FALSE,
+          -- Catálogo (funis/etapas/responsáveis/origens) deduzido da API e
+          -- GUARDADO. Sem isso a tela abria com todos os menus vazios: o
+          -- catálogo só existia depois de clicar em "Reler funil", e select
+          -- cujo valor não está nas opções renderiza em branco — a integração
+          -- parecia desconectada mesmo estando salva e varrendo.
+          ADD COLUMN IF NOT EXISTS catalogo JSONB,
+          ADD COLUMN IF NOT EXISTS catalogo_em TIMESTAMPTZ
       `);
       await pool.query(`
         CREATE TABLE IF NOT EXISTS public.sults_negocios (
