@@ -159,6 +159,14 @@ async function sincronizarCliente(
   const vistos = new Set<number>();
   const agora = new Date().toISOString();
 
+  let estado: EstadoAnterior;
+  try {
+    estado = await carregarEstado(pool, conn.client_id);
+  } catch (err) {
+    r.erro = `estado anterior: ${(err as Error).message}`;
+    return r;
+  }
+
   try {
     for (let i = 0; i < MAX_PAGINAS; i++) {
       if (Date.now() >= fim) break;
@@ -180,14 +188,13 @@ async function sincronizarCliente(
       }
       adaptado = true; // a partir da 2ª página o passo está decidido
 
-      for (const s of snaps) {
-        if (vistos.has(s.negocioId)) continue;
-        vistos.add(s.negocioId);
-        r.lidos++;
-        const efeito = await gravarNegocio(pool, conn.client_id, s, agora);
-        if (efeito.novo) r.novos++;
-        if (efeito.movimento) r.movimentos++;
-      }
+      const paginaNova = snaps.filter(s => !vistos.has(s.negocioId));
+      for (const s of paginaNova) vistos.add(s.negocioId);
+      r.lidos += paginaNova.length;
+
+      const efeito = await gravarPagina(pool, conn.client_id, paginaNova, estado, agora);
+      r.novos += efeito.novos;
+      r.movimentos += efeito.movimentos;
 
       start += passo;
       if (negocios.length < POR_PAGINA) { r.varreduraCompleta = true; break; }
@@ -207,35 +214,86 @@ async function sincronizarCliente(
   return r;
 }
 
-async function gravarNegocio(
-  pool: Pool, clientId: string, s: SnapshotNegocio, agora: string,
-): Promise<{ novo: boolean; movimento: boolean }> {
-  const { rows: [ant] } = await pool.query<{
-    etapa_id: number | null; etapa_nome: string | null;
+type EstadoAnterior = {
+  etapas: Map<number, { etapaId: number | null; etapaNome: string | null;
+                        situacaoId: number | null; situacaoNome: string | null }>;
+  leads: Map<number, string>;
+};
+
+/**
+ * Estado anterior do cliente inteiro, em DUAS consultas.
+ *
+ * ⚠️ Medido antes de existir: a versão anterior consultava o banco 3× POR
+ * NEGÓCIO (estado anterior, lead vinculado, upsert). No funil do CondoStore —
+ * 2.644 negócios — isso era ~8 mil consultas a cada varredura, de 10 em 10
+ * minutos, para descobrir que quase nada mudou. Carregar tudo de uma vez e
+ * comparar em memória troca isso por 2 consultas + uma gravação por página.
+ */
+async function carregarEstado(pool: Pool, clientId: string): Promise<EstadoAnterior> {
+  const { rows: negs } = await pool.query<{
+    negocio_id: string; etapa_id: number | null; etapa_nome: string | null;
     situacao_id: number | null; situacao_nome: string | null;
   }>(
-    `SELECT etapa_id, etapa_nome, situacao_id, situacao_nome
-       FROM public.sults_negocios WHERE client_id = $1 AND negocio_id = $2`,
-    [clientId, s.negocioId],
+    `SELECT negocio_id, etapa_id, etapa_nome, situacao_id, situacao_nome
+       FROM public.sults_negocios WHERE client_id = $1`, [clientId],
   );
-
-  const anterior: SnapshotNegocio | null = ant
-    ? { ...s, etapaId: ant.etapa_id, etapaNome: ant.etapa_nome,
-        situacaoId: ant.situacao_id, situacaoNome: ant.situacao_nome }
-    : null;
-
-  const mov = diffNegocio(anterior, s, agora);
-
-  // O elo com o lead do reports: quem criamos pelo worker de ida tem a linha em
+  // O elo com o lead do reports: quem criamos pelo worker de ida tem linha em
   // `sults_envios`. Negócio cadastrado à mão no SULTS não tem — e entra assim
-  // mesmo, com lead_id null. O funil do cliente aparece inteiro, não só a parte
-  // que saiu daqui.
-  const { rows: [envio] } = await pool.query<{ lead_id: string }>(
-    `SELECT lead_id FROM public.sults_envios
-      WHERE client_id = $1 AND negocio_id = $2 LIMIT 1`,
-    [clientId, s.negocioId],
+  // mesmo, com lead_id null, para o funil do cliente aparecer inteiro.
+  const { rows: envs } = await pool.query<{ negocio_id: string; lead_id: string }>(
+    `SELECT negocio_id, lead_id FROM public.sults_envios
+      WHERE client_id = $1 AND negocio_id IS NOT NULL`, [clientId],
   );
-  const leadId = envio?.lead_id ?? null;
+  return {
+    etapas: new Map(negs.map(n => [Number(n.negocio_id), {
+      etapaId: n.etapa_id, etapaNome: n.etapa_nome,
+      situacaoId: n.situacao_id, situacaoNome: n.situacao_nome,
+    }])),
+    leads: new Map(envs.map(e => [Number(e.negocio_id), e.lead_id])),
+  };
+}
+
+const COLS_SNAPSHOT = 19;
+
+/** Grava a página inteira: um upsert com todas as linhas, um insert dos movimentos. */
+async function gravarPagina(
+  pool: Pool, clientId: string, snaps: SnapshotNegocio[], estado: EstadoAnterior, agora: string,
+): Promise<{ novos: number; movimentos: number }> {
+  if (!snaps.length) return { novos: 0, movimentos: 0 };
+
+  const valores: unknown[] = [];
+  const linhas: string[] = [];
+  const movs: { s: SnapshotNegocio; m: NonNullable<ReturnType<typeof diffNegocio>> }[] = [];
+  let novos = 0;
+
+  for (const s of snaps) {
+    const ant = estado.etapas.get(s.negocioId);
+    if (!ant) novos++;
+    const anterior: SnapshotNegocio | null = ant ? { ...s, ...ant } : null;
+    const m = diffNegocio(anterior, s, agora);
+    if (m) movs.push({ s, m });
+    // Mantém o estado em memória coerente: a mesma varredura não pode ver o
+    // negócio duas vezes e gerar o movimento de novo.
+    estado.etapas.set(s.negocioId, {
+      etapaId: s.etapaId, etapaNome: s.etapaNome,
+      situacaoId: s.situacaoId, situacaoNome: s.situacaoNome,
+    });
+
+    const b = valores.length;
+    linhas.push(`($${b + 1},$${b + 2},$${b + 3},$${b + 4},$${b + 5},$${b + 6},$${b + 7},$${b + 8},`
+      + `$${b + 9},$${b + 10},$${b + 11},$${b + 12},$${b + 13},$${b + 14},$${b + 15},`
+      + `$${b + 16}::timestamptz,$${b + 17}::timestamptz,$${b + 18}::timestamptz,$${b + 19}::jsonb,NOW())`);
+    valores.push(
+      clientId, s.negocioId, estado.leads.get(s.negocioId) ?? null, s.titulo,
+      s.funilId, s.funilNome, s.etapaId, s.etapaNome, s.situacaoId, s.situacaoNome,
+      s.responsavelNome, s.origemNome, s.campanhaNome, s.motivoPerda, s.valor,
+      s.dtCadastro, s.dtConclusao, s.entrouNaEtapaEm, JSON.stringify(s.duracaoEtapas),
+    );
+  }
+
+  if (valores.length !== snaps.length * COLS_SNAPSHOT) {
+    throw new Error('montagem do upsert inconsistente'); // guarda contra edição futura
+  }
 
   await pool.query(
     `INSERT INTO public.sults_negocios (
@@ -243,8 +301,7 @@ async function gravarNegocio(
        etapa_id, etapa_nome, situacao_id, situacao_nome, responsavel_nome,
        origem_nome, campanha_nome, motivo_perda, valor, dt_cadastro,
        dt_conclusao, entrou_na_etapa_em, duracao_etapas, visto_em
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,
-               $16::timestamptz,$17::timestamptz,$18::timestamptz,$19::jsonb, NOW())
+     ) VALUES ${linhas.join(',')}
      ON CONFLICT (client_id, negocio_id) DO UPDATE SET
        lead_id = COALESCE(public.sults_negocios.lead_id, EXCLUDED.lead_id),
        titulo = EXCLUDED.titulo,
@@ -258,32 +315,30 @@ async function gravarNegocio(
        entrou_na_etapa_em = EXCLUDED.entrou_na_etapa_em,
        duracao_etapas = EXCLUDED.duracao_etapas,
        visto_em = NOW()`,
-    [
-      clientId, s.negocioId, leadId, s.titulo, s.funilId, s.funilNome,
-      s.etapaId, s.etapaNome, s.situacaoId, s.situacaoNome, s.responsavelNome,
-      s.origemNome, s.campanhaNome, s.motivoPerda, s.valor, s.dtCadastro,
-      s.dtConclusao, s.entrouNaEtapaEm, JSON.stringify(s.duracaoEtapas),
-    ],
+    valores,
   );
 
-  if (!mov) return { novo: !ant, movimento: false };
+  let gravados = 0;
+  for (const { s, m } of movs) {
+    const { rowCount } = await pool.query(
+      `INSERT INTO public.sults_movimentos (
+         client_id, negocio_id, lead_id,
+         etapa_de_id, etapa_de_nome, etapa_para_id, etapa_para_nome,
+         situacao_de_id, situacao_de_nome, situacao_para_id, situacao_para_nome,
+         ocorrido_em
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::timestamptz)
+       ON CONFLICT DO NOTHING`,
+      [
+        clientId, m.negocioId, estado.leads.get(s.negocioId) ?? null,
+        m.etapaDeId, m.etapaDeNome, m.etapaParaId, m.etapaParaNome,
+        m.situacaoDeId, m.situacaoDeNome, m.situacaoParaId, m.situacaoParaNome,
+        m.ocorridoEm,
+      ],
+    );
+    gravados += rowCount ?? 0;
+  }
 
-  const { rowCount } = await pool.query(
-    `INSERT INTO public.sults_movimentos (
-       client_id, negocio_id, lead_id,
-       etapa_de_id, etapa_de_nome, etapa_para_id, etapa_para_nome,
-       situacao_de_id, situacao_de_nome, situacao_para_id, situacao_para_nome,
-       ocorrido_em
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::timestamptz)
-     ON CONFLICT DO NOTHING`,
-    [
-      clientId, mov.negocioId, leadId,
-      mov.etapaDeId, mov.etapaDeNome, mov.etapaParaId, mov.etapaParaNome,
-      mov.situacaoDeId, mov.situacaoDeNome, mov.situacaoParaId, mov.situacaoParaNome,
-      mov.ocorridoEm,
-    ],
-  );
-  return { novo: false, movimento: (rowCount ?? 0) > 0 };
+  return { novos, movimentos: gravados };
 }
 
 export async function sincronizarVoltaSults(
