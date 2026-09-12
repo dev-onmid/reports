@@ -2169,6 +2169,7 @@ export default function CrmPage({ lockedClientId, embedded = false }: CrmPagePro
   const [dateFromFilter, setDateFromFilter] = useState(() => presetDateRange('thisMonth').from);
   const [dateToFilter, setDateToFilter] = useState(() => presetDateRange('thisMonth').to);
   const [datePreset, setDatePreset] = useState<DatePreset>('thisMonth');
+  const [funnelMenuOpen, setFunnelMenuOpen] = useState(false);
   const [dateMenuOpen, setDateMenuOpen] = useState(false);
   const [columnFilters, setColumnFilters] = useState<Partial<Record<ColumnKey, string>>>({});
   const [colWidths, setColWidths] = useState<Record<ColumnKey, number>>(DEFAULT_COL_WIDTHS);
@@ -2806,10 +2807,16 @@ export default function CrmPage({ lockedClientId, embedded = false }: CrmPagePro
   return (
     <div className={cn(
       'flex flex-col gap-5 overflow-hidden',
-      embedded ? 'h-[calc(100vh-360px)] min-h-[640px]' : 'h-full',
+      embedded ? 'h-[calc(100vh-300px)] min-h-[520px]' : 'h-full',
     )}>
 
-      {/* ── PAGE HEADER ─────────────────────────────────────────────── */}
+      {/* ── PAGE HEADER ─────────────────────────────────────────────────
+          ⚠️ Escondido quando embutido na página do cliente: ali a aba "CRM" já
+          está destacada e o nome do cliente está no topo. Repetir título,
+          subtítulo e ícone custava ~75px da altura do quadro — que é a parte
+          que o gestor realmente usa. Os avisos de "Salvando…"/erro migram para
+          a barra de filtros, que continua visível. */}
+      {!embedded && (
       <div className="flex items-center gap-3">
         <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-violet-600/20 border border-violet-500/30">
           {clientId ? <Users className="h-5 w-5 text-violet-400" /> : <Sparkles className="h-5 w-5 text-violet-400" />}
@@ -2825,6 +2832,7 @@ export default function CrmPage({ lockedClientId, embedded = false }: CrmPagePro
         {saving    && <span className="ml-2 text-xs font-medium text-amber-400 animate-pulse">Salvando…</span>}
         {saveError && <span className="ml-2 text-xs font-medium text-red-400">Erro: {saveError}</span>}
       </div>
+      )}
 
       {!clientId && (
         <div className="space-y-7">
@@ -2944,10 +2952,13 @@ export default function CrmPage({ lockedClientId, embedded = false }: CrmPagePro
       {clientId && (
       <div className="flex flex-wrap items-center gap-2">
         {lockedClientId ? (
-          <div className="flex h-10 items-center gap-2 rounded-lg border border-border bg-card px-3 text-sm font-semibold">
-            <Users className="h-3.5 w-3.5 text-primary" />
-            <span>{lockedClient?.name ?? 'Cliente selecionado'}</span>
-          </div>
+          // Só fora da página do cliente: lá dentro o nome está no cabeçalho.
+          !embedded && (
+            <div className="flex h-10 items-center gap-2 rounded-lg border border-border bg-card px-3 text-sm font-semibold">
+              <Users className="h-3.5 w-3.5 text-primary" />
+              <span>{lockedClient?.name ?? 'Cliente selecionado'}</span>
+            </div>
+          )
         ) : (
           <IconSelect icon={Users} value={clientId} onChange={openClientCrm}
             placeholder="Selecionar cliente..." className="min-w-[180px]">
@@ -2969,23 +2980,38 @@ export default function CrmPage({ lockedClientId, embedded = false }: CrmPagePro
                 {funnels.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
               </select>
             </div>
-            <button
-              type="button"
-              onClick={() => setShowFunnelEditor(true)}
-              className="flex h-9 items-center gap-1.5 rounded-lg border border-border px-3 text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-            >
-              <Pencil className="h-3.5 w-3.5" />
-              Editar funil
-            </button>
-            <button
-              type="button"
-              onClick={() => setShowPortalModal(true)}
-              title="Link somente-leitura pro cliente acompanhar o funil"
-              className="flex h-9 items-center gap-1.5 rounded-lg border border-border px-3 text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-            >
-              <Globe2 className="h-3.5 w-3.5" />
-              Portal do cliente
-            </button>
+            {/* ⚠️ Configuração, não operação: editar funil e gerar o portal
+                acontecem uma vez e ficavam ocupando ~230px da barra para
+                sempre. No menu continuam a um clique. */}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setFunnelMenuOpen(o => !o)}
+                title="Configurar funil"
+                aria-label="Configurar funil"
+                className="flex h-9 w-8 items-center justify-center rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              >
+                <MoreVertical className="h-4 w-4" />
+              </button>
+              {funnelMenuOpen && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setFunnelMenuOpen(false)} />
+                  <div className="absolute left-0 top-10 z-50 w-52 overflow-hidden rounded-lg border border-border bg-popover shadow-xl">
+                    <button type="button"
+                      onClick={() => { setFunnelMenuOpen(false); setShowFunnelEditor(true); }}
+                      className="flex w-full items-center gap-2 px-3 py-2 text-xs text-muted-foreground hover:bg-muted hover:text-foreground">
+                      <Pencil className="h-3.5 w-3.5" /> Editar funil
+                    </button>
+                    <button type="button"
+                      onClick={() => { setFunnelMenuOpen(false); setShowPortalModal(true); }}
+                      title="Link somente-leitura pro cliente acompanhar o funil"
+                      className="flex w-full items-center gap-2 px-3 py-2 text-xs text-muted-foreground hover:bg-muted hover:text-foreground">
+                      <Globe2 className="h-3.5 w-3.5" /> Portal do cliente
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         )}
 
