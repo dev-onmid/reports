@@ -20,6 +20,8 @@ import {
 import { cn } from '@/lib/utils';
 
 type Item = { id: number; nome: string; qtd: number };
+type ValorCanal = { valor: string; qtd: string };
+type Canais = { canal: ValorCanal[]; origin: ValorCanal[] };
 type Funil = Item & { etapas: Item[] };
 type Catalogo = {
   funis: Funil[]; responsaveis: Item[]; origens: Item[]; campanhas: Item[]; amostra: number;
@@ -41,6 +43,7 @@ type Config = {
   ultima_volta_em?: string | null;
   ultimo_erro_volta?: string | null;
   stats?: Record<string, string>;
+  canais?: Canais;
   erro?: string;
 };
 
@@ -86,15 +89,9 @@ function Prontidao({ cfg }: { cfg: Config }) {
   );
 }
 
-/**
- * Valores de `canal`/`origin` que a ingestão realmente grava — viram sugestões
- * no campo. Não é lista fechada: o webhook genérico repassa o que a LP mandar.
- */
-const CANAIS_CONHECIDOS = [
-  'Formulário Meta', 'Whatsapp', 'meta', 'google', 'instagram', 'formulario', 'organic',
-];
+type Linha = { canal: string; origemId: number; livre?: boolean };
 
-type Linha = { canal: string; origemId: number };
+const OUTRO = '__outro__';
 
 /**
  * canal do nosso CRM → origemId do SULTS.
@@ -104,13 +101,21 @@ type Linha = { canal: string; origemId: number };
  * "landing page" disparava 12 PATCHes — e descartava a linha enquanto o nome
  * estivesse vazio, então ela sumia na cara de quem acabou de criá-la.
  */
-function MapaOrigem({ valor, origens, aoMudar }: {
+function MapaOrigem({ valor, origens, canais, aoMudar }: {
   valor: Record<string, number> | null | undefined;
   origens: Item[];
+  canais: Canais | undefined;
   aoMudar: (v: Record<string, number>) => void;
 }) {
+  const doCliente = [...(canais?.canal ?? []), ...(canais?.origin ?? [])].map(c => c.valor);
   const [linhas, setLinhas] = useState<Linha[]>(
-    () => Object.entries(valor ?? {}).map(([canal, origemId]) => ({ canal, origemId: Number(origemId) })),
+    () => Object.entries(valor ?? {}).map(([canal, origemId]) => ({
+      canal,
+      origemId: Number(origemId),
+      // Mapeamento gravado para um canal que não aparece mais na base do
+      // cliente continua editável como texto — some do menu, não do mapa.
+      livre: !doCliente.includes(canal),
+    })),
   );
 
   const salvar = (ls: Linha[]) => {
@@ -128,18 +133,40 @@ function MapaOrigem({ valor, origens, aoMudar }: {
 
   return (
     <div className="space-y-1.5">
-      <datalist id="sults-canais">
-        {CANAIS_CONHECIDOS.map(c => <option key={c} value={c} />)}
-      </datalist>
-
       {linhas.map((l, i) => (
         <div key={i} className="flex gap-1.5">
-          <input
-            className={CAMPO} value={l.canal} list="sults-canais"
-            placeholder="ex: Formulário Meta"
-            onChange={e => mexer(i, { canal: e.target.value }, false)}
-            onBlur={() => salvar(linhas)}
-          />
+          {l.livre ? (
+            <input
+              className={CAMPO} value={l.canal} autoFocus
+              placeholder="nome do canal"
+              onChange={e => mexer(i, { canal: e.target.value }, false)}
+              onBlur={() => salvar(linhas)}
+            />
+          ) : (
+            <select
+              className={CAMPO} value={l.canal}
+              onChange={e => e.target.value === OUTRO
+                ? mexer(i, { canal: '', livre: true }, false)
+                : mexer(i, { canal: e.target.value }, true)}
+            >
+              <option value="">— escolha o canal —</option>
+              {!!canais?.canal.length && (
+                <optgroup label="Canal do lead">
+                  {canais.canal.map(c => (
+                    <option key={`c-${c.valor}`} value={c.valor}>{c.valor} ({c.qtd})</option>
+                  ))}
+                </optgroup>
+              )}
+              {!!canais?.origin.length && (
+                <optgroup label="Origem do lead">
+                  {canais.origin.map(c => (
+                    <option key={`o-${c.valor}`} value={c.valor}>{c.valor} ({c.qtd})</option>
+                  ))}
+                </optgroup>
+              )}
+              <option value={OUTRO}>Outro (digitar)…</option>
+            </select>
+          )}
           <select
             className={CAMPO} value={String(l.origemId)}
             onChange={e => mexer(i, { origemId: Number(e.target.value) }, true)}
@@ -159,17 +186,18 @@ function MapaOrigem({ valor, origens, aoMudar }: {
       <button
         type="button"
         className="text-[11px] font-bold uppercase tracking-widest text-primary hover:underline disabled:opacity-40"
-        onClick={() => setLinhas([...linhas, { canal: '', origemId: origens[0]?.id ?? 0 }])}
+        onClick={() => setLinhas([...linhas, { canal: '', origemId: origens[0]?.id ?? 0, livre: false }])}
         disabled={!origens.length}
       >
         + adicionar canal
       </button>
 
       <p className="text-[11px] text-muted-foreground">
-        À esquerda, o canal como ele chega <strong>no reports</strong> (o campo sugere os
-        que a ingestão grava). À direita, a origem correspondente <strong>no SULTS</strong>.
-        A comparação é em minúsculas, contra <code>canal</code> e depois <code>origin</code> do lead.
-        Canal que não casar entra <strong>sem origem</strong> — melhor que um rótulo chutado.
+        À esquerda, os canais que <strong>já existem nos leads deste cliente</strong>, com a
+        quantidade de cada um. À direita, a origem correspondente <strong>no SULTS</strong>.
+        O envio testa o <code>canal</code> do lead e, se não casar, o <code>origin</code> —
+        por isso os dois aparecem separados no menu. Canal que não casar entra
+        <strong>sem origem</strong>, que é melhor que um rótulo chutado.
       </p>
     </div>
   );
@@ -368,7 +396,7 @@ export default function SultsCard({ clientId }: { clientId: string }) {
             Origem por canal
           </span>
           <MapaOrigem
-            valor={cfg.mapa_origem} origens={cat?.origens ?? []}
+            valor={cfg.mapa_origem} origens={cat?.origens ?? []} canais={cfg.canais}
             aoMudar={v => patch({ mapa_origem: v })}
           />
         </div>
