@@ -20,7 +20,7 @@ import {
   diffNegocio, normalizarNegocio, type NegocioRemoto, type SnapshotNegocio,
 } from '@/lib/sults';
 import {
-  ensureSultsSchema, listarConexoesSultsAtivas, sultsFetch, SULTS_API,
+  ensureSultsSchema, listarConexoesSultsVolta, sultsFetch, SULTS_API,
   type ConexaoSults,
 } from '@/lib/sults-server';
 
@@ -349,8 +349,7 @@ export async function sincronizarVoltaSults(
 
   // `clientId` atende o botão "sincronizar agora" da tela: um cliente só, sem
   // fazer a pessoa esperar a varredura da carteira inteira.
-  const conexoes = (await listarConexoesSultsAtivas(pool))
-    .filter(c => c.sync_ativo !== false)
+  const conexoes = (await listarConexoesSultsVolta(pool))
     .filter(c => !opts.clientId || c.client_id === opts.clientId);
 
   const clientes: ResultadoVolta[] = [];

@@ -102,7 +102,27 @@ export type ConexaoSults = {
   ultimo_erro_volta?: string | null;
 };
 
-/** Conexões prontas para enviar: ligadas, com token e com os dois IDs obrigatórios. */
+/**
+ * Conexões prontas para a VOLTA (ler o funil do SULTS).
+ *
+ * ⚠️ Régua PRÓPRIA, e é o ponto todo: ler exige só token e o interruptor da
+ * volta. `enabled`, `responsavel_id` e `etapa_id` são requisitos de CRIAR
+ * negócio — nada disso é preciso para listar. Reaproveitar a régua da ida
+ * deixava a volta refém do interruptor da ida: a tela mostrava "Volta: Ativa",
+ * o botão rodava, e a varredura devolvia "0 negócios lidos" sem explicar nada.
+ */
+export async function listarConexoesSultsVolta(pool: Pool): Promise<ConexaoSults[]> {
+  await ensureSultsSchema(pool);
+  const { rows } = await pool.query<ConexaoSults>(
+    `SELECT * FROM public.sults_connections
+      WHERE COALESCE(api_token, '') <> ''
+        AND COALESCE(sync_ativo, TRUE)
+      ORDER BY created_at`,
+  );
+  return rows;
+}
+
+/** Conexões prontas para ENVIAR: ligadas, com token e com os dois IDs obrigatórios. */
 export async function listarConexoesSultsAtivas(pool: Pool): Promise<ConexaoSults[]> {
   await ensureSultsSchema(pool);
   const { rows } = await pool.query<ConexaoSults>(
