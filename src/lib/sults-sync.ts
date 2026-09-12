@@ -287,13 +287,16 @@ async function gravarNegocio(
 }
 
 export async function sincronizarVoltaSults(
-  pool: Pool, opts: { budgetMs?: number } = {},
+  pool: Pool, opts: { budgetMs?: number; clientId?: string } = {},
 ): Promise<{ clientes: ResultadoVolta[] }> {
   await ensureSultsSyncSchema(pool);
   const fim = Date.now() + (opts.budgetMs ?? 240_000);
 
+  // `clientId` atende o botão "sincronizar agora" da tela: um cliente só, sem
+  // fazer a pessoa esperar a varredura da carteira inteira.
   const conexoes = (await listarConexoesSultsAtivas(pool))
-    .filter(c => c.sync_ativo !== false);
+    .filter(c => c.sync_ativo !== false)
+    .filter(c => !opts.clientId || c.client_id === opts.clientId);
 
   const clientes: ResultadoVolta[] = [];
   for (const conn of conexoes) {

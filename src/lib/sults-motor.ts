@@ -194,11 +194,12 @@ async function processarCliente(
 }
 
 export async function processarFilaSults(
-  pool: Pool, opts: { budgetMs?: number } = {},
+  pool: Pool, opts: { budgetMs?: number; clientId?: string } = {},
 ): Promise<{ clientes: ResultadoSults[] }> {
   await ensureSultsSchema(pool);
   const fim = Date.now() + (opts.budgetMs ?? 45_000);
-  const conexoes = await listarConexoesSultsAtivas(pool);
+  const conexoes = (await listarConexoesSultsAtivas(pool))
+    .filter(c => !opts.clientId || c.client_id === opts.clientId);
 
   const clientes: ResultadoSults[] = [];
   for (const conn of conexoes) {

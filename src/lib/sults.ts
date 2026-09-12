@@ -391,3 +391,81 @@ export function diffNegocio(
     ocorridoEm: (mudouEtapa && atual.entrouNaEtapaEm) || agoraIso,
   };
 }
+
+// ── Catálogo deduzido ────────────────────────────────────────────────────────
+//
+// ⚠️ A API de Expansão NÃO publica endpoint para listar funis, etapas,
+// responsáveis, origens ou campanhas — a doc manda copiar os ids na mão, da
+// tela de Parâmetros do SULTS. Mas a listagem de negócios traz todos esses
+// objetos ANINHADOS em cada linha, então o catálogo sai de graça de uma
+// varredura que já vamos fazer.
+//
+// ⚠️ É uma AMOSTRA, não a verdade completa: etapa recém-criada e ainda sem
+// nenhum negócio não aparece aqui. Por isso a tela sempre deixa digitar o id
+// à mão — o menu é conveniência, não gaiola.
+
+export type ItemCatalogo = { id: number; nome: string; qtd: number };
+export type FunilCatalogo = ItemCatalogo & { etapas: ItemCatalogo[] };
+
+export type CatalogoSults = {
+  funis: FunilCatalogo[];
+  responsaveis: ItemCatalogo[];
+  origens: ItemCatalogo[];
+  campanhas: ItemCatalogo[];
+  amostra: number;
+};
+
+/** Incrementa sem julgar o id — a validação é de quem chama. */
+function bump(mapa: Map<number, ItemCatalogo>, id: number, nomeBruto: unknown): void {
+  const atual = mapa.get(id);
+  if (atual) { atual.qtd++; return; }
+  mapa.set(id, { id, nome: String(nomeBruto ?? '').trim() || `#${id}`, qtd: 1 });
+}
+
+/** Só conta id positivo de verdade — 0/null/lixo da API não vira opção de menu. */
+function contar(mapa: Map<number, ItemCatalogo>, id: unknown, nomeBruto: unknown): void {
+  const n = typeof id === 'string' ? Number(id) : id;
+  if (typeof n !== 'number' || !Number.isFinite(n) || n <= 0) return;
+  bump(mapa, n, nomeBruto);
+}
+
+const porVolume = (a: ItemCatalogo, b: ItemCatalogo) => b.qtd - a.qtd || a.id - b.id;
+
+/** Deduz o catálogo a partir de negócios já baixados. */
+export function agregarCatalogo(negocios: NegocioRemoto[]): CatalogoSults {
+  const funis = new Map<number, ItemCatalogo>();
+  const etapasPorFunil = new Map<number, Map<number, ItemCatalogo>>();
+  const responsaveis = new Map<number, ItemCatalogo>();
+  const origens = new Map<number, ItemCatalogo>();
+  const campanhas = new Map<number, ItemCatalogo>();
+  // Etapa cujo negócio não declara funil não pode ser jogada fora — vira um
+  // pseudo-funil 0 ("sem funil"), senão sumiria do menu sem explicação.
+  const SEM_FUNIL = 0;
+
+  for (const n of negocios ?? []) {
+    const etapa = n?.etapa;
+    if (etapa?.id) {
+      // `bump`, não `contar`: o funil 0 é legítimo aqui e o guard de positivo
+      // o descartaria — era esse o bug que apagava a etapa sem funil do menu.
+      const bruto = Number(etapa.funil?.id);
+      const fid = Number.isFinite(bruto) && bruto > 0 ? bruto : SEM_FUNIL;
+      bump(funis, fid, fid === SEM_FUNIL ? 'Sem funil' : etapa.funil?.nome);
+      if (!etapasPorFunil.has(fid)) etapasPorFunil.set(fid, new Map());
+      contar(etapasPorFunil.get(fid) as Map<number, ItemCatalogo>, etapa.id, etapa.nome);
+    }
+    contar(responsaveis, n?.responsavel?.id, n?.responsavel?.nome);
+    contar(origens, n?.origem?.id, n?.origem?.nome);
+    contar(campanhas, n?.campanha?.id, n?.campanha?.nome);
+  }
+
+  return {
+    funis: [...funis.values()].sort(porVolume).map(f => ({
+      ...f,
+      etapas: [...(etapasPorFunil.get(f.id)?.values() ?? [])].sort((a, b) => a.id - b.id),
+    })),
+    responsaveis: [...responsaveis.values()].sort(porVolume),
+    origens: [...origens.values()].sort(porVolume),
+    campanhas: [...campanhas.values()].sort(porVolume),
+    amostra: (negocios ?? []).length,
+  };
+}
