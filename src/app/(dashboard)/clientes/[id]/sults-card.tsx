@@ -86,51 +86,90 @@ function Prontidao({ cfg }: { cfg: Config }) {
   );
 }
 
-/** canal do nosso CRM → origemId do SULTS. Linhas livres: o canal é texto livre aqui. */
+/**
+ * Valores de `canal`/`origin` que a ingestão realmente grava — viram sugestões
+ * no campo. Não é lista fechada: o webhook genérico repassa o que a LP mandar.
+ */
+const CANAIS_CONHECIDOS = [
+  'Formulário Meta', 'Whatsapp', 'meta', 'google', 'instagram', 'formulario', 'organic',
+];
+
+type Linha = { canal: string; origemId: number };
+
+/**
+ * canal do nosso CRM → origemId do SULTS.
+ *
+ * ⚠️ O estado é LOCAL e só sobe ao servidor no blur (ou ao trocar o menu, que
+ * já é uma decisão fechada). A primeira versão gravava a cada tecla — digitar
+ * "landing page" disparava 12 PATCHes — e descartava a linha enquanto o nome
+ * estivesse vazio, então ela sumia na cara de quem acabou de criá-la.
+ */
 function MapaOrigem({ valor, origens, aoMudar }: {
   valor: Record<string, number> | null | undefined;
   origens: Item[];
   aoMudar: (v: Record<string, number>) => void;
 }) {
-  const linhas = Object.entries(valor ?? {});
-  const setLinha = (i: number, canal: string, origem: number) => {
-    const novo = linhas.map((l, j) => (j === i ? [canal, origem] as const : l));
-    aoMudar(Object.fromEntries(novo.filter(([c]) => String(c).trim())) as Record<string, number>);
+  const [linhas, setLinhas] = useState<Linha[]>(
+    () => Object.entries(valor ?? {}).map(([canal, origemId]) => ({ canal, origemId: Number(origemId) })),
+  );
+
+  const salvar = (ls: Linha[]) => {
+    // Minúsculas na gravação: é assim que `origemSults` compara. Guardar
+    // "Landing Page" e comparar com "landing page" nunca casaria.
+    const limpo = ls.filter(l => l.canal.trim() && l.origemId > 0);
+    aoMudar(Object.fromEntries(limpo.map(l => [l.canal.trim().toLowerCase(), l.origemId])));
   };
+
+  const mexer = (i: number, campo: Partial<Linha>, salvarAgora: boolean) => {
+    const novo = linhas.map((l, j) => (j === i ? { ...l, ...campo } : l));
+    setLinhas(novo);
+    if (salvarAgora) salvar(novo);
+  };
+
   return (
     <div className="space-y-1.5">
-      {linhas.map(([canal, origemId], i) => (
+      <datalist id="sults-canais">
+        {CANAIS_CONHECIDOS.map(c => <option key={c} value={c} />)}
+      </datalist>
+
+      {linhas.map((l, i) => (
         <div key={i} className="flex gap-1.5">
           <input
-            className={CAMPO} value={canal} placeholder="canal no reports"
-            onChange={e => setLinha(i, e.target.value, Number(origemId))}
+            className={CAMPO} value={l.canal} list="sults-canais"
+            placeholder="ex: Formulário Meta"
+            onChange={e => mexer(i, { canal: e.target.value }, false)}
+            onBlur={() => salvar(linhas)}
           />
           <select
-            className={CAMPO} value={String(origemId)}
-            onChange={e => setLinha(i, canal, Number(e.target.value))}
+            className={CAMPO} value={String(l.origemId)}
+            onChange={e => mexer(i, { origemId: Number(e.target.value) }, true)}
           >
             {origens.map(o => <option key={o.id} value={o.id}>{o.nome} ({o.id})</option>)}
           </select>
           <button
             type="button" title="remover"
             className="px-2 text-muted-foreground hover:text-red-400"
-            onClick={() => aoMudar(Object.fromEntries(linhas.filter((_, j) => j !== i)) as Record<string, number>)}
+            onClick={() => { const novo = linhas.filter((_, j) => j !== i); setLinhas(novo); salvar(novo); }}
           >
             <Trash2 className="h-4 w-4" />
           </button>
         </div>
       ))}
+
       <button
         type="button"
-        className="text-[11px] font-bold uppercase tracking-widest text-primary hover:underline"
-        onClick={() => aoMudar({ ...(valor ?? {}), '': origens[0]?.id ?? 0 })}
+        className="text-[11px] font-bold uppercase tracking-widest text-primary hover:underline disabled:opacity-40"
+        onClick={() => setLinhas([...linhas, { canal: '', origemId: origens[0]?.id ?? 0 }])}
         disabled={!origens.length}
       >
         + adicionar canal
       </button>
+
       <p className="text-[11px] text-muted-foreground">
-        O canal é comparado em minúsculas com <code>canal</code> e <code>origin</code> do lead.
-        Canal que não casar entra sem origem — melhor que um rótulo chutado.
+        À esquerda, o canal como ele chega <strong>no reports</strong> (o campo sugere os
+        que a ingestão grava). À direita, a origem correspondente <strong>no SULTS</strong>.
+        A comparação é em minúsculas, contra <code>canal</code> e depois <code>origin</code> do lead.
+        Canal que não casar entra <strong>sem origem</strong> — melhor que um rótulo chutado.
       </p>
     </div>
   );
