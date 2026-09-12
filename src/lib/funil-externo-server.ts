@@ -16,7 +16,7 @@ export type ResultadoFunil = {
   criadas: number;
   removidas: number;
   reordenadas: number;
-  preservadas: string[];
+  preservadas: PlanoFunil['preservadas'];
 };
 
 /**

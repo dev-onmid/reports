@@ -21,6 +21,7 @@ import { cn } from '@/lib/utils';
 
 type Item = { id: number; nome: string; qtd: number };
 type ValorCanal = { valor: string; qtd: string };
+type EtapaPreservada = { label: string; leads: number; gatilhos: number };
 type Canais = { canal: ValorCanal[]; origin: ValorCanal[] };
 type Funil = Item & { etapas: Item[] };
 type Catalogo = {
@@ -308,7 +309,10 @@ export default function SultsCard({ clientId }: { clientId: string }) {
         const f = res.funil;
         const funil = f && (f.criadas || f.removidas || f.reordenadas)
           ? ` · funil ${f.modo}: ${f.criadas} etapas criadas, ${f.removidas} removidas, ${f.reordenadas} reordenadas`
-            + (f.preservadas?.length ? ` (preservadas por estarem em uso: ${f.preservadas.join(', ')})` : '')
+            + (f.preservadas?.length
+              ? ` — etapas mantidas: ${f.preservadas.map((x: EtapaPreservada) =>
+                  `${x.label} (${x.leads} leads, ${x.gatilhos} gatilhos)`).join('; ')}`
+              : '')
           : '';
         const crm = (res.leadsCriados || res.leadsAtualizados || res.errosCrm)
           ? ` · CRM: ${res.leadsCriados ?? 0} leads criados, ${res.leadsAtualizados ?? 0} atualizados${res.errosCrm ? `, ${res.errosCrm} com erro` : ''}`
@@ -542,8 +546,14 @@ export default function SultsCard({ clientId }: { clientId: string }) {
               ⚠️ A etapa do SULTS <strong>sobrescreve</strong> o status do lead aqui, e o
               funil deste cliente passa a ser <strong>o funil do SULTS</strong> — as etapas
               padrão que ninguém usou saem do Kanban e as de lá entram na ordem certa.
-              Etapa com lead ou com gatilho de automação nunca é removida; se houver
-              alguma, o funil só ganha as que faltam e nada é reordenado.
+              Etapa com lead ou com gatilho de automação nunca é removida — ela é
+              preservada e vai para depois das do SULTS.
+              <span className="mt-1 block">
+                Para dizer o que cada coluna significa no Funil de Performance (contato,
+                agendamento, fechamento…), use <strong>CRM → Editar funil</strong>: o
+                seletor ao lado de cada etapa. A escolha persiste — a sincronização só
+                classifica etapa no momento em que a cria.
+              </span>
             </p>
           ) : (
             <p className="mt-2 text-[11px] text-muted-foreground">
