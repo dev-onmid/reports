@@ -97,6 +97,8 @@ export type ConexaoSults = {
   // Opcionais no tipo porque a conexão pode ser lida antes daquele ensure rodar.
   funil_id?: number | null;
   sync_ativo?: boolean;
+  /** Trazer os negócios para `crm_leads` (dashboard, funil, Performance Comercial). */
+  ingerir_crm?: boolean;
   sync_pagina?: number;
   ultima_volta_em?: string | null;
   ultimo_erro_volta?: string | null;

@@ -243,7 +243,13 @@ export type NegocioRemoto = {
   valor?: number | string | null;
   dtCadastro?: string | null;
   dtConclusao?: string | null;
+  cidade?: string | null;
+  uf?: string | null;
   etapa?: { id?: number; nome?: string; funil?: { id?: number; nome?: string } } | null;
+  contatoPessoa?: Array<{
+    id?: number; nome?: string | null; phone?: string | null;
+    email?: string | null; cidade?: string | null; uf?: string | null;
+  }> | null;
   situacao?: { id?: number; nome?: string } | null;
   responsavel?: { id?: number; nome?: string } | null;
   origem?: { id?: number; nome?: string } | null;
@@ -275,6 +281,18 @@ export type SnapshotNegocio = {
   valor: number | null;
   dtCadastro: string | null;
   dtConclusao: string | null;
+  cidade: string | null;
+  uf: string | null;
+  temperatura: string | null;
+  /**
+   * Contato do negócio. ⚠️ É a ponte com o CRM daqui: medido na base do
+   * CondoStore, 95% dos negócios têm nome, 82% telefone e 68% e-mail. Sem
+   * guardar isso o espelho vira uma ilha — não dá para casar com `crm_leads`
+   * nem alimentar dashboard e funil.
+   */
+  contatoNome: string | null;
+  contatoTelefone: string | null;
+  contatoEmail: string | null;
   /** Entrada na etapa ATUAL, lida de `duracaoEtapa` — o timestamp do movimento. */
   entrouNaEtapaEm: string | null;
   /** Minutos acumulados por etapa, para o relatório de tempo de funil. */
@@ -330,6 +348,14 @@ export function normalizarNegocio(n: NegocioRemoto): SnapshotNegocio | null {
     valor: num(n.valor),
     dtCadastro: nome(n.dtCadastro),
     dtConclusao: nome(n.dtConclusao),
+    cidade: nome(n.cidade),
+    uf: nome(n.uf)?.toUpperCase() ?? null,
+    temperatura: nome(n.temperatura?.nome),
+    // Primeiro contato da lista: é o principal. A API devolve array, mas na
+    // base medida 100% dos negócios com contato têm exatamente um.
+    contatoNome: nome(n.contatoPessoa?.[0]?.nome),
+    contatoTelefone: nome(n.contatoPessoa?.[0]?.phone),
+    contatoEmail: nome(n.contatoPessoa?.[0]?.email),
     entrouNaEtapaEm: entradaNaEtapa(n),
     duracaoEtapas: (Array.isArray(n.duracaoEtapa) ? n.duracaoEtapa : []).map(d => ({
       etapaId: num(d?.etapa?.id),

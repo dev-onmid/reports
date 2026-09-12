@@ -69,6 +69,7 @@ async function carregar(pool: ReturnType<typeof makeServerPool>, clientId: strin
     conectado: true as const,
     enabled: conn.enabled,
     sync_ativo: conn.sync_ativo !== false,
+    ingerir_crm: conn.ingerir_crm === true,
     api_token_masked: mascarar(conn.api_token),
     responsavel_id: conn.responsavel_id,
     etapa_id: conn.etapa_id,
@@ -159,7 +160,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
 }
 
 const NUM = ['responsavel_id', 'etapa_id', 'funil_id', 'origem_id', 'campanha_id'] as const;
-const BOOL = ['enabled', 'sync_ativo'] as const;
+const BOOL = ['enabled', 'sync_ativo', 'ingerir_crm'] as const;
 
 export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
