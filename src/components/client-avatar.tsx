@@ -81,6 +81,12 @@ export function ClientAvatar({
         <img
           src={imgUrl}
           alt={name}
+          /* A foto do Instagram vem no tamanho original do fbcdn (medido: até
+             178KB) e não dá para pedir menor — numa lista de 40+ clientes isso
+             seria alguns MB de uma vez. `lazy` faz baixar só o que está à
+             vista; o resto desce conforme rola. */
+          loading="lazy"
+          decoding="async"
           className="w-full h-full object-cover"
           onError={() => setImgUrl(null)}
         />
