@@ -30,7 +30,7 @@ import { notificar } from '@/components/ui/toast';
 import { cn, formatCurrencyBRL } from '@/lib/utils';
 import type { Client } from '@/lib/mock-data';
 import type { AttendanceAudit } from '@/lib/crm-attendance-audit';
-import { classificarEtapa, ETAPAS_FUNIL, ROTULOS_ETAPA, type EtapaFunil } from '@/lib/funil-etapas';
+import { classificarEtapa, corDaEtapa, ETAPAS_FUNIL, ROTULOS_ETAPA, type EtapaFunil } from '@/lib/funil-etapas';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 
 type CrmLead = {
@@ -108,12 +108,6 @@ type AttendanceMetrics = {
     waiting_seconds: number;
   }>;
 };
-
-const STAGE_COLORS = [
-  '#0ea5e9', '#3b82f6', '#7dd3fc', '#10b981', '#34d399',
-  '#a1a1aa', '#71717a', '#f97316', '#ef4444', '#dc2626',
-  '#8b5cf6', '#ec4899', '#f59e0b', '#84cc16',
-];
 
 // "Comprou" saiu (fundido em "Fechado" — um ganho só; ver crm-saneamento.ts).
 const STATUS_OPTIONS = ['Em Atendimento', 'Agendado', 'Reagendado', 'Fechado', 'Paciente', 'Não Retorna', 'Distante', 'Sem Interesse', 'Desqualificado'];
@@ -1135,7 +1129,7 @@ function KanbanView({
           <KanbanColumn
             key={stage.label}
             status={stage.label}
-            color={stage.color}
+            color={corDaEtapa(stage.etapa_funil, stage.label)}
             leads={grouped.get(stage.label) ?? []}
             onEdit={onEdit}
             onDelete={onDelete}
@@ -1685,7 +1679,6 @@ function SortableStageRow({
   onDelete: () => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: stage.id });
-  const [showColors, setShowColors] = useState(false);
 
   const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),
@@ -1700,22 +1693,14 @@ function SortableStageRow({
         <GripVertical className="h-4 w-4" />
       </button>
 
-      <div className="relative shrink-0">
-        <button type="button" onClick={() => setShowColors(v => !v)}
-          className="h-5 w-5 rounded-full border border-border/50 transition-transform hover:scale-110 shrink-0"
-          style={{ background: stage.color }} />
-        {showColors && (
-          <div className="absolute left-0 top-7 z-50 flex flex-wrap gap-1 rounded-lg border border-border bg-popover p-2 shadow-xl w-36">
-            {STAGE_COLORS.map(c => (
-              <button key={c} type="button"
-                onClick={() => { onChange({ color: c }); setShowColors(false); }}
-                className="h-5 w-5 rounded-full border-2 transition-transform hover:scale-110 shrink-0"
-                style={{ background: c, borderColor: c === stage.color ? 'white' : 'transparent' }}
-              />
-            ))}
-          </div>
-        )}
-      </div>
+      {/* Espelho da cor do degrau escolhido ao lado — não é escolha de cor.
+          Um seletor aqui seria pior que nada: o gestor trocaria a cor e o board
+          continuaria pintando pelo degrau. */}
+      <span
+        className="h-5 w-5 shrink-0 rounded-full border border-border/50"
+        style={{ background: corDaEtapa(stage.etapa_funil, stage.label) }}
+        title={`Cor do degrau ${ROTULOS_ETAPA[stage.etapa_funil ?? classificarEtapa(stage.label)]}`}
+      />
 
       <input
         value={stage.label}

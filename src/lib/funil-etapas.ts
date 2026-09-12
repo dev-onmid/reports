@@ -38,6 +38,35 @@ export const ROTULOS_ETAPA: Record<EtapaFunil, string> = {
 };
 
 /**
+ * Cor de cada degrau — é ELA que pinta as colunas do Kanban (decisão do
+ * Matheus, 2026-09-12: "cada status com a cor de acordo com o funil").
+ *
+ * ⚠️ A cor não é mais escolhida coluna a coluna. `crm_stages.color` existe e
+ * continua sendo gravada, mas deixou de mandar no board: as etapas criadas
+ * pelo espelho do SULTS nasceram TODAS em `#94a3b8`, então o funil inteiro
+ * ficava cinza e a cor não significava nada. Vindo do degrau, a leitura é
+ * automática, igual em todos os clientes e impossível de sair do lugar.
+ *
+ * A escada esquenta da entrada até a venda; `perdido` é o único vermelho e
+ * `fechamento` o único verde — o verde é o CTA da marca, então não se gasta
+ * com outra coisa.
+ */
+export const CORES_ETAPA: Record<EtapaFunil, string> = {
+  contato:        '#7dd3fc',
+  qualificado:    '#0ea5e9',
+  agendamento:    '#8b5cf6',
+  comparecimento: '#f59e0b',
+  fechamento:     '#10b981',
+  perdido:        '#ef4444',
+};
+
+/** Cor da coluna a partir do degrau escolhido no editor — ou, se ninguém
+ *  escolheu, do que o nome da etapa diz (mesma auto-classificação do funil). */
+export function corDaEtapa(etapa: EtapaFunil | null | undefined, label?: string | null): string {
+  return CORES_ETAPA[etapa ?? classificarEtapa(label)];
+}
+
+/**
  * Normaliza para comparação: sem acento, sem caixa, separadores unificados.
  * ⚠️ Range de diacríticos ESCAPADO (`̀-ͯ`) — a forma literal corrompe em
  * copy-paste/encoding (armadilha registrada no CLAUDE.md).

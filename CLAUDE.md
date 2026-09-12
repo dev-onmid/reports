@@ -1,5 +1,15 @@
 @AGENTS.md
 
+## Kanban — a cor da coluna passa a vir do DEGRAU do funil (2026-09-12)
+
+Pedido do Matheus: "cada status do Kanban com a cor de acordo com o funil onde temos as etapas". Escolha dele entre as 3 opções oferecidas: **automático pelo degrau** (a cor manual deixa de valer).
+
+- **A causa do board cinza era dado, não código**: `crm_stages.color` sempre existiu e o board já a usava — só que as etapas criadas pelo **espelho do SULTS** nasceram TODAS em `#94a3b8`. Medido: 53 etapas nesse cinza, e no CondoStore todas as colunas visíveis estavam nele (as etapas antigas, essas sim, tinham cor).
+- **`CORES_ETAPA` + `corDaEtapa(etapa, label)` em `funil-etapas.ts`** (dono da semântica de degrau): contato `#7dd3fc` → qualificado `#0ea5e9` → agendamento `#8b5cf6` → comparecimento `#f59e0b` → fechamento `#10b981`, perdido `#ef4444`. Sem degrau explícito, cai na mesma auto-classificação pelo nome que o Funil de Performance usa. ⚠️ Verde só no fechamento (é o CTA da marca) e vermelho só no perdido.
+- **⚠️ O seletor de cor do editor de funil FOI REMOVIDO** (junto de `STAGE_COLORS`): deixá-lo ali seria pior que não ter — o gestor escolheria uma cor e o board continuaria pintando pelo degrau. A bolinha virou espelho da cor do degrau, com o nome dele no `title`. A coluna `color` segue no banco e continua sendo gravada; só deixou de mandar.
+- **⚠️ Colunas irmãs no mesmo degrau ficam na MESMA cor** — no CondoStore, "Reunião Realizada", "Lead Frio", "Lead Morno" e "Lead Quente" são todas `comparecimento` e saem em âmbar. Conferido antes de mexer: **está certo**, no fluxo deles a temperatura é atribuída DEPOIS da reunião, então os quatro são pós-comparecimento mesmo. Se um dia incomodar, o ajuste é variar a luminosidade dentro do degrau (mantendo a família de cor) — não trocar a cor de um deles.
+- ✅ Verificado: tsc + `next build` limpos, eslint sem erro novo (19 → 18, todos pré-existentes); board REAL do CondoStore renderizado no browser com as etapas e `etapa_funil` lidos de produção — azul na entrada, âmbar no pós-reunião, verde no Contrato, vermelho na Perca.
+
 ## CRM — hierarquia tipográfica: tudo tinha o mesmo peso (2026-09-12)
 
 Cobrança do Matheus: "precisamos rever os tamanhos de fonte, botões, títulos — uns precisam de mais destaque que outros". Estava certo, e o defeito era **contraste**, não tamanho absoluto. Medido no código, três inversões:
