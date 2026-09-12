@@ -24,6 +24,9 @@ import {
   type ConexaoSults,
 } from '@/lib/sults-server';
 import { ingerirNegocioSults } from '@/lib/sults-ingest';
+import { ensureDefaultFunnel } from '@/lib/crm-conversation-sync';
+import { aplicarFunilExterno } from '@/lib/funil-externo-server';
+import type { CatalogoSults } from '@/lib/sults';
 
 const POR_PAGINA = 100; // teto da API
 const MAX_PAGINAS = 60; // 6.000 negócios por rodada
@@ -165,6 +168,7 @@ export type ResultadoVolta = {
   leadsCriados: number;
   leadsAtualizados: number;
   errosCrm: number;
+  funil?: { modo: string; criadas: number; removidas: number; reordenadas: number };
   erro?: string;
 };
 
@@ -190,6 +194,29 @@ async function sincronizarCliente(
   let start = conn.sync_pagina ?? 0;
   const vistos = new Set<number>();
   const agora = new Date().toISOString();
+
+  /**
+   * Antes de ingerir: o funil daqui passa a refletir o de lá.
+   *
+   * ⚠️ Uma vez por varredura, não por negócio. E a ORDEM vem do catálogo
+   * guardado (etapas ordenadas pelo id, que é a ordem do funil no SULTS) —
+   * anexar na ordem em que os negócios aparecem punha "Perca" antes de
+   * "Abordagem D1" no board.
+   */
+  if (conn.ingerir_crm) {
+    try {
+      const cat = conn.catalogo as CatalogoSults | null;
+      const funis = cat?.funis ?? [];
+      const escolhidos = conn.funil_id ? funis.filter(f => f.id === conn.funil_id) : funis;
+      const etapas = escolhidos.flatMap(f => f.etapas.map(e => e.nome)).filter(Boolean);
+      if (etapas.length) {
+        const funnelId = await ensureDefaultFunnel(pool, conn.client_id);
+        r.funil = await aplicarFunilExterno(pool, conn.client_id, funnelId, etapas);
+      }
+    } catch (err) {
+      r.erro = `funil: ${(err as Error).message}`;
+    }
+  }
 
   let estado: EstadoAnterior;
   try {
