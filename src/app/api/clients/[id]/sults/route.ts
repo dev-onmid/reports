@@ -42,6 +42,29 @@ async function carregar(pool: ReturnType<typeof makeServerPool>, clientId: strin
     [clientId],
   ).catch(() => ({ rows: [{}] }));
 
+  /**
+   * Canais que ESTE cliente realmente tem — alimentam o menu do mapa de origem.
+   *
+   * ⚠️ `canal` e `origin` vêm separados de propósito: são dimensões diferentes
+   * ('Formulário Meta' é canal, 'meta' é origin) e `origemSults` testa o canal
+   * ANTES do origin. Fundir os dois no menu esconderia essa precedência de quem
+   * está configurando.
+   *
+   * Minúsculas já aqui — é a forma com que a comparação acontece na hora do
+   * envio, então é a forma que deve ser gravada.
+   */
+  const listaDe = async (coluna: 'canal' | 'origin') => {
+    const { rows } = await pool.query<{ valor: string; qtd: string }>(
+      `SELECT lower(trim(${coluna})) valor, COUNT(*)::text qtd
+         FROM public.crm_leads
+        WHERE client_id = $1 AND COALESCE(NULLIF(trim(${coluna}), ''), '') <> ''
+        GROUP BY 1 ORDER BY COUNT(*) DESC LIMIT 30`,
+      [clientId],
+    ).catch(() => ({ rows: [] }));
+    return rows;
+  };
+  const [canais, origins] = await Promise.all([listaDe('canal'), listaDe('origin')]);
+
   return {
     conectado: true as const,
     enabled: conn.enabled,
@@ -59,6 +82,7 @@ async function carregar(pool: ReturnType<typeof makeServerPool>, clientId: strin
     ultima_volta_em: conn.ultima_volta_em ?? null,
     ultimo_erro_volta: conn.ultimo_erro_volta ?? null,
     stats: { ...f, ...v },
+    canais: { canal: canais, origin: origins },
   };
 }
 
