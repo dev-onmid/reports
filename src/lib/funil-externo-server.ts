@@ -16,6 +16,7 @@ export type ResultadoFunil = {
   criadas: number;
   removidas: number;
   reordenadas: number;
+  preservadas: string[];
 };
 
 /**
@@ -67,7 +68,7 @@ export async function aplicarFunilExterno(
 
   const plano = planejarFunil(atuais, etapas, await levantarUso(pool, clientId));
   if (!plano.remover.length && !plano.criar.length && !plano.reposicionar.length) {
-    return { modo: plano.modo, criadas: 0, removidas: 0, reordenadas: 0 };
+    return { modo: plano.modo, criadas: 0, removidas: 0, reordenadas: 0, preservadas: plano.preservadas };
   }
 
   // ⚠️ Posições em DUAS fases. `position` não é unique hoje, mas mover uma
@@ -113,5 +114,6 @@ export async function aplicarFunilExterno(
     criadas: plano.criar.length,
     removidas: plano.remover.length,
     reordenadas: plano.reposicionar.length,
+    preservadas: plano.preservadas,
   };
 }
