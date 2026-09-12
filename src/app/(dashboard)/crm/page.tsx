@@ -2998,8 +2998,8 @@ export default function CrmPage({ lockedClientId, embedded = false }: CrmPagePro
               <button
                 type="button"
                 onClick={() => setFunnelMenuOpen(o => !o)}
-                title="Configurar funil"
-                aria-label="Configurar funil"
+                title="Configurações do CRM"
+                aria-label="Configurações do CRM"
                 className="flex h-9 w-8 items-center justify-center rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
               >
                 <MoreVertical className="h-4 w-4" />
@@ -3025,6 +3025,12 @@ export default function CrmPage({ lockedClientId, embedded = false }: CrmPagePro
                       className="flex w-full items-center gap-2 px-3 py-2 text-xs text-muted-foreground hover:bg-muted hover:text-foreground">
                       <Sparkles className="h-3.5 w-3.5" /> Critérios IA
                     </button>
+                    <button type="button"
+                      onClick={() => { setFunnelMenuOpen(false); setCrmView('capture'); }}
+                      title="De onde os leads deste cliente estão vindo"
+                      className="flex w-full items-center gap-2 px-3 py-2 text-xs text-muted-foreground hover:bg-muted hover:text-foreground">
+                      <Link2 className="h-3.5 w-3.5" /> Fontes de Captura
+                    </button>
                   </div>
                 </>
               )}
@@ -3038,11 +3044,6 @@ export default function CrmPage({ lockedClientId, embedded = false }: CrmPagePro
             className={cn('flex items-center gap-1.5 h-8 px-3 rounded-md text-xs font-semibold transition-colors',
               crmView === 'leads' ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground')}>
             <Users className="h-3.5 w-3.5" /> Leads
-          </button>
-          <button type="button" onClick={() => setCrmView('capture')}
-            className={cn('flex items-center gap-1.5 h-8 px-3 rounded-md text-xs font-semibold transition-colors',
-              crmView === 'capture' ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground')}>
-            <Link2 className="h-3.5 w-3.5" /> Fontes de Captura
           </button>
           <button type="button" onClick={() => setCrmView('chat')}
             className={cn('relative flex items-center gap-1.5 h-8 px-3 rounded-md text-xs font-semibold transition-colors',
@@ -3099,22 +3100,13 @@ export default function CrmPage({ lockedClientId, embedded = false }: CrmPagePro
       <div className="flex flex-wrap items-center gap-2">
         {clientId && (crmView === 'leads' || crmView === 'attendance') && (
           <>
-            {crmView === 'leads' && (
-              <>
-                <IconSelect icon={SlidersHorizontal} value={statusFilter} onChange={setStatusFilter}
-                  placeholder="Todos status" className="min-w-[160px]">
-                  {statusOptions.map(s => <option key={s}>{s}</option>)}
-                </IconSelect>
-
-                <IconSelect icon={Sparkles} value={temperatureFilter} onChange={setTemperatureFilter}
-                  placeholder="Temperatura" className="min-w-[150px]">
-                  <option value="quente">Quente</option>
-                  <option value="morno">Morno</option>
-                  <option value="frio">Frio</option>
-                  <option value="sem">Sem classificação</option>
-                </IconSelect>
-              </>
-            )}
+            {/* ⚠️ Filtros de status e temperatura removidos a pedido: o Kanban
+                JÁ é a visão por status (cada coluna é um), então filtrar por
+                status é filtrar a única coisa que o board existe para mostrar.
+                Temperatura continua visível — é a borda colorida do card —, só
+                deixou de ser eixo de filtro. O estado permanece porque a régua
+                de filtragem e os efeitos ainda o leem; só não é mais ajustável
+                daqui. */}
 
             <div ref={dateMenuRef} className="relative">
               <button
