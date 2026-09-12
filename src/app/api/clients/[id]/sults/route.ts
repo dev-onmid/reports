@@ -38,7 +38,11 @@ async function carregar(pool: ReturnType<typeof makeServerPool>, clientId: strin
 
   const { rows: [v] } = await pool.query<Record<string, string>>(
     `SELECT (SELECT COUNT(*)::text FROM public.sults_negocios WHERE client_id = $1) negocios,
-            (SELECT COUNT(*)::text FROM public.sults_movimentos WHERE client_id = $1) movimentos`,
+            (SELECT COUNT(*)::text FROM public.sults_movimentos WHERE client_id = $1) movimentos,
+            -- Prova de que a ingestão chegou no CRM: são estes leads que a
+            -- dashboard e o funil passam a enxergar.
+            (SELECT COUNT(*)::text FROM public.crm_leads
+              WHERE client_id = $1 AND external_id LIKE 'sults:%') leads_crm`,
     [clientId],
   ).catch(() => ({ rows: [{}] }));
 
@@ -84,6 +88,9 @@ async function carregar(pool: ReturnType<typeof makeServerPool>, clientId: strin
     ultimo_erro_volta: conn.ultimo_erro_volta ?? null,
     stats: { ...f, ...v },
     canais: { canal: canais, origin: origins },
+    sync_pagina: conn.sync_pagina ?? 0,
+    catalogo: conn.catalogo ?? null,
+    catalogo_em: conn.catalogo_em ?? null,
   };
 }
 
@@ -97,7 +104,15 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
       const conn = await conexaoSults(pool, id);
       if (!conn?.api_token) return Response.json({ erro: 'Conecte um token primeiro.' }, { status: 400 });
       const negocios = await amostrarNegociosSults(conn.api_token);
-      return Response.json(agregarCatalogo(negocios as NegocioRemoto[]));
+      const cat = agregarCatalogo(negocios as NegocioRemoto[]);
+      // Guardado para a próxima abertura da tela não depender de 27 requisições
+      // à API do cliente só para desenhar os menus.
+      await pool.query(
+        `UPDATE public.sults_connections
+            SET catalogo = $2::jsonb, catalogo_em = NOW() WHERE client_id = $1`,
+        [id, JSON.stringify(cat)],
+      ).catch(() => null);
+      return Response.json(cat);
     }
 
     return Response.json(await carregar(pool, id));

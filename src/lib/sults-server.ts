@@ -99,6 +99,8 @@ export type ConexaoSults = {
   sync_ativo?: boolean;
   /** Trazer os negócios para `crm_leads` (dashboard, funil, Performance Comercial). */
   ingerir_crm?: boolean;
+  catalogo?: unknown;
+  catalogo_em?: string | null;
   sync_pagina?: number;
   ultima_volta_em?: string | null;
   ultimo_erro_volta?: string | null;
