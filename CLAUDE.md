@@ -1,5 +1,16 @@
 @AGENTS.md
 
+## CRM — hierarquia tipográfica: tudo tinha o mesmo peso (2026-09-12)
+
+Cobrança do Matheus: "precisamos rever os tamanhos de fonte, botões, títulos — uns precisam de mais destaque que outros". Estava certo, e o defeito era **contraste**, não tamanho absoluto. Medido no código, três inversões:
+
+- **A faixa de stats tinha SEIS números em `font-heading text-xl`** — "40 leads no funil" com exatamente o mesmo peso de "0 frio". ⚠️ Frio/morno/quente é **composição do total ao lado**, não métrica irmã dele: agora vem depois de uma **divisória**, em `text-base`, enquanto o trio de resultado sobe para `text-2xl` com o rótulo no label padrão do DS (`text-[10px] font-bold uppercase tracking-widest`).
+- **O título "Leads" da toolbar (`text-sm font-semibold`) era o maior item da área** — competindo com o board inteiro sendo que a aba ativa logo acima já diz onde se está. Virou o label do DS.
+- **O nome da coluna (`text-[11px]`) era MENOR que o nome do lead (`text-xs`)** — a estrutura do board perdia para o conteúdo. Ganhou `uppercase tracking-wide`: autoridade sem gastar altura, porque ⚠️ **o Kanban é denso de propósito** (rodada de 2026-07-19, "box grandes demais") e engordar o card seria regredir pedido anterior.
+- **O nome do lead perdia para os badges**: `text-[8px]` mas em cor saturada, o que salta mais que texto branco de 12px. Nome foi para `text-[13px]`; badges para `text-[9px]` (8px é abaixo do legível) com a cor recuada (`opacity-80`, `text-primary/75`).
+- ✅ Verificado: tsc + `next build` limpos; harness no browser com as duas versões lado a lado (réplica fiel das classes) — a leitura passa a ser total → resultado → composição, e no card o nome vence os badges.
+- ⚠️ **Não tocado**: as abas do topo (PLANEJAMENTO/DEMANDAS/…) e o botão CONFIGURAÇÕES, que outra sessão acabou de reorganizar em `clientes/[id]/page.tsx` (commits `e31d38f`/`f7e22aa`) — mexer ali no mesmo dia desfaria decisão recém-tomada.
+
 ## Avatar de cliente — a foto vinha do id errado e em 50px (2026-09-12)
 
 Print do Matheus: vários clientes com iniciais ou com a **bandeirinha branca** do Facebook em vez da foto. Três defeitos somados em `client-avatar.tsx`, que montava `graph.facebook.com/{accountId}/picture?type=square` com o **primeiro** vínculo `facebook` OU `instagram` que achasse:
