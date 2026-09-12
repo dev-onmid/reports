@@ -305,11 +305,15 @@ export default function SultsCard({ clientId }: { clientId: string }) {
           setOcupado(false);
           return;
         }
+        const f = res.funil;
+        const funil = f && (f.criadas || f.removidas || f.reordenadas)
+          ? ` · funil ${f.modo}: ${f.criadas} etapas criadas, ${f.removidas} removidas, ${f.reordenadas} reordenadas`
+          : '';
         const crm = (res.leadsCriados || res.leadsAtualizados || res.errosCrm)
           ? ` · CRM: ${res.leadsCriados ?? 0} leads criados, ${res.leadsAtualizados ?? 0} atualizados${res.errosCrm ? `, ${res.errosCrm} com erro` : ''}`
           : '';
         setMsg(acao === 'sincronizar'
-          ? `${res.lidos ?? 0} negócios lidos · ${res.movimentos ?? 0} movimentações novas${crm}`
+          ? `${res.lidos ?? 0} negócios lidos · ${res.movimentos ?? 0} movimentações novas${funil}${crm}`
             + `${res.varreduraCompleta === false ? ' — parcial, o cron continua de onde parou' : ''}`
           : `${res.enviados ?? 0} enviados · ${res.descartados ?? 0} descartados · ${res.erros ?? 0} com erro`);
       }
@@ -534,9 +538,11 @@ export default function SultsCard({ clientId }: { clientId: string }) {
           </label>
           {cfg.ingerir_crm ? (
             <p className="mt-2 text-[11px] text-amber-400">
-              ⚠️ A etapa do SULTS <strong>sobrescreve</strong> o status do lead aqui. Ligue
-              só para cliente que qualifica dentro do SULTS — senão o Kanban e o
-              follow-up daqui vão brigar com ele.
+              ⚠️ A etapa do SULTS <strong>sobrescreve</strong> o status do lead aqui, e o
+              funil deste cliente passa a ser <strong>o funil do SULTS</strong> — as etapas
+              padrão que ninguém usou saem do Kanban e as de lá entram na ordem certa.
+              Etapa com lead ou com gatilho de automação nunca é removida; se houver
+              alguma, o funil só ganha as que faltam e nada é reordenado.
             </p>
           ) : (
             <p className="mt-2 text-[11px] text-muted-foreground">
