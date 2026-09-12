@@ -261,7 +261,8 @@ function StatusFilterToggle({ value, onChange }: {
 
 // ── Integrations data ──────────────────────────────────────────────────────────
 // ⚠️ NÃO MONTADO (2026-09-08): alimentava a grade de contas do modal Configurar,
-// que saiu. Vínculo de conta é só pelos ícones / "Vincular Contas".
+// que saiu. Vínculo de conta é só pelos ícones do cliente na lista ou por
+// Configurações > Contas de anúncio (2026-09-12: o botão saiu do cabeçalho).
 const integracoes = [
   { id: 1, name: 'Meta Ads',            status: 'Conectado',    logo: <img src="/brand/meta-ads-logo.webp" alt="Meta Ads" className="h-8 w-10 object-contain" /> },
   { id: 2, name: 'Google Ads',          status: 'Desconectado', logo: <img src="/brand/google-ads-logo.png" alt="Google Ads" className="h-8 w-10 object-contain" /> },
@@ -1508,7 +1509,7 @@ const AD_ACCOUNT_STATUS_LABEL: Record<number, string> = {
 };
 
 // ⚠️ NÃO MONTADO (2026-09-08). Vincular conta de anúncio passou a acontecer só
-// pelos ícones do cliente (lista) e pelo botão "Vincular Contas" do topo, que
+// pelos ícones do cliente (lista) e por Configurações > Contas de anúncio, que
 // abrem o LinkAccountsDialog — a grade de contas saiu do modal Configurar a
 // pedido do Matheus. Preservado com o motivo, no padrão do repo.
 function MetaAdsConnectionDialog({
@@ -1677,7 +1678,7 @@ function MetaAdsConnectionDialog({
 }
 
 // ⚠️ NÃO MONTADO (2026-09-08). Vincular conta de anúncio passou a acontecer só
-// pelos ícones do cliente (lista) e pelo botão "Vincular Contas" do topo, que
+// pelos ícones do cliente (lista) e por Configurações > Contas de anúncio, que
 // abrem o LinkAccountsDialog — a grade de contas saiu do modal Configurar a
 // pedido do Matheus. Preservado com o motivo, no padrão do repo.
 function GoogleAdsConnectionDialog({
@@ -1926,7 +1927,7 @@ function ClientBillingSection({ clientId }: { clientId: string }) {
 // Modal único de configuração do cliente — junta tudo que é setup (conexões, cobrança,
 // e Links & Senhas). O Anota Aí saiu daqui (2026-08-21): delivery configura-se na
 // aba Integrações → Delivery, um lugar só.
-function ClientConfigModal({ open, onClose, clientId, clientName, ajustes }: {
+function ClientConfigModal({ open, onClose, clientId, clientName, ajustes, onVincularContas, onAlterarStatus, inativo }: {
   open: boolean;
   onClose: () => void;
   clientId: string;
@@ -1941,6 +1942,11 @@ function ClientConfigModal({ open, onClose, clientId, clientName, ajustes }: {
    * divergiriam na primeira mudança.
    */
   ajustes?: React.ReactNode;
+  /** Abre o diálogo de vínculo de contas — fecha este antes, para não empilhar modal. */
+  onVincularContas?: () => void;
+  /** Ativa/desativa o cliente. Fica no fim, separado: é a única ação destrutiva daqui. */
+  onAlterarStatus?: () => void;
+  inativo?: boolean;
 }) {
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
@@ -1951,7 +1957,7 @@ function ClientConfigModal({ open, onClose, clientId, clientName, ajustes }: {
             Configurar cliente
           </DialogTitle>
           <p className="text-sm text-muted-foreground">
-            {clientName} — ajustes do cliente, forma de cobrança e senhas. Vincular contas de anúncio é pelos ícones do cliente (ou “Vincular Contas”, no topo); delivery, na aba Integrações.
+            {clientName} — ajustes, contas de anúncio, cobrança e senhas. Delivery continua na aba Integrações.
           </p>
         </DialogHeader>
         {open && (
@@ -1965,6 +1971,24 @@ function ClientConfigModal({ open, onClose, clientId, clientName, ajustes }: {
                 {ajustes}
               </div>
             )}
+            {onVincularContas && (
+              <div>
+                <div className="mb-3 flex items-center gap-2">
+                  <Link2 className="h-4 w-4 text-primary" />
+                  <h3 className="text-sm font-bold uppercase tracking-wider text-foreground">Contas de anúncio</h3>
+                </div>
+                <div className="flex flex-wrap items-center gap-3">
+                  <Button variant="outline" className="h-9 gap-2 border-border text-xs font-bold uppercase tracking-wider"
+                    onClick={() => { onClose(); onVincularContas(); }}>
+                    <Link2 className="h-4 w-4 text-primary" /> Vincular contas
+                  </Button>
+                  <span className="text-xs text-muted-foreground">
+                    Meta e Google. Delivery continua na aba Integrações.
+                  </span>
+                </div>
+              </div>
+            )}
+
             <ClientBillingSection clientId={clientId} />
             <div>
               <div className="mb-3 flex items-center gap-2">
@@ -1973,6 +1997,30 @@ function ClientConfigModal({ open, onClose, clientId, clientName, ajustes }: {
               </div>
               <VaultTab clientId={clientId} />
             </div>
+
+            {onAlterarStatus && (
+              <div className="border-t border-border pt-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-bold text-foreground">
+                      {inativo ? 'Reativar cliente' : 'Desativar cliente'}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {inativo
+                        ? 'Volta a aparecer na carteira, nos relatórios e nas automações.'
+                        : 'Sai da carteira, dos relatórios e das automações. Nada é apagado — dá para reativar depois.'}
+                    </p>
+                  </div>
+                  <Button variant="outline"
+                    className={cn('h-9 shrink-0 gap-2 text-xs font-bold uppercase tracking-wider',
+                      inativo ? 'border-primary/40 text-primary' : 'border-orange-400/40 text-orange-300')}
+                    onClick={() => { onClose(); onAlterarStatus(); }}>
+                    {inativo ? <Power className="h-4 w-4" /> : <PowerOff className="h-4 w-4" />}
+                    {inativo ? 'Ativar cliente' : 'Desativar cliente'}
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </DialogContent>
@@ -2390,26 +2438,11 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
             </div>
           </div>
         </div>
+        {/* ⚠️ Um botão só. "Vincular Contas" e "Desativar Cliente" viraram
+            ações DENTRO de Configurações: a primeira acontece na montagem do
+            cliente, a segunda quase nunca — e ambas ocupavam a faixa mais nobre
+            da tela, ao lado do nome, em toda visita. */}
         <div className="flex items-center gap-3">
-          <Button
-            variant="outline"
-            className={cn(
-              'border-border h-9 text-xs font-bold uppercase tracking-wider gap-2',
-              client.status === 'Inativo' ? 'border-primary/40 text-primary' : 'border-orange-400/40 text-orange-300'
-            )}
-            onClick={() => openStatusDialog(client.status === 'Inativo' ? 'Ativo' : 'Inativo')}
-          >
-            {client.status === 'Inativo' ? <Power className="w-4 h-4" /> : <PowerOff className="w-4 h-4" />}
-            {client.status === 'Inativo' ? 'Ativar Cliente' : 'Desativar Cliente'}
-          </Button>
-          <Button
-            variant="outline"
-            className="border-border h-9 text-xs font-bold uppercase tracking-wider gap-2"
-            onClick={() => setLinkDialogOpen(true)}
-          >
-            <Link2 className="w-4 h-4 text-primary" />
-            Vincular Contas
-          </Button>
           <Button
             variant="outline"
             className="border-border h-9 text-xs font-bold uppercase tracking-wider gap-2"
@@ -2461,6 +2494,9 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
         onClose={() => setConfigOpen(false)}
         clientId={id}
         clientName={client.name}
+        inativo={client.status === 'Inativo'}
+        onVincularContas={() => setLinkDialogOpen(true)}
+        onAlterarStatus={() => openStatusDialog(client.status === 'Inativo' ? 'Ativo' : 'Inativo')}
         ajustes={(
             <div className="flex items-center gap-3 flex-wrap">
                       <div className="flex items-center gap-2">
