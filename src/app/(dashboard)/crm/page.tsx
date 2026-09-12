@@ -15,7 +15,7 @@ import {
   ChevronLeft, ChevronRight, ChevronDown, SlidersHorizontal,
   AlignJustify, Trash2, Pencil, Sparkles, Clock3, LayoutGrid, List, ArrowUpDown,
   BarChart3, UserRound, MessageCircle, X, Send, GripVertical, Layers, WifiOff, Link2,
-  Globe2, Clapperboard,
+  Globe2, Clapperboard, Info,
 } from 'lucide-react';
 import { ChatView } from './chat-view';
 import { PortalLinkModal } from './portal-link-modal';
@@ -79,7 +79,7 @@ type LocalStage = CrmStage & { _isNew?: boolean };
 type CrmTab = 'leads' | 'capture' | 'chat' | 'followup' | 'attendance' | 'disparos' | 'ads';
 const ABAS_CRM = ['leads', 'capture', 'chat', 'followup', 'attendance', 'disparos', 'ads'] as const;
 const VISOES_CRM = ['list', 'kanban'] as const;
-type DatePreset = 'all' | 'today' | 'yesterday' | 'last7' | 'last14' | 'last30' | 'thisMonth' | 'lastMonth' | 'custom';
+type DatePreset = 'all' | 'today' | 'yesterday' | 'last7' | 'last15' | 'last14' | 'last30' | 'last90' | 'thisMonth' | 'lastMonth' | 'thisYear' | 'custom';
 
 type AttendanceMetrics = {
   summary: {
@@ -272,7 +272,15 @@ function presetDateRange(preset: DatePreset) {
   }
   if (preset === 'last7') return { from: localDateString(addDays(today, -6)), to: localDateString(today) };
   if (preset === 'last14') return { from: localDateString(addDays(today, -13)), to: localDateString(today) };
+  if (preset === 'last15') return { from: localDateString(addDays(today, -14)), to: localDateString(today) };
   if (preset === 'last30') return { from: localDateString(addDays(today, -29)), to: localDateString(today) };
+  if (preset === 'last90') return { from: localDateString(addDays(today, -89)), to: localDateString(today) };
+  if (preset === 'thisYear') {
+    return {
+      from: localDateString(new Date(today.getFullYear(), 0, 1)),
+      to: localDateString(new Date(today.getFullYear(), 11, 31)),
+    };
+  }
   if (preset === 'thisMonth') return { from: localDateString(startThisMonth), to: localDateString(endThisMonth) };
   if (preset === 'lastMonth') return { from: localDateString(startLastMonth), to: localDateString(endLastMonth) };
   return { from: '', to: '' };
@@ -286,11 +294,14 @@ function periodLabel(preset: DatePreset, from: string, to: string) {
     all: 'Todo período',
     today: 'Hoje',
     yesterday: 'Ontem',
-    last7: 'Últimos 7 dias',
+    last7: 'Últimos 7d',
     last14: 'Últimos 14 dias',
-    last30: 'Últimos 30 dias',
-    thisMonth: 'Este mês',
+    last15: 'Últimos 15d',
+    last30: 'Últimos 30d',
+    last90: 'Últimos 90d',
+    thisMonth: 'Mês atual',
     lastMonth: 'Mês passado',
+    thisYear: 'Este ano',
     custom: from || to ? `${from ? shortDateLabel(from) : 'Início'} até ${to ? shortDateLabel(to) : 'Hoje'}` : 'Personalizado',
   };
   return labels[preset];
@@ -1718,8 +1729,8 @@ function SortableStageRow({
       <select
         value={stage.etapa_funil ?? classificarEtapa(stage.label)}
         onChange={e => onChange({ etapa_funil: e.target.value as EtapaFunil })}
-        title="Etapa do Funil de Performance"
-        className="shrink-0 rounded-md border border-border bg-background px-1.5 py-1 text-[10px] text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+        title="Em qual degrau do Funil de Performance esta coluna entra"
+        className="w-[118px] shrink-0 rounded-md border border-border bg-background px-1.5 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
       >
         {[...ETAPAS_FUNIL, 'perdido' as const].map(e => (
           <option key={e} value={e}>{ROTULOS_ETAPA[e]}</option>
@@ -1846,6 +1857,30 @@ function FunnelEditorModal({
                 className="flex items-center gap-1 text-xs font-semibold text-primary hover:text-primary/80 transition-colors">
                 <Plus className="h-3.5 w-3.5" /> Adicionar etapa
               </button>
+            </div>
+
+            {/* ⚠️ O seletor da direita decide o FUNIL DA DASHBOARD e vivia sem
+                rótulo nenhum, só com um title no hover — ninguém achava. Um
+                cliente com 14 etapas (D1…D7, Lead Morno, Lead Quente…) precisa
+                dizer que todas elas são topo de funil, senão a dashboard conta
+                cada uma como um degrau diferente. */}
+            <div className="mb-2 flex items-start gap-2 rounded-lg border border-border bg-background/40 px-3 py-2">
+              <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
+              <p className="text-[11px] leading-snug text-muted-foreground">
+                <strong className="text-foreground">Grau no funil</strong> (coluna da direita) é o
+                que a <strong className="text-foreground">dashboard</strong> conta. Várias etapas
+                podem ter o mesmo grau — marque D1, D2, D3… todas como
+                <strong className="text-foreground"> Contato</strong> e elas viram um degrau só no
+                Funil de Performance, sem deixar de ser colunas separadas aqui no Kanban.
+              </p>
+            </div>
+
+            <div className="mb-1 flex items-center gap-2 px-2 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+              <span className="w-4 shrink-0" />
+              <span className="w-5 shrink-0" />
+              <span className="flex-1">Nome da coluna</span>
+              <span className="w-[118px] shrink-0">Grau no funil</span>
+              <span className="w-4 shrink-0" />
             </div>
 
             <DndContext sensors={editorSensors} onDragEnd={handleStageDragEnd}>
@@ -2127,9 +2162,13 @@ export default function CrmPage({ lockedClientId, embedded = false }: CrmPagePro
   const [statusFilter, setStatusFilter] = useState('');
   const [temperatureFilter, setTemperatureFilter] = useState('');
   const [monthFilter, setMonthFilter] = useState('');
-  const [dateFromFilter, setDateFromFilter] = useState('');
-  const [dateToFilter, setDateToFilter] = useState('');
-  const [datePreset, setDatePreset] = useState<DatePreset>('all');
+  // ⚠️ Nasce no MÊS ATUAL, não em "todo período". Cliente alimentado por CRM
+  // externo (SULTS, Agendor, planilha) traz anos de histórico de uma vez: abrir
+  // no total fazia "1.807 leads no funil" competir com o número do mês e não
+  // dizer nada sobre o desempenho atual.
+  const [dateFromFilter, setDateFromFilter] = useState(() => presetDateRange('thisMonth').from);
+  const [dateToFilter, setDateToFilter] = useState(() => presetDateRange('thisMonth').to);
+  const [datePreset, setDatePreset] = useState<DatePreset>('thisMonth');
   const [dateMenuOpen, setDateMenuOpen] = useState(false);
   const [columnFilters, setColumnFilters] = useState<Partial<Record<ColumnKey, string>>>({});
   const [colWidths, setColWidths] = useState<Record<ColumnKey, number>>(DEFAULT_COL_WIDTHS);
@@ -3044,14 +3083,20 @@ export default function CrmPage({ lockedClientId, embedded = false }: CrmPagePro
                 <div className="absolute left-0 top-11 z-50 w-72 rounded-xl border border-border bg-popover p-2 shadow-xl">
                   <div className="grid grid-cols-2 gap-1">
                     {([
-                      ['all', 'Todo período'],
+                      ['lastMonth', 'Mês passado'],
+                      ['thisMonth', 'Mês atual'],
+                      ['last7', 'Últimos 7d'],
+                      ['last15', 'Últimos 15d'],
+                      ['last30', 'Últimos 30d'],
+                      ['last90', 'Últimos 90d'],
+                      ['thisYear', 'Este ano'],
                       ['today', 'Hoje'],
                       ['yesterday', 'Ontem'],
-                      ['last7', 'Últimos 7 dias'],
-                      ['last14', 'Últimos 14 dias'],
-                      ['last30', 'Últimos 30 dias'],
-                      ['thisMonth', 'Este mês'],
-                      ['lastMonth', 'Mês passado'],
+                      // ⚠️ Último da lista, não o primeiro: "todo período" num
+                      // cliente alimentado por CRM externo mostra anos de
+                      // histórico e o número do topo deixa de dizer algo sobre
+                      // o mês. Continua disponível, só não é mais o convite.
+                      ['all', 'Todo período'],
                     ] as Array<[DatePreset, string]>).map(([preset, label]) => (
                       <button
                         key={preset}
