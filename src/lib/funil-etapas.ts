@@ -64,7 +64,11 @@ export function normalizarEtiqueta(t: string | null | undefined): string {
  */
 export function classificarEtapa(label: string | null | undefined): EtapaFunil {
   const s = normalizarEtiqueta(label);
-  if (/efetivad|fechad|vendid|comprou|contratad|paciente|ganho|\bwon\b/.test(s)) return 'fechamento';
+  // ⚠️ `\bcontrato\b` com fronteira, NÃO `contrat`: "Negociação Contratual" é
+  // etapa de negociação, e alargar o prefixo faria 12 negociações do CondoStore
+  // entrarem como VENDA na dashboard. E `contratad` sozinho não pegava
+  // "Contrato", que é justamente a etapa de fechamento do funil deles.
+  if (/efetivad|fechad|vendid|comprou|contratad|\bcontrato\b|paciente|ganho|\bwon\b/.test(s)) return 'fechamento';
   // Ausência explícita ANTES de comparecimento: "No-Show" contém "show" mas é
   // o oposto — agendou e faltou.
   if (/no show|nao compareceu|com falta|faltou/.test(s)) return 'agendamento';

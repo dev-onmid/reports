@@ -326,4 +326,15 @@ console.log(`OK — ${n} asserts`);
   eq(somarFunis([mix, mix]).agendamentoSemDesfecho, 2, 'somarFunis soma sem desfecho');
 }
 
+
+// ═══ "Contrato" é fechamento; "Contratual" NÃO é (CondoStore, 2026-09-12)
+eq(classificarEtapa('Contrato'), 'fechamento', 'Contrato é venda');
+eq(classificarEtapa('contrato'), 'fechamento', 'caixa baixa');
+eq(classificarEtapa('Contrato Assinado'), 'fechamento', 'contrato assinado');
+eq(classificarEtapa('Contratado'), 'fechamento', 'contratado segue valendo');
+// ⚠️ a regressão que o prefixo largo criaria: 12 negociações viram venda
+eq(classificarEtapa('Negociação Contratual.'), 'qualificado', 'Contratual NÃO é fechamento');
+eq(classificarEtapa('Negociacao Contratual'), 'qualificado', 'sem acento idem');
+ok(classificarEtapa('Minuta Contratual') !== 'fechamento', 'qualquer "contratual" fica fora do fechamento');
+
 console.log(`OK (com a quebra de agendamentos) — ${n} asserts`);
