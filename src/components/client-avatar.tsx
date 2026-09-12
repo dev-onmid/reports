@@ -24,24 +24,34 @@ function initials(name: string): string {
     .toUpperCase();
 }
 
-const pictureCache = new Map<string, string | null>();
+/**
+ * Mapa de avatares de TODOS os clientes, buscado UMA vez por carga de página e
+ * compartilhado por todos os `ClientAvatar` da tela (uma lista tem 40+).
+ *
+ * ⚠️ A URL NÃO é montada aqui. Antes este arquivo fazia
+ * `graph.facebook.com/{accountId}/picture` com o id do primeiro vínculo
+ * Meta que encontrasse — e o id do Instagram responde 400 nesse endpoint, o
+ * que deixava sem foto todo cliente cujo vínculo mais antigo era o Instagram.
+ * Quem escolhe a fonte agora é o servidor (`client-avatar-source.ts`).
+ */
+let mapaPendente: Promise<Record<string, string>> | null = null;
+
+function carregarMapa(): Promise<Record<string, string>> {
+  mapaPendente ??= fetch('/api/clients/avatars')
+    .then((r) => (r.ok ? r.json() : { avatars: {} }))
+    .then((d: { avatars?: Record<string, string> }) => d.avatars ?? {})
+    .catch(() => {
+      // Falha de rede não pode deixar a sessão inteira sem foto: zera para que
+      // o próximo avatar montado tente de novo.
+      mapaPendente = null;
+      return {};
+    });
+  return mapaPendente;
+}
 
 export async function fetchClientPicture(clientId: string): Promise<string | null> {
-  if (pictureCache.has(clientId)) return pictureCache.get(clientId)!;
-
-  try {
-    const res = await fetch(`/api/clients/${clientId}/links`);
-    if (!res.ok) { pictureCache.set(clientId, null); return null; }
-    const links = await res.json() as Array<{ platform: string; accountId: string }>;
-    const fbLink = links.find((l) => l.platform === 'facebook' || l.platform === 'instagram');
-    if (!fbLink) { pictureCache.set(clientId, null); return null; }
-    const url = `https://graph.facebook.com/${fbLink.accountId}/picture?type=square`;
-    pictureCache.set(clientId, url);
-    return url;
-  } catch {
-    pictureCache.set(clientId, null);
-    return null;
-  }
+  const mapa = await carregarMapa();
+  return mapa[clientId] ?? null;
 }
 
 export function ClientAvatar({
