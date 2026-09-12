@@ -2807,11 +2807,10 @@ export default function CrmPage({ lockedClientId, embedded = false }: CrmPagePro
   return (
     <div className={cn(
       'flex flex-col gap-5 overflow-hidden',
-      // 240px: com o cabeçalho do CRM e a barra "Configurações do cliente"
-      // fora, o que sobra acima do quadro é header do cliente (~90) + abas
+      // 200px: sobrou header do cliente (~90) + a linha de abas/Configurações
       // (~55) + espaçamentos. Descontar mais do que existe é o que fazia o
       // board parecer espremido com espaço sobrando embaixo.
-      embedded ? 'h-[calc(100vh-240px)] min-h-[520px]' : 'h-full',
+      embedded ? 'h-[calc(100vh-200px)] min-h-[520px]' : 'h-full',
     )}>
 
       {/* ── PAGE HEADER ─────────────────────────────────────────────────
@@ -2953,11 +2952,12 @@ export default function CrmPage({ lockedClientId, embedded = false }: CrmPagePro
       )}
 
       {/* ── BARRA ────────────────────────────────────────────────────────
-          Duas linhas com papéis distintos, em vez de uma fileira única que
-          quebrava onde calhasse — foi isso que deixou "Critérios IA" sozinho
-          numa linha inteira com um vazio do lado.
-            Linha 1 = ONDE VOCÊ ESTÁ  (funil, visão, ação principal)
-            Linha 2 = O QUE ESTÁ FILTRANDO (status, temperatura, período, busca)
+          UMA linha: funil · ⋮ · visão · período · busca · Novo Lead.
+          ⚠️ Já foi duas, e estava certo enquanto havia 6 controles — a fileira
+          única quebrava onde calhasse e deixou "Critérios IA" órfão. Com os
+          filtros de status e temperatura fora e Fontes de Captura no ⋮, sobrou
+          largura: manter duas linhas passou a gastar uma faixa inteira para
+          dois controles. A busca é flex-1 e come a sobra, então não há vazio.
       */}
       {clientId && (
       <>
@@ -3088,16 +3088,6 @@ export default function CrmPage({ lockedClientId, embedded = false }: CrmPagePro
           </button>
         </div>
 
-        {crmView === 'leads' && (
-          <button onClick={() => void saveNew()}
-            className="ml-auto flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors"
-          >
-            <Plus className="h-4 w-4" /> Novo Lead
-          </button>
-        )}
-      </div>
-
-      <div className="flex flex-wrap items-center gap-2">
         {clientId && (crmView === 'leads' || crmView === 'attendance') && (
           <>
             {/* ⚠️ Filtros de status e temperatura removidos a pedido: o Kanban
@@ -3194,13 +3184,21 @@ export default function CrmPage({ lockedClientId, embedded = false }: CrmPagePro
             </div>
 
             {crmView === 'leads' && (
-              // A busca cresce e come a sobra da linha: espaço vazio numa barra
-              // de ferramentas não é respiro, é desperdício.
-              <div className="relative min-w-[180px] flex-1">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
-                <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar leads..."
-                  className="w-full pl-8 pr-3 py-2 rounded-lg border border-border bg-card text-sm focus:outline-none focus:ring-1 focus:ring-primary" />
-              </div>
+              <>
+                {/* A busca cresce e come a sobra da linha: espaço vazio numa
+                    barra de ferramentas não é respiro, é desperdício. */}
+                <div className="relative min-w-[160px] flex-1">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+                  <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar leads..."
+                    className="w-full pl-8 pr-3 py-2 rounded-lg border border-border bg-card text-sm focus:outline-none focus:ring-1 focus:ring-primary" />
+                </div>
+
+                <button onClick={() => void saveNew()}
+                  className="flex shrink-0 items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors"
+                >
+                  <Plus className="h-4 w-4" /> Novo Lead
+                </button>
+              </>
             )}
           </>
         )}

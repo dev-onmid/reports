@@ -2438,23 +2438,15 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
             </div>
           </div>
         </div>
-        {/* ⚠️ Um botão só. "Vincular Contas" e "Desativar Cliente" viraram
-            ações DENTRO de Configurações: a primeira acontece na montagem do
-            cliente, a segunda quase nunca — e ambas ocupavam a faixa mais nobre
-            da tela, ao lado do nome, em toda visita. */}
-        <div className="flex items-center gap-3">
-          <Button
-            variant="outline"
-            className="border-border h-9 text-xs font-bold uppercase tracking-wider gap-2"
-            onClick={() => setConfigOpen(true)}
-          >
-            <Settings className="w-4 h-4 text-primary" />
-            Configurações
-          </Button>
-        </div>
       </div>
 
-      {/* Tabs nav */}
+      {/* ⚠️ Abas e Configurações na MESMA linha. Antes eram duas faixas
+          empilhadas — a das abas ficava com um vazio à direita do tamanho da
+          tela inteira, e o botão sozinho numa faixa só dele. Juntas, some uma
+          linha inteira e o vazio vira o espaçamento entre as duas coisas.
+          ("Vincular Contas" e "Desativar Cliente" já tinham entrado no modal:
+          a primeira acontece na montagem do cliente, a segunda quase nunca.) */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
       <div className="flex gap-1 bg-card border border-border p-1 rounded-xl w-fit flex-wrap">
         {[...PRIMARY_TABS, ...(clientFidelidade ? (['fidelidade'] as Tab[]) : []), 'historico' as Tab].map((t) => (
           <button key={t} onClick={() => setTab(t)}
@@ -2467,6 +2459,16 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
             {tabLabel[t]}
           </button>
         ))}
+      </div>
+
+        <Button
+          variant="outline"
+          className="border-border h-9 shrink-0 text-xs font-bold uppercase tracking-wider gap-2"
+          onClick={() => setConfigOpen(true)}
+        >
+          <Settings className="w-4 h-4 text-primary" />
+          Configurações
+        </Button>
       </div>
 
       {/* Tab content */}
