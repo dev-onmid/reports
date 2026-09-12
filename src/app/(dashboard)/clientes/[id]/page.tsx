@@ -1926,11 +1926,21 @@ function ClientBillingSection({ clientId }: { clientId: string }) {
 // Modal único de configuração do cliente — junta tudo que é setup (conexões, cobrança,
 // e Links & Senhas). O Anota Aí saiu daqui (2026-08-21): delivery configura-se na
 // aba Integrações → Delivery, um lugar só.
-function ClientConfigModal({ open, onClose, clientId, clientName }: {
+function ClientConfigModal({ open, onClose, clientId, clientName, ajustes }: {
   open: boolean;
   onClose: () => void;
   clientId: string;
   clientName: string;
+  /**
+   * Categoria, tipo de dashboard, topo do funil e Fidelidade.
+   *
+   * ⚠️ Chega como JSX pronto, não como props soltas: os controles dependem de
+   * oito pedaços de estado da página do cliente (categorias carregadas,
+   * `patchClient`, a aba atual para o caso de desligar Fidelidade com ela
+   * aberta). Recriá-los aqui significaria duplicar esse estado — e duas cópias
+   * divergiriam na primeira mudança.
+   */
+  ajustes?: React.ReactNode;
 }) {
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
@@ -1941,11 +1951,20 @@ function ClientConfigModal({ open, onClose, clientId, clientName }: {
             Configurar cliente
           </DialogTitle>
           <p className="text-sm text-muted-foreground">
-            {clientName} — forma de cobrança e senhas. Vincular contas de anúncio é pelos ícones do cliente (ou “Vincular Contas”, no topo); delivery, na aba Integrações.
+            {clientName} — ajustes do cliente, forma de cobrança e senhas. Vincular contas de anúncio é pelos ícones do cliente (ou “Vincular Contas”, no topo); delivery, na aba Integrações.
           </p>
         </DialogHeader>
         {open && (
           <div className="space-y-6 pt-2">
+            {ajustes && (
+              <div>
+                <div className="mb-3 flex items-center gap-2">
+                  <Settings className="h-4 w-4 text-primary" />
+                  <h3 className="text-sm font-bold uppercase tracking-wider text-foreground">Ajustes do cliente</h3>
+                </div>
+                {ajustes}
+              </div>
+            )}
             <ClientBillingSection clientId={clientId} />
             <div>
               <div className="mb-3 flex items-center gap-2">
@@ -2402,87 +2421,6 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
         </div>
       </div>
 
-      {/* Client settings row — category & dashboard type */}
-      <div className="flex items-center gap-3 flex-wrap rounded-xl border border-border bg-card/50 px-4 py-3">
-        <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Configurações do cliente</span>
-        <div className="flex items-center gap-2">
-          <label className="text-xs text-muted-foreground">Categoria:</label>
-          <select
-            value={clientCategoryId}
-            onChange={e => {
-              setClientCategoryId(e.target.value);
-              void patchClient({ category_id: e.target.value || null });
-            }}
-            className="h-7 rounded-lg border border-border bg-background px-2 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
-          >
-            <option value="">Sem categoria</option>
-            {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
-        </div>
-        <div className="flex items-center gap-2">
-          <label className="text-xs text-muted-foreground">Dashboard:</label>
-          <select
-            value={clientDashType}
-            onChange={e => {
-              const v = e.target.value as DashboardType;
-              setClientDashType(v);
-              void patchClient({ dashboard_type: v });
-            }}
-            className="h-7 rounded-lg border border-border bg-background px-2 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
-          >
-            <option value="leads">Leads</option>
-            <option value="branding">Branding</option>
-            <option value="conversao">Conversão</option>
-                <option value="food">Food / Delivery</option>
-                <option value="clinicas">Clínicas</option>
-          </select>
-        </div>
-        <div className="flex items-center gap-2">
-          <label className="text-xs text-muted-foreground" title="O que conta como Contatos no topo do Funil de Performance do dashboard">
-            Topo do funil:
-          </label>
-          <select
-            value={clientFonteTopo}
-            onChange={e => {
-              const v = e.target.value as 'auto' | 'crm' | 'anuncios';
-              setClientFonteTopo(v);
-              void patchClient({ funil_fonte_topo: v });
-            }}
-            className="h-7 rounded-lg border border-border bg-background px-2 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
-          >
-            <option value="auto">Automático (CRM se houver)</option>
-            <option value="crm">Sempre CRM/planilha</option>
-            <option value="anuncios">Sempre anúncios</option>
-          </select>
-        </div>
-        <div className="flex items-center gap-2">
-          <label
-            className="text-xs text-muted-foreground"
-            title="Campanhas automáticas de recompra pelo WhatsApp do cliente. Deixe desativada quando o cardápio digital dele já faz isso por dentro."
-          >
-            Fidelidade:
-          </label>
-          <button
-            onClick={() => {
-              const v = !clientFidelidade;
-              setClientFidelidade(v);
-              void patchClient({ fidelidade_ativa: v });
-              // Desligar com a aba aberta deixaria a tela pendurada num cliente
-              // que não tem mais Fidelidade — volta pro planejamento.
-              if (!v && tab === 'fidelidade') setTab('planejamento');
-            }}
-            className={cn(
-              'h-7 rounded-lg border px-2 text-xs font-bold uppercase tracking-wider transition-colors',
-              clientFidelidade
-                ? 'border-primary bg-primary/15 text-primary'
-                : 'border-border text-muted-foreground hover:text-foreground',
-            )}
-          >
-            {clientFidelidade ? 'Ativa' : 'Desativada'}
-          </button>
-        </div>
-      </div>
-
       {/* Tabs nav */}
       <div className="flex gap-1 bg-card border border-border p-1 rounded-xl w-fit flex-wrap">
         {[...PRIMARY_TABS, ...(clientFidelidade ? (['fidelidade'] as Tab[]) : []), 'historico' as Tab].map((t) => (
@@ -2523,6 +2461,86 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
         onClose={() => setConfigOpen(false)}
         clientId={id}
         clientName={client.name}
+        ajustes={(
+            <div className="flex items-center gap-3 flex-wrap">
+                      <div className="flex items-center gap-2">
+                <label className="text-xs text-muted-foreground">Categoria:</label>
+                <select
+                  value={clientCategoryId}
+                  onChange={e => {
+                    setClientCategoryId(e.target.value);
+                    void patchClient({ category_id: e.target.value || null });
+                  }}
+                  className="h-7 rounded-lg border border-border bg-background px-2 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
+                >
+                  <option value="">Sem categoria</option>
+                  {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </div>
+              <div className="flex items-center gap-2">
+                <label className="text-xs text-muted-foreground">Dashboard:</label>
+                <select
+                  value={clientDashType}
+                  onChange={e => {
+                    const v = e.target.value as DashboardType;
+                    setClientDashType(v);
+                    void patchClient({ dashboard_type: v });
+                  }}
+                  className="h-7 rounded-lg border border-border bg-background px-2 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
+                >
+                  <option value="leads">Leads</option>
+                  <option value="branding">Branding</option>
+                  <option value="conversao">Conversão</option>
+                      <option value="food">Food / Delivery</option>
+                      <option value="clinicas">Clínicas</option>
+                </select>
+              </div>
+              <div className="flex items-center gap-2">
+                <label className="text-xs text-muted-foreground" title="O que conta como Contatos no topo do Funil de Performance do dashboard">
+                  Topo do funil:
+                </label>
+                <select
+                  value={clientFonteTopo}
+                  onChange={e => {
+                    const v = e.target.value as 'auto' | 'crm' | 'anuncios';
+                    setClientFonteTopo(v);
+                    void patchClient({ funil_fonte_topo: v });
+                  }}
+                  className="h-7 rounded-lg border border-border bg-background px-2 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
+                >
+                  <option value="auto">Automático (CRM se houver)</option>
+                  <option value="crm">Sempre CRM/planilha</option>
+                  <option value="anuncios">Sempre anúncios</option>
+                </select>
+              </div>
+              <div className="flex items-center gap-2">
+                <label
+                  className="text-xs text-muted-foreground"
+                  title="Campanhas automáticas de recompra pelo WhatsApp do cliente. Deixe desativada quando o cardápio digital dele já faz isso por dentro."
+                >
+                  Fidelidade:
+                </label>
+                <button
+                  onClick={() => {
+                    const v = !clientFidelidade;
+                    setClientFidelidade(v);
+                    void patchClient({ fidelidade_ativa: v });
+                    // Desligar com a aba aberta deixaria a tela pendurada num cliente
+                    // que não tem mais Fidelidade — volta pro planejamento.
+                    if (!v && tab === 'fidelidade') setTab('planejamento');
+                  }}
+                  className={cn(
+                    'h-7 rounded-lg border px-2 text-xs font-bold uppercase tracking-wider transition-colors',
+                    clientFidelidade
+                      ? 'border-primary bg-primary/15 text-primary'
+                      : 'border-border text-muted-foreground hover:text-foreground',
+                  )}
+                >
+                  {clientFidelidade ? 'Ativa' : 'Desativada'}
+                </button>
+              </div>
+            </div>
+        )}
       />
 
 

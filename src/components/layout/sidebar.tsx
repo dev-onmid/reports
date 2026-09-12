@@ -110,11 +110,17 @@ export function Sidebar({
     <aside className={cn(
       'h-screen flex flex-col sticky top-0 z-20 transition-all duration-200 shrink-0',
       'bg-background border-r border-border',
-      isCollapsed ? 'w-16' : 'w-64',
+      // 224px, não 256. Medido no item mais largo ("Biblioteca Meta", que é
+      // sub-item e carrega o recuo de pl-7): ocupa 180px e sobram 20 de folga.
+      // w-52 deixaria 4px e o rótulo encostaria na borda.
+      isCollapsed ? 'w-16' : 'w-56',
       className
     )}>
       {/* Header */}
-      <div className={cn('h-14 flex items-center relative border-b border-border', isCollapsed ? 'justify-center' : 'px-5')}>
+      {/* ⚠️ px-4, não px-5: logo (até 120px) + gap + selo da versão somavam
+          exatamente a largura útil a 224px, e o `overflow-hidden` do link
+          cortaria o selo em vez de avisar. */}
+      <div className={cn('h-14 flex items-center relative border-b border-border', isCollapsed ? 'justify-center' : 'px-4')}>
         {isCollapsed ? (
           <Link href="/inicio" onClick={onNavigate}>
             <img src="/brand/onmid-logo-white.png" alt="Onmid" className="h-6 w-auto object-contain" />
