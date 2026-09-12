@@ -31,6 +31,7 @@ type Config = {
   conectado: boolean;
   enabled?: boolean;
   sync_ativo?: boolean;
+  ingerir_crm?: boolean;
   api_token_masked?: string | null;
   responsavel_id?: number | null;
   etapa_id?: number | null;
@@ -278,8 +279,12 @@ export default function SultsCard({ clientId }: { clientId: string }) {
           setOcupado(false);
           return;
         }
+        const crm = (res.leadsCriados || res.leadsAtualizados || res.errosCrm)
+          ? ` · CRM: ${res.leadsCriados ?? 0} leads criados, ${res.leadsAtualizados ?? 0} atualizados${res.errosCrm ? `, ${res.errosCrm} com erro` : ''}`
+          : '';
         setMsg(acao === 'sincronizar'
-          ? `${res.lidos ?? 0} negócios lidos · ${res.movimentos ?? 0} movimentações novas${res.varreduraCompleta === false ? ' (parcial — o cron continua de onde parou)' : ''}`
+          ? `${res.lidos ?? 0} negócios lidos · ${res.movimentos ?? 0} movimentações novas${crm}`
+            + `${res.varreduraCompleta === false ? ' — parcial, o cron continua de onde parou' : ''}`
           : `${res.enviados ?? 0} enviados · ${res.descartados ?? 0} descartados · ${res.erros ?? 0} com erro`);
       }
     } catch { setMsg('Falhou.'); }
@@ -479,10 +484,31 @@ export default function SultsCard({ clientId }: { clientId: string }) {
             className="mt-3 flex items-center gap-1 text-[11px] font-bold uppercase tracking-widest text-primary hover:underline disabled:opacity-40">
             <RefreshCw className={cn('h-3 w-3', ocupado && 'animate-spin')} /> Sincronizar agora
           </button>
-          <p className="mt-2 text-[11px] text-muted-foreground">
-            A etapa do SULTS não sobrescreve o status do lead no CRM daqui — fica ao lado,
-            para não brigar com o Kanban e o follow-up.
-          </p>
+          <label className="mt-3 flex cursor-pointer items-start gap-2 border-t border-border pt-3">
+            <input
+              type="checkbox" className="mt-0.5" checked={!!cfg.ingerir_crm} disabled={ocupado}
+              onChange={e => patch({ ingerir_crm: e.target.checked })}
+            />
+            <span className="text-[11px] leading-snug">
+              <strong className="text-foreground">Alimentar o CRM e a dashboard daqui</strong>
+              <span className="block text-muted-foreground">
+                Cada negócio do SULTS vira lead no CRM deste cliente, e a etapa de lá
+                passa a mandar no status daqui. Funil, dashboard e Performance Comercial
+                passam a mostrar a operação do cliente.
+              </span>
+            </span>
+          </label>
+          {cfg.ingerir_crm ? (
+            <p className="mt-2 text-[11px] text-amber-400">
+              ⚠️ A etapa do SULTS <strong>sobrescreve</strong> o status do lead aqui. Ligue
+              só para cliente que qualifica dentro do SULTS — senão o Kanban e o
+              follow-up daqui vão brigar com ele.
+            </p>
+          ) : (
+            <p className="mt-2 text-[11px] text-muted-foreground">
+              Desligado, o espelho fica isolado: nada toca o status do lead no CRM daqui.
+            </p>
+          )}
         </div>
       </div>
 

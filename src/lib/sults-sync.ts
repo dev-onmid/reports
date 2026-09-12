@@ -23,6 +23,7 @@ import {
   ensureSultsSchema, listarConexoesSultsVolta, sultsFetch, SULTS_API,
   type ConexaoSults,
 } from '@/lib/sults-server';
+import { ingerirNegocioSults } from '@/lib/sults-ingest';
 
 const POR_PAGINA = 100; // teto da API
 const MAX_PAGINAS = 60; // 6.000 negócios por rodada
@@ -42,7 +43,11 @@ export function ensureSultsSyncSchema(pool: Pool): Promise<void> {
           -- funil grande (mesma lição do backfill do Agendor).
           ADD COLUMN IF NOT EXISTS sync_pagina INT NOT NULL DEFAULT 0,
           ADD COLUMN IF NOT EXISTS ultima_volta_em TIMESTAMPTZ,
-          ADD COLUMN IF NOT EXISTS ultimo_erro_volta TEXT
+          ADD COLUMN IF NOT EXISTS ultimo_erro_volta TEXT,
+          -- Trazer o negócio para a tabela de leads (dashboard, funil e
+          -- Performance Comercial) é opcional: só faz sentido para
+          -- cliente que qualifica DENTRO do SULTS.
+          ADD COLUMN IF NOT EXISTS ingerir_crm BOOLEAN NOT NULL DEFAULT FALSE
       `);
       await pool.query(`
         CREATE TABLE IF NOT EXISTS public.sults_negocios (
@@ -65,6 +70,12 @@ export function ensureSultsSyncSchema(pool: Pool): Promise<void> {
           dt_conclusao TIMESTAMPTZ,
           entrou_na_etapa_em TIMESTAMPTZ,
           duracao_etapas JSONB,
+          cidade TEXT,
+          uf TEXT,
+          temperatura TEXT,
+          contato_nome TEXT,
+          contato_telefone TEXT,
+          contato_email TEXT,
           primeira_vez_em TIMESTAMPTZ NOT NULL DEFAULT NOW(),
           visto_em TIMESTAMPTZ NOT NULL DEFAULT NOW(),
           PRIMARY KEY (client_id, negocio_id)
@@ -102,6 +113,16 @@ export function ensureSultsSyncSchema(pool: Pool): Promise<void> {
         CREATE INDEX IF NOT EXISTS sults_movimentos_lead_idx
           ON public.sults_movimentos (client_id, lead_id, ocorrido_em DESC)
       `);
+      // Instalação que já tinha a tabela antes do contato existir.
+      await pool.query(`
+        ALTER TABLE public.sults_negocios
+          ADD COLUMN IF NOT EXISTS cidade TEXT,
+          ADD COLUMN IF NOT EXISTS uf TEXT,
+          ADD COLUMN IF NOT EXISTS temperatura TEXT,
+          ADD COLUMN IF NOT EXISTS contato_nome TEXT,
+          ADD COLUMN IF NOT EXISTS contato_telefone TEXT,
+          ADD COLUMN IF NOT EXISTS contato_email TEXT
+      `);
       await pool.query(`
         CREATE INDEX IF NOT EXISTS sults_negocios_lead_idx
           ON public.sults_negocios (client_id, lead_id)
@@ -134,6 +155,9 @@ export type ResultadoVolta = {
   movimentos: number;
   paginas: number;
   varreduraCompleta: boolean;
+  leadsCriados: number;
+  leadsAtualizados: number;
+  errosCrm: number;
   erro?: string;
 };
 
@@ -143,6 +167,7 @@ async function sincronizarCliente(
   const r: ResultadoVolta = {
     client_id: conn.client_id, lidos: 0, novos: 0, movimentos: 0,
     paginas: 0, varreduraCompleta: false,
+    leadsCriados: 0, leadsAtualizados: 0, errosCrm: 0,
   };
 
   /**
@@ -195,6 +220,23 @@ async function sincronizarCliente(
       const efeito = await gravarPagina(pool, conn.client_id, paginaNova, estado, agora);
       r.novos += efeito.novos;
       r.movimentos += efeito.movimentos;
+
+      // O espelho já está gravado; a ingestão no CRM é best-effort por negócio.
+      // ⚠️ Um negócio problemático não pode derrubar a varredura inteira — o
+      // espelho é a fonte, e a próxima rodada tenta de novo o que faltou.
+      if (conn.ingerir_crm) {
+        for (const s of efeito.paraCrm) {
+          if (Date.now() >= fim) break;
+          try {
+            const res = await ingerirNegocioSults(pool, conn.client_id, s);
+            if (res?.criado) r.leadsCriados++;
+            else if (res) r.leadsAtualizados++;
+          } catch (err) {
+            r.errosCrm++;
+            if (!r.erro) r.erro = `CRM (negócio ${s.negocioId}): ${(err as Error).message}`;
+          }
+        }
+      }
 
       start += passo;
       if (negocios.length < POR_PAGINA) { r.varreduraCompleta = true; break; }
@@ -253,22 +295,26 @@ async function carregarEstado(pool: Pool, clientId: string): Promise<EstadoAnter
   };
 }
 
-const COLS_SNAPSHOT = 19;
+const COLS_SNAPSHOT = 25;
 
 /** Grava a página inteira: um upsert com todas as linhas, um insert dos movimentos. */
 async function gravarPagina(
   pool: Pool, clientId: string, snaps: SnapshotNegocio[], estado: EstadoAnterior, agora: string,
-): Promise<{ novos: number; movimentos: number }> {
-  if (!snaps.length) return { novos: 0, movimentos: 0 };
+): Promise<{ novos: number; movimentos: number; paraCrm: SnapshotNegocio[] }> {
+  if (!snaps.length) return { novos: 0, movimentos: 0, paraCrm: [] };
 
   const valores: unknown[] = [];
   const linhas: string[] = [];
   const movs: { s: SnapshotNegocio; m: NonNullable<ReturnType<typeof diffNegocio>> }[] = [];
   let novos = 0;
 
+  const paraCrm: SnapshotNegocio[] = [];
   for (const s of snaps) {
     const ant = estado.etapas.get(s.negocioId);
     if (!ant) novos++;
+    // Só negócio novo ou que mexeu vai para o CRM: reingerir os 2.644 a cada
+    // 10 minutos seria milhares de transações para não mudar nada.
+    if (!ant || ant.etapaId !== s.etapaId || ant.situacaoId !== s.situacaoId) paraCrm.push(s);
     const anterior: SnapshotNegocio | null = ant ? { ...s, ...ant } : null;
     const m = diffNegocio(anterior, s, agora);
     if (m) movs.push({ s, m });
@@ -282,12 +328,14 @@ async function gravarPagina(
     const b = valores.length;
     linhas.push(`($${b + 1},$${b + 2},$${b + 3},$${b + 4},$${b + 5},$${b + 6},$${b + 7},$${b + 8},`
       + `$${b + 9},$${b + 10},$${b + 11},$${b + 12},$${b + 13},$${b + 14},$${b + 15},`
-      + `$${b + 16}::timestamptz,$${b + 17}::timestamptz,$${b + 18}::timestamptz,$${b + 19}::jsonb,NOW())`);
+      + `$${b + 16}::timestamptz,$${b + 17}::timestamptz,$${b + 18}::timestamptz,$${b + 19}::jsonb,`
+      + `$${b + 20},$${b + 21},$${b + 22},$${b + 23},$${b + 24},$${b + 25},NOW())`);
     valores.push(
       clientId, s.negocioId, estado.leads.get(s.negocioId) ?? null, s.titulo,
       s.funilId, s.funilNome, s.etapaId, s.etapaNome, s.situacaoId, s.situacaoNome,
       s.responsavelNome, s.origemNome, s.campanhaNome, s.motivoPerda, s.valor,
       s.dtCadastro, s.dtConclusao, s.entrouNaEtapaEm, JSON.stringify(s.duracaoEtapas),
+      s.cidade, s.uf, s.temperatura, s.contatoNome, s.contatoTelefone, s.contatoEmail,
     );
   }
 
@@ -300,7 +348,8 @@ async function gravarPagina(
        client_id, negocio_id, lead_id, titulo, funil_id, funil_nome,
        etapa_id, etapa_nome, situacao_id, situacao_nome, responsavel_nome,
        origem_nome, campanha_nome, motivo_perda, valor, dt_cadastro,
-       dt_conclusao, entrou_na_etapa_em, duracao_etapas, visto_em
+       dt_conclusao, entrou_na_etapa_em, duracao_etapas,
+       cidade, uf, temperatura, contato_nome, contato_telefone, contato_email, visto_em
      ) VALUES ${linhas.join(',')}
      ON CONFLICT (client_id, negocio_id) DO UPDATE SET
        lead_id = COALESCE(public.sults_negocios.lead_id, EXCLUDED.lead_id),
@@ -314,6 +363,11 @@ async function gravarPagina(
        dt_conclusao = EXCLUDED.dt_conclusao,
        entrou_na_etapa_em = EXCLUDED.entrou_na_etapa_em,
        duracao_etapas = EXCLUDED.duracao_etapas,
+       cidade = EXCLUDED.cidade, uf = EXCLUDED.uf,
+       temperatura = EXCLUDED.temperatura,
+       contato_nome = EXCLUDED.contato_nome,
+       contato_telefone = EXCLUDED.contato_telefone,
+       contato_email = EXCLUDED.contato_email,
        visto_em = NOW()`,
     valores,
   );
@@ -338,7 +392,7 @@ async function gravarPagina(
     gravados += rowCount ?? 0;
   }
 
-  return { novos, movimentos: gravados };
+  return { novos, movimentos: gravados, paraCrm };
 }
 
 export async function sincronizarVoltaSults(
