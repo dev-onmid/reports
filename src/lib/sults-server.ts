@@ -210,9 +210,15 @@ export async function criarNegocioSults(apiToken: string, payload: unknown): Pro
  * origem da conta ("Landing Page (Google)", 164 negócios) e metade das etapas.
  */
 export async function amostrarNegociosSults(
-  apiToken: string, opts: { paginas?: number; funilId?: number | null } = {},
+  apiToken: string, opts: { paginas?: number; funilId?: number | null; budgetMs?: number } = {},
 ): Promise<unknown[]> {
-  const alvo = Math.max(1, Math.min(opts.paginas ?? 6, 12));
+  // ⚠️ 30 páginas, não 6. Medido na conta do CondoStore: a amostra de 6 páginas
+  // achava 5 origens e 14 etapas, enquanto a base COMPLETA tem 9 e 62 — quatro
+  // origens reais ficavam fora do menu, e quem configurasse não teria como
+  // saber que faltavam. O funil inteiro (27 páginas, 2.644 negócios) leva 11,7s,
+  // então ler quase tudo cabe no orçamento de quem está olhando a tela.
+  const alvo = Math.max(1, Math.min(opts.paginas ?? 30, 30));
+  const fim = Date.now() + (opts.budgetMs ?? 25_000);
   const base = (p: number) => {
     const q = new URLSearchParams({ start: String(p), limit: '100' });
     if (opts.funilId) q.set('funil', String(opts.funilId));
@@ -231,7 +237,10 @@ export async function amostrarNegociosSults(
   for (let i = 1; i <= restantes; i++) {
     passos.add(Math.min(total - 1, Math.round((i * (total - 1)) / restantes)));
   }
-  for (const p of passos) {
+  // Conta grande estoura o orçamento antes de acabar: melhor um catálogo
+  // parcial e a tela abrindo do que a rota morrendo no timeout.
+  for (const p of [...passos].sort((a, b) => a - b)) {
+    if (Date.now() >= fim) break;
     const r = await sultsFetch<{ data?: unknown[] }>(apiToken, base(p)).catch(() => null);
     if (r?.data) out.push(...r.data);
   }
