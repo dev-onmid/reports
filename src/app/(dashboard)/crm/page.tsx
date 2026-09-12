@@ -2807,7 +2807,11 @@ export default function CrmPage({ lockedClientId, embedded = false }: CrmPagePro
   return (
     <div className={cn(
       'flex flex-col gap-5 overflow-hidden',
-      embedded ? 'h-[calc(100vh-300px)] min-h-[520px]' : 'h-full',
+      // 240px: com o cabeçalho do CRM e a barra "Configurações do cliente"
+      // fora, o que sobra acima do quadro é header do cliente (~90) + abas
+      // (~55) + espaçamentos. Descontar mais do que existe é o que fazia o
+      // board parecer espremido com espaço sobrando embaixo.
+      embedded ? 'h-[calc(100vh-240px)] min-h-[520px]' : 'h-full',
     )}>
 
       {/* ── PAGE HEADER ─────────────────────────────────────────────────
