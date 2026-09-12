@@ -989,14 +989,14 @@ function KanbanCard({
 
       {/* Linha 1: nome + valor */}
       <div className="flex items-center gap-1.5">
-        <p className="min-w-0 flex-1 truncate text-xs font-semibold text-foreground">{lead.nome ?? lead.numero ?? '—'}</p>
+        <p className="min-w-0 flex-1 truncate text-[13px] font-semibold text-foreground">{lead.nome ?? lead.numero ?? '—'}</p>
         {value > 0 && <span className="shrink-0 text-[10px] font-bold text-primary">{fmtN(lead.valor_rs)}</span>}
       </div>
 
       {/* Linha 2: número + data */}
       <div className="mt-0.5 flex items-center justify-between gap-2">
         <p className="min-w-0 truncate text-[10px] text-muted-foreground">{lead.numero ?? '—'}</p>
-        <span className="shrink-0 text-[9px] text-muted-foreground/70">{fmtD(lead.data ?? lead.created_at)}</span>
+        <span className="shrink-0 text-[10px] text-muted-foreground/70">{fmtD(lead.data ?? lead.created_at)}</span>
       </div>
 
       {/* Linha 3: canal + pills essenciais (uma linha só, truncada) */}
@@ -1007,22 +1007,22 @@ function KanbanCard({
           </span>
         ))}
         <span
-          className={cn('inline-flex shrink-0 rounded px-1 py-px text-[8px] font-bold leading-tight', trackingStatus.className)}
+          className={cn('inline-flex shrink-0 rounded px-1 py-px text-[9px] font-bold leading-tight opacity-80', trackingStatus.className)}
           title={`${trackingStatus.label}: ${trackingStatus.detail}`}
         >
           {trackingShort}
         </span>
-        <span className="inline-flex min-w-0 items-center gap-0.5 truncate rounded bg-primary/10 px-1 py-px text-[8px] font-semibold leading-tight text-primary" title={aiTag}>
+        <span className="inline-flex min-w-0 items-center gap-0.5 truncate rounded bg-primary/5 px-1 py-px text-[9px] font-semibold leading-tight text-primary/75" title={aiTag}>
           <Sparkles className="h-2 w-2 shrink-0" />
           <span className="truncate">{aiTag}</span>
         </span>
         <div className="ml-auto flex shrink-0 items-center gap-1">
           {lead.time_interno && (
-            <span className="rounded bg-zinc-500/15 px-1 py-px text-[8px] font-bold leading-tight text-zinc-300">Interno</span>
+            <span className="rounded bg-zinc-500/15 px-1 py-px text-[9px] font-bold leading-tight text-zinc-300/80">Interno</span>
           )}
           <FollowupBadge active={!!hasActiveFollowup} />
           {lead.fechou && (
-            <span className="rounded bg-emerald-500/15 px-1 py-px text-[8px] font-bold leading-tight text-emerald-400">Fechou</span>
+            <span className="rounded bg-emerald-500/15 px-1 py-px text-[9px] font-bold leading-tight text-emerald-400">Fechou</span>
           )}
         </div>
       </div>
@@ -1050,11 +1050,11 @@ function KanbanColumn({
     <div className="flex max-h-full w-[232px] shrink-0 flex-col">
       <div className="shrink-0 rounded-t-lg border border-b-0 border-border bg-card px-2.5 py-1.5" style={{ borderTop: `3px solid ${color}` }}>
         <div className="flex items-center gap-1.5">
-          <span className="min-w-0 truncate text-[11px] font-bold text-foreground leading-tight" title={status}>{status}</span>
+          <span className="min-w-0 truncate text-[11px] font-bold uppercase tracking-wide text-foreground leading-tight" title={status}>{status}</span>
           <span className="shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-bold leading-none" style={{ background: `${color}25`, color }}>
             {leads.length}
           </span>
-          <span className="ml-auto shrink-0 text-[9px] font-semibold text-muted-foreground">{total > 0 ? formatCurrencyBRL(total) : ''}</span>
+          <span className="ml-auto shrink-0 text-[10px] font-semibold text-muted-foreground">{total > 0 ? formatCurrencyBRL(total) : ''}</span>
         </div>
       </div>
       <div
@@ -3219,22 +3219,28 @@ export default function CrmPage({ lockedClientId, embedded = false }: CrmPagePro
                 <Icon className="h-4 w-4" style={{ color }} />
               </div>
               <div className="flex items-baseline gap-1.5">
-                <span className="font-heading text-xl leading-none">{value}</span>
-                <span className="text-[11px] text-muted-foreground">{label}</span>
+                <span className="font-heading text-2xl leading-none">{value}</span>
+                <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{label}</span>
               </div>
             </div>
           ))}
-          {([
-            { label: 'frio', value: stats.frios, color: '#60a5fa' },
-            { label: 'morno', value: stats.mornos, color: '#f59e0b' },
-            { label: 'quente', value: stats.quentes, color: '#f87171' },
-          ] as const).map(item => (
-            <div key={item.label} className="flex items-baseline gap-1.5" title={item.label}>
-              <span className="h-2 w-2 shrink-0 self-center rounded-full" style={{ background: item.color }} />
-              <span className="font-heading text-xl leading-none" style={{ color: item.color }}>{item.value.toLocaleString('pt-BR')}</span>
-              <span className="text-[11px] text-muted-foreground">{item.label}</span>
-            </div>
-          ))}
+          {/* Temperatura é COMPOSIÇÃO do total ao lado, não uma métrica irmã dele —
+              por isso vem depois de uma divisória e num corpo menor. Com o mesmo
+              peso das três primeiras, a faixa virava seis números indistinguíveis. */}
+          <span className="h-6 w-px shrink-0 bg-border" aria-hidden />
+          <div className="flex items-center gap-3">
+            {([
+              { label: 'frio', value: stats.frios, color: '#60a5fa' },
+              { label: 'morno', value: stats.mornos, color: '#f59e0b' },
+              { label: 'quente', value: stats.quentes, color: '#f87171' },
+            ] as const).map(item => (
+              <div key={item.label} className="flex items-baseline gap-1.5" title={item.label}>
+                <span className="h-2 w-2 shrink-0 self-center rounded-full" style={{ background: item.color }} />
+                <span className="font-heading text-base leading-none" style={{ color: item.color }}>{item.value.toLocaleString('pt-BR')}</span>
+                <span className="text-[10px] text-muted-foreground">{item.label}</span>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
@@ -3311,7 +3317,7 @@ export default function CrmPage({ lockedClientId, embedded = false }: CrmPagePro
           <div className="flex items-center justify-between px-4 py-2.5 border-b border-border shrink-0">
             <div className="flex items-center gap-2">
               {viewMode === 'list' ? <AlignJustify className="h-4 w-4 text-primary" /> : <LayoutGrid className="h-4 w-4 text-primary" />}
-              <span className="text-sm font-semibold">Leads</span>
+              <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Leads</span>
             </div>
             <div className="flex items-center gap-2">
               {/* View toggle */}
