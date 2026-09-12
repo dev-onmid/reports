@@ -2948,8 +2948,15 @@ export default function CrmPage({ lockedClientId, embedded = false }: CrmPagePro
         </div>
       )}
 
-      {/* ── FILTERS BAR ─────────────────────────────────────────────── */}
+      {/* ── BARRA ────────────────────────────────────────────────────────
+          Duas linhas com papéis distintos, em vez de uma fileira única que
+          quebrava onde calhasse — foi isso que deixou "Critérios IA" sozinho
+          numa linha inteira com um vazio do lado.
+            Linha 1 = ONDE VOCÊ ESTÁ  (funil, visão, ação principal)
+            Linha 2 = O QUE ESTÁ FILTRANDO (status, temperatura, período, busca)
+      */}
       {clientId && (
+      <>
       <div className="flex flex-wrap items-center gap-2">
         {lockedClientId ? (
           // Só fora da página do cliente: lá dentro o nome está no cabeçalho.
@@ -3007,6 +3014,12 @@ export default function CrmPage({ lockedClientId, embedded = false }: CrmPagePro
                       title="Link somente-leitura pro cliente acompanhar o funil"
                       className="flex w-full items-center gap-2 px-3 py-2 text-xs text-muted-foreground hover:bg-muted hover:text-foreground">
                       <Globe2 className="h-3.5 w-3.5" /> Portal do cliente
+                    </button>
+                    <button type="button"
+                      onClick={() => { setFunnelMenuOpen(false); setShowAiCriteria(true); }}
+                      title="Regras que a IA usa para qualificar e mover leads"
+                      className="flex w-full items-center gap-2 px-3 py-2 text-xs text-muted-foreground hover:bg-muted hover:text-foreground">
+                      <Sparkles className="h-3.5 w-3.5" /> Critérios IA
                     </button>
                   </div>
                 </>
@@ -3070,6 +3083,16 @@ export default function CrmPage({ lockedClientId, embedded = false }: CrmPagePro
           </button>
         </div>
 
+        {crmView === 'leads' && (
+          <button onClick={() => void saveNew()}
+            className="ml-auto flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors"
+          >
+            <Plus className="h-4 w-4" /> Novo Lead
+          </button>
+        )}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
         {clientId && (crmView === 'leads' || crmView === 'attendance') && (
           <>
             {crmView === 'leads' && (
@@ -3175,31 +3198,18 @@ export default function CrmPage({ lockedClientId, embedded = false }: CrmPagePro
             </div>
 
             {crmView === 'leads' && (
-              <>
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
-                  <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar leads..."
-                    className="pl-8 pr-3 py-2 rounded-lg border border-border bg-card text-sm focus:outline-none focus:ring-1 focus:ring-primary w-48" />
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => setShowAiCriteria(true)}
-                  className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm font-semibold text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-                >
-                  <Sparkles className="h-4 w-4" /> Critérios IA
-                </button>
-
-                <button onClick={() => void saveNew()}
-                  className="ml-auto flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors"
-                >
-                  <Plus className="h-4 w-4" /> Novo Lead
-                </button>
-              </>
+              // A busca cresce e come a sobra da linha: espaço vazio numa barra
+              // de ferramentas não é respiro, é desperdício.
+              <div className="relative min-w-[180px] flex-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+                <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar leads..."
+                  className="w-full pl-8 pr-3 py-2 rounded-lg border border-border bg-card text-sm focus:outline-none focus:ring-1 focus:ring-primary" />
+              </div>
             )}
           </>
         )}
       </div>
+      </>
       )}
 
       {/* ── STATS (faixa única compacta — o espaço vertical é do funil) ── */}
