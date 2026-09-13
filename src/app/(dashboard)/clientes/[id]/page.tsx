@@ -23,7 +23,7 @@ import {
   Power, PowerOff, Search, BookMarked, ExternalLink, RefreshCw, ChevronRight,
   PiggyBank, Wallet, Info, Lightbulb, UserPlus, Brain, Save, MousePointer2,
   Maximize2, Minimize2, ZoomIn, ZoomOut, ImageIcon, Unlink, History, Copy, Sparkles,
-  Store, Settings, Pencil, Globe2, Kanban,
+  Store, Settings, Pencil,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -49,7 +49,7 @@ import { cn, formatCurrencyBRL, formatCurrencyInputBRL, parseCurrencyBRL } from 
 import { LinkAccountsDialog } from '@/components/link-accounts-dialog';
 import { ClientSwitcher } from '@/components/client-switcher';
 import { HistoricoTab } from '@/components/historico-tab';
-import { VaultTab } from '@/components/vault-tab';
+import { ClientConfigModal, CelulaAjuste, SELECT_AJUSTE } from './client-config-modal';
 import CrmWorkspace, { type AcaoConfigCrm } from '@/app/(dashboard)/crm/page';
 import { ClientTrackingTab } from './tracking-tab';
 import { ClientDemandasTab } from './demandas-tab';
@@ -1851,209 +1851,6 @@ function GoogleAdsConnectionDialog({
 
 const CLIENT_BILLING_MODE_PREFIX = 'clientAdsBillingMode_';
 
-function ClientBillingSection({ clientId }: { clientId: string }) {
-  const [billingMode, setBillingMode] = useState<'prepaid' | 'card'>('prepaid');
-
-  useEffect(() => {
-    const stored = localStorage.getItem(`${CLIENT_BILLING_MODE_PREFIX}${clientId}`);
-    setBillingMode(stored === 'card' ? 'card' : 'prepaid');
-    let cancelled = false;
-    fetch(`/api/clients/${clientId}/billing-mode`)
-      .then(r => r.json())
-      .then((data: { mode: 'prepaid' | 'card' }) => {
-        if (cancelled) return;
-        setBillingMode(data.mode);
-        localStorage.setItem(`${CLIENT_BILLING_MODE_PREFIX}${clientId}`, data.mode);
-      })
-      .catch(() => {});
-    return () => { cancelled = true; };
-  }, [clientId]);
-
-  function updateBillingMode(next: 'prepaid' | 'card') {
-    setBillingMode(next);
-    localStorage.setItem(`${CLIENT_BILLING_MODE_PREFIX}${clientId}`, next);
-    fetch(`/api/clients/${clientId}/billing-mode`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mode: next }),
-    }).catch(() => {});
-  }
-
-  return (
-    <>
-      <Card className="mb-4 border-border bg-card">
-        <CardHeader>
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div className="flex min-w-0 items-start gap-3">
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-border bg-background">
-                <WalletCards className="h-5 w-5 text-primary" />
-              </div>
-              <div>
-                <CardTitle>Forma de cobrança dos anúncios</CardTitle>
-                <CardDescription className="mt-1">
-                  Use “Cartão/faturado” para clientes em que a Meta/Google cobra direto no cartão. Essas contas não aparecem como saldo crítico em Pagamentos.
-                </CardDescription>
-              </div>
-            </div>
-            <div className="flex shrink-0 self-start rounded-xl border border-border bg-background p-1">
-              {([
-                { value: 'prepaid' as const, label: 'Pré-pago / saldo' },
-                { value: 'card' as const, label: 'Cartão / faturado' },
-              ]).map((option) => (
-                <button
-                  key={option.value}
-                  type="button"
-                  onClick={() => updateBillingMode(option.value)}
-                  className={cn(
-                    'rounded-lg px-3 py-2 text-xs font-bold transition-all',
-                    billingMode === option.value
-                      ? 'bg-primary text-black shadow-[0_0_12px_rgba(85,245,47,0.25)]'
-                      : 'text-muted-foreground hover:text-foreground',
-                  )}
-                >
-                  {option.label}
-                </button>
-              ))}
-            </div>
-          </div>
-        </CardHeader>
-      </Card>
-
-
-    </>
-  );
-}
-
-// Modal único de configuração do cliente — junta tudo que é setup (conexões, cobrança,
-// e Links & Senhas). O Anota Aí saiu daqui (2026-08-21): delivery configura-se na
-// aba Integrações → Delivery, um lugar só.
-function ClientConfigModal({ open, onClose, clientId, clientName, ajustes, onVincularContas, onAlterarStatus, inativo, onAcaoCrm }: {
-  open: boolean;
-  onClose: () => void;
-  clientId: string;
-  clientName: string;
-  /**
-   * Categoria, tipo de dashboard, topo do funil e Fidelidade.
-   *
-   * ⚠️ Chega como JSX pronto, não como props soltas: os controles dependem de
-   * oito pedaços de estado da página do cliente (categorias carregadas,
-   * `patchClient`, a aba atual para o caso de desligar Fidelidade com ela
-   * aberta). Recriá-los aqui significaria duplicar esse estado — e duas cópias
-   * divergiriam na primeira mudança.
-   */
-  ajustes?: React.ReactNode;
-  /** Abre o diálogo de vínculo de contas — fecha este antes, para não empilhar modal. */
-  onVincularContas?: () => void;
-  /** Ativa/desativa o cliente. Fica no fim, separado: é a única ação destrutiva daqui. */
-  onAlterarStatus?: () => void;
-  inativo?: boolean;
-  /** Ações de configuração do CRM (funil, portal, critérios IA, fontes) — abrem na aba CRM. */
-  onAcaoCrm?: (acao: AcaoConfigCrm) => void;
-}) {
-  return (
-    <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
-      <DialogContent className="w-[95vw] sm:max-w-4xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Settings className="h-5 w-5 text-primary" />
-            Configurar cliente
-          </DialogTitle>
-          <p className="text-sm text-muted-foreground">
-            {clientName} — ajustes, contas de anúncio, cobrança e senhas. Delivery continua na aba Integrações.
-          </p>
-        </DialogHeader>
-        {open && (
-          <div className="space-y-6 pt-2">
-            {ajustes && (
-              <div>
-                <div className="mb-3 flex items-center gap-2">
-                  <Settings className="h-4 w-4 text-primary" />
-                  <h3 className="text-sm font-bold uppercase tracking-wider text-foreground">Ajustes do cliente</h3>
-                </div>
-                {ajustes}
-              </div>
-            )}
-            {onVincularContas && (
-              <div>
-                <div className="mb-3 flex items-center gap-2">
-                  <Link2 className="h-4 w-4 text-primary" />
-                  <h3 className="text-sm font-bold uppercase tracking-wider text-foreground">Contas de anúncio</h3>
-                </div>
-                <div className="flex flex-wrap items-center gap-3">
-                  <Button variant="outline" className="h-9 gap-2 border-border text-xs font-bold uppercase tracking-wider"
-                    onClick={() => { onClose(); onVincularContas(); }}>
-                    <Link2 className="h-4 w-4 text-primary" /> Vincular contas
-                  </Button>
-                  <span className="text-xs text-muted-foreground">
-                    Meta e Google. Delivery continua na aba Integrações.
-                  </span>
-                </div>
-              </div>
-            )}
-
-            {onAcaoCrm && (
-              <div>
-                <div className="mb-3 flex items-center gap-2">
-                  <Kanban className="h-4 w-4 text-primary" />
-                  <h3 className="text-sm font-bold uppercase tracking-wider text-foreground">CRM</h3>
-                </div>
-                {/* Eram o ⋮ da barra do CRM. Cada um fecha este modal e abre na aba CRM. */}
-                <div className="flex flex-wrap items-center gap-2">
-                  {([
-                    ['funil', Pencil, 'Editar funil', 'Etapas e degraus do Kanban'],
-                    ['portal', Globe2, 'Portal do cliente', 'Link somente-leitura para o cliente acompanhar'],
-                    ['criterios', Sparkles, 'Critérios IA', 'Regras que a IA usa para qualificar e mover leads'],
-                    ['captura', Link2, 'Fontes de Captura', 'WhatsApp rastreável, landing, Meta Forms, API'],
-                  ] as Array<[AcaoConfigCrm, typeof Pencil, string, string]>).map(([acao, Icone, rotulo, dica]) => (
-                    <Button key={acao} variant="outline" title={dica}
-                      className="h-9 gap-2 border-border text-xs font-bold uppercase tracking-wider"
-                      onClick={() => { onClose(); onAcaoCrm(acao); }}>
-                      <Icone className="h-4 w-4 text-primary" /> {rotulo}
-                    </Button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            <ClientBillingSection clientId={clientId} />
-            <div>
-              <div className="mb-3 flex items-center gap-2">
-                <BookMarked className="h-4 w-4 text-primary" />
-                <h3 className="text-sm font-bold uppercase tracking-wider text-foreground">Links &amp; Senhas</h3>
-              </div>
-              <VaultTab clientId={clientId} />
-            </div>
-
-            {onAlterarStatus && (
-              <div className="border-t border-border pt-4">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-bold text-foreground">
-                      {inativo ? 'Reativar cliente' : 'Desativar cliente'}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      {inativo
-                        ? 'Volta a aparecer na carteira, nos relatórios e nas automações.'
-                        : 'Sai da carteira, dos relatórios e das automações. Nada é apagado — dá para reativar depois.'}
-                    </p>
-                  </div>
-                  <Button variant="outline"
-                    className={cn('h-9 shrink-0 gap-2 text-xs font-bold uppercase tracking-wider',
-                      inativo ? 'border-primary/40 text-primary' : 'border-orange-400/40 text-orange-300')}
-                    onClick={() => { onClose(); onAlterarStatus(); }}>
-                    {inativo ? <Power className="h-4 w-4" /> : <PowerOff className="h-4 w-4" />}
-                    {inativo ? 'Ativar cliente' : 'Desativar cliente'}
-                  </Button>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-      </DialogContent>
-    </Dialog>
-  );
-}
-
 // ── Google Sheets Results Tab ─────────────────────────────────────────────────
 type SheetsTab = { name: string; amount: number; count?: number; source?: string };
 type SheetsResult = { tabs: SheetsTab[]; total: number; note?: string };
@@ -2107,6 +1904,8 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
   const [crmMetrics, setCrmMetrics] = useState<CrmMetrics | null>(null);
   const [metaBalance, setMetaBalance] = useState<number | null>(null);
   const [googleBalance, setGoogleBalance] = useState<number | null>(null);
+  // Quantas contas de cada plataforma estão vinculadas — alimenta os cards do modal Configurar.
+  const [contasVinculadas, setContasVinculadas] = useState<{ meta: number; google: number } | null>(null);
   const [balancesLoading, setBalancesLoading] = useState(true);
 
   useEffect(() => {
@@ -2129,6 +1928,7 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
       const gb = googleBalances.filter(b => googleIds.has(b.id) && b.balance !== null).reduce((s, b) => s + (b.balance ?? 0), 0);
       setMetaBalance(metaIds.size > 0 ? mb : null);
       setGoogleBalance(googleIds.size > 0 ? gb : null);
+      setContasVinculadas({ meta: metaIds.size, google: googleIds.size });
     }).catch(() => {}).finally(() => setBalancesLoading(false));
   }, [id]);
 
@@ -2525,88 +2325,55 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
         clientId={id}
         clientName={client.name}
         inativo={client.status === 'Inativo'}
+        statusCliente={client.status}
+        contas={contasVinculadas}
+        onIrParaIntegracoes={() => setTab('rastreio')}
         onVincularContas={() => setLinkDialogOpen(true)}
         onAcaoCrm={(acao) => { setTab('crm'); setCrmAcao(acao); }}
         onAlterarStatus={() => openStatusDialog(client.status === 'Inativo' ? 'Ativo' : 'Inativo')}
         ajustes={(
-            <div className="flex items-center gap-3 flex-wrap">
-                      <div className="flex items-center gap-2">
-                <label className="text-xs text-muted-foreground">Categoria:</label>
-                <select
-                  value={clientCategoryId}
-                  onChange={e => {
-                    setClientCategoryId(e.target.value);
-                    void patchClient({ category_id: e.target.value || null });
-                  }}
-                  className="h-7 rounded-lg border border-border bg-background px-2 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
-                >
-                  <option value="">Sem categoria</option>
-                  {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
-              </div>
-              <div className="flex items-center gap-2">
-                <label className="text-xs text-muted-foreground">Dashboard:</label>
-                <select
-                  value={clientDashType}
-                  onChange={e => {
-                    const v = e.target.value as DashboardType;
-                    setClientDashType(v);
-                    void patchClient({ dashboard_type: v });
-                  }}
-                  className="h-7 rounded-lg border border-border bg-background px-2 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
-                >
-                  <option value="leads">Leads</option>
-                  <option value="branding">Branding</option>
-                  <option value="conversao">Conversão</option>
-                      <option value="food">Food / Delivery</option>
-                      <option value="clinicas">Clínicas</option>
-                </select>
-              </div>
-              <div className="flex items-center gap-2">
-                <label className="text-xs text-muted-foreground" title="O que conta como Contatos no topo do Funil de Performance do dashboard">
-                  Topo do funil:
-                </label>
-                <select
-                  value={clientFonteTopo}
-                  onChange={e => {
-                    const v = e.target.value as 'auto' | 'crm' | 'anuncios';
-                    setClientFonteTopo(v);
-                    void patchClient({ funil_fonte_topo: v });
-                  }}
-                  className="h-7 rounded-lg border border-border bg-background px-2 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
-                >
-                  <option value="auto">Automático (CRM se houver)</option>
-                  <option value="crm">Sempre CRM/planilha</option>
-                  <option value="anuncios">Sempre anúncios</option>
-                </select>
-              </div>
-              <div className="flex items-center gap-2">
-                <label
-                  className="text-xs text-muted-foreground"
-                  title="Campanhas automáticas de recompra pelo WhatsApp do cliente. Deixe desativada quando o cardápio digital dele já faz isso por dentro."
-                >
-                  Fidelidade:
-                </label>
-                <button
-                  onClick={() => {
-                    const v = !clientFidelidade;
-                    setClientFidelidade(v);
-                    void patchClient({ fidelidade_ativa: v });
-                    // Desligar com a aba aberta deixaria a tela pendurada num cliente
-                    // que não tem mais Fidelidade — volta pro planejamento.
-                    if (!v && tab === 'fidelidade') setTab('planejamento');
-                  }}
-                  className={cn(
-                    'h-7 rounded-lg border px-2 text-xs font-bold uppercase tracking-wider transition-colors',
-                    clientFidelidade
-                      ? 'border-primary bg-primary/15 text-primary'
-                      : 'border-border text-muted-foreground hover:text-foreground',
-                  )}
-                >
-                  {clientFidelidade ? 'Ativa' : 'Desativada'}
-                </button>
-              </div>
-            </div>
+          <>
+            <CelulaAjuste icone={Layers} rotulo="Categoria">
+              <select value={clientCategoryId} className={SELECT_AJUSTE}
+                onChange={e => { setClientCategoryId(e.target.value); void patchClient({ category_id: e.target.value || null }); }}>
+                <option value="">Sem categoria</option>
+                {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </CelulaAjuste>
+            <CelulaAjuste icone={BarChart3} rotulo="Dashboard">
+              <select value={clientDashType} className={SELECT_AJUSTE}
+                onChange={e => { const v = e.target.value as DashboardType; setClientDashType(v); void patchClient({ dashboard_type: v }); }}>
+                <option value="leads">Leads</option>
+                <option value="branding">Branding</option>
+                <option value="conversao">Conversão</option>
+                <option value="food">Food / Delivery</option>
+                <option value="clinicas">Clínicas</option>
+              </select>
+            </CelulaAjuste>
+            <CelulaAjuste icone={Filter} rotulo="Topo do funil" dica="O que conta como Contatos no topo do Funil de Performance do dashboard">
+              <select value={clientFonteTopo} className={SELECT_AJUSTE}
+                onChange={e => { const v = e.target.value as 'auto' | 'crm' | 'anuncios'; setClientFonteTopo(v); void patchClient({ funil_fonte_topo: v }); }}>
+                <option value="auto">Automático (CRM se houver)</option>
+                <option value="crm">Sempre CRM/planilha</option>
+                <option value="anuncios">Sempre anúncios</option>
+              </select>
+            </CelulaAjuste>
+            <CelulaAjuste icone={Sparkles} rotulo="Fidelidade" dica="Campanhas automáticas de recompra pelo WhatsApp do cliente. Deixe desativada quando o cardápio digital dele já faz isso por dentro.">
+              <button type="button"
+                onClick={() => {
+                  const v = !clientFidelidade;
+                  setClientFidelidade(v);
+                  void patchClient({ fidelidade_ativa: v });
+                  // Desligar com a aba aberta deixaria a tela pendurada num cliente
+                  // que não tem mais Fidelidade — volta pro planejamento.
+                  if (!v && tab === 'fidelidade') setTab('planejamento');
+                }}
+                className={cn('mt-0.5 h-7 rounded-md border px-2.5 text-xs font-bold uppercase tracking-wider transition-colors',
+                  clientFidelidade ? 'border-primary bg-primary/15 text-primary' : 'border-border text-muted-foreground hover:text-foreground')}>
+                {clientFidelidade ? 'Ativa' : 'Desativada'}
+              </button>
+            </CelulaAjuste>
+          </>
         )}
       />
 
