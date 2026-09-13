@@ -4,11 +4,15 @@
 // todos os forms nativos vinculados à página e IG, só selecionar". Antes o
 // tipo "Meta Forms" do wizard só gerava um webhook para Make/Zapier.
 //
-// Fluxo nativo: resolver a Página do cliente → listar `/{page}/leadgen_forms`
-// → o gestor escolhe → conectar = (1) mapa página→cliente para o webhook
-// resolver o dono do lead, (2) assinar a Página no nosso app com o campo
-// `leadgen` (medido em 13/09: a Página do CondoStore tinha ZERO assinaturas —
-// sem isso a Meta nunca manda o evento), (3) registrar o formulário escolhido.
+// 2ª decisão do Matheus, mesma tarde: "deixa automático qualquer formulário
+// vinculado à página ou à conta do cliente, sem selecionar qual form vai pro
+// CRM". Então NÃO há escolha: conectar é por PÁGINA — (1) mapa página→cliente
+// para o webhook resolver o dono do lead, (2) assinar a Página no nosso app
+// com o campo `leadgen` (medido em 13/09: a Página do CondoStore tinha ZERO
+// assinaturas — sem isso a Meta nunca manda o evento), (3) registrar TODOS os
+// formulários da Página (só para a tela mostrar contadores; formulário novo
+// criado depois entra do mesmo jeito, porque a assinatura é da Página).
+// Roda sozinho: ao abrir a aba do cliente (GET) e na rotina diária da carteira.
 //
 // ⚠️ A ingestão em si já existia (`processLeadgenEvent`, webhook `object=page`
 // + `field=leadgen`). Este módulo só liga a tubulação que faltava; não cria um
@@ -64,9 +68,27 @@ export async function ensureLeadgenFormsSchema(pool: Pool) {
       connected_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
     CREATE INDEX IF NOT EXISTS meta_leadgen_forms_client_idx ON public.meta_leadgen_forms (client_id);
+    CREATE TABLE IF NOT EXISTS public.meta_leadgen_paginas (
+      client_id   TEXT PRIMARY KEY,
+      page_id     TEXT,
+      page_name   TEXT,
+      assinada    BOOLEAN NOT NULL DEFAULT FALSE,
+      formularios INT NOT NULL DEFAULT 0,
+      erro        TEXT,
+      checked_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
   `);
   schemaOk = true;
 }
+
+export type StatusPagina = {
+  pageId: string | null;
+  pageName: string | null;
+  assinada: boolean;
+  formularios: number;
+  erro: string | null;
+  checkedAt: string | null;
+};
 
 // ── Puras (testáveis sem rede) ───────────────────────────────────────────────
 
@@ -231,38 +253,97 @@ export async function listarConectados(pool: Pool, clientId: string): Promise<Fo
 }
 
 /**
- * Liga o formulário ao cliente. ⚠️ A Página é PK do mapa página→cliente: se
- * já pertence a OUTRO cliente, recusa em vez de roubar em silêncio — o webhook
- * passaria a entregar todos os leads daquela Página no cliente errado.
+ * Conecta a PÁGINA do cliente inteira ao CRM — idempotente, roda sozinha.
+ * ⚠️ A Página é PK do mapa página→cliente: se já pertence a OUTRO cliente,
+ * recusa em vez de roubar em silêncio (o webhook passaria a entregar todos os
+ * leads daquela Página no cliente errado — caso real Cinfel/Cinfel Filial).
  */
-export async function conectarFormularios(
-  pool: Pool, clientId: string, pagina: PaginaDoCliente, forms: FormularioMeta[],
-): Promise<{ conectados: string[]; erro: string | null }> {
+export async function conectarPaginaDoCliente(pool: Pool, clientId: string): Promise<StatusPagina> {
   await ensureLeadgenFormsSchema(pool);
+  const gravar = async (s: Omit<StatusPagina, 'checkedAt'>) => {
+    await pool.query(
+      `INSERT INTO public.meta_leadgen_paginas (client_id, page_id, page_name, assinada, formularios, erro, checked_at)
+       VALUES ($1,$2,$3,$4,$5,$6,NOW())
+       ON CONFLICT (client_id) DO UPDATE SET page_id=EXCLUDED.page_id, page_name=EXCLUDED.page_name,
+         assinada=EXCLUDED.assinada, formularios=EXCLUDED.formularios, erro=EXCLUDED.erro, checked_at=NOW()`,
+      [clientId, s.pageId, s.pageName, s.assinada, s.formularios, s.erro]).catch(() => null);
+    return { ...s, checkedAt: new Date().toISOString() };
+  };
+
+  const { pagina, motivo } = await resolverPaginaDoCliente(pool, clientId);
+  if (!pagina) return gravar({ pageId: null, pageName: null, assinada: false, formularios: 0, erro: motivo });
+
   const { rows: [dono] } = await pool.query<{ client_id: string }>(
     `SELECT client_id FROM public.meta_leadgen_page_map WHERE page_id = $1`, [pagina.pageId]);
   if (dono && dono.client_id !== clientId) {
     const { rows: [c] } = await pool.query<{ name: string }>(`SELECT name FROM public.clients WHERE id = $1`, [dono.client_id]).catch(() => ({ rows: [] as Array<{ name: string }> }));
-    return { conectados: [], erro: `A Página ${pagina.pageName} já está ligada ao cliente "${c?.name ?? dono.client_id}". Uma Página entrega leads para um cliente só.` };
+    return gravar({ pageId: pagina.pageId, pageName: pagina.pageName, assinada: false, formularios: 0,
+      erro: `A Página ${pagina.pageName} já entrega leads para o cliente "${c?.name ?? dono.client_id}". Uma Página alimenta um cliente só.` });
   }
-  await pool.query(
-    `INSERT INTO public.meta_leadgen_page_map (page_id, client_id) VALUES ($1, $2)
-     ON CONFLICT (page_id) DO NOTHING`, [pagina.pageId, clientId]);
-  const conectados: string[] = [];
-  for (const f of forms) {
+  await pool.query(`INSERT INTO public.meta_leadgen_page_map (page_id, client_id) VALUES ($1,$2) ON CONFLICT (page_id) DO NOTHING`,
+    [pagina.pageId, clientId]);
+
+  const assinatura = await assinarPaginaParaLeadgen(pagina);
+  const { formularios, erro: erroLista } = await listarFormularios(pagina);
+  for (const f of formularios) {
     await pool.query(
       `INSERT INTO public.meta_leadgen_forms (form_id, client_id, page_id, form_name, status)
-       VALUES ($1, $2, $3, $4, $5)
-       ON CONFLICT (form_id) DO UPDATE SET form_name = EXCLUDED.form_name, status = EXCLUDED.status
+       VALUES ($1,$2,$3,$4,$5)
+       ON CONFLICT (form_id) DO UPDATE SET form_name = EXCLUDED.form_name, status = EXCLUDED.status, page_id = EXCLUDED.page_id
        WHERE public.meta_leadgen_forms.client_id = EXCLUDED.client_id`,
-      [f.id, clientId, pagina.pageId, f.nome, f.status]);
-    conectados.push(f.id);
+      [f.id, clientId, pagina.pageId, f.nome, f.status]).catch(() => null);
   }
-  return { conectados, erro: null };
+  return gravar({ pageId: pagina.pageId, pageName: pagina.pageName, assinada: assinatura.ok, formularios: formularios.length,
+    erro: assinatura.ok ? erroLista : (assinatura.erro ?? 'A Meta recusou a assinatura da Página.') });
 }
 
-export async function desconectarFormulario(pool: Pool, clientId: string, formId: string): Promise<boolean> {
+export async function statusDaPagina(pool: Pool, clientId: string): Promise<StatusPagina | null> {
   await ensureLeadgenFormsSchema(pool);
-  const r = await pool.query(`DELETE FROM public.meta_leadgen_forms WHERE client_id = $1 AND form_id = $2`, [clientId, formId]);
+  const { rows: [r] } = await pool.query(`SELECT * FROM public.meta_leadgen_paginas WHERE client_id = $1`, [clientId]);
+  if (!r) return null;
+  return { pageId: r.page_id ?? null, pageName: r.page_name ?? null, assinada: !!r.assinada,
+    formularios: Number(r.formularios ?? 0), erro: r.erro ?? null, checkedAt: r.checked_at ?? null };
+}
+
+/** Desliga: tira `leadgen` da assinatura da Página, solta o mapa e apaga o status. Os formulários ficam (histórico). */
+export async function desligarPaginaDoCliente(pool: Pool, clientId: string): Promise<boolean> {
+  await ensureLeadgenFormsSchema(pool);
+  const { pagina } = await resolverPaginaDoCliente(pool, clientId);
+  if (pagina) {
+    const atuais = await camposAssinadosNaPagina(pagina);
+    const restantes = atuais.filter(c => c !== 'leadgen');
+    if (atuais.includes('leadgen')) {
+      await graph(`/${pagina.pageId}/subscribed_apps`, pagina.pageToken,
+        restantes.length
+          ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ subscribed_fields: restantes.join(','), access_token: pagina.pageToken }) }
+          : { method: 'DELETE' });
+    }
+    await pool.query(`DELETE FROM public.meta_leadgen_page_map WHERE page_id = $1 AND client_id = $2`, [pagina.pageId, clientId]);
+  }
+  const r = await pool.query(`DELETE FROM public.meta_leadgen_paginas WHERE client_id = $1`, [clientId]);
   return (r.rowCount ?? 0) > 0;
+}
+
+/**
+ * Rotina da carteira: garante Página mapeada + assinada para todo cliente
+ * ativo com Página/Instagram vinculado. Orçamento de tempo para caber num cron.
+ */
+export async function garantirLeadgenParaTodos(pool: Pool, orcamentoMs = 200_000): Promise<{
+  total: number; assinadas: number; semPagina: number; erros: number; semTempo: number; detalhes: Array<{ clientId: string; nome: string; ok: boolean; erro: string | null }>;
+}> {
+  const inicio = Date.now();
+  const { rows: clientes } = await pool.query<{ id: string; name: string }>(
+    `SELECT c.id, c.name FROM public.clients c
+      WHERE COALESCE(c.status,'Ativo') NOT IN ('Arquivado','Inativo')
+        AND (EXISTS (SELECT 1 FROM public.client_account_links l WHERE l.client_id = c.id AND l.platform IN ('facebook','instagram'))
+          OR EXISTS (SELECT 1 FROM public.social_monitor_snapshots s WHERE s.client_id = c.id AND s.page_id IS NOT NULL))
+      ORDER BY c.name`);
+  const out = { total: clientes.length, assinadas: 0, semPagina: 0, erros: 0, semTempo: 0, detalhes: [] as Array<{ clientId: string; nome: string; ok: boolean; erro: string | null }> };
+  for (const c of clientes) {
+    if (Date.now() - inicio > orcamentoMs) { out.semTempo++; continue; }
+    const s = await conectarPaginaDoCliente(pool, c.id).catch(e => ({ pageId: null, pageName: null, assinada: false, formularios: 0, erro: e instanceof Error ? e.message : String(e), checkedAt: null } as StatusPagina));
+    if (s.assinada) out.assinadas++; else if (!s.pageId) out.semPagina++; else out.erros++;
+    out.detalhes.push({ clientId: c.id, nome: c.name, ok: s.assinada, erro: s.assinada ? null : s.erro });
+  }
+  return out;
 }
