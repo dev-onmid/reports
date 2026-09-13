@@ -47,7 +47,7 @@ type LeadgenData = {
   field_data?: Array<{ name?: string; values?: string[] }>;
 };
 
-async function ensureLeadgenSchema(pool: Pool) {
+export async function ensureLeadgenSchema(pool: Pool) {
   // Mapa explícito página→cliente: prioridade máxima na resolução. Preenchido
   // manualmente (INSERT) ou por UI futura — cobre páginas cujo anúncio não dá
   // pra resolver via conta (ex: lead orgânico do form, sem ad_id).
@@ -317,6 +317,19 @@ export async function processLeadgenEvent(
       field_data: lead.field_data ?? [],
     },
   });
+
+  // Formulário conectado pela tela ganha o contador de "recebidos aqui" — é o
+  // que mostra ao gestor que a conexão nativa está viva. Best-effort: sem a
+  // tabela (nenhum form conectado ainda) segue em frente.
+  const formId = String(lead.form_id ?? value.form_id ?? '');
+  if (formId) {
+    await pool.query(
+      `UPDATE public.meta_leadgen_forms
+          SET leads_recebidos = leads_recebidos + 1, last_lead_at = NOW()
+        WHERE form_id = $1`,
+      [formId],
+    ).catch(() => null);
+  }
 
   return { ok: true, leadId, clientId };
 }
