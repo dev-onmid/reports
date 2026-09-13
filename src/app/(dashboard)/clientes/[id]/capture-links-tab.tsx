@@ -33,14 +33,14 @@ type WebhookConfig = {
 type SourceKind = 'whatsapp' | 'landing' | 'meta_form' | 'api';
 
 // Formulários nativos de Lead Ads da Página do cliente (rota /meta-forms).
-type FormularioMeta = { id: string; nome: string; status: string; leadsTotal: number; criadoEm: string | null; perguntas: string[] };
 type FormularioConectado = { formId: string; pageId: string; formName: string; status: string | null; leadsRecebidos: number; lastLeadAt: string | null; connectedAt: string };
 type MetaFormsResposta = {
-  pagina: { id: string; nome: string } | null;
-  motivo: string | null;
-  formularios: FormularioMeta[];
-  conectados: FormularioConectado[];
+  pageId: string | null;
+  pageName: string | null;
   assinada: boolean;
+  formularios: FormularioConectado[];
+  erro: string | null;
+  checkedAt: string | null;
 };
 
 const DEFAULT_MESSAGE = 'Olá, vim pelo anúncio!';
@@ -348,49 +348,26 @@ export function CaptureLinksTab({ clientId }: { clientId: string }) {
     destination: '',
     initialStatus: 'Em Atendimento',
   });
-  // Meta Forms nativo: a lista vem da Graph pela Página do cliente; o gestor
-  // só marca. `viaMake` é a saída antiga (webhook para Make/Zapier), que fica
-  // como alternativa e não como caminho principal.
+  // Meta Forms: AUTOMÁTICO por Página (decisão do Matheus, 13/09 — "sem
+  // selecionar qual form vai pro CRM"). O GET já conecta; a tela só mostra o
+  // estado e os formulários com contadores. `viaMake` é a saída antiga.
   const [metaForms, setMetaForms] = useState<MetaFormsResposta | null>(null);
   const [metaFormsLoading, setMetaFormsLoading] = useState(false);
-  const [metaSelecionados, setMetaSelecionados] = useState<string[]>([]);
-  const [metaBusca, setMetaBusca] = useState('');
   const [viaMake, setViaMake] = useState(false);
-  const [metaConectados, setMetaConectados] = useState<FormularioConectado[]>([]);
-  const [metaAviso, setMetaAviso] = useState<string | null>(null);
 
-  async function carregarMetaForms() {
+  async function carregarMetaForms(forcar = false) {
     setMetaFormsLoading(true);
     try {
-      const r = await fetch(`/api/clients/${encodeURIComponent(clientId)}/meta-forms`);
+      const r = await fetch(`/api/clients/${encodeURIComponent(clientId)}/meta-forms`, { method: forcar ? 'POST' : 'GET' });
       const data = await r.json().catch(() => null) as MetaFormsResposta | null;
-      if (data) { setMetaForms(data); setMetaConectados(data.conectados ?? []); }
+      if (data) setMetaForms(data);
     } finally { setMetaFormsLoading(false); }
   }
 
-  async function conectarMetaForms() {
-    setError('');
-    if (!metaSelecionados.length) { setError('Marque ao menos um formulário.'); return; }
-    setSaving(true);
-    try {
-      const r = await fetch(`/api/clients/${encodeURIComponent(clientId)}/meta-forms`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ formIds: metaSelecionados }),
-      });
-      const data = await r.json().catch(() => null) as { ok?: boolean; error?: string; lista?: FormularioConectado[]; assinada?: boolean; avisoAssinatura?: string | null } | null;
-      if (!r.ok || !data?.ok) { setError(data?.error ?? 'Não consegui conectar os formulários.'); return; }
-      setMetaConectados(data.lista ?? []);
-      setMetaAviso(data.assinada ? null : (data.avisoAssinatura ?? 'A Página não pôde ser assinada — os leads não vão chegar até resolver.'));
-      setMetaSelecionados([]);
-      setShowForm(false);
-    } finally { setSaving(false); }
-  }
-
-  async function desconectarMetaForm(formId: string) {
-    if (!confirm('Desconectar este formulário? Os leads dele deixam de entrar por aqui.')) return;
-    const r = await fetch(`/api/clients/${encodeURIComponent(clientId)}/meta-forms?formId=${encodeURIComponent(formId)}`, { method: 'DELETE' });
-    const data = await r.json().catch(() => null) as { lista?: FormularioConectado[] } | null;
-    if (data?.lista) setMetaConectados(data.lista);
+  async function desligarMetaForms() {
+    if (!confirm('Desligar os formulários Meta desta Página? Os leads de formulário deixam de entrar no CRM até religar.')) return;
+    await fetch(`/api/clients/${encodeURIComponent(clientId)}/meta-forms`, { method: 'DELETE' });
+    setMetaForms(null);
   }
   const [form, setForm] = useState({
     name: '',
@@ -410,10 +387,11 @@ export function CaptureLinksTab({ clientId }: { clientId: string }) {
       .finally(() => setLoading(false));
   }
 
+  // Abrir a aba já conecta a Página (idempotente) — é o "automático" pedido.
   useEffect(() => {
     fetch(`/api/clients/${encodeURIComponent(clientId)}/meta-forms`)
       .then(r => r.ok ? r.json() as Promise<MetaFormsResposta> : null)
-      .then(d => { if (d?.conectados) setMetaConectados(d.conectados); })
+      .then(d => { if (d) setMetaForms(d); })
       .catch(() => {});
   }, [clientId]);
 
@@ -507,8 +485,6 @@ export function CaptureLinksTab({ clientId }: { clientId: string }) {
     setCreatedWebhook(null);
     setError('');
     setViaMake(false);
-    setMetaSelecionados([]);
-    setMetaBusca('');
     if (kind === 'meta_form') void carregarMetaForms();
     setSetupForm({ name: '', destination: '', initialStatus: 'Em Atendimento' });
     setForm({ name: '', whatsapp: '', message: DEFAULT_MESSAGE, slug: '' });
@@ -571,7 +547,7 @@ export function CaptureLinksTab({ clientId }: { clientId: string }) {
         <SourceCard
           icon={Megaphone}
           title="Formulário Meta"
-          desc="Lista os formulários de Lead Ads da Página do cliente — é só marcar e conectar."
+          desc="Todo formulário de Lead Ads da Página do cliente entra no CRM sozinho — atuais e futuros."
           badge="Meta"
           onClick={() => openWizard('meta_form')}
         />
@@ -600,35 +576,37 @@ export function CaptureLinksTab({ clientId }: { clientId: string }) {
         ))}
       </div>
 
-      {metaAviso && (
-        <p className="rounded-lg border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-xs font-semibold text-amber-200">{metaAviso}</p>
-      )}
-
-      {metaConectados.length > 0 && (
+      {metaForms?.pageId && (
         <div className="rounded-xl border border-border bg-card p-4">
-          <div className="mb-3 flex items-center gap-2">
+          <div className="mb-3 flex flex-wrap items-center gap-2">
             <Megaphone className="h-4 w-4 text-primary" />
-            <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Formulários Meta conectados</p>
-            <span className="rounded-full border border-primary/25 bg-primary/10 px-2 py-0.5 text-[10px] font-bold text-primary">{metaConectados.length}</span>
+            <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Formulários Meta · {metaForms.pageName}</p>
+            <span className={cn('rounded-full px-2 py-0.5 text-[10px] font-bold',
+              metaForms.assinada ? 'border border-primary/25 bg-primary/10 text-primary' : 'border border-red-400/30 bg-red-500/10 text-red-300')}>
+              {metaForms.assinada ? 'automático · entrando no CRM' : 'não conectado'}
+            </span>
+            <span className="ml-auto flex items-center gap-2">
+              <button type="button" onClick={() => carregarMetaForms(true)} className="text-[11px] font-bold text-muted-foreground hover:text-foreground">Reconectar</button>
+              <button type="button" onClick={desligarMetaForms} className="text-[11px] font-bold text-red-300 hover:text-red-200">Desligar</button>
+            </span>
           </div>
-          <div className="space-y-2">
-            {metaConectados.map(f => (
+          {metaForms.erro && <p className="mb-2 rounded-lg border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">{metaForms.erro}</p>}
+          <div className="space-y-1.5">
+            {metaForms.formularios.map(f => (
               <div key={f.formId} className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-background/50 px-3 py-2">
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-bold text-foreground">{f.formName || f.formId}</p>
+                  <p className="truncate text-sm font-bold text-foreground">{f.formName || `Formulário ${f.formId}`}</p>
                   <p className="mt-0.5 text-[11px] text-muted-foreground">
                     {f.leadsRecebidos} lead{f.leadsRecebidos === 1 ? '' : 's'} recebido{f.leadsRecebidos === 1 ? '' : 's'} por aqui
                     {f.lastLeadAt ? ` · último ${new Date(f.lastLeadAt).toLocaleDateString('pt-BR')}` : ' · nenhum ainda'}
                     {f.status && f.status !== 'ACTIVE' ? ` · ${f.status.toLowerCase()} na Meta` : ''}
                   </p>
                 </div>
-                <button type="button" onClick={() => desconectarMetaForm(f.formId)}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-red-400/30 bg-red-500/10 px-2.5 py-1.5 text-xs font-bold text-red-300 transition-colors hover:bg-red-500/15">
-                  <Trash2 className="h-3.5 w-3.5" />
-                  Desconectar
-                </button>
               </div>
             ))}
+            {metaForms.formularios.length === 0 && (
+              <p className="rounded-lg border border-dashed border-border p-3 text-center text-xs text-muted-foreground">Esta Página ainda não tem formulário de Lead Ads. Quando criar, entra sozinho.</p>
+            )}
           </div>
         </div>
       )}
@@ -716,72 +694,45 @@ export function CaptureLinksTab({ clientId }: { clientId: string }) {
             {sourceKind === 'meta_form' && !viaMake ? (
               <div className="space-y-3">
                 {metaFormsLoading ? (
-                  <div className="rounded-xl border border-border bg-background/50 p-6 text-center text-sm text-muted-foreground">Buscando os formulários da Página na Meta…</div>
-                ) : !metaForms?.pagina ? (
+                  <div className="rounded-xl border border-border bg-background/50 p-6 text-center text-sm text-muted-foreground">Conectando a Página do cliente na Meta…</div>
+                ) : !metaForms?.pageId ? (
                   <div className="rounded-xl border border-amber-400/30 bg-amber-500/10 p-4">
                     <p className="text-sm font-bold text-foreground">Não consegui chegar na Página deste cliente.</p>
-                    <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{metaForms?.motivo ?? 'Sem resposta da Meta.'}</p>
+                    <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{metaForms?.erro ?? 'Sem resposta da Meta.'}</p>
                   </div>
                 ) : (
                   <>
-                    <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border bg-background/50 px-3 py-2">
-                      <div className="min-w-0">
-                        <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Página</p>
-                        <p className="truncate text-sm font-bold text-foreground">{metaForms.pagina.nome}</p>
-                      </div>
-                      <span className={cn('rounded-full px-2 py-0.5 text-[10px] font-bold',
-                        metaForms.assinada ? 'border border-primary/25 bg-primary/10 text-primary' : 'border border-amber-400/30 bg-amber-500/10 text-amber-200')}>
-                        {metaForms.assinada ? 'recebendo leads' : 'assina ao conectar'}
-                      </span>
+                    <div className={cn('rounded-xl border p-4', metaForms.assinada ? 'border-primary/30 bg-primary/10' : 'border-red-400/30 bg-red-500/10')}>
+                      <p className="text-sm font-bold text-foreground">
+                        {metaForms.assinada ? 'Conectado automaticamente' : 'Não foi possível conectar'} · {metaForms.pageName}
+                      </p>
+                      <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                        {metaForms.assinada
+                          ? `Todos os ${metaForms.formularios.length} formulários de Lead Ads desta Página entram no CRM sozinhos — inclusive os que forem criados depois. Não precisa escolher.`
+                          : (metaForms.erro ?? 'A Meta recusou a assinatura da Página.')}
+                      </p>
                     </div>
-                    {metaForms.motivo && <p className="text-xs text-amber-200">{metaForms.motivo}</p>}
-                    <input
-                      value={metaBusca}
-                      onChange={e => setMetaBusca(e.target.value)}
-                      placeholder={`Buscar entre ${metaForms.formularios.length} formulários…`}
-                      className="h-9 w-full rounded-lg border border-border bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-1 focus:ring-primary"
-                    />
-                    <div className="max-h-[44vh] space-y-1.5 overflow-y-auto pr-1">
-                      {metaForms.formularios
-                        .filter(f => !metaBusca.trim() || f.nome.toLowerCase().includes(metaBusca.trim().toLowerCase()))
-                        .map(f => {
-                          const jaConectado = metaConectados.some(c => c.formId === f.id);
-                          const marcado = metaSelecionados.includes(f.id);
-                          return (
-                            <label key={f.id} className={cn('flex cursor-pointer items-start gap-3 rounded-lg border px-3 py-2 transition-colors',
-                              jaConectado ? 'border-border bg-muted/20 opacity-60' : marcado ? 'border-primary/40 bg-primary/10' : 'border-border bg-background/50 hover:bg-muted/30')}>
-                              <input type="checkbox" className="mt-1 accent-primary" disabled={jaConectado} checked={jaConectado || marcado}
-                                onChange={() => setMetaSelecionados(prev => prev.includes(f.id) ? prev.filter(x => x !== f.id) : [...prev, f.id])} />
-                              <div className="min-w-0 flex-1">
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <p className="truncate text-sm font-bold text-foreground">{f.nome}</p>
-                                  {f.status !== 'ACTIVE' && <span className="rounded-full border border-border px-1.5 py-0.5 text-[9px] font-bold uppercase text-muted-foreground">{f.status.toLowerCase()}</span>}
-                                  {jaConectado && <span className="rounded-full border border-primary/25 bg-primary/10 px-1.5 py-0.5 text-[9px] font-bold uppercase text-primary">conectado</span>}
-                                </div>
-                                <p className="mt-0.5 text-[11px] text-muted-foreground">
-                                  {f.leadsTotal} lead{f.leadsTotal === 1 ? '' : 's'} na Meta
-                                  {f.perguntas.length ? ` · ${f.perguntas.slice(0, 4).join(', ')}${f.perguntas.length > 4 ? '…' : ''}` : ''}
-                                </p>
-                              </div>
-                            </label>
-                          );
-                        })}
-                      {metaForms.formularios.length === 0 && (
-                        <p className="rounded-lg border border-dashed border-border p-4 text-center text-xs text-muted-foreground">Esta Página não tem formulário de Lead Ads criado.</p>
-                      )}
+                    <div className="max-h-[40vh] space-y-1.5 overflow-y-auto pr-1">
+                      {metaForms.formularios.map(f => (
+                        <div key={f.formId} className="rounded-lg border border-border bg-background/50 px-3 py-2">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="truncate text-sm font-bold text-foreground">{f.formName || `Formulário ${f.formId}`}</p>
+                            {f.status && f.status !== 'ACTIVE' && <span className="rounded-full border border-border px-1.5 py-0.5 text-[9px] font-bold uppercase text-muted-foreground">{f.status.toLowerCase()}</span>}
+                          </div>
+                          <p className="mt-0.5 text-[11px] text-muted-foreground">{f.leadsRecebidos} lead{f.leadsRecebidos === 1 ? '' : 's'} recebido{f.leadsRecebidos === 1 ? '' : 's'} por aqui</p>
+                        </div>
+                      ))}
                     </div>
                   </>
                 )}
 
-                {error && <p className="rounded-lg border border-red-400/30 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-300">{error}</p>}
-
                 <div className="flex flex-wrap items-center gap-2 pt-1">
                   <button type="button" onClick={() => setShowForm(false)} className="flex-1 rounded-lg border border-border py-2 text-sm font-bold text-muted-foreground hover:bg-muted/40 hover:text-foreground">
-                    Cancelar
+                    Fechar
                   </button>
-                  <button type="button" onClick={conectarMetaForms} disabled={saving || !metaForms?.pagina || metaSelecionados.length === 0}
+                  <button type="button" onClick={() => carregarMetaForms(true)} disabled={metaFormsLoading}
                     className="flex-1 rounded-lg bg-primary py-2 text-sm font-bold text-black hover:bg-primary/90 disabled:opacity-60">
-                    {saving ? 'Conectando...' : metaSelecionados.length > 1 ? `Conectar ${metaSelecionados.length} formulários` : 'Conectar formulário'}
+                    {metaFormsLoading ? 'Conectando...' : 'Reconectar agora'}
                   </button>
                 </div>
                 <button type="button" onClick={() => setViaMake(true)} className="w-full text-center text-[11px] text-muted-foreground underline-offset-2 hover:underline">

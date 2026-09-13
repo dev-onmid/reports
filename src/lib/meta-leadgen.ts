@@ -324,10 +324,11 @@ export async function processLeadgenEvent(
   const formId = String(lead.form_id ?? value.form_id ?? '');
   if (formId) {
     await pool.query(
-      `UPDATE public.meta_leadgen_forms
-          SET leads_recebidos = leads_recebidos + 1, last_lead_at = NOW()
-        WHERE form_id = $1`,
-      [formId],
+      `INSERT INTO public.meta_leadgen_forms (form_id, client_id, page_id, leads_recebidos, last_lead_at)
+       VALUES ($1, $2, $3, 1, NOW())
+       ON CONFLICT (form_id) DO UPDATE
+         SET leads_recebidos = public.meta_leadgen_forms.leads_recebidos + 1, last_lead_at = NOW()`,
+      [formId, clientId, pageId],
     ).catch(() => null);
   }
 
