@@ -141,7 +141,13 @@ export async function ensureLeadTrackingSchema(pool: Pool) {
        ADD COLUMN IF NOT EXISTS ddd TEXT,
        ADD COLUMN IF NOT EXISTS regiao_uf TEXT,
        ADD COLUMN IF NOT EXISTS regiao_cidade TEXT,
-       ADD COLUMN IF NOT EXISTS regiao_fonte TEXT`,
+       ADD COLUMN IF NOT EXISTS regiao_fonte TEXT,
+       ADD COLUMN IF NOT EXISTS utm_source TEXT,
+       ADD COLUMN IF NOT EXISTS utm_medium TEXT,
+       ADD COLUMN IF NOT EXISTS utm_campaign TEXT,
+       ADD COLUMN IF NOT EXISTS utm_content TEXT,
+       ADD COLUMN IF NOT EXISTS utm_term TEXT,
+       ADD COLUMN IF NOT EXISTS source_url TEXT`,
     // Histórico imutável de toques de atribuição (1 linha por toque, nunca sobrescreve).
     // Some apenas quando o lead é deletado (FK ON DELETE CASCADE, adicionada abaixo).
     `CREATE TABLE IF NOT EXISTS public.lead_tracking_events (
@@ -354,6 +360,18 @@ export async function applyLeadAttribution(pool: Pool, leadId: string, attr: Lea
             regiao_cidade = COALESCE(NULLIF(regiao_cidade, ''), NULLIF($15, '')),
             regiao_fonte = COALESCE(NULLIF(regiao_fonte, ''), NULLIF($16, '')),
             email        = COALESCE(NULLIF(email, ''), NULLIF($18, '')),
+            -- ⚠️ UTMs e URL de origem entram AQUI, não só no histórico. Medido em
+            -- 13/09: 80 leads (79 da Cost Odonto via Datalytics + 1 de LP) tinham os
+            -- UTMs em lead_tracking_events e NADA no cadastro — e é o cadastro que a
+            -- tela "Fonte de captura" lê. As portas que fazem INSERT próprio (LP,
+            -- Datalytics) dependem desta função para o rastreio; sem estas linhas o
+            -- dado chegava e se perdia no caminho. Fill-blanks: first-touch vence.
+            utm_source   = COALESCE(NULLIF(utm_source, ''), NULLIF($19, '')),
+            utm_medium   = COALESCE(NULLIF(utm_medium, ''), NULLIF($20, '')),
+            utm_campaign = COALESCE(NULLIF(utm_campaign, ''), NULLIF($21, '')),
+            utm_content  = COALESCE(NULLIF(utm_content, ''), NULLIF($22, '')),
+            utm_term     = COALESCE(NULLIF(utm_term, ''), NULLIF($23, '')),
+            source_url   = COALESCE(NULLIF(source_url, ''), NULLIF($24, '')),
             first_origin_at = COALESCE(first_origin_at, CASE WHEN $17 THEN NOW() ELSE NULL END),
             updated_at   = NOW()
       WHERE id = $1`,
@@ -376,6 +394,12 @@ export async function applyLeadAttribution(pool: Pool, leadId: string, attr: Lea
       attr.regiaoFonte ?? null,
       attr.hasClickMatch || Boolean(t.gclid || t.fbclid || t.ttclid),
       attr.email ?? null,
+      t.utm_source ?? null,
+      t.utm_medium ?? null,
+      t.utm_campaign ?? null,
+      t.utm_content ?? null,
+      t.utm_term ?? null,
+      t.source_url ?? null,
     ],
   ).catch(err => console.error('[lead-tracking applyLeadAttribution]', err?.message ?? err));
 }
