@@ -3,7 +3,7 @@
 // Modal "Configurar cliente" e as peças que só ele usa. Saiu do page.tsx
 // (2026-09-13) por dois motivos: o page tem 7 mil linhas e não monta em bundle
 // isolado (usa next/link) — aqui o modal dá para renderizar num harness e olhar.
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   AlertTriangle, BookMarked, ChevronRight, ExternalLink, Globe2, Kanban, Layers,
   Link2, Pencil, Power, PowerOff, Settings, Sparkles, Store, Wallet, WalletCards,
@@ -83,14 +83,11 @@ export function CelulaAjuste({ icone: Icone, rotulo, dica, children }: { icone: 
 export const SELECT_AJUSTE = 'mt-0.5 h-7 w-full bg-transparent pr-1 text-sm font-bold text-foreground focus:outline-none';
 
 type SecaoConfig = 'geral' | 'contas' | 'crm' | 'cobranca' | 'links' | 'risco';
-const ORDEM_SECOES: SecaoConfig[] = ['geral', 'contas', 'crm', 'cobranca', 'links', 'risco'];
 
-// Cabeçalho de seção do modal; recebe o registrador de ref para a navegação lateral.
-function SecaoTitulo({ id, Icone, titulo, sub, registrar }: {
-  id: SecaoConfig; Icone: typeof Settings; titulo: string; sub: string; registrar: (id: SecaoConfig) => (el: HTMLElement | null) => void;
-}) {
+// Cabeçalho de seção do modal.
+function SecaoTitulo({ Icone, titulo, sub }: { Icone: typeof Settings; titulo: string; sub: string }) {
   return (
-    <div ref={registrar(id)} data-secao={id} className="mb-3 flex items-start gap-2 scroll-mt-4">
+    <div className="mb-3 flex items-start gap-2">
       <Icone className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
       <div>
         <h3 className="text-base font-bold text-foreground">{titulo}</h3>
@@ -105,7 +102,9 @@ function SecaoTitulo({ id, Icone, titulo, sub, registrar }: {
 // aba Integrações → Delivery, um lugar só.
 //
 // Layout (2026-09-13, referência do Matheus): cabeçalho com selo de status, faixa de
-// ajustes, navegação lateral por seção e cards — em vez da pilha de linhas.
+// ajustes, navegação lateral e cards. ⚠️ A lateral é de ABAS, não de âncoras: só a
+// seção clicada aparece ("caso contrário os botões laterais perdem o sentido").
+// No mobile a mesma lista vira chips horizontais.
 // ⚠️ Sem "Salvar alterações": cada controle grava no ato (PATCH), como sempre foi.
 // Um botão Salvar aqui seria decorativo e faria o gestor achar que nada gravou
 // antes de clicar.
@@ -137,63 +136,9 @@ export function ClientConfigModal({ open, onClose, clientId, clientName, statusC
   /** Ações de configuração do CRM (funil, portal, critérios IA, fontes) — abrem na aba CRM. */
   onAcaoCrm?: (acao: AcaoConfigCrm) => void;
 }) {
-  const secoes = useRef<Partial<Record<SecaoConfig, HTMLElement | null>>>({});
-  const conteudo = useRef<HTMLDivElement>(null);
-  // Depois de um clique na navegação, o listener de rolagem fica mudo por 700ms:
-  // seção perto do fim bate no limite da rolagem e a regra do fim realçaria a última.
-  const ignorandoRolagem = useRef(false);
   const [ativa, setAtiva] = useState<SecaoConfig>('geral');
-
-  // O scroller é o DialogContent (overflow-y-auto), achado subindo a árvore —
-  // não a página. `scrollIntoView` encadeado em dois scrollers rolava o corpo
-  // primeiro e o modal só na 2ª tentativa.
-  function containerDeRolagem(): HTMLElement | null {
-    let c: HTMLElement | null = conteudo.current?.parentElement ?? null;
-    while (c && !/(auto|scroll)/.test(getComputedStyle(c).overflowY)) c = c.parentElement;
-    return c;
-  }
-
-  // Realce da navegação pela rolagem: a seção ativa é a última cujo título já
-  // passou da linha de 64px do topo do container. ⚠️ Regra do fim: a última seção nunca chega
-  // ao topo (acabou a rolagem), então no fim do scroll ela é a ativa — sem isso
-  // clicar em "Zona de risco" realçava "Cobrança".
-  // ⚠️ Anexado no CALLBACK REF do wrapper, não num useEffect: o conteúdo do Dialog
-  // monta num portal depois do efeito rodar e o listener nunca era instalado.
-  const registrarConteudo = useCallback((el: HTMLDivElement | null) => {
-    conteudo.current = el;
-    if (!el) return;
-    let cont: HTMLElement | null = el.parentElement;
-    while (cont && !/(auto|scroll)/.test(getComputedStyle(cont).overflowY)) cont = cont.parentElement;
-    if (!cont) return;
-    const scroller = cont;
-    const onScroll = () => {
-      if (ignorandoRolagem.current) return;
-      const ordem = ORDEM_SECOES.filter(id => secoes.current[id]);
-      if (!ordem.length) return;
-      if (scroller.scrollTop >= scroller.scrollHeight - scroller.clientHeight - 2) { setAtiva(ordem[ordem.length - 1]); return; }
-      // Linha fixa a 64px do topo: com 35% da altura, uma seção curta (CRM) rolada ao
-      // topo já realçava a seguinte — o título da próxima cabia dentro da faixa.
-      const linha = scroller.getBoundingClientRect().top + 64;
-      let atual = ordem[0];
-      for (const id of ordem) if ((secoes.current[id] as HTMLElement).getBoundingClientRect().top <= linha) atual = id;
-      setAtiva(atual);
-    };
-    scroller.addEventListener('scroll', onScroll, { passive: true });
-    return () => scroller.removeEventListener('scroll', onScroll);
-  }, []);
-
-  function irPara(id: SecaoConfig) {
-    setAtiva(id);
-    ignorandoRolagem.current = true;
-    window.setTimeout(() => { ignorandoRolagem.current = false; }, 700);
-    const el = secoes.current[id];
-    if (!el) return;
-    const cont = containerDeRolagem();
-    if (!cont) { el.scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
-    const top = el.getBoundingClientRect().top - cont.getBoundingClientRect().top + cont.scrollTop - 12;
-    cont.scrollTo({ top, behavior: 'smooth' });
-  }
-  const registrar = (id: SecaoConfig) => (el: HTMLElement | null) => { secoes.current[id] = el; };
+  // Fechar volta para Geral — reabrir num cliente e cair em "Zona de risco" assusta.
+  const fechar = () => { onClose(); setAtiva('geral'); };
 
   const NAV: Array<{ id: SecaoConfig; rotulo: string; Icone: typeof Settings; mostrar: boolean }> = [
     { id: 'geral', rotulo: 'Geral', Icone: Settings, mostrar: true },
@@ -211,7 +156,7 @@ export function ClientConfigModal({ open, onClose, clientId, clientName, statusC
   ];
 
   return (
-    <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
+    <Dialog open={open} onOpenChange={(o) => { if (!o) fechar(); }}>
       <DialogContent className="w-[95vw] sm:max-w-6xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
@@ -234,7 +179,7 @@ export function ClientConfigModal({ open, onClose, clientId, clientName, statusC
         </DialogHeader>
 
         {open && (
-          <div ref={registrarConteudo} className="pt-2">
+          <div className="pt-2">
             {ajustes && (
               <div className="mb-6 grid gap-4 rounded-xl border border-border bg-card p-4 sm:grid-cols-2 lg:grid-cols-4">
                 {ajustes}
@@ -242,31 +187,27 @@ export function ClientConfigModal({ open, onClose, clientId, clientName, statusC
             )}
 
             <div className="grid gap-6 md:grid-cols-[190px_1fr]">
-              <nav className="hidden self-start md:sticky md:top-0 md:block">
-                <ul className="space-y-1">
-                  {NAV.filter(n => n.mostrar).map(({ id, rotulo, Icone }) => (
-                    <li key={id}>
-                      <button type="button" onClick={() => irPara(id)}
-                        className={cn('flex w-full items-center gap-2 rounded-lg border-l-2 px-3 py-2 text-left text-sm transition-colors',
-                          ativa === id ? 'border-primary bg-primary/10 font-bold text-foreground' : 'border-transparent text-muted-foreground hover:bg-muted/40 hover:text-foreground')}>
-                        <Icone className={cn('h-4 w-4', ativa === id ? 'text-primary' : '')} /> {rotulo}
-                      </button>
-                    </li>
-                  ))}
-                  {onIrParaIntegracoes && (
-                    <li>
-                      <button type="button" onClick={() => { onClose(); onIrParaIntegracoes(); }}
-                        className="flex w-full items-center gap-2 rounded-lg border-l-2 border-transparent px-3 py-2 text-left text-sm text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground">
-                        <Store className="h-4 w-4" /> Integrações <ExternalLink className="ml-auto h-3 w-3" />
-                      </button>
-                    </li>
-                  )}
-                </ul>
+              {/* Desktop: lista vertical; mobile: os mesmos itens em chips roláveis. */}
+              <nav className="-mx-1 flex gap-1 overflow-x-auto px-1 pb-1 md:mx-0 md:block md:self-start md:overflow-visible md:px-0 md:pb-0">
+                {NAV.filter(n => n.mostrar).map(({ id, rotulo, Icone }) => (
+                  <button key={id} type="button" onClick={() => setAtiva(id)} aria-current={ativa === id ? 'page' : undefined}
+                    className={cn('flex shrink-0 items-center gap-2 rounded-lg border-l-2 px-3 py-2 text-left text-sm transition-colors md:mb-1 md:w-full',
+                      ativa === id ? 'border-primary bg-primary/10 font-bold text-foreground' : 'border-transparent text-muted-foreground hover:bg-muted/40 hover:text-foreground')}>
+                    <Icone className={cn('h-4 w-4', ativa === id ? 'text-primary' : '')} /> {rotulo}
+                  </button>
+                ))}
+                {onIrParaIntegracoes && (
+                  <button type="button" onClick={() => { fechar(); onIrParaIntegracoes(); }}
+                    className="flex shrink-0 items-center gap-2 rounded-lg border-l-2 border-transparent px-3 py-2 text-left text-sm text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground md:w-full">
+                    <Store className="h-4 w-4" /> Integrações <ExternalLink className="h-3 w-3 md:ml-auto" />
+                  </button>
+                )}
               </nav>
 
-              <div className="min-w-0 space-y-8">
-                <section>
-                  <SecaoTitulo registrar={registrar} id="geral" Icone={Settings} titulo="Geral" sub="Informações principais e status do cliente." />
+              {/* Altura mínima: sem ela o modal encolhe e cresce a cada aba (Cobrança é 1 linha, Links é alto). */}
+              <div className="min-w-0 md:min-h-[440px]">
+                {ativa === 'geral' && (<section>
+                  <SecaoTitulo Icone={Settings} titulo="Geral" sub="Informações principais e status do cliente." />
                   <div className="grid gap-3 sm:grid-cols-2">
                     {plataformas.map(({ chave, nome, logo, n }) => {
                       const ligada = n > 0;
@@ -292,7 +233,7 @@ export function ClientConfigModal({ open, onClose, clientId, clientName, statusC
                           </div>
                           {onVincularContas && (
                             <Button variant={ligada ? 'outline' : 'default'} className="mt-3 h-9 w-full gap-2 text-xs font-bold"
-                              onClick={() => { onClose(); onVincularContas(); }}>
+                              onClick={() => { fechar(); onVincularContas(); }}>
                               <Link2 className="h-4 w-4" /> {ligada ? 'Gerenciar contas' : 'Conectar conta'}
                             </Button>
                           )}
@@ -300,14 +241,14 @@ export function ClientConfigModal({ open, onClose, clientId, clientName, statusC
                       );
                     })}
                   </div>
-                </section>
+                </section>)}
 
-                {onVincularContas && (
+                {ativa === 'contas' && onVincularContas && (
                   <section>
-                    <SecaoTitulo registrar={registrar} id="contas" Icone={Link2} titulo="Contas de anúncio" sub="Meta e Google. Delivery continua na aba Integrações." />
+                    <SecaoTitulo Icone={Link2} titulo="Contas de anúncio" sub="Meta e Google. Delivery continua na aba Integrações." />
                     <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-card p-4">
                       <Button variant="outline" className="h-9 gap-2 border-border text-xs font-bold uppercase tracking-wider"
-                        onClick={() => { onClose(); onVincularContas(); }}>
+                        onClick={() => { fechar(); onVincularContas(); }}>
                         <Link2 className="h-4 w-4 text-primary" /> Vincular contas
                       </Button>
                       <span className="text-xs text-muted-foreground">
@@ -317,9 +258,9 @@ export function ClientConfigModal({ open, onClose, clientId, clientName, statusC
                   </section>
                 )}
 
-                {onAcaoCrm && (
+                {ativa === 'crm' && onAcaoCrm && (
                   <section>
-                    <SecaoTitulo registrar={registrar} id="crm" Icone={Kanban} titulo="CRM" sub="Funil, portal do cliente, critérios da IA e captura de leads." />
+                    <SecaoTitulo Icone={Kanban} titulo="CRM" sub="Funil, portal do cliente, critérios da IA e captura de leads." />
                     {/* Eram o ⋮ da barra do CRM. Cada um fecha este modal e abre na aba CRM. */}
                     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                       {([
@@ -328,7 +269,7 @@ export function ClientConfigModal({ open, onClose, clientId, clientName, statusC
                         ['criterios', Sparkles, 'Critérios IA', 'Regras que a IA usa para qualificar e mover leads.'],
                         ['captura', Link2, 'Fontes de captura', 'WhatsApp rastreável, landing, Meta Forms e UTMs.'],
                       ] as Array<[AcaoConfigCrm, typeof Pencil, string, string]>).map(([acao, Icone, rotulo, desc]) => (
-                        <button key={acao} type="button" onClick={() => { onClose(); onAcaoCrm(acao); }}
+                        <button key={acao} type="button" onClick={() => { fechar(); onAcaoCrm(acao); }}
                           className="group flex flex-col rounded-xl border border-border bg-card p-4 text-left transition-colors hover:border-primary/40 hover:bg-primary/5">
                           <div className="flex items-start justify-between">
                             <Icone className="h-5 w-5 text-primary" />
@@ -342,19 +283,19 @@ export function ClientConfigModal({ open, onClose, clientId, clientName, statusC
                   </section>
                 )}
 
-                <section>
-                  <SecaoTitulo registrar={registrar} id="cobranca" Icone={WalletCards} titulo="Cobrança dos anúncios" sub="Defina a forma de cobrança usada nas contas de anúncio (Meta e Google)." />
+                {ativa === 'cobranca' && (<section>
+                  <SecaoTitulo Icone={WalletCards} titulo="Cobrança dos anúncios" sub="Defina a forma de cobrança usada nas contas de anúncio (Meta e Google)." />
                   <ClientBillingSection clientId={clientId} />
-                </section>
+                </section>)}
 
-                <section>
-                  <SecaoTitulo registrar={registrar} id="links" Icone={BookMarked} titulo="Links & senhas" sub="Centralize todas as credenciais e acessos do cliente." />
+                {ativa === 'links' && (<section>
+                  <SecaoTitulo Icone={BookMarked} titulo="Links & senhas" sub="Centralize todas as credenciais e acessos do cliente." />
                   <VaultTab clientId={clientId} />
-                </section>
+                </section>)}
 
-                {onAlterarStatus && (
+                {ativa === 'risco' && onAlterarStatus && (
                   <section>
-                    <SecaoTitulo registrar={registrar} id="risco" Icone={AlertTriangle} titulo="Zona de risco" sub="Ações que afetam diretamente o funcionamento do cliente." />
+                    <SecaoTitulo Icone={AlertTriangle} titulo="Zona de risco" sub="Ações que afetam diretamente o funcionamento do cliente." />
                     <div className={cn('flex flex-wrap items-center justify-between gap-3 rounded-xl border p-4',
                       inativo ? 'border-primary/30 bg-primary/5' : 'border-red-500/30 bg-red-500/5')}>
                       <div className="flex items-start gap-3">
@@ -373,7 +314,7 @@ export function ClientConfigModal({ open, onClose, clientId, clientName, statusC
                       <Button variant="outline"
                         className={cn('h-9 shrink-0 gap-2 text-xs font-bold uppercase tracking-wider',
                           inativo ? 'border-primary/40 text-primary' : 'border-red-500/40 text-red-300 hover:bg-red-500/10')}
-                        onClick={() => { onClose(); onAlterarStatus(); }}>
+                        onClick={() => { fechar(); onAlterarStatus(); }}>
                         {inativo ? <Power className="h-4 w-4" /> : <PowerOff className="h-4 w-4" />}
                         {inativo ? 'Ativar cliente' : 'Desativar cliente'}
                       </Button>
