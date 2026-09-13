@@ -1819,3 +1819,14 @@ Print do Matheus: 01–31/08 R$ 23.322,60 no Agendor contra menos na dash; julho
 - **Correção aplicada**: `backfill_pagina = 1, backfill_concluido = FALSE` para a Cinfel; o cron de 15 min re-varre as ~20 páginas com a leitura nova. Idempotente (dedupe por `agendor:{dealId}`) e **backfill nunca dispara conversão**, então não polui Meta/Google.
 - ⚠️ **Rótulo duplicado a resolver**: a origem nativa e a personalizada nomeiam o mesmo canal de formas diferentes ("Site/Google" × "Google/Site", "Redes sociais" × "Instagram"/"Facebook") — no donut de canais viram fatias separadas. Fundir precisa de decisão do Matheus.
 - ⚠️ Regra que vale para qualquer cliente: **mudar critério de filtro exige refazer o backfill**, senão a correção só vale daqui pra frente.
+
+## Rastreio — os UTMs chegavam e se perdiam entre o histórico e o cadastro (2026-09-13)
+
+Print do Matheus (lead de teste da LP do CondoStore) + diagnóstico de outra sessão: a tela "Fonte de captura" mostrava Campanha/Conjunto/Anúncio/UTM como "Não recebido" mesmo com a URL certa. **O diagnóstico da outra sessão estava correto** e foi confirmado no banco: `lead_tracking_events` tinha os quatro UTMs; `crm_leads` (que é o que a tela lê) tinha tudo nulo.
+
+- **`applyLeadAttribution` gravava gclid/fbclid/keyword/região/e-mail, mas NÃO os `utm_*` nem `source_url`.** As portas que fazem INSERT próprio em `crm_leads` (LP e Datalytics) dependem dela para o rastreio inteiro — o dado chegava, ia para o histórico e nunca para o cadastro. O webhook genérico e o WhatsApp não sofriam porque passam por `upsertLeadFromConversation`, que já gravava.
+- **⚠️ Era maior que o print**: medido antes do conserto, **80 leads** nessa condição — **79 REAIS da Cost Odonto via Datalytics** (12/08 → 11/09) + o teste da LP. Sem medir, teria parecido bug só da LP nova.
+- Correção na função, uma vez para todas as 7 portas: 6 colunas em fill-blanks (`COALESCE(NULLIF(col,''), NULLIF($n,''))`, first-touch vence) + `ADD COLUMN IF NOT EXISTS` no ensure. A rota de LP também passou a carregar `source_url` do `page_url` (montava o tracking sem ela).
+- **Backfill aplicado em produção**: os 80 leads receberam os UTMs do toque MAIS ANTIGO do histórico (first-touch), só onde o cadastro estava vazio. Ids tocados guardados no log da sessão.
+- ✅ Verificado: 25 asserts exercitando a função REAL com pool stub (6 colunas em fill-blanks, valores nas posições certas, `undefined`→`null`, contagem de placeholders = nº de parâmetros — o erro clássico ao estender UPDATE posicional); tsc + `next build` limpos; lead do print conferido no banco depois do backfill.
+- ⚠️ Lição: **toda porta que faz INSERT próprio em `crm_leads` precisa de `applyLeadAttribution` COMPLETA** — se um campo de rastreio nascer, é aqui que ele entra, não em cada rota.

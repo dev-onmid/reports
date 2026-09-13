@@ -56,6 +56,8 @@ function lerTracking(c: Corpo): MergedTracking {
     keyword: txt(c.keyword) ?? txt(c.palavra_chave),
     matchtype: txt(c.matchtype), device: txt(c.device),
     network: txt(c.network), placement: txt(c.placement),
+    // A URL de onde o lead veio: o cadastro tem coluna para ela e antes ficava nula.
+    source_url: txt(c.page_url) ?? txt(c.source_url) ?? txt(c.url),
   } as MergedTracking;
 }
 
