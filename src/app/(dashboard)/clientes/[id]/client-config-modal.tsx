@@ -141,7 +141,7 @@ export function ClientConfigModal({ open, onClose, clientId, clientName, statusC
   const conteudo = useRef<HTMLDivElement>(null);
   // Depois de um clique na navegação, o listener de rolagem fica mudo por 700ms:
   // seção perto do fim bate no limite da rolagem e a regra do fim realçaria a última.
-  const ignorarRolagemAte = useRef(0);
+  const ignorandoRolagem = useRef(false);
   const [ativa, setAtiva] = useState<SecaoConfig>('geral');
 
   // O scroller é o DialogContent (overflow-y-auto), achado subindo a árvore —
@@ -167,7 +167,7 @@ export function ClientConfigModal({ open, onClose, clientId, clientName, statusC
     if (!cont) return;
     const scroller = cont;
     const onScroll = () => {
-      if (performance.now() < ignorarRolagemAte.current) return;
+      if (ignorandoRolagem.current) return;
       const ordem = ORDEM_SECOES.filter(id => secoes.current[id]);
       if (!ordem.length) return;
       if (scroller.scrollTop >= scroller.scrollHeight - scroller.clientHeight - 2) { setAtiva(ordem[ordem.length - 1]); return; }
@@ -184,7 +184,8 @@ export function ClientConfigModal({ open, onClose, clientId, clientName, statusC
 
   function irPara(id: SecaoConfig) {
     setAtiva(id);
-    ignorarRolagemAte.current = performance.now() + 700;
+    ignorandoRolagem.current = true;
+    window.setTimeout(() => { ignorandoRolagem.current = false; }, 700);
     const el = secoes.current[id];
     if (!el) return;
     const cont = containerDeRolagem();
