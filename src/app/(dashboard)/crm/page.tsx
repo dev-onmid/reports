@@ -2107,12 +2107,22 @@ function ClientChoiceCard({
   );
 }
 
+/** Ações de configuração do CRM que a página do cliente dispara pelo modal Configurações. */
+export type AcaoConfigCrm = 'funil' | 'portal' | 'criterios' | 'captura';
+
 type CrmPageProps = {
   lockedClientId?: string;
   embedded?: boolean;
+  /**
+   * Dentro do cliente o ⋮ da barra some (pedido do Matheus, 13/09: "essa parte
+   * tem que ficar dentro de Configurações"). Os mesmos 4 itens vivem no modal
+   * Configurar cliente e chegam aqui por esta prop; `onAcaoConsumida` zera.
+   */
+  acaoConfig?: AcaoConfigCrm | null;
+  onAcaoConsumida?: () => void;
 };
 
-export default function CrmPage({ lockedClientId, embedded = false }: CrmPageProps = {}) {
+export default function CrmPage({ lockedClientId, embedded = false, acaoConfig = null, onAcaoConsumida }: CrmPageProps = {}) {
   const { clients } = useClients();
   const activeClients = useMemo(() => clients.filter(c => c.status === 'Ativo'), [clients]);
 
@@ -2182,6 +2192,17 @@ export default function CrmPage({ lockedClientId, embedded = false }: CrmPagePro
     param: 'view',
     forcar: () => (new URLSearchParams(window.location.search).get('lead') ? 'chat' : null),
   });
+
+  // Ação vinda do modal Configurações do cliente (ver AcaoConfigCrm).
+  useEffect(() => {
+    if (!acaoConfig) return;
+    if (acaoConfig === 'funil') setShowFunnelEditor(true);
+    else if (acaoConfig === 'portal') setShowPortalModal(true);
+    else if (acaoConfig === 'criterios') setShowAiCriteria(true);
+    else if (acaoConfig === 'captura') setCrmView('capture');
+    onAcaoConsumida?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [acaoConfig]);
   const [kanbanEditLead, setKanbanEditLead] = useState<CrmLead | null>(null);
 
   useEffect(() => {
@@ -2978,7 +2999,10 @@ export default function CrmPage({ lockedClientId, embedded = false }: CrmPagePro
             </div>
             {/* ⚠️ Configuração, não operação: editar funil e gerar o portal
                 acontecem uma vez e ficavam ocupando ~230px da barra para
-                sempre. No menu continuam a um clique. */}
+                sempre. Dentro do CLIENTE nem o menu fica — os 4 itens moram
+                no modal Configurações (13/09); aqui só no /crm avulso, que
+                não tem esse modal. */}
+            {!embedded && (
             <div className="relative">
               <button
                 type="button"
@@ -3020,6 +3044,7 @@ export default function CrmPage({ lockedClientId, embedded = false }: CrmPagePro
                 </>
               )}
             </div>
+            )}
           </div>
         )}
 

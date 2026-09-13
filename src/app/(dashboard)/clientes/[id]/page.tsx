@@ -23,7 +23,7 @@ import {
   Power, PowerOff, Search, BookMarked, ExternalLink, RefreshCw, ChevronRight,
   PiggyBank, Wallet, Info, Lightbulb, UserPlus, Brain, Save, MousePointer2,
   Maximize2, Minimize2, ZoomIn, ZoomOut, ImageIcon, Unlink, History, Copy, Sparkles,
-  Store, Settings, Pencil,
+  Store, Settings, Pencil, Globe2, Kanban,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -50,7 +50,7 @@ import { LinkAccountsDialog } from '@/components/link-accounts-dialog';
 import { ClientSwitcher } from '@/components/client-switcher';
 import { HistoricoTab } from '@/components/historico-tab';
 import { VaultTab } from '@/components/vault-tab';
-import CrmWorkspace from '@/app/(dashboard)/crm/page';
+import CrmWorkspace, { type AcaoConfigCrm } from '@/app/(dashboard)/crm/page';
 import { ClientTrackingTab } from './tracking-tab';
 import { ClientDemandasTab } from './demandas-tab';
 import { ClientReunioesTab } from './reunioes-tab';
@@ -1927,7 +1927,7 @@ function ClientBillingSection({ clientId }: { clientId: string }) {
 // Modal único de configuração do cliente — junta tudo que é setup (conexões, cobrança,
 // e Links & Senhas). O Anota Aí saiu daqui (2026-08-21): delivery configura-se na
 // aba Integrações → Delivery, um lugar só.
-function ClientConfigModal({ open, onClose, clientId, clientName, ajustes, onVincularContas, onAlterarStatus, inativo }: {
+function ClientConfigModal({ open, onClose, clientId, clientName, ajustes, onVincularContas, onAlterarStatus, inativo, onAcaoCrm }: {
   open: boolean;
   onClose: () => void;
   clientId: string;
@@ -1947,6 +1947,8 @@ function ClientConfigModal({ open, onClose, clientId, clientName, ajustes, onVin
   /** Ativa/desativa o cliente. Fica no fim, separado: é a única ação destrutiva daqui. */
   onAlterarStatus?: () => void;
   inativo?: boolean;
+  /** Ações de configuração do CRM (funil, portal, critérios IA, fontes) — abrem na aba CRM. */
+  onAcaoCrm?: (acao: AcaoConfigCrm) => void;
 }) {
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
@@ -1985,6 +1987,30 @@ function ClientConfigModal({ open, onClose, clientId, clientName, ajustes, onVin
                   <span className="text-xs text-muted-foreground">
                     Meta e Google. Delivery continua na aba Integrações.
                   </span>
+                </div>
+              </div>
+            )}
+
+            {onAcaoCrm && (
+              <div>
+                <div className="mb-3 flex items-center gap-2">
+                  <Kanban className="h-4 w-4 text-primary" />
+                  <h3 className="text-sm font-bold uppercase tracking-wider text-foreground">CRM</h3>
+                </div>
+                {/* Eram o ⋮ da barra do CRM. Cada um fecha este modal e abre na aba CRM. */}
+                <div className="flex flex-wrap items-center gap-2">
+                  {([
+                    ['funil', Pencil, 'Editar funil', 'Etapas e degraus do Kanban'],
+                    ['portal', Globe2, 'Portal do cliente', 'Link somente-leitura para o cliente acompanhar'],
+                    ['criterios', Sparkles, 'Critérios IA', 'Regras que a IA usa para qualificar e mover leads'],
+                    ['captura', Link2, 'Fontes de Captura', 'WhatsApp rastreável, landing, Meta Forms, API'],
+                  ] as Array<[AcaoConfigCrm, typeof Pencil, string, string]>).map(([acao, Icone, rotulo, dica]) => (
+                    <Button key={acao} variant="outline" title={dica}
+                      className="h-9 gap-2 border-border text-xs font-bold uppercase tracking-wider"
+                      onClick={() => { onClose(); onAcaoCrm(acao); }}>
+                      <Icone className="h-4 w-4 text-primary" /> {rotulo}
+                    </Button>
+                  ))}
                 </div>
               </div>
             )}
@@ -2119,6 +2145,8 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
     normalizar: (v) => (v === 'delivery' || v === 'lps' ? 'rastreio' : v),
   });
   const [configOpen, setConfigOpen] = useState(false);
+  // Ação de CRM escolhida no modal Configurações; o CrmWorkspace consome e zera.
+  const [crmAcao, setCrmAcao] = useState<AcaoConfigCrm | null>(null);
   const [linkDialogOpen, setLinkDialogOpen] = useState(false);
   const [statusDialogOpen, setStatusDialogOpen] = useState(false);
   const [pendingStatus, setPendingStatus] = useState<ClientStatus | null>(null);
@@ -2489,7 +2517,7 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
 
       {tab === 'pagamentos' && <InvestmentPaymentsTab clientId={id} clientName={client.name} />}
 
-      {tab === 'crm' && <CrmWorkspace lockedClientId={id} embedded />}
+      {tab === 'crm' && <CrmWorkspace lockedClientId={id} embedded acaoConfig={crmAcao} onAcaoConsumida={() => setCrmAcao(null)} />}
 
       <ClientConfigModal
         open={configOpen}
@@ -2498,6 +2526,7 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
         clientName={client.name}
         inativo={client.status === 'Inativo'}
         onVincularContas={() => setLinkDialogOpen(true)}
+        onAcaoCrm={(acao) => { setTab('crm'); setCrmAcao(acao); }}
         onAlterarStatus={() => openStatusDialog(client.status === 'Inativo' ? 'Ativo' : 'Inativo')}
         ajustes={(
             <div className="flex items-center gap-3 flex-wrap">
