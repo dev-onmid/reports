@@ -397,8 +397,11 @@ function trackingRows(lead: CrmLead) {
     ['Canal', lead.canal],
     ['Origem', originLabel(lead.origin) ?? lead.origin],
     ['Campanha', lead.campaign_name ?? lead.utm_campaign],
-    ['Conjunto', lead.adset_name ?? lead.utm_medium],
+    // ⚠️ `utm_medium` é o MEIO (paid, cpc, organic) — nunca o conjunto. Estava
+    // aqui como fallback e fazia a linha "Conjunto" exibir "paid".
+    ['Conjunto', lead.adset_name],
     ['Anúncio', lead.ad_name ?? lead.utm_content],
+    ['Meio', lead.utm_medium],
     ['Criativo', lead.creative_name],
     ['UTM source', lead.utm_source],
     ['UTM term', lead.utm_term],

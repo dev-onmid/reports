@@ -12,6 +12,7 @@ import {
 } from '@/lib/lead-tracking';
 import { regiaoFromPhone } from '@/lib/ddd-regioes';
 import { resolverNomesGoogle, pareceIdGoogle } from '@/lib/google-ad-resolver';
+import { resolveMetaAdHierarchy, pareceIdMeta } from '@/lib/meta-ad-resolver';
 
 /**
  * Recebe lead de site/landing page DIRETO, sem intermediário.
@@ -165,17 +166,36 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ token: str
 
     // Pós-processamento best-effort: não derruba o 200 do formulário.
 
-    // O ValueTrack do Google só manda ID ({campaignid}) — não existe macro de
-    // nome, ao contrário do Meta. Traduz aqui para o CRM mostrar "Revenda
-    // Londrina Search" em vez de "22334455". Se a tradução falhar, o ID fica:
-    // rastreio com ID é pior de ler, mas continua sendo rastreio.
+    // ⚠️ Campanha/conjunto/anúncio chegam como ID em DOIS casos, e sem traduzir
+    // o CRM mostra "52604281006064" — rastreio que ninguém consegue ler:
+    //   • Google: o ValueTrack só tem `{campaignid}`, não existe macro de nome;
+    //   • Meta: quando o anúncio usa o parâmetro AUTOMÁTICO em vez do template
+    //     da agência. (O comentário antigo aqui dizia que a Meta sempre manda
+    //     nome — o 1º lead assim chegou em 14/09 e desmentiu.)
+    // Os nomes vão para COLUNAS PRÓPRIAS; os `utm_*` continuam com o que a URL
+    // trouxe de verdade, senão o campo "UTM campaign" da tela passa a mostrar
+    // um nome que nunca esteve no link.
+    const nomes: { campaign?: string | null; adset?: string | null; ad?: string | null } = {};
+
     if (pareceIdGoogle(tracking.utm_campaign) || txt(c.campaignid)) {
-      const nomes = await resolverNomesGoogle(pool, origem.client_id, {
+      const g = await resolverNomesGoogle(pool, origem.client_id, {
         campaignId: txt(c.campaignid) ?? tracking.utm_campaign,
         adgroupId: txt(c.adgroupid),
       });
-      if (nomes?.campaign_name) tracking.utm_campaign = nomes.campaign_name;
-      if (nomes?.adgroup_name && !tracking.utm_term) tracking.utm_term = nomes.adgroup_name;
+      if (g?.campaign_name) nomes.campaign = g.campaign_name;
+      if (g?.adgroup_name) nomes.adset = g.adgroup_name;
+    }
+
+    // No parâmetro automático da Meta o anúncio vem em `utm_content` — e é por
+    // ele que a Graph devolve a hierarquia inteira numa chamada só (com cache).
+    if (pareceIdMeta(tracking.utm_content)) {
+      const m = await resolveMetaAdHierarchy(pool, origem.client_id, tracking.utm_content!)
+        .catch(() => null);
+      if (m) {
+        if (m.campaign_name) nomes.campaign = m.campaign_name;
+        if (m.adset_name) nomes.adset = m.adset_name;
+        if (m.ad_name) nomes.ad = m.ad_name;
+      }
     }
 
     const regiao = regiaoFromPhone(telefoneBruto ?? telefone ?? '');
@@ -187,6 +207,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ token: str
       regiaoFonte: estado || cidade ? 'form' : regiao ? 'ddd' : null,
       city: cidade,
       email,
+      nomes,
       hasClickMatch: false,
     }).catch(err => console.error('[lp] atribuicao', err));
 
