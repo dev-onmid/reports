@@ -1,5 +1,6 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
+import { extrairRespostas } from '@/lib/lead-formulario';
 import { ensureLeadTrackingSchema } from '@/lib/lead-tracking';
 import { parseIsoDateRange } from '@/lib/optimizer-period-range';
 
@@ -52,7 +53,7 @@ export async function GET(req: NextRequest) {
                    AND l.time_interno IS NOT TRUE
                    ${clientClause}`;
 
-    const [leads, porOrigem, porCampanha, porRegiao, porKeyword, porPlacement, totais] = await Promise.all([
+    const [leads, porOrigem, porCampanha, porRegiao, porCidade, porKeyword, porPlacement, respostasBrutas, totais] = await Promise.all([
       pool.query(
         `SELECT l.id, l.client_id, c.name AS client_name, l.nome, l.numero, l.email,
                 l.origin, l.canal, l.status,
@@ -61,7 +62,7 @@ export async function GET(req: NextRequest) {
                 l.keyword, l.matchtype, l.device, l.network, l.placement,
                 (l.ctwa_clid IS NOT NULL AND l.ctwa_clid <> '') AS has_ctwa,
                 (l.gclid IS NOT NULL AND l.gclid <> '') OR (l.wbraid IS NOT NULL AND l.wbraid <> '') AS has_gclid,
-                l.click_code, l.ddd, l.regiao_uf, l.regiao_cidade, l.regiao_fonte,
+                l.click_code, l.ddd, l.regiao_uf, l.regiao_cidade, l.regiao_fonte, l.city,
                 l.first_origin_at, l.created_at
            FROM public.crm_leads l
            LEFT JOIN public.clients c ON c.id = l.client_id
@@ -90,6 +91,15 @@ export async function GET(req: NextRequest) {
           GROUP BY l.regiao_uf ORDER BY count DESC LIMIT 10`,
         params,
       ),
+      // ⚠️ Cidade DECLARADA, nunca a região do DDD: `regiao_cidade` guarda as
+      // duas coisas e é dominada pelo DDD (medido em 13/09: 10.551 de 12.441).
+      // Agrupar tudo junto faria "Bauru / Marília" aparecer como cidade.
+      pool.query<CountRow>(
+        `SELECT l.city AS label, COUNT(*)::int AS count FROM public.crm_leads l
+          WHERE ${where} AND NULLIF(l.city, '') IS NOT NULL
+          GROUP BY l.city ORDER BY count DESC LIMIT 10`,
+        params,
+      ),
       pool.query<CountRow>(
         `SELECT l.keyword AS label, COUNT(*)::int AS count FROM public.crm_leads l
           WHERE ${where} AND NULLIF(l.keyword, '') IS NOT NULL
@@ -102,6 +112,17 @@ export async function GET(req: NextRequest) {
           GROUP BY l.placement ORDER BY count DESC LIMIT 8`,
         params,
       ),
+      // Respostas de formulário do período. O agrupamento por pergunta/resposta
+      // acontece em JS: o raw tem formatos diferentes (Meta `field_data[]`, LP
+      // objeto plano) e a normalização já existe testada em lead-formulario.ts —
+      // reescrevê-la em SQL criaria uma segunda régua para divergir.
+      pool.query<{ raw: unknown }>(
+        `SELECT e.raw FROM public.lead_tracking_events e
+           JOIN public.crm_leads l ON l.id = e.lead_id
+          WHERE ${where} AND e.raw IS NOT NULL AND e.event_type = 'formulario'
+          ORDER BY e.created_at DESC LIMIT 2000`,
+        params,
+      ).catch(() => ({ rows: [] as Array<{ raw: unknown }> })),
       pool.query<{ total: number; com_atribuicao: number; com_regiao: number }>(
         `SELECT COUNT(*)::int AS total,
                 COUNT(*) FILTER (
@@ -118,6 +139,28 @@ export async function GET(req: NextRequest) {
       ),
     ]);
 
+    // pergunta → resposta → quantas vezes. Ordena por pergunta mais respondida
+    // e, dentro dela, pela resposta mais escolhida.
+    const porPergunta = new Map<string, Map<string, number>>();
+    for (const linha of respostasBrutas.rows) {
+      for (const { pergunta, resposta } of extrairRespostas(linha.raw)) {
+        const respostas = porPergunta.get(pergunta) ?? new Map<string, number>();
+        respostas.set(resposta, (respostas.get(resposta) ?? 0) + 1);
+        porPergunta.set(pergunta, respostas);
+      }
+    }
+    const formulario = [...porPergunta.entries()]
+      .map(([pergunta, respostas]) => ({
+        pergunta,
+        total: [...respostas.values()].reduce((s, n) => s + n, 0),
+        respostas: [...respostas.entries()]
+          .map(([resposta, count]) => ({ resposta, count }))
+          .sort((a, b) => b.count - a.count)
+          .slice(0, 8),
+      }))
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 6);
+
     const t = totais.rows[0] ?? { total: 0, com_atribuicao: 0, com_regiao: 0 };
     return Response.json({
       leads: leads.rows,
@@ -131,8 +174,11 @@ export async function GET(req: NextRequest) {
         porOrigem: normalizeCounts(porOrigem.rows, '(desconhecida)'),
         porCampanha: normalizeCounts(porCampanha.rows, '(sem campanha)'),
         porRegiao: normalizeCounts(porRegiao.rows, '(sem região)'),
+        porCidade: normalizeCounts(porCidade.rows, '(sem cidade)'),
         porKeyword: normalizeCounts(porKeyword.rows, '(sem keyword)'),
         porPlacement: normalizeCounts(porPlacement.rows, '(sem posicionamento)'),
+        /** Respostas agregadas; vazio quando nenhum lead do período veio de formulário. */
+        formulario,
       },
     });
   } catch (err) {

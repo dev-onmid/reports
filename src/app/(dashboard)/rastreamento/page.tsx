@@ -102,6 +102,10 @@ type TrackingSummary = {
   porRegiao: CountItem[];
   porKeyword: CountItem[];
   porPlacement: CountItem[];
+  /** Cidade DECLARADA no formulário — separada da região do DDD, de propósito. */
+  porCidade: CountItem[];
+  /** Respostas agregadas por pergunta; vazio quando não houve formulário. */
+  formulario: Array<{ pergunta: string; total: number; respostas: Array<{ resposta: string; count: number }> }>;
 };
 
 type DemoBucket = { label: string; impressions: number; clicks: number; spend: number; leads: number };
@@ -114,6 +118,7 @@ type Demografia = {
 const EMPTY_SUMMARY: TrackingSummary = {
   total: 0, comAtribuicao: 0, comRegiao: 0,
   porOrigem: [], porCampanha: [], porRegiao: [], porKeyword: [], porPlacement: [],
+  porCidade: [], formulario: [],
 };
 
 const ORIGIN_LABELS: Record<string, string> = {
@@ -780,6 +785,12 @@ export default function RastreamentoPage() {
                 title: waSummary.porKeyword.length > 0 ? 'Por palavra-chave' : 'Por posicionamento',
                 items: waSummary.porKeyword.length > 0 ? waSummary.porKeyword : waSummary.porPlacement,
               },
+              // ⚠️ Card próprio, e só com dado: a cidade aqui é a que a PESSOA
+              // escreveu no formulário. "Por região (UF)" ao lado vem quase todo
+              // do DDD — juntar os dois faria estimativa virar endereço.
+              ...(waSummary.porCidade.length > 0
+                ? [{ title: 'Por cidade (informada no formulário)', items: waSummary.porCidade }]
+                : []),
             ].map(({ title, items }) => (
               <div key={title} className="rounded-xl border border-border bg-card p-4">
                 <p className="mb-3 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{title}</p>
@@ -807,6 +818,47 @@ export default function RastreamentoPage() {
                 )}
               </div>
             ))}
+          </div>
+        )}
+
+        {/* Respostas de formulário — o que a pessoa respondeu, agregado.
+            Só aparece quando algum lead do período veio de formulário; cliente
+            que só capta por WhatsApp não vê caixa vazia. */}
+        {!waLoading && waSummary.formulario.length > 0 && (
+          <div className="rounded-[var(--radius)] border border-border bg-card p-5">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+              Respostas de formulário
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              O que os leads responderam nos formulários do período.
+            </p>
+            <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+              {waSummary.formulario.map(bloco => (
+                <div key={bloco.pergunta} className="rounded-xl border border-border bg-background/40 p-4">
+                  <p className="text-xs font-bold text-foreground">{bloco.pergunta}</p>
+                  <p className="mt-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">
+                    {bloco.total} {bloco.total === 1 ? 'resposta' : 'respostas'}
+                  </p>
+                  <div className="mt-3 space-y-1.5">
+                    {bloco.respostas.map((r, i) => {
+                      const max = bloco.respostas[0]?.count || 1;
+                      const cor = BAR_COLORS[i % BAR_COLORS.length];
+                      return (
+                        <div key={r.resposta}>
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="truncate text-xs font-semibold" title={r.resposta}>{r.resposta}</span>
+                            <span className="shrink-0 text-xs font-bold tabular-nums" style={{ color: cor }}>{r.count}</span>
+                          </div>
+                          <div className="mt-0.5 h-1 w-full overflow-hidden rounded-full bg-muted/40">
+                            <div className="h-full rounded-full" style={{ width: `${Math.round((r.count / max) * 100)}%`, background: cor }} />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 

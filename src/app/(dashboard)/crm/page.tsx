@@ -15,7 +15,7 @@ import {
   ChevronLeft, ChevronRight, ChevronDown, SlidersHorizontal,
   AlignJustify, Trash2, Pencil, Sparkles, Clock3, LayoutGrid, List, ArrowUpDown,
   BarChart3, UserRound, MessageCircle, X, Send, GripVertical, Layers, WifiOff, Link2,
-  Globe2, Clapperboard, Info,
+  Globe2, Clapperboard, Info, MapPin, ClipboardList,
 } from 'lucide-react';
 import { ChatView } from './chat-view';
 import { PortalLinkModal } from './portal-link-modal';
@@ -28,6 +28,7 @@ import { ClientAvatar, fetchClientPicture } from '@/components/client-avatar';
 import { DictateButton } from '@/components/ui/dictate-button';
 import { notificar } from '@/components/ui/toast';
 import { cn, formatCurrencyBRL } from '@/lib/utils';
+import { localDoLead, type RespostaFormulario } from '@/lib/lead-formulario';
 import type { Client } from '@/lib/mock-data';
 import type { AttendanceAudit } from '@/lib/crm-attendance-audit';
 import { classificarEtapa, corDaEtapa, ETAPAS_FUNIL, ROTULOS_ETAPA, type EtapaFunil } from '@/lib/funil-etapas';
@@ -63,6 +64,11 @@ type CrmLead = {
   creative_name?: string | null;
   first_origin_at?: string | null;
   instance_id?: string | null;
+  email?: string | null;
+  city?: string | null;
+  regiao_cidade?: string | null;
+  regiao_uf?: string | null;
+  regiao_fonte?: string | null;
   last_contact_at?: string | null;
   whatsapp_last_message_at?: string | null;
   whatsapp_last_message_text?: string | null;
@@ -503,10 +509,58 @@ function compareSortValues(a: string | number | boolean | null, b: string | numb
   return String(a).localeCompare(String(b), 'pt-BR', { numeric: true, sensitivity: 'base' });
 }
 
+/**
+ * Respostas do formulário que o lead preencheu. Busca sob demanda (o modal já
+ * faz o mesmo com a análise da IA) porque o dado mora no histórico de toques,
+ * não numa coluna do lead — carregá-lo na lista seria um JSONB por linha.
+ */
+function RespostasFormulario({ leadId }: { leadId: string }) {
+  type Envio = { canal: string | null; recebidoEm: string | null; respostas: RespostaFormulario[] };
+  const [envios, setEnvios] = useState<Envio[]>([]);
+
+  useEffect(() => {
+    let vivo = true;
+    fetch(`/api/crm/${leadId}/formulario`)
+      .then(r => r.ok ? r.json() as Promise<{ envios: Envio[] }> : null)
+      .then(d => { if (vivo && d?.envios?.length) setEnvios(d.envios); })
+      .catch(() => {});
+    return () => { vivo = false; };
+  }, [leadId]);
+
+  // Sem resposta o bloco NÃO aparece — lead de WhatsApp não preencheu nada, e
+  // uma caixa dizendo "nenhuma resposta" só ocuparia o modal.
+  if (envios.length === 0) return null;
+
+  return (
+    <div className="rounded-lg border border-border bg-background/50 p-3 space-y-3">
+      <div className="flex items-center gap-2">
+        <ClipboardList className="h-3.5 w-3.5 text-primary" />
+        <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Respostas do formulário</p>
+      </div>
+      {envios.map((envio, i) => (
+        <div key={i} className="space-y-1.5">
+          {(envio.canal || envio.recebidoEm) && (
+            <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
+              {[envio.canal, envio.recebidoEm ? fmtD(envio.recebidoEm) : null].filter(Boolean).join(' · ')}
+            </p>
+          )}
+          {envio.respostas.map((r, j) => (
+            <div key={j} className="rounded border border-border/60 bg-card px-2 py-1.5">
+              <span className="block text-[10px] font-bold uppercase tracking-wider text-muted-foreground">{r.pergunta}</span>
+              <span className="mt-0.5 block text-xs font-semibold text-foreground">{r.resposta}</span>
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function TrackingSourcePanel({ lead }: { lead: CrmLead }) {
   const status = leadTrackingStatus(lead);
   const rows = trackingRows(lead);
   const sourceUrl = lead.source_url;
+  const local = localDoLead(lead);
 
   return (
     <div className="rounded-lg border border-border bg-background/50 p-3 space-y-3">
@@ -519,6 +573,16 @@ function TrackingSourcePanel({ lead }: { lead: CrmLead }) {
           {status.label}
         </span>
       </div>
+      {local && (
+        <div className="rounded border border-border/60 bg-card px-2 py-1.5">
+          <span className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+            <MapPin className="h-3 w-3" /> {local.rotulo}
+          </span>
+          <span className="mt-0.5 block text-xs font-semibold text-foreground">{local.texto}</span>
+          {/* ⚠️ A fonte fica visível de propósito: região de DDD não é endereço. */}
+          <span className="mt-0.5 block text-[10px] text-muted-foreground">{local.detalhe}</span>
+        </div>
+      )}
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         {rows.map(([label, value]) => (
           <div key={label} className="rounded border border-border/60 bg-card px-2 py-1.5">
@@ -772,6 +836,7 @@ function QuickEditModal({
             </label>
           </div>
           <TrackingSourcePanel lead={lead} />
+          <RespostasFormulario leadId={lead.id} />
           <ChatPreviewPanel leadId={lead.id} onOpenChat={() => { onOpenChat(lead.id); onClose(); }} />
           <div className="grid grid-cols-2 gap-3">
             <label className="space-y-1">

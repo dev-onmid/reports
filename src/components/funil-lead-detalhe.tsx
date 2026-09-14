@@ -15,6 +15,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { X, ExternalLink, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { localDoLead, type RespostaFormulario } from '@/lib/lead-formulario';
 
 /** O lead como o banco devolve — colunas variam por instalação, então tudo é opcional. */
 type LeadBruto = Record<string, unknown>;
@@ -64,6 +65,7 @@ export function FunilLeadDetalhe({ leadId, clientId, canal, onClose }: {
 }) {
   const [lead, setLead] = useState<LeadBruto | null>(null);
   const [erro, setErro] = useState(false);
+  const [respostas, setRespostas] = useState<RespostaFormulario[]>([]);
 
   useEffect(() => {
     const onEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
@@ -82,10 +84,25 @@ export function FunilLeadDetalhe({ leadId, clientId, canal, onClose }: {
     return () => { vivo = false; };
   }, [leadId]);
 
+  // As respostas moram no histórico de toques, não no lead — busca à parte.
+  useEffect(() => {
+    let vivo = true;
+    fetch(`/api/crm/${leadId}/formulario`)
+      .then(r => r.ok ? r.json() as Promise<{ envios: Array<{ respostas: RespostaFormulario[] }> }> : null)
+      .then(d => { if (vivo && d?.envios?.length) setRespostas(d.envios.flatMap(e => e.respostas)); })
+      .catch(() => {});
+    return () => { vivo = false; };
+  }, [leadId]);
+
   const l = lead ?? {};
   const nome = texto(l.nome) ?? texto(l.numero) ?? 'Lead sem nome';
   const valor = numero(l.revenue) || numero(l.valor_rs);
-  const regiao = [texto(l.regiao_cidade), texto(l.regiao_uf)].filter(Boolean).join(' / ') || null;
+  // Mesma régua do modal do CRM: cidade declarada vence, e região de DDD nunca
+  // é rotulada "Cidade" (ver src/lib/lead-formulario.ts).
+  const local = localDoLead({
+    city: texto(l.city), regiao_cidade: texto(l.regiao_cidade),
+    regiao_uf: texto(l.regiao_uf), regiao_fonte: texto(l.regiao_fonte),
+  });
   const clickId = texto(l.ctwa_clid) ? 'CTWA (anúncio no WhatsApp)'
     : texto(l.gclid) || texto(l.wbraid) || texto(l.gbraid) ? 'gclid (Google Ads)'
     : texto(l.fbclid) ? 'fbclid (Meta)' : null;
@@ -134,9 +151,15 @@ export function FunilLeadDetalhe({ leadId, clientId, canal, onClose }: {
                 <Campo rotulo="Rastreio" valor={clickId} />
                 <Campo rotulo="utm_source" valor={texto(l.utm_source)} />
                 <Campo rotulo="Palavra-chave" valor={texto(l.keyword)} />
-                <Campo rotulo="Região" valor={regiao} />
+                <Campo rotulo={local?.rotulo ?? 'Região'} valor={local ? `${local.texto} (${local.detalhe})` : null} />
                 <Campo rotulo="Como o dado entrou" valor={texto(l.origin)} />
               </Bloco>
+
+              {respostas.length > 0 && (
+                <Bloco titulo="Respostas do formulário">
+                  {respostas.map((r, i) => <Campo key={i} rotulo={r.pergunta} valor={r.resposta} />)}
+                </Bloco>
+              )}
 
               {texto(l.observacao) && (
                 <div className="border-t border-white/[0.06] px-5 py-3">

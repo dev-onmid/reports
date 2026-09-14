@@ -185,6 +185,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ token: str
       regiaoUf: estado ?? regiao?.uf ?? null,
       regiaoCidade: cidade ?? regiao?.regiao ?? null,
       regiaoFonte: estado || cidade ? 'form' : regiao ? 'ddd' : null,
+      city: cidade,
       email,
       hasClickMatch: false,
     }).catch(err => console.error('[lp] atribuicao', err));
