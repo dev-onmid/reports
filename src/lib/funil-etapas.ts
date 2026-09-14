@@ -38,6 +38,22 @@ export const ROTULOS_ETAPA: Record<EtapaFunil, string> = {
 };
 
 /**
+ * Rótulos do DROPDOWN do editor de funil — mais largos que os do funil porque
+ * o grau é UM só pra qualquer negócio: o posto 2 vale pra clínica (agendou),
+ * vendas (mandou proposta) e franquia (marcou reunião); o posto 3 pra reunião
+ * feita/comparecimento. O funil em si continua mostrando o NOME REAL da coluna
+ * do cliente, então isso só ajuda o gestor a mapear a coluna no grau certo.
+ */
+export const ROTULOS_ETAPA_EDITOR: Record<EtapaFunil, string> = {
+  contato: 'Contato / Entrada',
+  qualificado: 'Qualificado',
+  agendamento: 'Agendamento / Proposta',
+  comparecimento: 'Comparecimento / Reunião',
+  fechamento: 'Fechamento / Ganho',
+  perdido: 'Perdido',
+};
+
+/**
  * Cor de cada degrau — é ELA que pinta as colunas do Kanban (decisão do
  * Matheus, 2026-09-12: "cada status com a cor de acordo com o funil").
  *
@@ -111,8 +127,13 @@ export function classificarEtapa(label: string | null | undefined): EtapaFunil {
   // o oposto — agendou e faltou.
   if (/no show|nao compareceu|com falta|faltou/.test(s)) return 'agendamento';
   if (/realizad|compareceu|comparecim|atendid[oa] na avaliacao|show/.test(s)) return 'comparecimento';
-  if (/agendad|agendament|remarcad|remarcac|reagendad|marcad/.test(s)) return 'agendamento';
-  if (/em atendimento|qualificad|qualificac|negocia|proposta|orcament|nao retorna|distante/.test(s)) return 'qualificado';
+  // ⚠️ Posto 2 é o "compromisso criado" — o mesmo andar pra clínica (agendou),
+  // franquia (marcou reunião) e vendas (mandou proposta/orçamento/entrou em
+  // negociação). Antes proposta/orçamento/negociação caíam em QUALIFICADO (posto
+  // 1), no mesmo degrau que "Qualificação" — numa board de vendas os dois
+  // colapsavam num degrau só. Aqui viram um degrau próprio, depois de qualificado.
+  if (/agendad|agendament|remarcad|remarcac|reagendad|marcad|proposta|orcament|orcado|cotacao|negocia/.test(s)) return 'agendamento';
+  if (/em atendimento|qualificad|qualificac|nao retorna|distante/.test(s)) return 'qualificado';
   return 'contato';
 }
 

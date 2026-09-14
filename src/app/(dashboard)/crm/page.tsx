@@ -31,7 +31,7 @@ import { cn, formatCurrencyBRL } from '@/lib/utils';
 import { localDoLead, type RespostaFormulario } from '@/lib/lead-formulario';
 import type { Client } from '@/lib/mock-data';
 import type { AttendanceAudit } from '@/lib/crm-attendance-audit';
-import { classificarEtapa, corDaEtapa, ETAPAS_FUNIL, ROTULOS_ETAPA, type EtapaFunil } from '@/lib/funil-etapas';
+import { classificarEtapa, corDaEtapa, ETAPAS_FUNIL, ROTULOS_ETAPA, ROTULOS_ETAPA_EDITOR, type EtapaFunil } from '@/lib/funil-etapas';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 
 type CrmLead = {
@@ -1780,10 +1780,10 @@ function SortableStageRow({
         value={stage.etapa_funil ?? classificarEtapa(stage.label)}
         onChange={e => onChange({ etapa_funil: e.target.value as EtapaFunil })}
         title="Em qual degrau do Funil de Performance esta coluna entra"
-        className="w-[118px] shrink-0 rounded-md border border-border bg-background px-1.5 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+        className="w-[172px] shrink-0 rounded-md border border-border bg-background px-1.5 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
       >
         {[...ETAPAS_FUNIL, 'perdido' as const].map(e => (
-          <option key={e} value={e}>{ROTULOS_ETAPA[e]}</option>
+          <option key={e} value={e}>{ROTULOS_ETAPA_EDITOR[e]}</option>
         ))}
       </select>
 
