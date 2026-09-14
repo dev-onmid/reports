@@ -106,6 +106,8 @@ type TrackingSummary = {
   porCidade: CountItem[];
   /** Respostas agregadas por pergunta; vazio quando não houve formulário. */
   formulario: Array<{ pergunta: string; total: number; respostas: Array<{ resposta: string; count: number }> }>;
+  /** Perguntas de resposta livre (nome, e-mail) que não entram na contagem. */
+  perguntasLivres: number;
 };
 
 type DemoBucket = { label: string; impressions: number; clicks: number; spend: number; leads: number };
@@ -118,7 +120,7 @@ type Demografia = {
 const EMPTY_SUMMARY: TrackingSummary = {
   total: 0, comAtribuicao: 0, comRegiao: 0,
   porOrigem: [], porCampanha: [], porRegiao: [], porKeyword: [], porPlacement: [],
-  porCidade: [], formulario: [],
+  porCidade: [], formulario: [], perguntasLivres: 0,
 };
 
 const ORIGIN_LABELS: Record<string, string> = {
@@ -831,6 +833,9 @@ export default function RastreamentoPage() {
             </p>
             <p className="mt-1 text-xs text-muted-foreground">
               O que os leads responderam nos formulários do período.
+              {waSummary.perguntasLivres > 0 && (
+                <> {waSummary.perguntasLivres} {waSummary.perguntasLivres === 1 ? 'pergunta de resposta livre fica' : 'perguntas de resposta livre ficam'} só no lead — nome de empresa e e-mail não se repetem, então contá-los não diria nada.</>
+              )}
             </p>
             <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
               {waSummary.formulario.map(bloco => (

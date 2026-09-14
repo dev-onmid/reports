@@ -149,7 +149,7 @@ export async function GET(req: NextRequest) {
         porPergunta.set(pergunta, respostas);
       }
     }
-    const formulario = [...porPergunta.entries()]
+    const agregaveis = [...porPergunta.entries()]
       .map(([pergunta, respostas]) => ({
         pergunta,
         total: [...respostas.values()].reduce((s, n) => s + n, 0),
@@ -157,9 +157,20 @@ export async function GET(req: NextRequest) {
           .map(([resposta, count]) => ({ resposta, count }))
           .sort((a, b) => b.count - a.count)
           .slice(0, 8),
-      }))
+      }));
+
+    // ⚠️ Pergunta de RESPOSTA LIVRE não entra no painel: medido em produção com
+    // dado real (14/09) — "Qual nome da empresa?" deu 13 respostas e 13 nomes
+    // diferentes, e "Email profissional" virou barra de gráfico com e-mail de
+    // pessoa. Contagem onde nada se repete não informa, e expõe dado de contato
+    // num painel de estatística. A régua é objetiva: entra quem tem alguma
+    // resposta repetida. A resposta continua inteira no lead, que é onde ela
+    // serve — o modal não filtra nada.
+    const formulario = agregaveis
+      .filter(b => (b.respostas[0]?.count ?? 0) >= 2)
       .sort((a, b) => b.total - a.total)
       .slice(0, 6);
+    const perguntasLivres = agregaveis.length - formulario.length;
 
     const t = totais.rows[0] ?? { total: 0, com_atribuicao: 0, com_regiao: 0 };
     return Response.json({
@@ -179,6 +190,8 @@ export async function GET(req: NextRequest) {
         porPlacement: normalizeCounts(porPlacement.rows, '(sem posicionamento)'),
         /** Respostas agregadas; vazio quando nenhum lead do período veio de formulário. */
         formulario,
+        /** Quantas perguntas ficaram de fora por serem de resposta livre. */
+        perguntasLivres,
       },
     });
   } catch (err) {
