@@ -3,13 +3,17 @@ import { makeServerPool } from '@/lib/server-db';
 import { canalSql, rotularCanal } from '@/lib/canal-lead';
 import {
   construirMapaEtapas,
+  construirLadder,
+  indiceStageDoLead,
   etapaDoLead,
   leadNaEtapa,
   ROTULOS_ETAPA,
   diaISO,
   type EtapaDeStage,
   type EtapaFunil,
+  type LadderKanban,
   type LeadParaFunil,
+  type StageKanban,
 } from '@/lib/funil-etapas';
 
 /**
@@ -41,7 +45,18 @@ export async function GET(req: NextRequest) {
   const clientIds = (sp.get('clientIds') ?? '')
     .split(',').map(s => s.trim()).filter(Boolean);
 
-  if (!etapa || !ETAPAS_VALIDAS.includes(etapa)) {
+  // Modo ETAPA REAL do Kanban: a dashboard manda `stageIndex` quando o funil está
+  // personalizado pelo CRM (um cliente só). Recomputa a MESMA escada do summary
+  // para o total bater com o degrau clicado.
+  const stageIndexRaw = sp.get('stageIndex');
+  const stageMode = stageIndexRaw !== null;
+  const stageIndex = stageMode ? parseInt(stageIndexRaw, 10) : -1;
+
+  if (stageMode) {
+    if (!Number.isInteger(stageIndex) || stageIndex < 0 || clientIds.length !== 1) {
+      return Response.json({ error: 'stageIndex exige exatamente um cliente' }, { status: 400 });
+    }
+  } else if (!etapa || !ETAPAS_VALIDAS.includes(etapa)) {
     return Response.json({ error: 'etapa inválida' }, { status: 400 });
   }
 
@@ -100,18 +115,20 @@ export async function GET(req: NextRequest) {
     // Mapa de etapas POR CLIENTE — o mesmo status pode significar coisas
     // diferentes em funis diferentes, então não dá pra ter um mapa global.
     const stagesPorCliente = new Map<string, EtapaDeStage[]>();
+    const kanbanPorCliente = new Map<string, StageKanban[]>();
     try {
       const { rows: stageRows } = await pool.query(
-        `SELECT client_id, funnel_id, label, etapa_funil FROM public.crm_stages`,
+        `SELECT client_id, funnel_id, label, etapa_funil, position FROM public.crm_stages`,
       );
       for (const s of stageRows) {
         const cid = String(s.client_id);
+        const funnelId = String(s.funnel_id);
+        const label = String(s.label ?? '');
+        const etapa = (s.etapa_funil ?? null) as EtapaFunil | null;
         if (!stagesPorCliente.has(cid)) stagesPorCliente.set(cid, []);
-        stagesPorCliente.get(cid)!.push({
-          funnelId: String(s.funnel_id),
-          label: String(s.label ?? ''),
-          etapa: (s.etapa_funil ?? null) as EtapaFunil | null,
-        });
+        stagesPorCliente.get(cid)!.push({ funnelId, label, etapa });
+        if (!kanbanPorCliente.has(cid)) kanbanPorCliente.set(cid, []);
+        kanbanPorCliente.get(cid)!.push({ funnelId, label, etapa, position: Number(s.position) || 0 });
       }
     } catch {
       // sem crm_stages → auto-classificação pelo texto do status (igual ao summary)
@@ -126,6 +143,26 @@ export async function GET(req: NextRequest) {
       }
       return m;
     };
+
+    // Modo etapa real: escada do único cliente, montada com os MESMOS leads que
+    // acabaram de vir (para o funil dominante casar com o do summary).
+    let ladder: LadderKanban | null = null;
+    if (stageMode) {
+      const soloId = clientIds[0];
+      const leadsDoSolo: LeadParaFunil[] = rows
+        .filter(r => String(r.client_id) === soloId)
+        .map(r => ({
+          status: r.status ?? null,
+          funnelId: r.funnel_id ? String(r.funnel_id) : null,
+          agendou: r.agendou === true,
+          dataAgendada: r.data_agendada ? String(r.data_agendada) : null,
+          dataLead: r.data_lead ? String(r.data_lead) : null,
+          compareceu: r.compareceu === true,
+          fechou: r.fechou === true,
+          receita: Number(r.valor_rs) || 0,
+        }));
+      ladder = construirLadder(kanbanPorCliente.get(soloId) ?? [], leadsDoSolo);
+    }
 
     const selecionados: Array<Record<string, unknown>> = [];
     for (const row of rows) {
@@ -142,8 +179,21 @@ export async function GET(req: NextRequest) {
         fechou: row.fechou === true,
         receita: Number(row.valor_rs) || 0,
       };
-      const posto = etapaDoLead(lead, mapaDe(clientId));
-      if (!leadNaEtapa(posto, etapa, modo)) continue;
+      let etapaAtual: string;
+      let perdidoLead: boolean;
+      if (stageMode && ladder) {
+        const s = indiceStageDoLead(lead, ladder);
+        // alcancou = chegou nesta etapa ou além; atual = parado exatamente nela.
+        const bate = modo === 'atual' ? s.idx === stageIndex : s.idx >= stageIndex;
+        if (!bate) continue;
+        etapaAtual = ladder.degraus[s.idx]?.label ?? '';
+        perdidoLead = s.perdido;
+      } else {
+        const posto = etapaDoLead(lead, mapaDe(clientId));
+        if (!leadNaEtapa(posto, etapa as EtapaFunil, modo)) continue;
+        etapaAtual = etapaRotuloDoPosto(posto.posto);
+        perdidoLead = posto.perdido;
+      }
 
       selecionados.push({
         id: String(row.id),
@@ -152,9 +202,9 @@ export async function GET(req: NextRequest) {
         nome: row.nome ?? null,
         numero: row.numero ?? null,
         status: row.status ?? null,
-        /** Etapa semântica que o lead ALCANÇOU (pode ser mais avançada que a clicada). */
-        etapaAtual: etapaRotuloDoPosto(posto.posto),
-        perdido: posto.perdido,
+        /** Etapa (real do Kanban no stageMode, senão semântica) que o lead ALCANÇOU. */
+        etapaAtual,
+        perdido: perdidoLead,
         valor: Number(row.valor_rs) || 0,
         data: row.data_lead ? String(row.data_lead).split('T')[0] : null,
         /** Canal de origem — `null` quando o CRM não registrou de onde veio. */
@@ -165,7 +215,8 @@ export async function GET(req: NextRequest) {
     }
 
     return Response.json({
-      etapa,
+      etapa: stageMode ? null : etapa,
+      stageIndex: stageMode ? stageIndex : null,
       modo,
       /** Total que casou o filtro — o modal usa pra dizer "mostrando N de M". */
       total: selecionados.length,

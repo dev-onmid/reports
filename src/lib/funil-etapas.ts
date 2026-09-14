@@ -468,3 +468,255 @@ export const ETAPAS_PADRAO: { label: string; color: string; position: number; et
   { label: 'Sem Interesse',  color: '#ef4444', position: 7, etapa: 'perdido' },
   { label: 'Desqualificado', color: '#dc2626', position: 8, etapa: 'perdido' },
 ];
+
+// ------------------------------------------- Funil pelas etapas reais do Kanban
+//
+// Pedido do Matheus (2026-09-14): o Funil de Performance tem que mostrar os
+// NOMES e a QUANTIDADE de etapas do Kanban do PRÓPRIO cliente, não os 5 degraus
+// semânticos genéricos. Cor e nº de quadrantes seguem o CRM.
+//
+// ⚠️ Isso NÃO substitui `contarFunil` (semântico): a versão por etapa real só
+// faz sentido com UM cliente selecionado — Kanbans de clientes diferentes têm
+// etapas diferentes e não se somam. Com vários clientes a dashboard continua no
+// funil semântico. As DUAS contagens convivem, calculadas da mesma régua de
+// posto para nunca divergirem entre si.
+
+/** Etapa real do Kanban, com posição e a etapa semântica (explícita ou nula). */
+export type StageKanban = {
+  funnelId: string;
+  label: string;
+  position: number;
+  /** etapa_funil explícita; null cai na auto-classificação pelo rótulo. */
+  etapa: EtapaFunil | null;
+};
+
+/** Um degrau do funil real, já com cor do degrau e contagem cumulativa. */
+export type DegrauKanban = {
+  label: string;
+  /** Cor do DEGRAU (corDaEtapa) — a mesma que pinta a coluna no Kanban. */
+  color: string;
+  etapa: EtapaFunil;
+  /** Posição na escada (0..N-1) — não é a `position` crua do banco. */
+  index: number;
+  /** Quem CHEGOU nesta etapa (cumulativo, igual ao card semântico). */
+  alcancaram: number;
+  /** Quem está PARADO exatamente aqui. */
+  atuais: number;
+};
+
+/**
+ * Escada do funil real de um cliente: as etapas não-perdido do funil dominante,
+ * na ordem, mais os índices auxiliares que `indiceStageDoLead` usa.
+ */
+export type LadderKanban = {
+  /** Funil escolhido (o com mais leads). '' quando o cliente não tem etapas. */
+  funnelId: string;
+  /** UM degrau por ETAPA presente (colunas irmãs colapsadas), em ordem de funil. Vazio → sem funil real. */
+  degraus: Array<{ label: string; color: string; etapa: EtapaFunil; index: number }>;
+  /** Semântica por rótulo do funil escolhido (inclui os perdido, p/ detecção). */
+  mapa: MapaEtapas;
+  /** normalizado(label) → index do degrau da sua ETAPA (toda coluna da etapa aponta pro mesmo). */
+  idxPorLabel: Map<string, number>;
+  /** Etapa semântica → index do seu (único) degrau colapsado (bump dos booleanos e do órfão). */
+  idxPorEtapa: Map<EtapaFunil, number>;
+};
+
+/**
+ * Escolhe o funil que representa o cliente: o que concentra MAIS leads. Cliente
+ * com um funil só (o caso comum) cai nele direto; quem tem vários (ex.: um
+ * espelho de importação antigo ao lado do principal) fica com o que a operação
+ * de fato usa. Empate → mais etapas → primeiro na ordem de chegada.
+ *
+ * Sem `funnel_id` em lead nenhum (base legada), decide pelo funil com mais
+ * etapas não-perdido — é o que tem cara de Kanban de verdade.
+ */
+function escolherFunilDominante(stages: StageKanban[], leads: LeadParaFunil[]): string {
+  const porFunil = new Map<string, StageKanban[]>();
+  for (const s of stages) {
+    if (!porFunil.has(s.funnelId)) porFunil.set(s.funnelId, []);
+    porFunil.get(s.funnelId)!.push(s);
+  }
+  if (porFunil.size === 0) return '';
+  if (porFunil.size === 1) return [...porFunil.keys()][0];
+
+  const leadsPorFunil = new Map<string, number>();
+  for (const l of leads) {
+    // Registro de venda (ledger) não é lead do funil — não pode inclinar a
+    // escolha do funil dominante (senão summary e drill-down escolheriam funis
+    // diferentes: um enxerga as vendas, o outro não).
+    if (l.tipo === 'venda' || !l.funnelId) continue;
+    leadsPorFunil.set(l.funnelId, (leadsPorFunil.get(l.funnelId) ?? 0) + 1);
+  }
+  const degrausDe = (fid: string) =>
+    (porFunil.get(fid) ?? []).filter(s => (s.etapa ?? classificarEtapa(s.label)) !== 'perdido').length;
+
+  let escolhido = '';
+  let melhor = -1;
+  // Ordem de chegada como desempate final — determinístico.
+  for (const fid of porFunil.keys()) {
+    const leadsF = leadsPorFunil.get(fid) ?? 0;
+    // Peso: leads dominam; nº de degraus só desempata (cabe em <1000 etapas).
+    const score = leadsF * 1000 + degrausDe(fid);
+    if (score > melhor) { melhor = score; escolhido = fid; }
+  }
+  return escolhido;
+}
+
+/** Monta a escada (degraus não-perdido) do funil dominante do cliente. */
+export function construirLadder(stages: StageKanban[], leads: LeadParaFunil[]): LadderKanban {
+  const funnelId = escolherFunilDominante(stages, leads);
+  const doFunil = stages.filter(s => s.funnelId === funnelId);
+  const mapa = construirMapaEtapas(
+    doFunil.map(s => ({ funnelId: s.funnelId, label: s.label, etapa: s.etapa })),
+  );
+
+  // Ordena por PROFUNDIDADE de funil (posto da etapa), com a posição no board
+  // como desempate DENTRO do mesmo degrau semântico. A posição crua do Kanban
+  // não é ordem de funil: em board real (CondoStore/SULTS) o "Contrato"
+  // (fechamento) fica na 3ª coluna e a cadência de entrada "Abordagem D1..D7"
+  // (contato) fica no fim — ordenar por posição jogaria o ganho pro meio da
+  // escada e a entrada pro rodapé. Pelo posto, a escada sai na ordem certa e o
+  // funil fica MONOTÔNICO (cada lead ocupa um degrau bem definido).
+  const etapaDe = (s: StageKanban): EtapaFunil => s.etapa ?? classificarEtapa(s.label);
+  const ordenadas = [...doFunil].sort((a, b) => {
+    const pa = postoDaEtapa(etapaDe(a));
+    const pb = postoDaEtapa(etapaDe(b));
+    return pa !== pb ? pa - pb : a.position - b.position;
+  });
+  // COLAPSA por etapa (posto): um degrau por ETAPA presente, não um por coluna.
+  // Colunas irmãs do mesmo degrau — as "Abordagem D1..D7" (todas contato), ou
+  // "Lead Frio/Morno/Quente" (todas comparecimento) — são a MESMA fase do funil:
+  // "tentar contato" é lead de entrada, não sete etapas. Mostrá-las como N
+  // degraus infla a escada sem informar. Cada etapa vira UM degrau, rotulado pela
+  // 1ª coluna daquela etapa (a porta de entrada da fase, pela ordem já aplicada),
+  // e TODA coluna da etapa aponta pra esse degrau (idxPorLabel), então lead que
+  // está em "Abordagem D3" cai no degrau de contato.
+  const degraus: LadderKanban['degraus'] = [];
+  const idxPorLabel = new Map<string, number>();
+  const idxPorEtapa = new Map<EtapaFunil, number>();
+  for (const s of ordenadas) {
+    const etapa = etapaDe(s);
+    if (etapa === 'perdido') continue; // perdido é contagem paralela, não degrau
+    let index = idxPorEtapa.get(etapa);
+    if (index === undefined) {
+      index = degraus.length;
+      degraus.push({ label: s.label, color: corDaEtapa(etapa, s.label), etapa, index });
+      idxPorEtapa.set(etapa, index);
+    }
+    const chave = normalizarEtiqueta(s.label);
+    if (chave && !idxPorLabel.has(chave)) idxPorLabel.set(chave, index);
+  }
+  return { funnelId, degraus, mapa, idxPorLabel, idxPorEtapa };
+}
+
+/** Maior índice do ladder cuja etapa não passa do posto de `alvo`. -1 se nenhum. */
+function maiorIndiceAteOPosto(ladder: LadderKanban, alvo: EtapaFunil): number {
+  const p = postoDaEtapa(alvo);
+  let best = -1;
+  for (const d of ladder.degraus) if (postoDaEtapa(d.etapa) <= p) best = Math.max(best, d.index);
+  return best;
+}
+
+/**
+ * Índice (0..N-1) do degrau real que o lead ALCANÇOU, na escada do cliente.
+ *
+ * Mesma régua de `etapaDoLead`, só que projetada nas etapas reais:
+ *  1. status casa um degrau pelo rótulo → é ele;
+ *  2. status órfão/planilha → classifica e cai no degrau daquela etapa (ou no
+ *     degrau imediatamente abaixo, se o funil não tiver essa etapa);
+ *  3. os booleanos (fechou/compareceu/agendou) só AVANÇAM, projetados no degrau
+ *     da etapa correspondente — export desatualizado nunca regride.
+ *
+ * `perdido` é paralelo (igual ao semântico): quem perdeu segue contando nas
+ * etapas que alcançou.
+ */
+export function indiceStageDoLead(lead: LeadParaFunil, ladder: LadderKanban): { idx: number; perdido: boolean } {
+  if (ladder.degraus.length === 0) return { idx: 0, perdido: false };
+  // Degrau que representa uma etapa semântica: o MAIOR índice com aquela etapa,
+  // ou — se o funil não tiver essa etapa — o maior degrau até aquele posto.
+  const indiceDe = (e: EtapaFunil): number => {
+    const exato = ladder.idxPorEtapa.get(e);
+    return exato !== undefined ? exato : maiorIndiceAteOPosto(ladder, e);
+  };
+
+  const label = normalizarEtiqueta(lead.status);
+  let idxBase: number;
+  let perdido = false;
+  if (ladder.idxPorLabel.has(label)) {
+    idxBase = ladder.idxPorLabel.get(label)!; // degrau exato (nunca perdido)
+  } else {
+    const etapaC = ladder.mapa.porLabel.get(label) ?? classificarEtapa(lead.status);
+    if (etapaC === 'perdido') { perdido = true; idxBase = -1; }
+    else idxBase = indiceDe(etapaC);
+  }
+
+  let idx = idxBase;
+  if (lead.fechou) idx = Math.max(idx, indiceDe('fechamento'));
+  else if (lead.compareceu) idx = Math.max(idx, indiceDe('comparecimento'));
+  else if (lead.agendou || diaDoAgendamento(lead) !== null) idx = Math.max(idx, indiceDe('agendamento'));
+
+  return { idx: Math.max(0, idx), perdido };
+}
+
+export type FunilPorStage = {
+  /** Degraus em ordem de funil (posto do Kanban), com cumulativo e ocupação. */
+  degraus: DegrauKanban[];
+  /** Contagem paralela dos perdidos (igual ao semântico). */
+  perdidos: number;
+};
+
+/** Piso de reconhecimento p/ o funil real valer; abaixo dele, cai no semântico. */
+export const PISO_STATUS_RECONHECIDO = 0.5;
+
+/**
+ * Fração de leads (não-venda) cujo status casa EXATAMENTE um degrau real do
+ * Kanban. É o que separa um cliente cujo CRM é de fato TOCADO pelo Kanban
+ * (SULTS/nativo — o status do lead é o nome da coluna, fração ~1) de um cliente
+ * de planilha (clínicas), cujos status importados ("Não Contactado", "Avaliação
+ * Realizada", vazio) não batem com as colunas-semente e teriam de ser empurrados
+ * pro degrau mais próximo — mislabelando o funil inteiro. Medido em produção:
+ * CondoStore/Londrigifts ~1, Sorrifácil ingleses ~0,15.
+ */
+export function fracaoStatusReconhecido(ladder: LadderKanban, leads: LeadParaFunil[]): number {
+  let total = 0;
+  let casaram = 0;
+  for (const l of leads) {
+    if (l.tipo === 'venda') continue; // ledger não é lead do funil
+    total++;
+    if (ladder.idxPorLabel.has(normalizarEtiqueta(l.status))) casaram++;
+  }
+  return total === 0 ? 0 : casaram / total;
+}
+
+/**
+ * Conta o funil pelas ETAPAS REAIS do Kanban do cliente (cumulativo).
+ *
+ * `degraus` vazio = cliente sem etapas cadastradas → o chamador cai no funil
+ * semântico. Registro de VENDA (ledger) não é contato do funil, igual ao
+ * `contarFunil`. A receita NÃO é recalculada aqui: continua vindo do funil
+ * semântico, então os dois nunca divergem no faturamento.
+ */
+export function contarFunilPorStage(stages: StageKanban[], leads: LeadParaFunil[]): FunilPorStage {
+  const ladder = construirLadder(stages, leads);
+  const degraus: DegrauKanban[] = ladder.degraus.map(d => ({ ...d, alcancaram: 0, atuais: 0 }));
+  if (degraus.length === 0) return { degraus: [], perdidos: 0 };
+
+  // ⚠️ O funil REAL só vale quando o Kanban de fato representa os leads. Cliente
+  // de planilha tem status que não casam as colunas-semente; forçar o funil real
+  // ali empilharia os leads no degrau mais próximo e o rótulo mentiria. Abaixo do
+  // piso, devolve vazio → o chamador (summary) cai no funil semântico, que
+  // normaliza esses status importados. SULTS/nativo passa folgado (~1).
+  if (fracaoStatusReconhecido(ladder, leads) < PISO_STATUS_RECONHECIDO) {
+    return { degraus: [], perdidos: 0 };
+  }
+
+  let perdidos = 0;
+  for (const lead of leads) {
+    if (lead.tipo === 'venda') continue;
+    const { idx, perdido } = indiceStageDoLead(lead, ladder);
+    if (perdido) perdidos++;
+    for (let k = 0; k <= idx && k < degraus.length; k++) degraus[k].alcancaram++;
+    if (idx < degraus.length) degraus[idx].atuais++;
+  }
+  return { degraus, perdidos };
+}
