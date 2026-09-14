@@ -271,16 +271,9 @@ export default function SultsCard({ clientId }: { clientId: string }) {
 
   useEffect(() => { void carregar(); }, [carregar]);
 
-  // O catálogo guardado desenha os menus imediatamente. Só quando não existe é
-  // que vale gastar as requisições à API do cliente — e uma vez só.
-  useEffect(() => {
-    if (!cfg?.conectado) return;
-    if (cfg.catalogo) { setCat(cfg.catalogo); return; }
-    if (cat || ocupado) return;
-    void buscarCatalogo();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cfg?.conectado, cfg?.catalogo]);
-
+  // ⚠️ Declarado ANTES do efeito que o chama. Funcionava com a ordem invertida
+  // porque o efeito só roda depois da renderização, mas é o tipo de coisa que
+  // deixa de funcionar quando alguém move a chamada para o corpo do componente.
   const buscarCatalogo = useCallback(async () => {
     setOcupado(true); setMsg('Lendo o funil do cliente…');
     try {
@@ -290,6 +283,16 @@ export default function SultsCard({ clientId }: { clientId: string }) {
     } catch { setMsg('Falha ao ler o catálogo.'); }
     setOcupado(false);
   }, [clientId]);
+
+  // O catálogo guardado desenha os menus imediatamente. Só quando não existe é
+  // que vale gastar as requisições à API do cliente — e uma vez só.
+  useEffect(() => {
+    if (!cfg?.conectado) return;
+    if (cfg.catalogo) { setCat(cfg.catalogo); return; }
+    if (cat || ocupado) return;
+    void buscarCatalogo();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cfg?.conectado, cfg?.catalogo]);
 
   const conectar = async () => {
     setOcupado(true); setMsg('');
