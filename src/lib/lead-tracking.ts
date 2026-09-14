@@ -147,7 +147,8 @@ export async function ensureLeadTrackingSchema(pool: Pool) {
        ADD COLUMN IF NOT EXISTS utm_campaign TEXT,
        ADD COLUMN IF NOT EXISTS utm_content TEXT,
        ADD COLUMN IF NOT EXISTS utm_term TEXT,
-       ADD COLUMN IF NOT EXISTS source_url TEXT`,
+       ADD COLUMN IF NOT EXISTS source_url TEXT,
+       ADD COLUMN IF NOT EXISTS city TEXT`,
     // Histórico imutável de toques de atribuição (1 linha por toque, nunca sobrescreve).
     // Some apenas quando o lead é deletado (FK ON DELETE CASCADE, adicionada abaixo).
     `CREATE TABLE IF NOT EXISTS public.lead_tracking_events (
@@ -335,6 +336,14 @@ export type LeadAttributionInput = {
   regiaoCidade?: string | null;
   /** ip (geo do clique) | ddd (telefone) | form (respondido no formulário) */
   regiaoFonte?: 'ip' | 'ddd' | 'form' | null;
+  /**
+   * Cidade DECLARADA pela pessoa (formulário). ⚠️ Coluna separada de
+   * `regiao_cidade` de propósito: aquela guarda também a REGIÃO do DDD
+   * ("Bauru / Marília"), que domina a base (medido em 13/09: 10.551 de 12.441).
+   * Misturar as duas faria a tela chamar de Cidade um endereço que ninguém
+   * informou.
+   */
+  city?: string | null;
   email?: string | null;
   hasClickMatch: boolean;
 };
@@ -372,6 +381,7 @@ export async function applyLeadAttribution(pool: Pool, leadId: string, attr: Lea
             utm_content  = COALESCE(NULLIF(utm_content, ''), NULLIF($22, '')),
             utm_term     = COALESCE(NULLIF(utm_term, ''), NULLIF($23, '')),
             source_url   = COALESCE(NULLIF(source_url, ''), NULLIF($24, '')),
+            city         = COALESCE(NULLIF(city, ''), NULLIF($25, '')),
             first_origin_at = COALESCE(first_origin_at, CASE WHEN $17 THEN NOW() ELSE NULL END),
             updated_at   = NOW()
       WHERE id = $1`,
@@ -400,6 +410,7 @@ export async function applyLeadAttribution(pool: Pool, leadId: string, attr: Lea
       t.utm_content ?? null,
       t.utm_term ?? null,
       t.source_url ?? null,
+      attr.city ?? null,
     ],
   ).catch(err => console.error('[lead-tracking applyLeadAttribution]', err?.message ?? err));
 }

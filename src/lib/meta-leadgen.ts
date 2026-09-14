@@ -286,6 +286,8 @@ export async function processLeadgenEvent(
     regiaoUf: regiao?.uf ?? null,
     regiaoCidade: regiao?.cidade ?? null,
     regiaoFonte: regiao?.fonte ?? null,
+    // Cidade declarada no formulário — coluna própria, longe da região do DDD.
+    city: fields.cidade,
     email: fields.email,
     hasClickMatch: false,
   });
