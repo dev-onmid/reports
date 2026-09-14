@@ -1,6 +1,6 @@
 "use client";
 
-import { type ElementType, useEffect, useState } from 'react';
+import { type ElementType, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
   ArrowRight, TrendingUp, Users, Target, RefreshCw,
@@ -174,6 +174,17 @@ function MetricCell({ value, pct, format = 'currency', loading = false }: {
   );
 }
 
+/** Primeiro e último dia do mês corrente no fuso de quem está olhando. */
+function janelaDoMes() {
+  const hoje = new Date();
+  const iso = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return {
+    from: iso(new Date(hoje.getFullYear(), hoje.getMonth(), 1)),
+    to: iso(new Date(hoje.getFullYear(), hoje.getMonth() + 1, 0)),
+  };
+}
+
 const FUNNEL_KEYS: (keyof ClientFunnel)[] = ['contatos', 'qualificados', 'agendamentos', 'comparecimentos', 'fechamentos'];
 const FUNNEL_LABELS = ['Cont.', 'Qualif.', 'Agend.', 'Comp.', 'Fecha.'];
 const FUNNEL_ICONS = [Eye, Users2, Calendar, ShoppingBag, CheckCircle2];
@@ -250,12 +261,19 @@ export default function ResultadosPage() {
   // etapa semântica) — antes esta coluna vinha de mocks hardcoded em
   // client-results-store e ficava zerada pra todo cliente real.
   const [funilByClient, setFunilByClient] = useState<Record<string, ClientFunnel>>({});
+  // Constante durante a sessão: recalcular a cada render refaria o fetch sem motivo.
+  const mesAtual = useMemo(() => janelaDoMes(), []);
   // Snapshot do Monitor de Redes Sociais — é dele que sai o resultado das metas
   // de rede social. ⚠️ Uma query só; resolver 40 contas ao vivo na Graph custaria
   // dezenas de chamadas por abertura da tela.
   const [socialByClient, setSocialByClient] = useState<Record<string, { ganho: number | null; alcance: number | null }>>({});
   useEffect(() => {
-    fetch('/api/crm/summary')
+    // ⚠️ O funil PRECISA da mesma janela do resto da linha. Sem `from`/`to` a
+    // rota devolve a base HISTÓRICA inteira: a Incorpast mostrava 1.764 contatos
+    // ao lado de 362 leads do mês — dois períodos diferentes na mesma linha,
+    // parecendo erro de cálculo. Mês corrente no fuso do usuário, que é o mesmo
+    // recorte de `period=this_month` das métricas.
+    fetch(`/api/crm/summary?from=${mesAtual.from}&to=${mesAtual.to}`)
       .then(r => r.ok ? r.json() as Promise<{ clientId: string; funil: ClientFunnel }[]> : [])
       .then(data => {
         const map: Record<string, ClientFunnel> = {};
@@ -272,7 +290,7 @@ export default function ResultadosPage() {
         setSocialByClient(map);
       })
       .catch(() => setSocialByClient({}));
-  }, []);
+  }, [mesAtual.from, mesAtual.to]);
   const [goalsByClient, setGoalsByClient] = useState<Record<string, GoalConfig | null>>({});
   const [planningByClient, setPlanningByClient] = useState<Record<string, ClientPlanningConfig>>({});
   const [loadingMetrics, setLoadingMetrics] = useState(false);
@@ -330,7 +348,11 @@ export default function ResultadosPage() {
     setLoadingMetrics(true);
     Promise.allSettled(
       clients.map(async (c) => {
-        const res = await fetch(`/api/clients/${c.id}/metrics`);
+        // ⚠️ `this_month`, não o default `last_30d` da rota: a meta desta tela é
+        // MENSAL, e comparar "meta de setembro" com "últimos 30 dias" mistura
+        // o mês passado no resultado — no dia 14 a janela começava em 15/08.
+        // É a mesma janela padrão da Dashboard, de propósito.
+        const res = await fetch(`/api/clients/${c.id}/metrics?period=this_month`);
         const data: ApiMetrics = res.ok ? await res.json() : { meta: null, google: null, crm: null };
         return [c.id, data] as const;
       })
@@ -351,16 +373,40 @@ export default function ResultadosPage() {
     const plannedFunil = funnelArrayToObject(plannedFunnelFromGoal(goal, planning.stages, planning.tkm));
     const hasPlannedFunil = FUNNEL_KEYS.some((key) => plannedFunil[key] > 0);
 
+    // ⚠️ Pagamento ≠ investimento em anúncio. Esta soma é de TODO o histórico de
+    // Pix da tela de Pagamentos (sem janela de data), então ficava ao lado de um
+    // CPL de 30 dias sem nenhuma relação com ele: Meta Pizzaria mostrava
+    // R$ 5.750,00 tendo gasto R$ 457,64. Continua na tela, mas como o que é —
+    // "enviado ao cliente" — e nunca mais como o investimento que gera o CPL.
     const clientPayments = payments.filter((p) => p.clientId === client.id);
-    const totalInvest = clientPayments.reduce((s, p) => s + p.amount, 0);
     const dispatchedInvest = clientPayments
       .filter((p) => p.status === 'Pago' || p.status === 'Enviado')
       .reduce((s, p) => s + p.amount, 0);
 
-    // Metrics: prefer real API, fallback to hardcoded
-    const leads = api?.meta?.leads ?? hardcoded?.leads ?? 0;
-    const cpl = api?.meta?.cpl ?? hardcoded?.cpl ?? 0;
-    const cac = api?.google?.cpa ?? hardcoded?.cac ?? 0;
+    // ── Métricas: MESMA régua da Dashboard (dashboard/page.tsx) ─────────────
+    // ⚠️ Antes cada número vinha de uma plataforma diferente na MESMA linha:
+    // `leads` só do Meta, `cac` só do Google, e `investimento` era a soma dos
+    // PAGAMENTOS cadastrados. Medido em 14/09: a Londrigifts aparecia com 0
+    // leads tendo 403 conversões no Google, e a Incorpast com "R$ 0,00
+    // investido" ao lado de um CPL de R$ 4,73 — tendo gasto R$ 5.692,05 em
+    // anúncio. Números que não se explicam entre si na própria linha.
+    const gastoMeta   = api?.meta?.spend ?? 0;
+    const gastoGoogle = api?.google?.cost ?? 0;
+    const gastoAnuncio = gastoMeta + gastoGoogle;
+
+    // Conversão do Google conta como lead — é o que a Dashboard soma, e cliente
+    // que só roda Google apareceria zerado de outro jeito.
+    const leadsApi = api ? (api.meta?.leads ?? 0) + (api.google?.conversions ?? 0) : null;
+    const leads = leadsApi ?? hardcoded?.leads ?? 0;
+    const cpl = leads > 0 && gastoAnuncio > 0 ? gastoAnuncio / leads : (api ? 0 : hardcoded?.cpl ?? 0);
+
+    // ⚠️ CAC é gasto ÷ VENDA FECHADA, que é o que o próprio cabeçalho promete.
+    // Vinha do `cpa` do Google (custo ÷ conversão do Google), então dizia
+    // R$ 42,77 para um cliente com 11 vendas reais e R$ 5.692 gastos — CAC de
+    // R$ 517. Sem venda no período fica 0 e a célula mostra "—": inventar um
+    // CAC sem denominador seria pior que não ter.
+    const vendas = api?.crm?.sales ?? 0;
+    const cac = vendas > 0 && gastoAnuncio > 0 ? gastoAnuncio / vendas : (api ? 0 : hardcoded?.cac ?? 0);
     const resultado = api?.crm?.revenue ?? hardcoded?.resultado ?? 0;
 
     // ── Meta de REDES SOCIAIS ──────────────────────────────────────────────
@@ -420,13 +466,13 @@ export default function ResultadosPage() {
       funil, metaFunil: metaFunilFinal, funnelPcts,
       ehSocial, alcance, pctAlcance,
       metaAlcance: semMetaDeclarada ? 0 : metaAlcance,
-      totalInvest, dispatchedInvest,
+      totalInvest: gastoAnuncio, dispatchedInvest, gastoMeta, gastoGoogle,
       pctResult, pctLeads, pctCpl, pctCac,
       gestor: hardcoded?.gestor ?? '',
       // Campos planos que `radar-tabela` consome (ordenar/filtrar).
       nome: client.name,
       categoria: client.segment ?? '',
-      investimento: totalInvest,
+      investimento: gastoAnuncio,
       fechamentos: funil.fechamentos,
       pctFechamentos: funnelPcts[FUNNEL_KEYS.length - 1] ?? null,
     };
@@ -455,6 +501,8 @@ export default function ResultadosPage() {
   const totMeta   = emReais.reduce((s, r) => s + r.metaTarget, 0);
   const totResult = emReais.reduce((s, r) => s + r.resultado, 0);
   const totLeads  = comMeta.reduce((s, r) => s + r.leads, 0);
+  // Agora soma GASTO de anúncio do mês — antes somava todo o histórico de Pix,
+  // o que dava R$ 834 mil ao lado de um CPL de 30 dias.
   const totInvest = comMeta.reduce((s, r) => s + r.totalInvest, 0);
   const overallPct = calcPct(totResult, totMeta);
   const overC = pctColors(overallPct);
@@ -468,7 +516,7 @@ export default function ResultadosPage() {
         <div>
           <h1 className="font-heading font-normal text-xl uppercase leading-none tracking-wide text-foreground">Radar Geral</h1>
           <p className="mt-4 text-lg font-medium text-muted-foreground">
-            Métricas reais das contas vinculadas — leads e CPL do Meta Ads, CAC do Google Ads.
+            Métricas reais das contas vinculadas no mês atual — leads, gasto e CPL somando Meta Ads e Google Ads.
           </p>
         </div>
         <div
@@ -615,11 +663,11 @@ export default function ResultadosPage() {
                   { label: 'META', info: '', sort: 'meta' as ColunaRadar },
                   { label: 'RESULTADO', info: '', sort: 'resultado' as ColunaRadar },
                   { label: '%', info: '', sort: 'pct' as ColunaRadar },
-                  { label: 'LEADS', info: '', sort: 'leads' as ColunaRadar },
-                  { label: 'CPL', info: 'CPL — custo por lead no período: investimento ÷ leads. Menor = melhor.', sort: 'cpl' as ColunaRadar, padrao: 'asc' as DirecaoOrdem },
-                  { label: 'CAC', info: 'CAC — custo por venda no período: investimento ÷ vendas fechadas. Menor = melhor.', sort: 'cac' as ColunaRadar, padrao: 'asc' as DirecaoOrdem },
-                  { label: 'FUNIL', info: 'Ordena pelo último degrau (fechamentos).', sort: 'fechamentos' as ColunaRadar },
-                  { label: 'INVESTIMENTO', info: 'Investimento — total previsto no período; abaixo, o quanto já foi enviado às plataformas.', sort: 'investimento' as ColunaRadar },
+                  { label: 'LEADS', info: 'Leads das PLATAFORMAS no mês: resultados do Meta Ads + conversões do Google Ads. Não é o mesmo número do funil ao lado, que conta quem entrou no CRM por qualquer caminho (WhatsApp, indicação, orgânico).', sort: 'leads' as ColunaRadar },
+                  { label: 'CPL', info: 'CPL — gasto em anúncio (Meta + Google) ÷ leads do período. Menor = melhor.', sort: 'cpl' as ColunaRadar, padrao: 'asc' as DirecaoOrdem },
+                  { label: 'CAC', info: 'CAC — gasto em anúncio (Meta + Google) ÷ vendas fechadas no CRM. Sem venda no período aparece "—". Menor = melhor.', sort: 'cac' as ColunaRadar, padrao: 'asc' as DirecaoOrdem },
+                  { label: 'FUNIL', info: 'Funil do CRM no mês: todo lead cadastrado, venha de anúncio ou não — por isso costuma ser maior que a coluna LEADS. Ordena pelo último degrau (fechamentos).', sort: 'fechamentos' as ColunaRadar },
+                  { label: 'INVESTIMENTO', info: 'Investimento — o que as contas de anúncio REALMENTE gastaram no mês (Meta + Google). É este número que divide os leads no CPL. Abaixo, o Pix já enviado ao cliente, que é outra coisa.', sort: 'investimento' as ColunaRadar },
                   { label: '', info: '' },
                 ] as { label: string; info: string; sort?: ColunaRadar; padrao?: DirecaoOrdem }[]).map((col) => {
                   const ativa = col.sort && ordem.coluna === col.sort;
@@ -759,7 +807,17 @@ export default function ResultadosPage() {
                     </td>
                     <td className="px-4 py-3">
                       <p className="text-sm font-bold whitespace-nowrap">{formatCurrencyBRL(row.totalInvest)}</p>
-                      <p className="text-[11px] text-muted-foreground mt-0.5 whitespace-nowrap">{formatCurrencyBRL(row.dispatchedInvest)} enviado</p>
+                      {/* A composição explica o CPL ao lado: é este gasto dividido pelos leads. */}
+                      {row.totalInvest > 0 && (
+                        <p className="text-[11px] text-muted-foreground mt-0.5 whitespace-nowrap">
+                          {[row.gastoMeta > 0 ? `Meta ${formatCurrencyBRL(row.gastoMeta)}` : null,
+                            row.gastoGoogle > 0 ? `Google ${formatCurrencyBRL(row.gastoGoogle)}` : null]
+                            .filter(Boolean).join(' · ')}
+                        </p>
+                      )}
+                      {row.dispatchedInvest > 0 && (
+                        <p className="text-[11px] text-muted-foreground/70 mt-0.5 whitespace-nowrap">{formatCurrencyBRL(row.dispatchedInvest)} em Pix enviado</p>
+                      )}
                     </td>
                     <td className="px-2 py-3">
                       <Link
