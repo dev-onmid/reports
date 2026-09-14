@@ -337,4 +337,38 @@ eq(classificarEtapa('Negociação Contratual.'), 'qualificado', 'Contratual NÃO
 eq(classificarEtapa('Negociacao Contratual'), 'qualificado', 'sem acento idem');
 ok(classificarEtapa('Minuta Contratual') !== 'fechamento', 'qualquer "contratual" fica fora do fechamento');
 
+
+// ── Substantivo é nome de coluna tanto quanto particípio (2026-09-14) ──
+// A regra nasceu só com particípio e achatava em 'contato' todo Kanban que
+// usa substantivo. Medido: os 503 leads em "Fechamento" da Londrigifts
+// contavam como TOPO de funil no Radar e na dashboard.
+for (const [rotulo, esperado] of [
+  ['Fechamento', 'fechamento'], ['Fechamentos', 'fechamento'],
+  ['Vendas', 'fechamento'], ['Venda', 'fechamento'], ['Contratação', 'fechamento'],
+  ['Qualificação', 'qualificado'], ['Agendamento', 'agendamento'],
+  ['Remarcação', 'agendamento'], ['Comparecimento', 'comparecimento'],
+  ['Perda', 'perdido'], ['Perdas', 'perdido'], ['Desqualificação', 'perdido'],
+]) {
+  assert.equal(classificarEtapa(rotulo), esperado, `${rotulo} deve ser ${esperado}`);
+  n++;
+}
+
+// ⚠️ PERDA vence GANHO quando os dois aparecem: "Venda Perdida" como
+// fechamento viraria FATURAMENTO — o erro mais caro que esta função pode ter.
+for (const rotulo of ['Venda Perdida', 'Contrato Perdido', 'Negócio Perdido']) {
+  assert.equal(classificarEtapa(rotulo), 'perdido', `${rotulo} é perda, não ganho`);
+  n++;
+}
+
+// Não alargar demais: estes continuam onde estavam.
+for (const [rotulo, esperado] of [
+  ['Negociação Contratual', 'qualificado'],  // o caso do CondoStore
+  ['No-Show', 'agendamento'],
+  ['Não compareceu', 'agendamento'],
+  ['Contato', 'contato'], ['Follow-up', 'contato'], ['Quente', 'contato'],
+]) {
+  assert.equal(classificarEtapa(rotulo), esperado, `${rotulo} não pode mudar de degrau`);
+  n++;
+}
+
 console.log(`OK (com a quebra de agendamentos) — ${n} asserts`);
