@@ -315,10 +315,17 @@ export function mergeTracking(fromText: TextTracking, click: ClickTracking | nul
 export function originFromTracking(t: TextTracking | MergedTracking): string | null {
   if (t.gclid || t.wbraid || t.gbraid) return 'google';
   if (t.utm_source) {
-    const src = t.utm_source.toLowerCase();
+    const src = t.utm_source.toLowerCase().trim();
+    // ⚠️ O parâmetro AUTOMÁTICO da Meta manda `{{site_source_name}}`, que é uma
+    // SIGLA de duas/três letras: ig, fb, msg, an. Elas precisam casar INTEIRAS —
+    // "ig" como substring casaria em "digital", "an" em "banner". Sem isto o
+    // lead ficava com origem "ig" crua, virando um canal novo no donut em vez
+    // de somar com Instagram (medido em 14/09 no 1º lead que chegou assim).
+    if (src === 'ig') return 'instagram';
+    if (src === 'fb' || src === 'msg' || src === 'an') return 'meta';
     if (src.includes('google') || src.includes('adwords')) return 'google';
     if (src.includes('instagram')) return 'instagram';
-    if (src.includes('facebook') || src.includes('fb')) return 'meta';
+    if (src.includes('facebook') || src.includes('face') || src.includes('fb')) return 'meta';
     if (src.includes('tiktok')) return 'tiktok';
     return t.utm_source;
   }
@@ -336,6 +343,13 @@ export type LeadAttributionInput = {
   regiaoCidade?: string | null;
   /** ip (geo do clique) | ddd (telefone) | form (respondido no formulário) */
   regiaoFonte?: 'ip' | 'ddd' | 'form' | null;
+  /**
+   * Nomes de campanha/conjunto/anúncio já traduzidos a partir dos IDs.
+   * ⚠️ Colunas SEPARADAS dos `utm_*`: o UTM guarda o que a URL trouxe de fato
+   * (às vezes um ID), e estes guardam o nome legível. Sobrescrever o UTM com o
+   * nome faria o campo "UTM campaign" mentir sobre o que chegou no link.
+   */
+  nomes?: { campaign?: string | null; adset?: string | null; ad?: string | null } | null;
   /**
    * Cidade DECLARADA pela pessoa (formulário). ⚠️ Coluna separada de
    * `regiao_cidade` de propósito: aquela guarda também a REGIÃO do DDD
@@ -382,6 +396,9 @@ export async function applyLeadAttribution(pool: Pool, leadId: string, attr: Lea
             utm_term     = COALESCE(NULLIF(utm_term, ''), NULLIF($23, '')),
             source_url   = COALESCE(NULLIF(source_url, ''), NULLIF($24, '')),
             city         = COALESCE(NULLIF(city, ''), NULLIF($25, '')),
+            campaign_name = COALESCE(NULLIF(campaign_name, ''), NULLIF($26, '')),
+            adset_name   = COALESCE(NULLIF(adset_name, ''), NULLIF($27, '')),
+            ad_name      = COALESCE(NULLIF(ad_name, ''), NULLIF($28, '')),
             first_origin_at = COALESCE(first_origin_at, CASE WHEN $17 THEN NOW() ELSE NULL END),
             updated_at   = NOW()
       WHERE id = $1`,
@@ -411,6 +428,9 @@ export async function applyLeadAttribution(pool: Pool, leadId: string, attr: Lea
       t.utm_term ?? null,
       t.source_url ?? null,
       attr.city ?? null,
+      attr.nomes?.campaign ?? null,
+      attr.nomes?.adset ?? null,
+      attr.nomes?.ad ?? null,
     ],
   ).catch(err => console.error('[lead-tracking applyLeadAttribution]', err?.message ?? err));
 }

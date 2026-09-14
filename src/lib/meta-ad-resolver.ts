@@ -102,3 +102,13 @@ export async function resolveMetaAdHierarchy(
     return null;
   }
 }
+
+/**
+ * ID de objeto do Meta (campanha/conjunto/anúncio): só dígitos e longo.
+ * ⚠️ Serve para distinguir o parâmetro AUTOMÁTICO da Meta (que manda ID) do
+ * template da agência (que usa `{{campaign.name}}`) — só o primeiro precisa de
+ * tradução. Nome de campanha real nunca é só dígitos.
+ */
+export function pareceIdMeta(valor: string | null | undefined): boolean {
+  return !!valor && /^\d{10,}$/.test(valor.trim());
+}
