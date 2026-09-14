@@ -400,6 +400,7 @@ export async function POST(
       regiaoCidade: regiao?.cidade ?? null,
       regiaoFonte: regiao?.fonte ?? null,
       hasClickMatch: Boolean(clickMatch),
+      clientId,
     });
     // Elo permanente clique ↔ lead (o clique deixa de ser anônimo)
     if (clickMatch) await linkClickToLead(pool, clickMatch.id, leadId);

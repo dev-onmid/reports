@@ -290,6 +290,7 @@ export async function processLeadgenEvent(
     city: fields.cidade,
     email: fields.email,
     hasClickMatch: false,
+    clientId,
   });
 
   // Evento imutável com o snapshot completo (respostas cruas em raw)
