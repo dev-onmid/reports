@@ -1959,3 +1959,15 @@ Print do Matheus de um lead do CondoStore: "veio bagunçado, não consigo identi
 - **Backfill de origem**: 1 `ig` → `instagram`, 76 `faceads` → `meta`. ⚠️ O `utm_source` CRU é preservado (os 77 seguem com `faceads`/`ig` no campo do UTM) — só a classificação de canal mudou, senão o histórico ficaria dividido entre o antes e o depois do deploy.
 - ✅ Verificado: **25 asserts** (siglas exatas, "digital"/"banner" NÃO virando Meta, ID × nome de campanha, e a **contagem de placeholders do UPDATE batendo com a de parâmetros** — o erro clássico ao estender UPDATE posicional); tsc + `next build` limpos; eslint sem erro novo; Graph real resolvendo os 3 níveis; lead do print conferido no banco depois do backfill.
 - ⚠️ Lição que se repete: **ID de objeto de anúncio chega por caminho que ninguém previu**. Qualquer porta que grave `utm_*` deve passar por `pareceIdMeta`/`pareceIdGoogle` antes de exibir — nome de campanha nunca é só dígitos.
+
+### ⚠️ Correção no mesmo dia: o conserto acima cobria UMA porta de sete (2026-09-14)
+
+Pergunta do Matheus logo depois: *"isso não vai acontecer mais em nenhum cliente?"*. **Não ia** — e a resposta anterior ("do nosso lado já está resolvido") estava errada.
+
+- **Medido por onde os 5 leads realmente entraram**: **3 pelo DATALYTICS** (Cost Odonto), 1 pela LP do CondoStore, 1 pela LP da Romanza. O conserto tinha ido só na rota da LP; **Datalytics e webhook genérico também aceitam `utm_*` de fora** e continuariam gravando ID.
+- **A tradução saiu das rotas e foi para dentro de `applyLeadAttribution`** — a função que as 6 chamadas (7 portas) já usam. É a MESMA lição de 13/09, quando os `utm_*` se perdiam por não estarem nela: **regra de rastreio mora na função compartilhada, nunca em cada rota**.
+- **⚠️ A régua depende de a porta passar `clientId`** (o token de anúncio é por cliente). Por isso existe um **assert que varre os call sites e FALHA se alguma porta esquecer** — provado removendo o `clientId` do Datalytics: o teste quebra citando arquivo e linha. É o que impede a próxima porta de repetir o erro.
+- **Custo**: o guard só dispara quando algum UTM É um ID (`pareceIdMeta`/`pareceIdGoogle`) — medido: apenas 5 leads em toda a base. Lead de WhatsApp sem UTM não paga chamada nenhuma. Best-effort: falha de Graph/GAQL nunca derruba a gravação do lead.
+- ⚠️ **O tsc pegou um erro real no meio**: `clientId` não existia no escopo de `posProcessarIngestao` (Agendor usa `conn.client_id`). E o assert de placeholders quebrou ao mover código para dentro da função — **os dois avisos foram úteis**, não ruído; o recorte do teste foi reancorado no `UPDATE` em si.
+- ⚠️ **Limite honesto**: anúncio cujo ID não existe mais na conta não tem nome para buscar (caso real: Luzia/Romanza, ad `801932230700` apagado na Meta). O ID fica.
+- ✅ 32 asserts; tsc + `next build` limpos; eslint 0 erros nos 6 arquivos; assert de regressão provado falhando.
