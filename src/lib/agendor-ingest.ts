@@ -485,6 +485,7 @@ export async function posProcessarIngestao(
     regiaoFonte: pessoa?.estado || pessoa?.cidade ? 'form' : regiao ? 'ddd' : null,
     email: pessoa?.email ?? null,
     hasClickMatch: false,
+    clientId: conn.client_id,
   }).catch(() => {});
 
   await recordTrackingEvent(pool, {

@@ -14,6 +14,8 @@
 //    do clique (headers x-vercel-ip-* — zero API externa).
 
 import { randomBytes } from 'crypto';
+import { resolveMetaAdHierarchy, pareceIdMeta } from '@/lib/meta-ad-resolver';
+import { resolverNomesGoogle, pareceIdGoogle } from '@/lib/google-ad-resolver';
 import type { Pool } from 'pg';
 
 // Alfabeto sem caracteres ambíguos (0/O, 1/I/L) — código legível por humanos.
@@ -351,6 +353,11 @@ export type LeadAttributionInput = {
    */
   nomes?: { campaign?: string | null; adset?: string | null; ad?: string | null } | null;
   /**
+   * Dono do lead. Necessário para traduzir ID de anúncio em NOME — sem ele a
+   * tradução é pulada (o token de anúncio é por cliente).
+   */
+  clientId?: string | null;
+  /**
    * Cidade DECLARADA pela pessoa (formulário). ⚠️ Coluna separada de
    * `regiao_cidade` de propósito: aquela guarda também a REGIÃO do DDD
    * ("Bauru / Marília"), que domina a base (medido em 13/09: 10.551 de 12.441).
@@ -362,9 +369,62 @@ export type LeadAttributionInput = {
   hasClickMatch: boolean;
 };
 
+/**
+ * Traduz ID de campanha/conjunto/anúncio para NOME.
+ *
+ * ⚠️ Mora AQUI, e não em cada rota, porque ID chega por porta que ninguém
+ * previu. Medido em 14/09: a rota da LP traduzia só o Google (o comentário
+ * dizia que a Meta "sempre manda nome"), e 3 dos 5 leads com ID vieram pelo
+ * DATALYTICS — porta que nem sabia do problema. Como todas as portas passam
+ * por `applyLeadAttribution`, a régua num lugar só é o que impede a próxima
+ * de esquecer.
+ *
+ * ⚠️ Só roda quando algum UTM É um ID (nome de campanha nunca é só dígitos),
+ * então lead de WhatsApp sem UTM não paga nada. Best-effort: falha de Graph
+ * ou de GAQL nunca derruba a gravação do lead — o ID fica, que é pior de ler
+ * mas continua sendo rastreio.
+ */
+type NomesDeAnuncio = { campaign?: string | null; adset?: string | null; ad?: string | null };
+
+async function resolverNomesDosIds(
+  pool: Pool, clientId: string, t: MergedTracking,
+): Promise<NomesDeAnuncio> {
+  const out: NomesDeAnuncio = {};
+
+  // Meta: o anúncio (utm_content no parâmetro automático) devolve a hierarquia
+  // inteira numa chamada só, com cache.
+  if (pareceIdMeta(t.utm_content)) {
+    const m = await resolveMetaAdHierarchy(pool, clientId, t.utm_content!).catch(() => null);
+    if (m) {
+      if (m.campaign_name) out.campaign = m.campaign_name;
+      if (m.adset_name) out.adset = m.adset_name;
+      if (m.ad_name) out.ad = m.ad_name;
+    }
+  }
+
+  // Google: o ValueTrack não tem macro de nome, então campanha/grupo vêm por id.
+  if (!out.campaign && pareceIdGoogle(t.utm_campaign)) {
+    const g = await resolverNomesGoogle(pool, clientId, {
+      campaignId: t.utm_campaign, adgroupId: pareceIdGoogle(t.utm_term) ? t.utm_term : null,
+    }).catch(() => null);
+    if (g?.campaign_name) out.campaign = g.campaign_name;
+    if (g?.adgroup_name && !out.adset) out.adset = g.adgroup_name;
+  }
+
+  return out;
+}
+
 export async function applyLeadAttribution(pool: Pool, leadId: string, attr: LeadAttributionInput) {
   await ensureLeadTrackingSchema(pool);
   const t = attr.tracking;
+
+  // Nome explícito do chamador vence; só o que faltar é resolvido aqui.
+  let nomes: NomesDeAnuncio = attr.nomes ?? {};
+  const faltaAlgum = !nomes.campaign || !nomes.adset || !nomes.ad;
+  if (attr.clientId && faltaAlgum) {
+    const achados: NomesDeAnuncio = await resolverNomesDosIds(pool, attr.clientId, t).catch(() => ({}));
+    nomes = { campaign: nomes.campaign ?? achados.campaign, adset: nomes.adset ?? achados.adset, ad: nomes.ad ?? achados.ad };
+  }
   await pool.query(
     `UPDATE public.crm_leads
         SET gclid        = COALESCE(NULLIF(gclid, ''), NULLIF($2, '')),
@@ -428,9 +488,9 @@ export async function applyLeadAttribution(pool: Pool, leadId: string, attr: Lea
       t.utm_term ?? null,
       t.source_url ?? null,
       attr.city ?? null,
-      attr.nomes?.campaign ?? null,
-      attr.nomes?.adset ?? null,
-      attr.nomes?.ad ?? null,
+      nomes.campaign ?? null,
+      nomes.adset ?? null,
+      nomes.ad ?? null,
     ],
   ).catch(err => console.error('[lead-tracking applyLeadAttribution]', err?.message ?? err));
 }

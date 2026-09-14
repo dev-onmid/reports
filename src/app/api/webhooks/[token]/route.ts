@@ -197,6 +197,7 @@ async function handleLeadCreate(pool: ReturnType<typeof makeServerPool>, data: a
     regiaoFonte: regiao?.fonte ?? null,
     email,
     hasClickMatch: false,
+    clientId,
   });
 
   // Toque imutável no histórico de atribuição

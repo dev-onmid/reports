@@ -266,6 +266,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ token: str
       regiaoFonte: lead.estado || lead.cidade ? 'form' : regiao ? 'ddd' : null,
       email: lead.email,
       hasClickMatch: false,
+      clientId: conn.client_id,
     });
     await recordTrackingEvent(pool, {
       leadId: r.leadId,

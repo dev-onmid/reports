@@ -209,6 +209,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ token: str
       email,
       nomes,
       hasClickMatch: false,
+      clientId: origem.client_id,
     }).catch(err => console.error('[lp] atribuicao', err));
 
     await recordTrackingEvent(pool, {
