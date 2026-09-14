@@ -37,9 +37,14 @@ eq(classificarEtapa('Comprou'), 'fechamento', 'comprou');
 
 // Outros vocabularios vivos no repo
 eq(classificarEtapa('Perca Qualificada'), 'perdido', 'perca qualificada e perda, nao qualificado');
-eq(classificarEtapa('Proposta'), 'qualificado', 'proposta');
-eq(classificarEtapa('Negociação'), 'qualificado', 'negociacao');
-eq(classificarEtapa('Orçamento enviado'), 'qualificado', 'orcamento');
+// Proposta/orçamento/negociação = posto 2 (compromisso criado), DEPOIS de
+// qualificado — senão numa board de vendas colapsam com "Qualificação".
+eq(classificarEtapa('Proposta'), 'agendamento', 'proposta = posto 2');
+eq(classificarEtapa('Envio de proposta'), 'agendamento', 'envio de proposta = posto 2');
+eq(classificarEtapa('Negociação'), 'agendamento', 'negociacao = posto 2');
+eq(classificarEtapa('Orçamento enviado'), 'agendamento', 'orcamento = posto 2');
+eq(classificarEtapa('Cotação'), 'agendamento', 'cotacao = posto 2');
+eq(classificarEtapa('Qualificação'), 'qualificado', 'qualificacao segue posto 1 (nao colapsa com proposta)');
 eq(classificarEtapa('No-Show'), 'agendamento', 'no-show = agendou e faltou');
 eq(classificarEtapa('Show'), 'comparecimento', 'show = compareceu');
 eq(classificarEtapa(''), 'contato', 'vazio vira contato');
@@ -332,9 +337,11 @@ eq(classificarEtapa('Contrato'), 'fechamento', 'Contrato é venda');
 eq(classificarEtapa('contrato'), 'fechamento', 'caixa baixa');
 eq(classificarEtapa('Contrato Assinado'), 'fechamento', 'contrato assinado');
 eq(classificarEtapa('Contratado'), 'fechamento', 'contratado segue valendo');
-// ⚠️ a regressão que o prefixo largo criaria: 12 negociações viram venda
-eq(classificarEtapa('Negociação Contratual.'), 'qualificado', 'Contratual NÃO é fechamento');
-eq(classificarEtapa('Negociacao Contratual'), 'qualificado', 'sem acento idem');
+// ⚠️ a regressão que o prefixo largo criaria: 12 negociações viram venda.
+// "Negociação Contratual" agora é agendamento (posto 2, "negocia") — o que
+// importa aqui é que NUNCA vira fechamento.
+eq(classificarEtapa('Negociação Contratual.'), 'agendamento', 'Contratual NÃO é fechamento (é negociação, posto 2)');
+eq(classificarEtapa('Negociacao Contratual'), 'agendamento', 'sem acento idem');
 ok(classificarEtapa('Minuta Contratual') !== 'fechamento', 'qualquer "contratual" fica fora do fechamento');
 
 
@@ -362,7 +369,7 @@ for (const rotulo of ['Venda Perdida', 'Contrato Perdido', 'Negócio Perdido']) 
 
 // Não alargar demais: estes continuam onde estavam.
 for (const [rotulo, esperado] of [
-  ['Negociação Contratual', 'qualificado'],  // o caso do CondoStore
+  ['Negociação Contratual', 'agendamento'],  // negociação = posto 2 (nunca fechamento — o caso do CondoStore)
   ['No-Show', 'agendamento'],
   ['Não compareceu', 'agendamento'],
   ['Contato', 'contato'], ['Follow-up', 'contato'], ['Quente', 'contato'],
