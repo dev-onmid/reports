@@ -1892,3 +1892,21 @@ Print do Matheus no modal "Editar Lead": "precisam conter também cidade e respo
 - ✅ Verificado: 34 asserts; tsc + `next build` limpos; eslint sem erro novo (comparado ao HEAD na mesma config); harness no browser com o raw REAL (desktop + 375px); **rotas provadas em produção com sessão forjada** — `/formulario` devolvendo "Quantas unidades está pensando em adquirir? → 10" de um lead real, e o agregado com "Implante unitário 3 · Tarde — das 14h às 18h 2".
 - ✅ **De brinde, a prova que faltava do Meta Forms automático**: o lead usado no teste é de **14/09**, canal "Formulário Meta" — chegou sozinho pelo webhook depois da conexão por Página. A ingestão nativa está viva.
 - ⚠️ **PENDENTE — painel na `/dashboard` principal**: `dashboard/page.tsx` estava com WIP de outra sessão no working tree e commitar levaria o código dela junto. A rota (`/api/tracking/leads` com `porCidade` e `formulario`) e o desenho do painel já existem; falta só montar lá.
+
+## Radar — cinco fontes diferentes na MESMA linha (2026-09-14)
+
+Print do Matheus: "tem algo errado com radar, esses números não batem com nada". Estava certo, e não era um número errado: era **cada coluna vindo de um lugar**. Tudo medido em produção antes de mexer.
+
+- **⚠️ INVESTIMENTO não era investimento em anúncio** — era `SUM(payments.amount)` do cliente, **sem janela de data**, ou seja o Pix cadastrado na tela de Pagamentos desde sempre. Ao lado de um CPL de 30 dias. Medido: **Incorpast "R$ 0,00" tendo gasto R$ 5.692,05**; **Meta Pizzaria "R$ 5.750,00" tendo gasto R$ 457,64** (12× acima). Era a maior fonte da sensação de "não bate com nada": a coluna não tinha relação nenhuma com o CPL da própria linha.
+- **⚠️ LEADS contava só o Meta** (`api.meta.leads`). A **Londrigifts, que é 100% Google, aparecia com ZERO leads** tendo 403 conversões no Google e 952 leads no CRM.
+- **⚠️ CAC era o CPA do Google** (`api.google.cpa`), enquanto o cabeçalho prometia "investimento ÷ vendas fechadas". Incorpast: R$ 42,77 na tela, com 11 vendas reais e R$ 5.692 gastos — CAC real **R$ 517**. E numa linha só-Meta o CAC ficava vazio mesmo havendo venda.
+- **⚠️ FUNIL vinha SEM `from`/`to`** — a rota `/api/crm/summary` aceita janela desde sempre e a tela chamava sem. Resultado: base HISTÓRICA ao lado de métricas do período. Medido: Incorpast **1.764 contatos no print → 475 no mês**; Londrigifts 2.663 → 420.
+- **⚠️ Período `last_30d` contra meta MENSAL**: a rota de métricas tem esse default e a tela não passava nada, então no dia 14 o "resultado do mês" incluía 15 dias de agosto. A Dashboard usa `this_month` — o Radar agora também.
+
+**Correção: uma régua só, a MESMA da Dashboard** (`dashboard/page.tsx` L5949-5960, que já fazia certo): `leads = meta.leads + google.conversions`, `gasto = meta.spend + google.cost`, `cpl = gasto ÷ leads`, `cac = gasto ÷ crm.sales`, tudo em `this_month`. ⚠️ Duas telas com réguas diferentes para o mesmo conceito é o bug — não somar o Google era uma terceira régua.
+
+- O Pix **não sumiu**: continua na célula como "R$ X em Pix enviado", e a composição do gasto ("Meta R$ … · Google R$ …") fica abaixo do total, para o CPL ao lado ser conferível na mão.
+- **Tooltips de LEADS e FUNIL agora dizem que são fontes diferentes** (plataformas × CRM) — sem isso a diferença legítima entre 362 e 475 vira a próxima dúvida.
+- ✅ Verificado: tsc + `next build` limpos; eslint sem erro novo (3 → 3); **régua nova simulada contra a API REAL antes de subir** — Incorpast R$ 2.542,74 ÷ 362 = R$ 7,02 e ÷ 4 vendas = R$ 635,69; Londrigifts 0 → 184 leads.
+- ⚠️ **Os números da tela ficam MENORES que antes e isso é o certo**: o card INVESTIMENTO sai de R$ 834 mil (histórico de Pix) para o gasto do mês.
+- ⚠️ Não verificado no browser: `resultados/page.tsx` usa `next/link` e não monta em bundle isolado; o dev não tem banco. A prova foi numérica, contra produção.
