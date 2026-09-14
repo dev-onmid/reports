@@ -1939,3 +1939,23 @@ Print do Agendor do Matheus: "o CRM da Londrigifts mostra uma enorme quantidade 
 - ⚠️ **Custo aceito por ele**: os 10 leads perdidos (Não Retorna, Sem Interesse) entram em Contato e passam a contar como ATIVOS no funil. Se um dia incomodar, o conserto é uma coluna "Perdido" — não reverter a migração.
 - **Ordem das colunas corrigida à mão** para a do funil real (Contato → Qualificação → Envio de proposta → Follow-up → Quente → Fechamento): ⚠️ o espelho grava `position` na ordem em que a etapa APARECE, que é a ordem de chegada dos negócios, não a do funil. Board de cliente novo espelhado nasce fora de ordem.
 - ✅ Estado final: **6 etapas, 1 funil, 2.663 leads, zero órfãos**; zero funis duplicados no sistema inteiro.
+
+## Lead da LP com ID no lugar do nome e origem "ig" (2026-09-14)
+
+Print do Matheus de um lead do CondoStore: "veio bagunçado, não consigo identificar nada; o utm_source veio como ig mas foi LP". A URL contava a história:
+
+```
+?utm_medium=paid&utm_source=ig&utm_id=52604281006064&utm_content=52604281079464
+ &utm_term=52604281013664&utm_campaign=52604281006064
+```
+
+É o **parâmetro AUTOMÁTICO do Meta Ads** — `{{site_source_name}}` vira sigla (`ig`) e campanha/conjunto/anúncio vêm como **ID**, ao contrário do template da agência, que usa `{{campaign.name}}`. Não estava bagunçado: estava ilegível. Três defeitos NOSSOS, todos medidos antes de mexer:
+
+- **⚠️⚠️ A rota da LP já traduzia ID→nome para o GOOGLE, e o comentário dizia que a Meta "sempre manda nome"** — este lead desmentiu. O bloco virou um só, cobrindo os dois canais (`pareceIdMeta` + `resolveMetaAdHierarchy`, que já existia com cache e era usado por webhook/leadgen/backfill — só o caminho da LP não usava). Graph confirmou: `52604281079464` = **DARK - RAFA 03**, conjunto **FORMS NACIONAL**, campanha **[ON] [FORMS] [NACIONAL] - 01/09**.
+- **⚠️ Os nomes vão para COLUNAS PRÓPRIAS (`campaign_name`/`adset_name`/`ad_name`), e os `utm_*` guardam o que a URL trouxe.** O caminho do Google sobrescrevia o `utm_campaign` com o nome — o campo "UTM campaign" da tela passava a mostrar algo que nunca esteve no link. `applyLeadAttribution` ganhou os três campos (fill-blanks), então **todas as 7 portas** herdam de uma vez, igual ao conserto dos `utm_*` de 13/09.
+- **⚠️ `originFromTracking` não reconhecia as siglas do `{{site_source_name}}`** (`ig`, `fb`, `msg`, `an`) — a origem virava `"ig"` cru, um canal NOVO no donut em vez de somar com Instagram. **As siglas casam INTEIRAS, nunca por substring**: `ig` casaria em "d**ig**ital", `an` em "b**an**ner" (os dois estão nos asserts). `faceads` (76 leads na base) também passou a cair em `meta`.
+- **⚠️ A linha "Conjunto" do modal caía em `utm_medium`** quando não havia adset — por isso exibia **"paid"**, que é o MEIO, nunca o conjunto. O fallback saiu e `utm_medium` ganhou linha própria ("Meio").
+- **⚠️ O escopo era maior que o print**: medido, **5 leads** com ID de anúncio sem nome — 1 do CondoStore e **3 da Cost Odonto** (que ninguém tinha reportado). Backfill resolveu 4 pela Graph; 1 ficou sem nome porque o ad_id (`801932230700`, 12 dígitos) não existe mais na conta — corretamente deixado como está.
+- **Backfill de origem**: 1 `ig` → `instagram`, 76 `faceads` → `meta`. ⚠️ O `utm_source` CRU é preservado (os 77 seguem com `faceads`/`ig` no campo do UTM) — só a classificação de canal mudou, senão o histórico ficaria dividido entre o antes e o depois do deploy.
+- ✅ Verificado: **25 asserts** (siglas exatas, "digital"/"banner" NÃO virando Meta, ID × nome de campanha, e a **contagem de placeholders do UPDATE batendo com a de parâmetros** — o erro clássico ao estender UPDATE posicional); tsc + `next build` limpos; eslint sem erro novo; Graph real resolvendo os 3 níveis; lead do print conferido no banco depois do backfill.
+- ⚠️ Lição que se repete: **ID de objeto de anúncio chega por caminho que ninguém previu**. Qualquer porta que grave `utm_*` deve passar por `pareceIdMeta`/`pareceIdGoogle` antes de exibir — nome de campanha nunca é só dígitos.
