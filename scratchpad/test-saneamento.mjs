@@ -3,7 +3,8 @@
 // Compilar antes:
 //   npx tsc src/lib/crm-saneamento.ts src/lib/funil-etapas.ts --outDir scratchpad/build \
 //     --module esnext --target es2022 --moduleResolution bundler --skipLibCheck
-//   (ajustar imports @/lib/* -> ./*.mjs no build)
+//   npx esbuild src/lib/crm-saneamento.ts --bundle --platform=node --format=esm \
+//     --external:pg --outfile=scratchpad/build/crm-saneamento.mjs
 //   node scratchpad/test-saneamento.mjs
 
 import assert from 'node:assert';
@@ -80,6 +81,37 @@ const s = (id, label, position) => ({ id, label, position });
 {
   const p = planejarSaneamento([]);
   eq(p.deletarStages, [], 'vazio ok');
+}
+
+
+// ── Etapa de espelho vazia (rodada de 2026-09-14) ──
+{
+  const st = (id, label, position, color, leads) => ({ id, label, position, color, leads });
+  const plano = planejarSaneamento([
+    st('a', 'Contato', 10, '#94a3b8', 262),            // espelho EM USO — fica
+    st('b', 'Produção', 21, '#94a3b8', 0),             // espelho vazio — sai
+    st('c', 'Carteira Bronze', 24, '#94a3b8', 0),      // espelho vazio — sai
+    st('d', 'Em Atendimento', 0, '#0ea5e9', 1394),     // seed em uso — fica
+    st('e', 'Desqualificado', 9, '#dc2626', 0),        // seed VAZIO mas do gestor — FICA
+  ]);
+  assert.deepStrictEqual(plano.deletarStages.sort(), ['b','c'], 'só as de espelho vazias saem');
+  assert.deepStrictEqual(plano.espelhosVazios.sort(), ['Carteira Bronze','Produção'], 'relatório traz os rótulos');
+  assert.ok(!plano.migrarLeads.some(m => m.de === 'Produção'), 'etapa vazia não gera migração de lead');
+  n += 3;
+}
+{
+  // ⚠️ Etapa de espelho SEM a contagem: `undefined` é "não sei", não "vazio".
+  // Chamador que não informa a contagem NÃO autoriza remoção — senão um caller
+  // desatento apagaria a coluna cheia do cliente.
+  const plano = planejarSaneamento([{ id: 'x', label: 'Follow-up', position: 1, color: '#94a3b8' }]);
+  assert.deepStrictEqual(plano.deletarStages, [], 'sem contagem não remove nada');
+  n += 1;
+}
+{
+  // Cor nula (instalação antiga) nunca é confundida com espelho.
+  const plano = planejarSaneamento([{ id: 'y', label: 'Novo', position: 1, color: null, leads: 0 }]);
+  assert.deepStrictEqual(plano.deletarStages, [], 'cor nula não é espelho');
+  n += 1;
 }
 
 console.log(`OK — ${n} asserts`);
