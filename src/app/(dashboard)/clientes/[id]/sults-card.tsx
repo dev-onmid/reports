@@ -75,6 +75,37 @@ function desde(iso: string | null | undefined): string {
 
 const CAMPO = 'h-9 w-full rounded-none border border-border bg-surface-elevated px-2 text-sm';
 
+/**
+ * Interruptor de verdade, com trilho e botão.
+ *
+ * ⚠️ Antes era um retângulo escrito "DESATIVADA" — que lê como SELO DE STATUS,
+ * não como controle. O usuário perguntou onde ligava a integração estando com o
+ * botão na tela: a afordância é que estava errada, não ele.
+ */
+function Interruptor({ ligado, onToggle, disabled, titulo }: {
+  ligado: boolean; onToggle: () => void; disabled?: boolean; titulo?: string;
+}) {
+  return (
+    <button
+      type="button" role="switch" aria-checked={ligado} disabled={disabled} title={titulo}
+      onClick={onToggle}
+      className={cn('group flex shrink-0 items-center gap-2',
+        disabled ? 'cursor-not-allowed opacity-40' : 'cursor-pointer')}
+    >
+      <span className={cn('relative h-5 w-9 rounded-full border transition-colors',
+        ligado ? 'border-primary bg-primary/80' : 'border-border bg-muted')}>
+        <span className={cn(
+          'absolute top-0.5 h-3.5 w-3.5 rounded-full bg-background transition-all',
+          ligado ? 'left-[18px]' : 'left-0.5')} />
+      </span>
+      <span className={cn('text-[10px] font-bold uppercase tracking-widest',
+        ligado ? 'text-primary' : 'text-muted-foreground group-hover:text-foreground')}>
+        {ligado ? 'Ativa' : 'Ligar'}
+      </span>
+    </button>
+  );
+}
+
 /** Espelha o checklist do próprio SULTS: o que falta para a integração funcionar. */
 function Prontidao({ cfg }: { cfg: Config }) {
   const itens = [
@@ -465,13 +496,13 @@ export default function SultsCard({ clientId }: { clientId: string }) {
             <span className="font-heading text-xs font-black uppercase tracking-widest">
               Ida — leads para o SULTS
             </span>
-            <button type="button" disabled={!pronto || ocupado}
-              onClick={() => patch({ enabled: !cfg.enabled })}
-              className={cn('px-2 py-1 text-[10px] font-bold uppercase tracking-widest',
-                cfg.enabled ? 'bg-primary text-black' : 'bg-muted text-muted-foreground',
-                !pronto && 'cursor-not-allowed opacity-40')}>
-              {cfg.enabled ? 'Ativa' : 'Desativada'}
-            </button>
+            <Interruptor
+              ligado={!!cfg.enabled} disabled={!pronto || ocupado}
+              onToggle={() => patch({ enabled: !cfg.enabled })}
+              titulo={pronto
+                ? 'Enviar os leads deste cliente para o SULTS'
+                : 'Escolha responsável e etapa antes de ligar'}
+            />
           </div>
           {!pronto && (
             <p className="mb-2 text-[11px] text-amber-400">
@@ -501,12 +532,11 @@ export default function SultsCard({ clientId }: { clientId: string }) {
             <span className="font-heading text-xs font-black uppercase tracking-widest">
               Volta — etapas para o reports
             </span>
-            <button type="button" disabled={ocupado}
-              onClick={() => patch({ sync_ativo: !cfg.sync_ativo })}
-              className={cn('px-2 py-1 text-[10px] font-bold uppercase tracking-widest',
-                cfg.sync_ativo ? 'bg-primary text-black' : 'bg-muted text-muted-foreground')}>
-              {cfg.sync_ativo ? 'Ativa' : 'Desativada'}
-            </button>
+            <Interruptor
+              ligado={cfg.sync_ativo !== false} disabled={ocupado}
+              onToggle={() => patch({ sync_ativo: !cfg.sync_ativo })}
+              titulo="Ler as etapas do SULTS e trazer para cá"
+            />
           </div>
           <dl className="space-y-0.5 text-xs text-muted-foreground">
             <div>negócios espelhados: <strong className="text-foreground">{s.negocios ?? '0'}</strong></div>
