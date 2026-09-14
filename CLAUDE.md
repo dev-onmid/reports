@@ -1910,3 +1910,32 @@ Print do Matheus: "tem algo errado com radar, esses números não batem com nada
 - ✅ Verificado: tsc + `next build` limpos; eslint sem erro novo (3 → 3); **régua nova simulada contra a API REAL antes de subir** — Incorpast R$ 2.542,74 ÷ 362 = R$ 7,02 e ÷ 4 vendas = R$ 635,69; Londrigifts 0 → 184 leads.
 - ⚠️ **Os números da tela ficam MENORES que antes e isso é o certo**: o card INVESTIMENTO sai de R$ 834 mil (histórico de Pix) para o gasto do mês.
 - ⚠️ Não verificado no browser: `resultados/page.tsx` usa `next/link` e não monta em bundle isolado; o dev não tem banco. A prova foi numérica, contra produção.
+
+## Kanban da Londrigifts — 26 colunas para um funil de 6 (2026-09-14)
+
+Print do Agendor do Matheus: "o CRM da Londrigifts mostra uma enorme quantidade de etapas mas deveria mostrar apenas essas do print, que seria exatamente o que vem do Agendor". Investigar isso destravou **três defeitos independentes**, todos medidos antes de mexer.
+
+### 1. Colunas mortas de importação (sistêmico, 8 clientes)
+
+- **Origem**: quando os leads do Agendor foram apagados na correção do filtro de origem (22/08), **as etapas que o espelho criou FICARAM**. A Londrigifts carregava 11 colunas vazias de funis do Agendor que nem são importados (`filtro_funis: ["709414"]`) — "Produção", "Despacho", "Carteira Bronze". Não voltam: `passaFiltros` bloqueia antes da ingestão.
+- **Funil duplicado**: `ensureDefaultFunnel` criou um segundo "Funil Principal" vazio numa corrida — **5 clientes**, e a Dominos tinha **3**.
+- **Regra nova em `crm-saneamento.ts`, com DUAS condições obrigatórias**: cor `COR_ESPELHO` (`#94a3b8`, com que Agendor/Datalytics/SULTS criam etapa) **E** zero leads. ⚠️ Etapa criada pelo gestor na tela nunca sai, nem vazia (ele pode tê-la criado para usar amanhã); etapa de espelho em uso nunca sai. ⚠️ **Contagem `undefined` é "não sei", não "vazio"** — sem ela a função não remove nada, senão um caller desatento apagaria coluna cheia.
+- ⚠️ A contagem de leads é por RÓTULO no cliente inteiro, não por `funnel_id`: `crm_leads.status` é texto livre e o mesmo rótulo pode estar em uso por lead de outro funil.
+- ✅ Varredura real: **18 etapas e 7 funis removidos, 20 leads migrados, 0 erros** em 26 clientes.
+
+### 2. ⚠️⚠️ Etapa com nome de SUBSTANTIVO caía toda em "contato"
+
+`classificarEtapa` nasceu só com **particípio** (`fechad`, `agendad`, `vendid`, `compareceu`) e não reconhecia o **substantivo** que o gestor usa como nome de coluna. Medido: **"Fechamento", "Vendas", "Contratação", "Qualificação", "Agendamento", "Comparecimento", "Perda" caíam TODOS em 'contato'** — os **503 leads ganhos da Londrigifts** e os 44 da Incorpast contavam como topo de funil no Radar e na dashboard.
+
+- **⚠️ PERDA passou a ser testada ANTES do ganho**: com as formas novas, "Venda Perdida" e "Contrato Perdido" entrariam como FATURAMENTO. É o erro mais caro que esta função pode cometer.
+- **⚠️⚠️ A reclassificação em massa NÃO pode sobrescrever escolha humana.** `crm_stages.etapa_funil` guarda tanto o que a máquina escreveu quanto o que o gestor escolheu no editor, e não há coluna que distinga. A migração compara o valor gravado com o que a **regra ANTIGA** produziria: só corrige quando batem (foi a máquina). Sem essa trava eu teria jogado **"Negócio concluído" da Cost Odonto (85 vendas) de `fechamento` para `contato`** e desfeito a decisão do CondoStore de 12/09 (Lead Frio/Morno/Quente = `comparecimento`, que está documentada acima).
+- ✅ Aplicado: **7 etapas reclassificadas, 7 escolhas do gestor preservadas**. 145 asserts.
+
+### 3. Board da Londrigifts com as 6 do Agendor (decisão do Matheus)
+
+1.453 leads (55% da base) estavam em etapas do **seed de clínica** (Em Atendimento, Fechado, Paciente…) porque entram pelo WhatsApp, não pelo Agendor. Escolha dele entre as 3 opções oferecidas: **mover para as 6 do Agendor**.
+
+- Mapa: Em Atendimento/Agendado/Não Retorna/Sem Interesse → **Contato**; Fechado/Paciente → **Fechamento**. Backup dos 1.453 status em `/root/backup-londrigifts-status-2026-09-14.json` (VPS).
+- ⚠️ **Custo aceito por ele**: os 10 leads perdidos (Não Retorna, Sem Interesse) entram em Contato e passam a contar como ATIVOS no funil. Se um dia incomodar, o conserto é uma coluna "Perdido" — não reverter a migração.
+- **Ordem das colunas corrigida à mão** para a do funil real (Contato → Qualificação → Envio de proposta → Follow-up → Quente → Fechamento): ⚠️ o espelho grava `position` na ordem em que a etapa APARECE, que é a ordem de chegada dos negócios, não a do funil. Board de cliente novo espelhado nasce fora de ordem.
+- ✅ Estado final: **6 etapas, 1 funil, 2.663 leads, zero órfãos**; zero funis duplicados no sistema inteiro.
