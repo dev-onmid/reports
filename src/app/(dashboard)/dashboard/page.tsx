@@ -81,7 +81,7 @@ import { MetaAdsMark, GoogleAdsMark } from '@/components/platform-logos';
 import {
   FUNIL_VAZIO, somarFunis, resolverTopoFunil, rotuloFonteTopo, normalizarFonteTopo,
   ETAPAS_FUNIL,
-  type ContagemFunil, type EtapaFunil,
+  type ContagemFunil, type EtapaFunil, type FunilPorStage,
 } from '@/lib/funil-etapas';
 import { FunilLeadsModal } from '@/components/funil-leads-modal';
 import { normalizarSegmento, perfilDaSelecao } from '@/lib/dashboard-segmento';
@@ -98,7 +98,7 @@ import {
 } from '@/lib/metricas-food';
 
 type Period = 'yesterday' | 'last_7d' | 'last_14d' | 'last_30d' | 'this_month' | 'last_month' | 'custom';
-type ClientSheetsSummary = { leads: number; funil: ContagemFunil; total: number };
+type ClientSheetsSummary = { leads: number; funil: ContagemFunil; total: number; funilStages: FunilPorStage | null };
 type ApiMetrics = {
   meta: { spend: number; reach?: number; impressions: number; clicks: number; leads: number; formLeads?: number; siteLeads?: number; conversations?: number; cpl: number } | null;
   google: { cost: number; impressions: number; clicks: number; cpc: number; conversions: number; cpa: number;
@@ -4528,6 +4528,64 @@ function canalNeutro(label: string): boolean {
 }
 
 /**
+ * Marcas com COR e LOGO fixos na legenda (pedido do Matheus: azul p/ Facebook,
+ * rosa p/ Instagram, vermelho p/ Google; WhatsApp entra junto por consistência,
+ * é o canal dominante da base). Cor fixa por marca deixa a leitura instantânea e
+ * estável entre períodos, e o logo na legenda remove qualquer ambiguidade com um
+ * tom parecido da paleta.
+ *
+ * ⚠️ A ordem importa: canal composto ("Facebook - WhatsApp") é atribuído pela
+ * PLATAFORMA de mídia — a origem do anúncio é o que informa —, não pelo destino.
+ * WhatsApp/Chatwoot puros caem no verde.
+ */
+function LogoInstagram() {
+  return <IgMark className="h-4 w-4" />;
+}
+function LogoFacebook() {
+  return (
+    <svg viewBox="0 0 20 20" className="h-4 w-4" aria-hidden>
+      <rect width="20" height="20" rx="5" fill="#1877F2" />
+      <path d="M11 5H9.5C8.7 5 8 5.7 8 6.5V8H6v2.5h2V17h3v-6.5h2.5L14 8h-3V6.5c0-.3.2-.5.5-.5H14V5h-3z" fill="#fff" />
+    </svg>
+  );
+}
+function LogoGoogle() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden>
+      <path fill="#4285F4" d="M23.5 12.27c0-.79-.07-1.54-.2-2.27H12v4.29h6.46a5.52 5.52 0 0 1-2.4 3.62v3h3.88c2.27-2.09 3.56-5.17 3.56-8.64z" />
+      <path fill="#34A853" d="M12 24c3.24 0 5.96-1.08 7.94-2.91l-3.88-3.01c-1.08.72-2.45 1.15-4.06 1.15-3.13 0-5.78-2.11-6.73-4.96H1.26v3.11A12 12 0 0 0 12 24z" />
+      <path fill="#FBBC05" d="M5.27 14.27a7.2 7.2 0 0 1 0-4.54v-3.1H1.26a12 12 0 0 0 0 10.75l4.01-3.11z" />
+      <path fill="#EA4335" d="M12 4.77c1.77 0 3.35.61 4.6 1.8l3.43-3.43C17.95 1.19 15.24 0 12 0A12 12 0 0 0 1.26 6.62l4.01 3.11C6.22 6.88 8.87 4.77 12 4.77z" />
+    </svg>
+  );
+}
+function LogoWhatsApp() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden>
+      <path fill="#25D366" d="M12 2a10 10 0 0 0-8.53 15.2L2 22l4.94-1.4A10 10 0 1 0 12 2z" />
+      <path fill="#fff" d="M9.1 7.3c-.2-.45-.4-.46-.6-.47l-.5-.01c-.17 0-.45.06-.68.32-.23.25-.9.87-.9 2.12s.92 2.46 1.05 2.63c.13.17 1.8 2.88 4.45 3.92 2.2.87 2.65.7 3.13.65.48-.04 1.55-.63 1.77-1.25.22-.62.22-1.15.15-1.26-.07-.11-.24-.17-.5-.3-.26-.13-1.55-.76-1.79-.85-.24-.09-.41-.13-.59.13-.17.26-.67.85-.82 1.02-.15.17-.3.19-.56.06-.26-.13-1.1-.4-2.1-1.29-.78-.69-1.3-1.55-1.46-1.81-.15-.26-.01-.4.12-.53.12-.12.26-.3.39-.46.13-.15.17-.26.26-.43.09-.17.05-.32-.01-.45-.07-.13-.58-1.42-.79-1.94z" />
+    </svg>
+  );
+}
+
+type MarcaCanal = { cor: string; logo: ReactNode };
+const MARCAS_CANAL: { teste: RegExp; cor: string; Logo: () => React.ReactElement }[] = [
+  { teste: /instagram/, cor: '#E1306C', Logo: LogoInstagram },
+  { teste: /facebook/, cor: '#1877F2', Logo: LogoFacebook },
+  { teste: /google/, cor: '#EA4335', Logo: LogoGoogle },
+  { teste: /whats|chatwoot/, cor: '#25D366', Logo: LogoWhatsApp },
+];
+
+/** Cor+logo fixos da marca do canal, ou null quando é canal genérico/neutro. */
+function marcaDoCanal(label: string): MarcaCanal | null {
+  if (canalNeutro(label)) return null;
+  // Marca casa por palavra ASCII (instagram/facebook/google/whats) — sem acento a tratar.
+  const n = label.toLowerCase();
+  const m = MARCAS_CANAL.find((x) => x.teste.test(n));
+  return m ? { cor: m.cor, logo: <m.Logo /> } : null;
+}
+
+/**
  * Cor por NOME do canal, não por posição no ranking.
  *
  * Trocar o período reordena a lista; se a cor viesse do rank, "Indicação"
@@ -4542,7 +4600,9 @@ function canalNeutro(label: string): boolean {
 function coresPorCanal(labels: string[]): Record<string, string> {
   const usados = new Set<number>();
   const out: Record<string, string> = {};
-  for (const label of [...labels].filter(l => !canalNeutro(l)).sort()) {
+  // Marca com cor fixa (Instagram/Facebook/Google/WhatsApp) não entra no rodízio
+  // da paleta — senão gastaria um tom e poderia mudar a cor de um canal genérico.
+  for (const label of [...labels].filter(l => !canalNeutro(l) && !marcaDoCanal(l)).sort()) {
     let h = 0;
     for (let i = 0; i < label.length; i++) h = (h * 31 + label.charCodeAt(i)) >>> 0;
     let slot = h % CORES_CANAL.length;
@@ -4589,7 +4649,7 @@ function CanalDonutCard({ titulo, fatiasBrutas, total, semCanal, formato, aviso 
     return [...cabeca, { label: `Outros${nomes}`, valor: resto }];
   })();
   const cores = coresPorCanal(fatias.map(f => f.label));
-  const corDe = (label: string) => (canalNeutro(label) ? CINZA_CANAL : cores[label]);
+  const corDe = (label: string) => marcaDoCanal(label)?.cor ?? (canalNeutro(label) ? CINZA_CANAL : cores[label]);
 
   return (
     <PremiumPanel className="p-4">
@@ -4641,9 +4701,15 @@ function CanalDonutCard({ titulo, fatiasBrutas, total, semCanal, formato, aviso 
 
           {/* Lista com os valores exatos — o donut dá a proporção, ela dá o número. */}
           <div className="min-w-0 space-y-1.5">
-            {fatias.map((o) => (
+            {fatias.map((o) => {
+              const marca = marcaDoCanal(o.label);
+              return (
               <div key={o.label} className="flex items-baseline gap-2">
-                <span className="mt-1 h-2.5 w-2.5 shrink-0 rounded-sm" style={{ backgroundColor: corDe(o.label) }} />
+                {marca ? (
+                  <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center">{marca.logo}</span>
+                ) : (
+                  <span className="mt-1 h-2.5 w-2.5 shrink-0 rounded-sm" style={{ backgroundColor: corDe(o.label) }} />
+                )}
                 <span className="min-w-0 flex-1 truncate text-xs font-semibold text-[#dce4e8]">{o.label}</span>
                 <span className="shrink-0 text-[10px] text-[#9aa4aa]">
                   {(total > 0 ? (o.valor / total) * 100 : 0).toFixed(1).replace('.', ',')}%
@@ -4651,7 +4717,8 @@ function CanalDonutCard({ titulo, fatiasBrutas, total, semCanal, formato, aviso 
                 </span>
                 <span className="shrink-0 text-xs font-bold text-[#f4f7f8]">{premiumValue(o.valor, formato)}</span>
               </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}
@@ -4716,7 +4783,7 @@ function IgMark({ className }: { className?: string }) {
 
 const FUNNEL_STEP_COLORS = ['#6cff2f', '#0ea5e9', '#7b2cff', '#f97316', '#ec4899', '#f59e0b', '#84cc16'];
 
-function SimpleFunnel({ steps, totalRate, fonteLabel, onStageClick }: {
+function SimpleFunnel({ steps, totalRate, fonteLabel, onStageClick, todosClicaveis }: {
   steps: Array<{
     label: string; actual: number; planned: number; color: string;
     /** Quebra explicativa sob o número (ex: quantos ainda vêm × quantos furaram). */
@@ -4727,7 +4794,12 @@ function SimpleFunnel({ steps, totalRate, fonteLabel, onStageClick }: {
   fonteLabel?: string;
   /** Abre a lista de leads do degrau. Índice mapeia em ETAPAS_FUNIL (0=contato…4=fechamento). */
   onStageClick?: (index: number) => void;
+  /** Funil personalizado pelo Kanban: TODOS os degraus são clicáveis (não só os 5 semânticos). */
+  todosClicaveis?: boolean;
 }) {
+  // No funil por etapa real, cada degrau tem lista própria; no semântico, só os
+  // índices que existem em ETAPAS_FUNIL abrem modal.
+  const podeClicar = (i: number) => !!onStageClick && (todosClicaveis || !!ETAPAS_FUNIL[i]);
   if (!steps.length) return null;
   const SVG_W = 1000;
   const SVG_H = 140;
@@ -4768,7 +4840,7 @@ function SimpleFunnel({ steps, totalRate, fonteLabel, onStageClick }: {
           const h1 = getFixedH(i, steps.length);
           const h2 = getFixedH(i + 1, steps.length);
           const d = `M ${x1} ${centerY - h1 / 2} L ${x2} ${centerY - h2 / 2} L ${x2} ${centerY + h2 / 2} L ${x1} ${centerY + h1 / 2} Z`;
-          const clicavel = !!onStageClick && !!ETAPAS_FUNIL[i];
+          const clicavel = podeClicar(i);
           return (
             <path
               key={step.label}
@@ -4788,7 +4860,7 @@ function SimpleFunnel({ steps, totalRate, fonteLabel, onStageClick }: {
           const actualPct = i === 0 ? null : prev && prev.actual > 0 ? (step.actual / prev.actual) * 100 : 0;
           const plannedPct = i === 0 ? null : prev && prev.planned > 0 ? (step.planned / prev.planned) * 100 : 0;
           const isBottleneck = actualPct !== null && plannedPct !== null && actualPct < plannedPct * 0.85;
-          const clicavel = !!onStageClick && !!ETAPAS_FUNIL[i];
+          const clicavel = podeClicar(i);
           return (
             <div
               key={step.label}
@@ -5709,10 +5781,10 @@ export default function GeneralDashboard() {
     const { from, to } = periodToDateRange(period, customDateFrom, customDateTo);
     const params = new URLSearchParams({ from: from.toISOString().split('T')[0], to: to.toISOString().split('T')[0] });
     fetch(`/api/crm/summary?${params}`)
-      .then(r => r.ok ? r.json() as Promise<{ clientId: string; leads: number; funil: ContagemFunil; total: number }[]> : [])
+      .then(r => r.ok ? r.json() as Promise<{ clientId: string; leads: number; funil: ContagemFunil; total: number; funilStages: FunilPorStage | null }[]> : [])
       .then(data => {
         const map: Record<string, ClientSheetsSummary> = {};
-        for (const item of data) map[item.clientId] = { leads: item.leads, funil: item.funil, total: item.total };
+        for (const item of data) map[item.clientId] = { leads: item.leads, funil: item.funil, total: item.total, funilStages: item.funilStages ?? null };
         setCrmSummary(map);
       })
       .catch(() => setCrmSummary({}));
@@ -6449,16 +6521,47 @@ export default function GeneralDashboard() {
   if (funilCrm.agendamentoSemData > 0) {
     detalhesAgendamento.push({ texto: `${funilCrm.agendamentoSemData} sem data`, tom: 'neutro' });
   }
-  const funnelStepsNew = firstPlanningForFunnel.stages.map((stage, i) => ({
-    label: cleanFunnelLabel(stage.name),
-    actual: actualFunnelVolumes[i] ?? 0,
-    planned: plannedFunnelAgg[i] ?? 0,
-    color: FUNNEL_STEP_COLORS[i % FUNNEL_STEP_COLORS.length],
-    // Só no degrau de agendamentos. Vale mesmo com topo estimado por anúncio:
-    // agendamentos e comparecimentos vêm do CRM nos dois casos (só o TOPO muda
-    // de fonte), então a quebra sempre fecha com os números exibidos.
-    detalhes: i === 2 ? detalhesAgendamento : undefined,
-  }));
+  // Funil pelas ETAPAS REAIS do Kanban do cliente — nome, cor e nº de degraus
+  // vêm do CRM dele (pedido do Matheus, 2026-09-14). Só com UM cliente
+  // selecionado: Kanbans de clientes diferentes não se somam num funil só, então
+  // seleção múltipla / "Todos" mantém o funil semântico de 5 degraus.
+  const stageFunilSolo = selectedIds.size === 1
+    ? (crmSummary[[...selectedIds][0]]?.funilStages ?? null)
+    : null;
+  const usaStageFunil = !!stageFunilSolo && stageFunilSolo.degraus.length > 0;
+
+  const funnelStepsNew = usaStageFunil
+    ? stageFunilSolo!.degraus.map((d, i) => {
+        // A quebra "a comparecer / faltaram" vai no ÚLTIMO degrau de agendamento
+        // que tenha um comparecimento depois. Os números vêm do funil semântico
+        // do próprio cliente (funilCrm) — no modo 1-cliente, é a mesma base.
+        const restante = stageFunilSolo!.degraus.slice(i + 1);
+        const ehUltimoAgendamento = d.etapa === 'agendamento'
+          && !restante.some(x => x.etapa === 'agendamento')
+          && restante.some(x => x.etapa === 'comparecimento');
+        return {
+          label: d.label,
+          actual: d.alcancaram,
+          planned: 0,
+          color: d.color,
+          detalhes: ehUltimoAgendamento ? detalhesAgendamento : undefined,
+        };
+      })
+    : firstPlanningForFunnel.stages.map((stage, i) => ({
+        label: cleanFunnelLabel(stage.name),
+        actual: actualFunnelVolumes[i] ?? 0,
+        planned: plannedFunnelAgg[i] ?? 0,
+        color: FUNNEL_STEP_COLORS[i % FUNNEL_STEP_COLORS.length],
+        // Só no degrau de agendamentos. Vale mesmo com topo estimado por anúncio:
+        // agendamentos e comparecimentos vêm do CRM nos dois casos (só o TOPO muda
+        // de fonte), então a quebra sempre fecha com os números exibidos.
+        detalhes: i === 2 ? detalhesAgendamento : undefined,
+      }));
+  // Conversão geral do funil real = fechamento (último degrau) sobre o topo dele.
+  const funnelTaxaFinal = usaStageFunil && stageFunilSolo!.degraus.length > 1
+    ? (stageFunilSolo!.degraus[stageFunilSolo!.degraus.length - 1].alcancaram
+        / Math.max(stageFunilSolo!.degraus[0].alcancaram, 1)) * 100
+    : funnelTaxa;
   const channelRows = [
     {
       channel: 'Meta Ads',
@@ -6931,7 +7034,7 @@ export default function GeneralDashboard() {
                 {deliverySoloId ? (
                   <DeliveryResumoCard clientId={deliverySoloId} from={deliveryRange.from} to={deliveryRange.to} />
                 ) : (
-                  <SimpleFunnel steps={funnelStepsNew} totalRate={funnelTaxa > 0 ? premiumValue(funnelTaxa, 'percent') : '—'} fonteLabel={fonteTopoLabel} onStageClick={setFunilStageIdx} />
+                  <SimpleFunnel steps={funnelStepsNew} totalRate={funnelTaxaFinal > 0 ? premiumValue(funnelTaxaFinal, 'percent') : '—'} fonteLabel={usaStageFunil ? 'fonte: CRM' : fonteTopoLabel} onStageClick={setFunilStageIdx} todosClicaveis={usaStageFunil} />
                 )}
                 <ChannelSummaryTable rows={channelRows} />
               </div>
@@ -7134,7 +7237,20 @@ export default function GeneralDashboard() {
 
       <CreativePreviewOverlay creative={previewCreative} onClose={() => setPreviewCreative(null)} />
 
-      {funilStageIdx !== null && ETAPAS_FUNIL[funilStageIdx] && (
+      {/* Modo etapa REAL do Kanban: drill-down por índice do degrau (um cliente só). */}
+      {usaStageFunil && funilStageIdx !== null && stageFunilSolo?.degraus[funilStageIdx] && (
+        <FunilLeadsModal
+          stageIndex={funilStageIdx}
+          tituloEtapa={funnelStepsNew[funilStageIdx]?.label ?? ''}
+          totalNoCard={funnelStepsNew[funilStageIdx]?.actual ?? 0}
+          clientIds={[...selectedIds]}
+          from={periodoISO.from}
+          to={periodoISO.to}
+          onClose={() => setFunilStageIdx(null)}
+        />
+      )}
+      {/* Modo semântico (vários clientes / cliente sem etapas): 5 degraus fixos. */}
+      {!usaStageFunil && funilStageIdx !== null && ETAPAS_FUNIL[funilStageIdx] && (
         <FunilLeadsModal
           etapa={ETAPAS_FUNIL[funilStageIdx] as EtapaFunil}
           tituloEtapa={funnelStepsNew[funilStageIdx]?.label ?? ''}

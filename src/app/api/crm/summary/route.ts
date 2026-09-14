@@ -2,10 +2,13 @@ import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import {
   contarFunil,
+  contarFunilPorStage,
   type ContagemFunil,
   type EtapaDeStage,
   type EtapaFunil,
+  type FunilPorStage,
   type LeadParaFunil,
+  type StageKanban,
 } from '@/lib/funil-etapas';
 
 /**
@@ -86,18 +89,22 @@ export async function GET(req: NextRequest) {
     // contarFunil então classifica pelo texto do status, que já cobre o
     // vocabulário de planilha.
     const stagesPorCliente = new Map<string, EtapaDeStage[]>();
+    // Etapas REAIS do Kanban (com posição/cor) para o funil personalizado por
+    // cliente — o que a dashboard usa quando há um cliente só selecionado.
+    const kanbanPorCliente = new Map<string, StageKanban[]>();
     try {
       const { rows: stageRows } = await pool.query(
-        `SELECT client_id, funnel_id, label, etapa_funil FROM public.crm_stages`
+        `SELECT client_id, funnel_id, label, etapa_funil, position FROM public.crm_stages`
       );
       for (const s of stageRows) {
         const cid = String(s.client_id);
+        const etapa = (s.etapa_funil ?? null) as EtapaFunil | null;
+        const funnelId = String(s.funnel_id);
+        const label = String(s.label ?? '');
         if (!stagesPorCliente.has(cid)) stagesPorCliente.set(cid, []);
-        stagesPorCliente.get(cid)!.push({
-          funnelId: String(s.funnel_id),
-          label: String(s.label ?? ''),
-          etapa: (s.etapa_funil ?? null) as EtapaFunil | null,
-        });
+        stagesPorCliente.get(cid)!.push({ funnelId, label, etapa });
+        if (!kanbanPorCliente.has(cid)) kanbanPorCliente.set(cid, []);
+        kanbanPorCliente.get(cid)!.push({ funnelId, label, etapa, position: Number(s.position) || 0 });
       }
     } catch {
       // sem crm_stages (ou sem a coluna etapa_funil ainda) → auto-classificação pura
@@ -125,11 +132,16 @@ export async function GET(req: NextRequest) {
     return Response.json(
       [...leadsPorCliente.entries()].map(([clientId, leads]) => {
         const funil: ContagemFunil = contarFunil(leads, stagesPorCliente.get(clientId) ?? []);
+        // Funil pelas ETAPAS REAIS do Kanban do cliente. `null` quando o cliente
+        // não tem etapas cadastradas → a dashboard cai no funil semântico.
+        const porStage: FunilPorStage = contarFunilPorStage(kanbanPorCliente.get(clientId) ?? [], leads);
         return {
           clientId,
           /** Base inteira do cliente — topo do funil quando a fonte é CRM. */
           leads: funil.contatos,
           funil,
+          /** Etapas reais do Kanban (nome/cor/ordem/contagem) ou null. */
+          funilStages: porStage.degraus.length ? porStage : null,
           /** Receita dos fechados (nome herdado do shape antigo). */
           total: funil.receita,
         };
