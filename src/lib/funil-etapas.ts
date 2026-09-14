@@ -97,14 +97,22 @@ export function classificarEtapa(label: string | null | undefined): EtapaFunil {
   // etapa de negociação, e alargar o prefixo faria 12 negociações do CondoStore
   // entrarem como VENDA na dashboard. E `contratad` sozinho não pegava
   // "Contrato", que é justamente a etapa de fechamento do funil deles.
-  if (/efetivad|fechad|vendid|comprou|contratad|\bcontrato\b|paciente|ganho|\bwon\b/.test(s)) return 'fechamento';
+  // ⚠️ PERDA É TESTADA ANTES DO GANHO, de propósito: "Venda Perdida" e "Contrato
+  // Perdido" contêm a palavra do ganho e entrariam como FATURAMENTO se a ordem
+  // fosse a inversa — o pior erro possível nesta função.
+  if (/sem interesse|desqualificad|desqualificac|perdid|\bperdas?\b|\bperca\b|\blost\b|descartad/.test(s)) return 'perdido';
+  // ⚠️ A regra nasceu só com PARTICÍPIO (fechad, vendid, contratad) e não
+  // reconhecia o SUBSTANTIVO que o gestor usa como nome de coluna: "Fechamento",
+  // "Vendas" e "Contratação" caíam todos em 'contato'. Medido em 14/09: os 503
+  // leads ganhos da Londrigifts contavam como topo de funil no Radar e na
+  // dashboard. Mesma família de defeito em agendamento e comparecimento abaixo.
+  if (/efetivad|fechad|fechament|vendid|\bvendas?\b|comprou|contratad|contratac|\bcontrato\b|paciente|ganho|\bwon\b/.test(s)) return 'fechamento';
   // Ausência explícita ANTES de comparecimento: "No-Show" contém "show" mas é
   // o oposto — agendou e faltou.
   if (/no show|nao compareceu|com falta|faltou/.test(s)) return 'agendamento';
-  if (/realizad|compareceu|atendid[oa] na avaliacao|show/.test(s)) return 'comparecimento';
-  if (/agendad|remarcad|reagendad|marcad/.test(s)) return 'agendamento';
-  if (/sem interesse|desqualificad|perdid|\bperca\b|\blost\b|descartad/.test(s)) return 'perdido';
-  if (/em atendimento|qualificad|negocia|proposta|orcament|nao retorna|distante/.test(s)) return 'qualificado';
+  if (/realizad|compareceu|comparecim|atendid[oa] na avaliacao|show/.test(s)) return 'comparecimento';
+  if (/agendad|agendament|remarcad|remarcac|reagendad|marcad/.test(s)) return 'agendamento';
+  if (/em atendimento|qualificad|qualificac|negocia|proposta|orcament|nao retorna|distante/.test(s)) return 'qualificado';
   return 'contato';
 }
 
