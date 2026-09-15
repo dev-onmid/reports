@@ -30,7 +30,14 @@ type ConversionConfig = {
 
 // ── Schema ────────────────────────────────────────────────────────────────────
 
+// ⚠️ Memoizada por processo — mesma lição do ensureCrmMessagesSchema (15/09/2026):
+// esta função roda ALTER TABLE (lock ACCESS EXCLUSIVE) e era executada em TODA chamada.
+// Sob concorrência as cópias disputam o lock, cada uma segura uma conexão do pooler
+// até o timeout, e o pool esgota para o sistema inteiro. Roda uma vez por processo.
+let schemaConversionSchemaPronto = false;
+
 export async function ensureConversionSchema(pool: Pool): Promise<void> {
+  if (schemaConversionSchemaPronto) return;
   await pool.query(`
     CREATE TABLE IF NOT EXISTS public.client_conversion_config (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -83,6 +90,7 @@ export async function ensureConversionSchema(pool: Pool): Promise<void> {
     CREATE INDEX IF NOT EXISTS idx_conversion_log_client
       ON public.conversion_log (client_id, enviado_em DESC);
   `).catch(() => null);
+  schemaConversionSchemaPronto = true;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
