@@ -30,6 +30,7 @@ function fakePool({ falharEm = null, falharConexao = false } = {}) {
   ok(l[0] === 'BEGIN', 'abre transação primeiro');
   ok(l[1].startsWith('SET LOCAL lock_timeout'), 'lock_timeout é SET LOCAL, dentro da transação');
   ok(l[2].startsWith('SET LOCAL statement_timeout'), 'statement_timeout é SET LOCAL');
+  ok(l[3].startsWith('SET LOCAL idle_in_transaction_session_timeout'), 'sessão parada no meio da transação é encerrada pelo Postgres (libera o lock exclusivo)');
   ok(l.at(-1) === 'COMMIT', 'fecha com COMMIT');
   ok(l.some(s => s.startsWith('CREATE TABLE IF NOT')), 'CREATE TABLE passou');
   ok(l.some(s => s.startsWith('ALTER TABLE public.crm_messages')), 'ALTERs passaram');
