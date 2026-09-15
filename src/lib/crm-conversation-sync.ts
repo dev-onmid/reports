@@ -79,7 +79,36 @@ export async function ensureCrmConversationSchema(pool: Pool) {
   `);
 }
 
-export async function ensureCrmMessagesSchema(pool: Pool) {
+/**
+ * ⚠️⚠️ MEMOIZADA POR PROCESSO — e isso NÃO é otimização, é o que impede o banco de travar.
+ *
+ * Esta função roda DDL (ALTER TABLE, que exige lock ACCESS EXCLUSIVE) + UPDATE na tabela
+ * inteira. Sem memoização ela era executada em TODA chamada de 8 pontos, incluindo o poll
+ * do chat (a cada 3s) e o webhook de CADA mensagem recebida. Medido em 15/09/2026: as
+ * cópias concorrentes disputavam o lock da mesma tabela, cada uma segurava uma conexão do
+ * pooler por 60s até estourar `ECHECKOUTTIMEOUT`, e o sistema INTEIRO parou de carregar —
+ * qualquer tela que toque o banco, não só o CRM.
+ *
+ * Se precisar acrescentar migração aqui, lembre: roda uma vez por processo, na primeira
+ * chamada; um redeploy reexecuta. Nunca ponha algo caro que precise rodar sempre.
+ */
+let schemaMensagensPronto: Promise<void> | null = null;
+
+export function ensureCrmMessagesSchema(pool: Pool): Promise<void> {
+  schemaMensagensPronto ??= aplicarSchemaMensagens(pool).catch(err => {
+    // Falhou? esquece o cache pra próxima chamada tentar de novo, senão um erro
+    // transitório de rede deixaria o schema desatualizado pelo resto da vida do processo.
+    schemaMensagensPronto = null;
+    throw err;
+  });
+  return schemaMensagensPronto;
+}
+
+async function aplicarSchemaMensagens(pool: Pool) {
+  // ⚠️ Teto de espera por lock: sem isto, um ALTER que não consegue o lock fica parado
+  // segurando a conexão até o pooler desistir aos 60s — que foi exatamente a falha de
+  // 15/09. Falhar rápido é melhor: o `.catch` abaixo engole e a próxima chamada tenta.
+  await pool.query(`SET lock_timeout = '5s'`).catch(() => null);
   await pool.query(`
     CREATE TABLE IF NOT EXISTS public.crm_messages (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -129,16 +158,6 @@ export async function ensureCrmMessagesSchema(pool: Pool) {
     `ALTER TABLE public.crm_messages DROP CONSTRAINT IF EXISTS crm_messages_direction_check`,
     `ALTER TABLE public.crm_messages ALTER COLUMN text DROP NOT NULL`,
     `ALTER TABLE public.crm_messages ALTER COLUMN content DROP NOT NULL`,
-    `UPDATE public.crm_messages
-        SET text = content
-      WHERE (text IS NULL OR text = '')
-        AND content IS NOT NULL
-        AND content <> ''`,
-    `UPDATE public.crm_messages
-        SET content = text
-      WHERE (content IS NULL OR content = '')
-        AND text IS NOT NULL
-        AND text <> ''`,
     `CREATE INDEX IF NOT EXISTS idx_crm_messages_lead
        ON public.crm_messages (lead_id, created_at DESC)
        WHERE lead_id IS NOT NULL`,
@@ -148,6 +167,26 @@ export async function ensureCrmMessagesSchema(pool: Pool) {
   ];
   for (const sql of stmts) {
     await pool.query(sql).catch(() => null);
+  }
+
+  // ⚠️ Migração de dados legada (`text` ↔ `content`): só roda quando há linha pendente.
+  // Sem o guard, era um UPDATE na tabela inteira a cada chamada — escrevendo zero linhas
+  // e, ainda assim, segurando lock de escrita que travava os ALTER acima.
+  for (const [alvo, origem] of [['text', 'content'], ['content', 'text']] as const) {
+    const pendente = await pool
+      .query(
+        `SELECT 1 FROM public.crm_messages
+          WHERE (${alvo} IS NULL OR ${alvo} = '') AND ${origem} IS NOT NULL AND ${origem} <> ''
+          LIMIT 1`,
+      )
+      .catch(() => null);
+    if (!pendente?.rowCount) continue;
+    await pool
+      .query(
+        `UPDATE public.crm_messages SET ${alvo} = ${origem}
+          WHERE (${alvo} IS NULL OR ${alvo} = '') AND ${origem} IS NOT NULL AND ${origem} <> ''`,
+      )
+      .catch(() => null);
   }
 }
 
