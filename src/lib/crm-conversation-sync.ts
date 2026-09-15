@@ -136,6 +136,12 @@ async function aplicarSchemaMensagens(pool: Pool) {
   await client.query('BEGIN');
   await client.query(`SET LOCAL lock_timeout = '5s'`);
   await client.query(`SET LOCAL statement_timeout = '30s'`);
+  // ⚠️ A trava que faltou na v2 (15/09, 2ª fase): lock_timeout protege contra ESPERAR
+  // um lock, não contra SEGURAR um. Uma sessão desta transação parou entre dois
+  // statements ("idle in transaction", 6 min, último comando RELEASE SAVEPOINT) e
+  // ficou com o ACCESS EXCLUSIVE da tabela — todo SELECT em crm_messages enfileirou
+  // atrás dela. Com isto, o Postgres encerra a sessão parada e libera o lock sozinho.
+  await client.query(`SET LOCAL idle_in_transaction_session_timeout = '15s'`);
   await q(`
     CREATE TABLE IF NOT EXISTS public.crm_messages (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
