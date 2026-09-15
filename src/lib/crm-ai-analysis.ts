@@ -53,7 +53,14 @@ const STATUS_MAP: Record<string, string> = {
   perdido: 'Perdido',
 };
 
+// ⚠️ Memoizada por processo — mesma lição do ensureCrmMessagesSchema (15/09/2026):
+// esta função roda ALTER TABLE (lock ACCESS EXCLUSIVE) e era executada em TODA chamada.
+// Sob concorrência as cópias disputam o lock, cada uma segura uma conexão do pooler
+// até o timeout, e o pool esgota para o sistema inteiro. Roda uma vez por processo.
+let schemaCrmAiSchemaPronto = false;
+
 export async function ensureCrmAiSchema(pool: Pool) {
+  if (schemaCrmAiSchemaPronto) return;
   await pool.query(`
     ALTER TABLE public.crm_leads
       ADD COLUMN IF NOT EXISTS temperatura TEXT,
@@ -147,6 +154,7 @@ export async function ensureCrmAiSchema(pool: Pool) {
       [temperatura, criterios],
     ).catch(() => null);
   }
+  schemaCrmAiSchemaPronto = true;
 }
 
 function extractJson(text: string): AiResult {
