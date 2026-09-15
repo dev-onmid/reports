@@ -93,23 +93,50 @@ export async function ensureCrmConversationSchema(pool: Pool) {
  * chamada; um redeploy reexecuta. Nunca ponha algo caro que precise rodar sempre.
  */
 let schemaMensagensPronto: Promise<void> | null = null;
+let ultimaFalhaSchemaEm = 0;
+// ⚠️ Depois de uma falha, NÃO tenta de novo na chamada seguinte. A 1ª versão desta
+// memoização limpava o cache no erro — e com o banco travado isso virou tempestade:
+// cada poll retentava o ALTER TABLE, 45 conexões enfileiradas no mesmo lock. Em prod
+// a tabela já existe com todas as colunas; não conseguir reaplicar o DDL por um
+// minuto é infinitamente melhor que derrubar o chat inteiro.
+const COOLDOWN_SCHEMA_MS = 60_000;
 
 export function ensureCrmMessagesSchema(pool: Pool): Promise<void> {
-  schemaMensagensPronto ??= aplicarSchemaMensagens(pool).catch(err => {
-    // Falhou? esquece o cache pra próxima chamada tentar de novo, senão um erro
-    // transitório de rede deixaria o schema desatualizado pelo resto da vida do processo.
-    schemaMensagensPronto = null;
-    throw err;
-  });
+  if (!schemaMensagensPronto) {
+    if (Date.now() - ultimaFalhaSchemaEm < COOLDOWN_SCHEMA_MS) return Promise.resolve();
+    schemaMensagensPronto = aplicarSchemaMensagens(pool).catch(err => {
+      ultimaFalhaSchemaEm = Date.now();
+      schemaMensagensPronto = null;
+      console.error('[crm] ensureCrmMessagesSchema falhou; nova tentativa em 60s:', err?.message ?? err);
+    });
+  }
   return schemaMensagensPronto;
 }
 
 async function aplicarSchemaMensagens(pool: Pool) {
-  // ⚠️ Teto de espera por lock: sem isto, um ALTER que não consegue o lock fica parado
-  // segurando a conexão até o pooler desistir aos 60s — que foi exatamente a falha de
-  // 15/09. Falhar rápido é melhor: o `.catch` abaixo engole e a próxima chamada tenta.
-  await pool.query(`SET lock_timeout = '5s'`).catch(() => null);
-  await pool.query(`
+  // ⚠️ TUDO num único client e numa única transação. O pooler roda em modo TRANSAÇÃO:
+  // um `SET lock_timeout` avulso cai num backend e o ALTER seguinte cai em OUTRO — o
+  // teto nunca valia (foi assim na 1ª versão: cada tentativa esperou os 60s inteiros).
+  // `SET LOCAL` dentro de BEGIN/COMMIT prende tudo ao mesmo backend. Cada statement
+  // tem sua SAVEPOINT: um ALTER que falha (coluna legada ausente etc.) não aborta o
+  // resto — é o que o `.catch(() => null)` de antes fazia, statement a statement.
+  const client = await pool.connect();
+  const q = async (sql: string, params?: unknown[]) => {
+    await client.query('SAVEPOINT sp');
+    try {
+      const r = await client.query(sql, params);
+      await client.query('RELEASE SAVEPOINT sp');
+      return r;
+    } catch {
+      await client.query('ROLLBACK TO SAVEPOINT sp');
+      return null;
+    }
+  };
+  try {
+  await client.query('BEGIN');
+  await client.query(`SET LOCAL lock_timeout = '5s'`);
+  await client.query(`SET LOCAL statement_timeout = '30s'`);
+  await q(`
     CREATE TABLE IF NOT EXISTS public.crm_messages (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       contact_id UUID,
@@ -166,7 +193,7 @@ async function aplicarSchemaMensagens(pool: Pool) {
        WHERE external_id IS NOT NULL AND lead_id IS NOT NULL`,
   ];
   for (const sql of stmts) {
-    await pool.query(sql).catch(() => null);
+    await q(sql).catch(() => null);
   }
 
   // ⚠️ Migração de dados legada (`text` ↔ `content`): só roda quando há linha pendente.
@@ -187,6 +214,13 @@ async function aplicarSchemaMensagens(pool: Pool) {
           WHERE (${alvo} IS NULL OR ${alvo} = '') AND ${origem} IS NOT NULL AND ${origem} <> ''`,
       )
       .catch(() => null);
+  }
+  await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => null);
+    throw err;
+  } finally {
+    client.release();
   }
 }
 
