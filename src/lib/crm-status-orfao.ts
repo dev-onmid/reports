@@ -39,6 +39,28 @@ const CANAIS_CONHECIDOS = [
   'indicacao', 'tv', 'email', 'telefone', 'fachada', 'meta', 'tiktok', 'datalytics',
 ];
 
+/**
+ * ⚠️ Motivos de DESCARTE, não fases do funil — decisão do Matheus em 16/09/2026.
+ *
+ * Criar uma coluna para cada um encheria o board: as Sorrifácil ficariam com 24-27
+ * colunas (hoje 10), o oposto do que ele pediu na Londrigifts em agosto ("uma enorme
+ * quantia de etapas, deveria mostrar apenas essas do print"). São 51 leads no total —
+ * volume que não justifica quatro colunas por onde ninguém nunca avança.
+ *
+ * Vão para a coluna de perdido que o cliente já tem. ⚠️ O motivo original não se perde:
+ * fica no `status` anterior gravado na observação do lead? Não — fica registrado aqui,
+ * e o lead passa a viver na coluna certa do funil. Se um dia o motivo precisar ser
+ * consultável, o lugar é um campo próprio, nunca uma coluna do Kanban.
+ */
+const MOTIVOS_DE_DESCARTE = [
+  'numero invalido', 'pessoa errada', 'cadastro duplicado', 'desligado',
+  'telefone invalido', 'nao existe',
+];
+
+export function ehMotivoDeDescarte(status: string): boolean {
+  return MOTIVOS_DE_DESCARTE.includes(normalizarRotulo(status));
+}
+
 export function ehCanalNaoEtapa(status: string): boolean {
   const k = normalizarRotulo(status);
   return CANAIS_CONHECIDOS.includes(k);
@@ -62,6 +84,8 @@ export type PlanoStatusOrfao = {
   excluirVazias: { id: string; label: string; porCausaDe: string }[];
   /** Status que é canal: o lead vai para a entrada e o canal é preservado/acrescentado. */
   viraEntrada: { statusAtual: string; leads: number }[];
+  /** Motivo de descarte: vai para a coluna de perdido que o cliente já tem. */
+  viraDescarte: { statusAtual: string; paraRotulo: string; leads: number }[];
 };
 
 /** Acento, caixa e pontuação fora do caminho — "Sem  Interesse" casa com "Sem Interesse". */
@@ -74,8 +98,10 @@ export function normalizarRotulo(texto: string): string {
 export function planejarStatusOrfaos(
   statusOrfaos: { status: string; leads: number }[],
   colunas: ColunaExistente[],
+  /** Rótulo da coluna de perdido do cliente; sem ela, descarte vira coluna normal. */
+  colunaPerdido?: string | null,
 ): PlanoStatusOrfao {
-  const plano: PlanoStatusOrfao = { corrigirGrafia: [], criarColunas: [], excluirVazias: [], viraEntrada: [] };
+  const plano: PlanoStatusOrfao = { corrigirGrafia: [], criarColunas: [], excluirVazias: [], viraEntrada: [], viraDescarte: [] };
   const porNorm = new Map(colunas.map(c => [normalizarRotulo(c.label), c]));
 
   // agrupa os órfãos pelo rótulo normalizado: "Sem  Interesse" e "sem interesse" são um só
@@ -90,6 +116,11 @@ export function planejarStatusOrfaos(
   }
 
   for (const [k, o] of agrupados) {
+    // motivo de descarte vai para a coluna de perdido que já existe
+    if (ehMotivoDeDescarte(o.status) && colunaPerdido) {
+      plano.viraDescarte.push({ statusAtual: o.status, paraRotulo: colunaPerdido, leads: o.leads });
+      continue;
+    }
     // canal nunca vira coluna: o board é de ETAPAS, e um lead pode ter vários canais
     if (ehCanalNaoEtapa(o.status)) {
       plano.viraEntrada.push({ statusAtual: o.status, leads: o.leads });
