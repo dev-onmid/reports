@@ -2,7 +2,7 @@ import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { queueFollowupIfExists } from '@/lib/followup-send';
 import { ensureCrmAiSchema } from '@/lib/crm-ai-analysis';
-import { dispararEventosPorStatus, dispararEventoFechamento } from '@/lib/conversions';
+import { dispararEventosPorStatus, dispararEventoFechamento, enviarEventoMeta } from '@/lib/conversions';
 
 /**
  * Um lead inteiro, por id.
@@ -52,8 +52,19 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         fechou=$18, valor_rs=$19, pagamento=$20, analise_credito=$21,
         data_nasc=$22, bairro=$23, motivacoes=$24, dores=$25,
         temperatura=$26, time_interno=$27,
+        -- ⚠️ Qualificado é MARCA HUMANA, não etapa: o gestor aperta o botão no card com o
+        -- critério do negócio dele (MQL). Fica ao lado da coluna, como a temperatura.
+        -- qualificado_em/_por só são escritos na virada, para o histórico não mentir
+        -- sobre quando e quem marcou.
+        qualificado=$28,
+        qualificado_em = CASE WHEN $28 IS DISTINCT FROM qualificado
+                              THEN (CASE WHEN $28 THEN NOW() ELSE NULL END)
+                              ELSE qualificado_em END,
+        qualificado_por = CASE WHEN $28 IS DISTINCT FROM qualificado
+                               THEN (CASE WHEN $28 THEN $29 ELSE NULL END)
+                               ELSE qualificado_por END,
         updated_at=NOW()
-       WHERE client_id=$28 AND id=$29::uuid
+       WHERE client_id=$30 AND id=$31::uuid
        RETURNING *`,
       [
         next.mes??null, next.data||null, next.link_criativo??null,
@@ -65,6 +76,8 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         next.pagamento??null, next.analise_credito??false,
         next.data_nasc||null, next.bairro??null, next.motivacoes??null, next.dores??null,
         next.temperatura ?? null, next.time_interno === true,
+        next.qualificado === true,
+        req.headers.get('x-onmid-user-id') ?? null,
         current.client_id, id,
       ]
     );
@@ -88,6 +101,15 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       const fechouJustNow = current.fechou !== true && lead.fechou === true;
       if (fechouJustNow && valor && valor > 0) {
         await dispararEventoFechamento(pool, lead.client_id, leadData, valor).catch(() => null);
+      }
+
+      // ⚠️ QUALIFICADO (16/09): o sinal de qualidade que o Matheus pediu. Dispara na
+      // VIRADA e só na subida — o Meta não tem "desconversão", então desmarcar corrige a
+      // tela e o relatório, mas o evento já enviado não volta atrás. Por isso o botão
+      // não pergunta nada ao marcar: o custo está em marcar errado, não em desmarcar.
+      const qualificouAgora = current.qualificado !== true && lead.qualificado === true;
+      if (qualificouAgora) {
+        await enviarEventoMeta(pool, lead.client_id, 'Lead_Qualificado', leadData, valor).catch(() => null);
       }
     }
 
