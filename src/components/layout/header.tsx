@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from 'react';
+import { NovoLembrete } from '@/components/layout/novo-lembrete';
+import { LembreteAlarme } from '@/components/layout/lembrete-alarme';
 import Link from 'next/link';
 import { Bell, Menu, Search } from 'lucide-react';
 import { Input } from '@/components/ui/input';
@@ -20,6 +22,7 @@ type Notificacao = {
   href: string | null;
   severidade: 'critico' | 'atencao' | 'info';
   lida_em: string | null;
+  importante?: boolean;
 };
 
 const DOT_SEVERIDADE: Record<Notificacao['severidade'], string> = {
@@ -37,6 +40,10 @@ export function Header({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
   const [session, setSession] = useState<AuthSession | null>(null);
   const [notificacoes, setNotificacoes] = useState<Notificacao[]>([]);
   const [naoLidas, setNaoLidas] = useState(0);
+  // ⚠️ Adiar é só do navegador (não some do banco): "lembrar em 10 min" é um pedido da
+  // pessoa naquela sessão, não uma mudança no lembrete que outra pessoa criou.
+  const [adiados, setAdiados] = useState<Record<string, number>>({});
+  const [agora, setAgora] = useState(() => Date.now());
   const [busca, setBusca] = useState('');
   const [buscaAberta, setBuscaAberta] = useState(false);
   const { clients } = useClients();
@@ -71,6 +78,19 @@ export function Header({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
     const timer = setInterval(carregar, 60_000);
     return () => { ativo = false; clearInterval(timer); };
   }, []);
+
+  // relógio do adiamento: sem ele, o lembrete adiado só voltaria no próximo poll de 60s
+  useEffect(() => {
+    const t = setInterval(() => setAgora(Date.now()), 15_000);
+    return () => clearInterval(t);
+  }, []);
+
+  const alarmes = useMemo(
+    () => notificacoes
+      .filter(n => n.importante && !n.lida_em && (adiados[n.id] ?? 0) <= agora)
+      .map(n => ({ id: n.id, titulo: n.titulo, descricao: n.descricao })),
+    [notificacoes, adiados, agora],
+  );
 
   function marcarLida(id: string) {
     setNotificacoes((atuais) => atuais.map((n) => (n.id === id ? { ...n, lida_em: new Date().toISOString() } : n)));
@@ -157,6 +177,8 @@ export function Header({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
       <AIUsagePill />
       <ThemeToggle />
 
+      <NovoLembrete />
+
       <Popover>
         <PopoverTrigger
           aria-label="Notificações"
@@ -218,6 +240,14 @@ export function Header({ onOpenSidebar }: { onOpenSidebar?: () => void }) {
           <AvatarFallback className="bg-primary/20 text-primary text-xs font-bold">{initials}</AvatarFallback>
         </Avatar>
       </div>
+
+      {/* ⚠️ Mora no header porque o header está em TODA tela — o lembrete tem que tocar
+          onde a pessoa estiver, não só no Início. */}
+      <LembreteAlarme
+        itens={alarmes}
+        onVi={marcarLida}
+        onAdiar={id => setAdiados(a => ({ ...a, [id]: Date.now() + 10 * 60_000 }))}
+      />
     </header>
   );
 }

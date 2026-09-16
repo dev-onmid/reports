@@ -101,6 +101,8 @@ export type SinalInput = {
   descricao?: string | null;
   href?: string | null;
   clientId?: string | null;
+  /** Marca o aviso como ALARME: a interface toca e sacode até alguém ver. */
+  importante?: boolean;
 };
 
 /**
@@ -173,12 +175,13 @@ export async function registrarEvento(pool: Pool, s: SinalInput): Promise<void> 
   await ensureNotificacoesSchema(pool);
   await pool.query(
     `INSERT INTO public.notificacoes
-       (user_id, tipo, severidade, titulo, descricao, href, client_id, signal_key)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       (user_id, tipo, severidade, titulo, descricao, href, client_id, signal_key, importante)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
      ON CONFLICT (user_id, signal_key) DO NOTHING`,
     [
       s.userId || AGENCIA, s.tipo, s.severidade ?? 'info', s.titulo,
       s.descricao ?? null, s.href ?? null, s.clientId ?? null, s.signalKey,
+      s.importante === true,
     ],
   ).catch(() => {});
 }

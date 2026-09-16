@@ -2,10 +2,9 @@ import type { NextRequest } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
 import { makeServerPool } from '@/lib/server-db';
 import { logAiUsage } from '@/lib/ai-usage-logger';
-import {
-  getInstructions, systemTools, execSystemTool,
-  ensureLunaTasksTable, computeNextRun, getLunaSendInstance, lunaConnSend,
-} from '@/lib/luna-tools';
+import {getInstructions, systemTools, execSystemTool,
+  ensureLunaTasksTable,  getLunaSendInstance, lunaConnSend} from '@/lib/luna-tools';
+import { computeNextRun } from '@/lib/recorrencia';
 
 // Agendador da Luna — executa tarefas de public.luna_tasks sem usuário presente.
 // Chamado pelo GitHub Actions (luna-scheduler.yml) a cada 15 min com ?secret=.
