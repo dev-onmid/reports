@@ -14,6 +14,7 @@ import {
   Clock3,
   ExternalLink,
   Eye,
+  FileText,
   Filter,
   MessageCircle,
   Pencil,
@@ -1262,6 +1263,7 @@ function EditPaymentModal({
     clientName: payment.clientName,
     date: payment.date,
     destination: payment.destination,
+    descricao: payment.descricao ?? '',
     channel: payment.channel,
     amount: payment.amount,
     status: payment.status,
@@ -1280,6 +1282,7 @@ function EditPaymentModal({
       clientName: form.clientName,
       date: form.date,
       destination: form.destination,
+      descricao: form.descricao.trim() || null,
       channel: form.channel,
       amount: form.amount,
       status: form.status,
@@ -1329,12 +1332,22 @@ function EditPaymentModal({
             </label>
           </div>
 
+          {/*
+            Substituiu "Destino / Campanha": aquele campo nasce auto-preenchido
+            com "{cliente} - Novo investimento" e nunca era digitado (saiu do
+            formulário de criação em 2026-07-29 por isso). Dois campos de texto
+            livre lado a lado só fariam o gestor não saber qual usar; o
+            `destination` continua gravado, apenas não aparece mais aqui.
+          */}
           <label className="block space-y-1.5">
-            <span className="text-xs font-bold text-foreground">Destino / Campanha</span>
+            <span className="text-xs font-bold text-foreground">
+              Descrição <span className="font-normal text-muted-foreground">(opcional)</span>
+            </span>
             <Input
-              value={form.destination}
-              onChange={e => setForm(f => ({ ...f, destination: e.target.value }))}
-              placeholder="Nome da campanha ou destino"
+              value={form.descricao}
+              onChange={e => setForm(f => ({ ...f, descricao: e.target.value }))}
+              placeholder="Ex: adiantamento de setembro, taxa de setup"
+              maxLength={120}
               className="h-10 bg-background focus:border-violet-400"
             />
           </label>
@@ -1405,6 +1418,20 @@ function EditPaymentModal({
   );
 }
 
+/**
+ * Legenda sob o nome do cliente nos três cards (mês/semana/dia).
+ *
+ * O logo do canal já fica ao lado do texto, então "Meta Ads" escrito é
+ * redundante — quando existe descrição, ela ocupa esse lugar em vez de somar
+ * uma linha nova. Os cards foram enxugados a pedido em 2026-07-29 e engordar
+ * de volta desfaria aquela rodada.
+ */
+function legendaDoPagamento(payment: InvestmentPayment): { texto: string; ehDescricao: boolean } {
+  const desc = payment.descricao?.trim();
+  if (desc) return { texto: desc, ehDescricao: true };
+  return { texto: payment.channel.replace(' ADS', ' Ads'), ehDescricao: false };
+}
+
 function MonthPaymentCard({
   payment,
   index,
@@ -1449,7 +1476,17 @@ function MonthPaymentCard({
             <p className={cn('shrink-0 text-[10px] font-bold leading-none tabular-nums', tone.text)}>{time}</p>
             <p className="truncate text-xs font-bold leading-tight text-foreground">{payment.clientName}</p>
           </div>
-          <p className="mt-0.5 truncate text-[10px] leading-tight text-muted-foreground">{payment.channel.replace(' ADS', ' Ads')}</p>
+          {(() => {
+            const leg = legendaDoPagamento(payment);
+            return (
+              <p
+                title={leg.ehDescricao ? leg.texto : undefined}
+                className={cn('mt-0.5 truncate text-[10px] leading-tight', leg.ehDescricao ? 'font-semibold text-foreground/80' : 'text-muted-foreground')}
+              >
+                {leg.texto}
+              </p>
+            );
+          })()}
           <div className="mt-1 flex items-center gap-1.5">
             <p className={cn('font-heading font-normal text-sm leading-none tabular-nums', tone.amount)}>
               {formatCurrencyBRL(payment.amount)}
@@ -1572,7 +1609,17 @@ function DayTimelinePaymentCard({
                 </span>
               )}
             </div>
-            <p className="mt-1 text-xs font-medium text-muted-foreground">{payment.channel.replace(' ADS', ' Ads')}</p>
+            {(() => {
+              const leg = legendaDoPagamento(payment);
+              return (
+                <p
+                  title={leg.ehDescricao ? leg.texto : undefined}
+                  className={cn('mt-1 truncate text-xs font-medium', leg.ehDescricao ? 'text-foreground/80' : 'text-muted-foreground')}
+                >
+                  {leg.texto}
+                </p>
+              );
+            })()}
           </div>
         </div>
         <div className="shrink-0 flex flex-col items-end gap-1" onClick={e => e.stopPropagation()}>
@@ -1695,7 +1742,17 @@ function WeekPaymentCard({
         <PaymentChannelLogo channel={payment.channel} className="h-9 w-9" />
         <div className="min-w-0">
           <p className="truncate text-xs font-bold leading-tight text-foreground">{payment.clientName}</p>
-          <p className="mt-0.5 truncate text-[11px] leading-tight text-muted-foreground">{payment.channel.replace(' ADS', ' Ads')}</p>
+          {(() => {
+            const leg = legendaDoPagamento(payment);
+            return (
+              <p
+                title={leg.ehDescricao ? leg.texto : undefined}
+                className={cn('mt-0.5 truncate text-[11px] leading-tight', leg.ehDescricao ? 'font-semibold text-foreground/80' : 'text-muted-foreground')}
+              >
+                {leg.texto}
+              </p>
+            );
+          })()}
           <p className={cn('mt-1 font-heading font-normal text-sm leading-none tabular-nums', cfg.text)}>{formatCurrencyBRL(payment.amount)}</p>
         </div>
       </button>
@@ -1853,12 +1910,16 @@ export default function PagamentosPage() {
     clientName: clients[0]?.name ?? '',
     date: toISODate(new Date()),
     destination: clients[0] ? `${clients[0].name} - Novo investimento` : '',
+    descricao: '',
     amount: DEFAULT_PAYMENT_AMOUNT,
     channel: 'Meta ADS',
     status: 'Pendente',
     extra: false,
   });
   const formRef = useRef<HTMLDivElement>(null);
+  // O campo de descrição fica fora da fileira até ser pedido: pagamento
+  // pontual é a exceção, e uma coluna a mais encolheria as outras oito.
+  const [mostrarDescricao, setMostrarDescricao] = useState(false);
 
   // The amount defaults to whatever was last sent. Payments arrive async, so the
   // prefill happens in an effect — and stops as soon as the user types a value of
@@ -1983,7 +2044,11 @@ export default function PagamentosPage() {
 
   async function handleAddPayment() {
     if (!newPayment.clientId || !newPayment.destination.trim() || newPayment.amount <= 0) return;
-    const base = { ...newPayment, destination: newPayment.destination.trim() };
+    const base = {
+      ...newPayment,
+      destination: newPayment.destination.trim(),
+      descricao: newPayment.descricao?.trim() || null,
+    };
 
     if (recurMode === 'none') {
       void addPayment(base);
@@ -2004,7 +2069,10 @@ export default function PagamentosPage() {
     // Keep the amount just sent — it's now "the last one", and the next Pix is
     // usually the same value. Clearing it back to a fixed 500 meant retyping.
     amountTouchedRef.current = false;
-    setNewPayment((prev) => ({ ...prev, destination: `${prev.clientName} - Novo investimento`, extra: false }));
+    // A descrição é do pagamento pontual que acabou de sair, não do próximo —
+    // ao contrário do valor, repeti-la carimbaria o texto errado por engano.
+    setNewPayment((prev) => ({ ...prev, destination: `${prev.clientName} - Novo investimento`, descricao: '', extra: false }));
+    setMostrarDescricao(false);
     setRecurMode('none');
     setRecurHasEnd(false);
     setRecurUntil('');
@@ -2121,7 +2189,7 @@ export default function PagamentosPage() {
           <h2 className="text-sm font-bold uppercase tracking-wider">Novo Pagamento</h2>
           <p className="text-xs text-muted-foreground">Cadastre um novo Pix ou agende para futuras datas.</p>
         </div>
-        <div className="grid gap-3 xl:grid-cols-[1.3fr_0.9fr_1fr_0.85fr_0.95fr_auto_auto_0.9fr]">
+        <div className="grid gap-3 xl:grid-cols-[1.2fr_0.85fr_0.95fr_0.8fr_0.9fr_auto_auto_auto_0.9fr]">
           <label className="space-y-1.5">
             <span className="text-xs font-bold text-foreground">Cliente</span>
             <select value={newPayment.clientId} onChange={(e) => handleClientChange(e.target.value)} className="h-9 w-full rounded-lg border border-border bg-background px-3 text-sm text-muted-foreground outline-none focus:border-primary">
@@ -2184,6 +2252,29 @@ export default function PagamentosPage() {
               Recorrência
             </button>
           </div>
+          <div className="flex flex-col items-center justify-end gap-1">
+            <span className="text-xs font-bold text-foreground">Descrever</span>
+            <button
+              type="button"
+              onClick={() => {
+                // Fechar limpa o texto: um campo escondido com conteúdo dentro
+                // gravaria descrição que o gestor não está mais vendo.
+                setMostrarDescricao(v => {
+                  if (v) setNewPayment(p => ({ ...p, descricao: '' }));
+                  return !v;
+                });
+              }}
+              title="Descrever este pagamento (opcional)"
+              className={cn(
+                'flex h-9 w-14 items-center justify-center rounded-lg border transition-all',
+                mostrarDescricao || newPayment.descricao
+                  ? 'border-violet-500/60 bg-violet-500/20 text-violet-300 shadow-[0_0_14px_rgba(168,85,247,0.4)]'
+                  : 'border-border bg-background text-muted-foreground hover:border-violet-500/40 hover:text-violet-400',
+              )}
+            >
+              <FileText className="h-4 w-4" />
+            </button>
+          </div>
           <button
             type="button"
             onClick={handleAddPayment}
@@ -2194,6 +2285,22 @@ export default function PagamentosPage() {
             Adicionar Pix
           </button>
         </div>
+        {(mostrarDescricao || newPayment.descricao) && (
+          <div className="mt-3 flex items-center gap-2">
+            <FileText className="h-3.5 w-3.5 shrink-0 text-violet-300" />
+            <Input
+              autoFocus
+              value={newPayment.descricao ?? ''}
+              onChange={(e) => setNewPayment((p) => ({ ...p, descricao: e.target.value }))}
+              placeholder="Descrição deste pagamento — ex: adiantamento de setembro, taxa de setup"
+              maxLength={120}
+              className="h-9 flex-1 bg-background"
+            />
+            <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
+              {(newPayment.descricao ?? '').length}/120
+            </span>
+          </div>
+        )}
         {/* ── Recorrência ─────────────────────────────────────────── */}
         {recurMode !== 'none' && (
         <div className="mt-3 border-t border-border/50 pt-3">

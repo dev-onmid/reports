@@ -1,5 +1,18 @@
 @AGENTS.md
 
+## Pagamentos — descrição opcional para identificar pagamento pontual (2026-09-16)
+
+Pedido do Matheus (prints do formulário e do modal de edição): "quero poder por alguma descrição para caso for algo beeeem pontual! Para a gente identificar cada pagamento".
+
+- **⚠️ Coluna NOVA `payments.descricao TEXT`, não reaproveitar `destination`.** O `destination` nasce sempre preenchido com `"{cliente} - Novo investimento"` (auto, em 4 pontos do código) — usá-lo como descrição carimbaria a MESMA frase em todo card e não identificaria coisa nenhuma, que é o oposto do pedido. `descricao` fica **NULA por omissão**, então só aparece quando alguém escreveu de verdade.
+- **A legenda do card troca de conteúdo, não ganha linha** (`legendaDoPagamento`, usada nos três cards — mês/semana/dia): o logo do canal já fica ao lado, então "Meta Ads" escrito é redundante e **dá lugar à descrição quando ela existe**; sem descrição, continua o canal. Assim a identificação entra sem engordar o card — que foi enxugado a pedido em 2026-07-29 e engordar de volta desfaria aquela rodada. Texto longo trunca com `title` no hover.
+- **No formulário de criação o campo fica ESCONDIDO atrás de um botão "Descrever"** (ícone `FileText`, mesmo padrão visual de Extra/Repetir): pagamento pontual é a exceção, e uma 9ª coluna de texto encolheria as outras oito. Aberto, o campo ocupa a largura toda embaixo, com `autoFocus` e contador `N/120`. ⚠️ Fechar o botão **limpa o texto** — campo escondido com conteúdo dentro gravaria descrição que o gestor não está mais vendo. Após enviar, a descrição é **zerada** (ao contrário do valor, que é mantido de propósito): ela é do pagamento que acabou de sair, não do próximo.
+- **⚠️ No modal de edição, "Descrição" SUBSTITUIU "Destino / Campanha"** — dois campos de texto livre lado a lado fariam o gestor não saber qual usar, e o `destination` nunca era digitado (saiu da criação em 2026-07-29 pelo mesmo motivo). O valor continua gravado no banco, só não aparece mais na tela. Reverter = devolver o `<label>` antigo.
+- **Apagar é reversível**: string vazia/só-espaços vira `NULL` no PATCH (não é ignorada), e o card volta a mostrar o canal. A API faz `descricao?.trim() || null` nos dois caminhos (POST e PATCH), então espaço em branco nunca vira "descrição".
+- **`ALTER TABLE ... ADD COLUMN IF NOT EXISTS` nos três handlers** (GET/POST/PATCH), não só no GET como a coluna `extra` faz: POST e PATCH referenciam a coluna e rodariam antes do primeiro GET numa instalação nova.
+- ✅ Verificado no preview (harness de login mockado, pagamentos com e sem descrição): botão abre o campo com autofoco e contador 30/120; POST leva `descricao` no payload e o campo fecha sozinho; card mostra "Adiantamento de setembro" no lugar de "Meta Ads" e o card sem descrição segue em "Google Ads"; edição salva (`PATCH {descricao}`) e o card atualiza ao vivo; apagar manda `null` e o card volta ao canal; descrição visível nas três visões; mobile 375px sem overflow. tsc + `next build` limpos.
+- ⚠️ **Entrou na `main` por cherry-pick isolado**, não por merge: a branch `feat/sults-integracao` onde a mudança nasceu estava 53 commits à frente e 71 atrás da main, e mergear levaria trabalho de outras sessões junto.
+
 ## Kanban — a cor da coluna passa a vir do DEGRAU do funil (2026-09-12)
 
 Pedido do Matheus: "cada status do Kanban com a cor de acordo com o funil onde temos as etapas". Escolha dele entre as 3 opções oferecidas: **automático pelo degrau** (a cor manual deixa de valer).
