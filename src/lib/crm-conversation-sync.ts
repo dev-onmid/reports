@@ -205,21 +205,22 @@ async function aplicarSchemaMensagens(pool: Pool) {
   // ⚠️ Migração de dados legada (`text` ↔ `content`): só roda quando há linha pendente.
   // Sem o guard, era um UPDATE na tabela inteira a cada chamada — escrevendo zero linhas
   // e, ainda assim, segurando lock de escrita que travava os ALTER acima.
+  // ⚠️⚠️ `q()` (o client DESTA transação), NUNCA `pool.query`. O pool é `max: 1` e a
+  // conexão já está tomada por `pool.connect()` acima — um `pool.query` aqui dentro
+  // espera por uma conexão que ele mesmo segura e NUNCA resolve. Como a promise desta
+  // função é memoizada, ela ficava pendente para sempre e TODA request seguinte
+  // esperava nela: foi o que derrubou o CRM inteiro em 16/09 (60s em todo cliente).
   for (const [alvo, origem] of [['text', 'content'], ['content', 'text']] as const) {
-    const pendente = await pool
-      .query(
-        `SELECT 1 FROM public.crm_messages
-          WHERE (${alvo} IS NULL OR ${alvo} = '') AND ${origem} IS NOT NULL AND ${origem} <> ''
-          LIMIT 1`,
-      )
-      .catch(() => null);
+    const pendente = await q(
+      `SELECT 1 FROM public.crm_messages
+        WHERE (${alvo} IS NULL OR ${alvo} = '') AND ${origem} IS NOT NULL AND ${origem} <> ''
+        LIMIT 1`,
+    );
     if (!pendente?.rowCount) continue;
-    await pool
-      .query(
-        `UPDATE public.crm_messages SET ${alvo} = ${origem}
-          WHERE (${alvo} IS NULL OR ${alvo} = '') AND ${origem} IS NOT NULL AND ${origem} <> ''`,
-      )
-      .catch(() => null);
+    await q(
+      `UPDATE public.crm_messages SET ${alvo} = ${origem}
+        WHERE (${alvo} IS NULL OR ${alvo} = '') AND ${origem} IS NOT NULL AND ${origem} <> ''`,
+    );
   }
   await client.query('COMMIT');
   } catch (err) {
