@@ -56,12 +56,23 @@ export async function GET(req: NextRequest) {
       });
     }
 
+    // ⚠️ Roda em TODOS (não só nos pendentes): quem foi afetado pela 1ª versão quebrada
+    // tem posições com buraco/colisão para reparar mesmo já tendo a coluna.
     const feitos: string[] = [];
-    for (const c of pendentes) {
-      await garantirEstruturaEngajado(pool, c.client_id).catch(() => null);
-      feitos.push(c.nome);
+    const falhas: string[] = [];
+    for (const c of clientes) {
+      const r = await garantirEstruturaEngajado(pool, c.client_id)
+        .catch(e => ({ criou: 0, erros: [(e as Error)?.message ?? 'falha'] }));
+      if (r.erros.length) falhas.push(`${c.nome}: ${r.erros[0]}`);
+      else feitos.push(c.nome);
     }
-    return Response.json({ ok: true, clientes_ajustados: feitos.length, clientes: feitos });
+    // ⚠️ Sucesso só quando NÃO houve falha — a 1ª versão respondeu "27 ajustados"
+    // enquanto todos os INSERTs falhavam, porque o erro era engolido por um catch.
+    return Response.json({
+      ok: falhas.length === 0,
+      clientes_ajustados: feitos.length,
+      falhas: falhas.length ? falhas : undefined,
+    }, { status: falhas.length ? 500 : 200 });
   } catch (e) {
     return Response.json({ ok: false, error: (e as Error)?.message }, { status: 500 });
   } finally {
