@@ -1,8 +1,9 @@
 import type { NextRequest } from 'next/server';
+import { memoizarSchema } from '@/lib/schema-memo';
 import { makeServerPool } from '@/lib/server-db';
 import { ensureCrmMessagesSchema, ensureDefaultFunnel, getFirstFunnelStageLabel } from '@/lib/crm-conversation-sync';
 
-async function ensureTable(pool: ReturnType<typeof makeServerPool>) {
+async function ensureTableInterno(pool: ReturnType<typeof makeServerPool>) {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS public.crm_leads (
       id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -74,6 +75,12 @@ async function ensureTable(pool: ReturnType<typeof makeServerPool>) {
       ADD COLUMN IF NOT EXISTS time_interno BOOLEAN NOT NULL DEFAULT false;
   `);
 }
+
+// ⚠️ Memoizada: ALTER TABLE pede lock ACCESS EXCLUSIVE mesmo quando é no-op, e
+// esta rota é caminho quente (o CRM faz poll a cada 3s). Sem isto, as chamadas
+// concorrentes se enfileiram no lock da tabela e a rota estoura — foi o apagão do
+// CRM em 16/09/2026. Ver src/lib/schema-memo.ts.
+const ensureTable = memoizarSchema(ensureTableInterno);
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
