@@ -1,4 +1,5 @@
 import type { NextRequest } from 'next/server';
+import { ensureDefaultFunnel } from '@/lib/crm-conversation-sync';
 import { makeServerPool } from '@/lib/server-db';
 import { planejarStatusOrfaos, type ColunaExistente } from '@/lib/crm-status-orfao';
 
@@ -61,14 +62,36 @@ export async function GET(req: NextRequest) {
           WHERE f.client_id = $1 ORDER BY s.position`,
         [alvo.client_id],
       );
-      if (!colunas.length) { falhas.push(`${alvo.nome}: sem funil`); continue; }
+      if (!colunas.length) {
+        // ⚠️ Sorrifácil Valinhos: 278 leads e NENHUM funil — board totalmente vazio, não
+        // é caso de status órfão. Sem o funil padrão, nada aqui teria onde encaixar.
+        if (!dry) {
+          await ensureDefaultFunnel(pool, alvo.client_id)
+            .catch(e => falhas.push(`${alvo.nome} criar funil: ${(e as Error).message}`));
+        }
+        relatorio.push({ cliente: alvo.nome, criou_funil_padrao: true });
+        continue;
+      }
 
-      const plano = planejarStatusOrfaos(orfaos, colunas);
+      // ⚠️ A coluna de perdido é a do cliente, não um nome fixo: uns chamam
+      // "Desqualificado", outros "Sem Interesse". Pega pelo GRAU, com o rótulo como
+      // desempate — e se não houver nenhuma, o descarte vira coluna normal (o plano
+      // trata `null`), em vez de o lead continuar invisível.
+      const { rows: [perdido] } = await pool.query<{ label: string }>(
+        `SELECT s.label FROM public.crm_stages s JOIN public.crm_funnels f ON f.id = s.funnel_id
+          WHERE f.client_id = $1
+            AND (s.etapa_funil = 'perdido' OR lower(trim(s.label)) IN ('desqualificado','sem interesse','perdido'))
+          ORDER BY (s.etapa_funil = 'perdido') DESC, s.position ASC LIMIT 1`,
+        [alvo.client_id],
+      ).catch(() => ({ rows: [] as Array<{ label: string }> }));
+
+      const plano = planejarStatusOrfaos(orfaos, colunas, perdido?.label ?? null);
       relatorio.push({
         cliente: alvo.nome,
         corrigir_grafia: plano.corrigirGrafia.map(g => `${g.leads}× "${g.statusAtual}" → "${g.paraRotulo}"`),
         criar_colunas: plano.criarColunas.map(c => `${c.label} (${c.etapa}, ${c.leads} leads)`),
         canal_vira_entrada: plano.viraEntrada.map(v => `${v.leads}× "${v.statusAtual}"`),
+        descarte_agrupado: plano.viraDescarte.map(v => `${v.leads}× "${v.statusAtual}" → "${v.paraRotulo}"`),
         excluir_vazias: plano.excluirVazias.map(e => e.label),
       });
       if (dry) continue;
@@ -88,6 +111,14 @@ export async function GET(req: NextRequest) {
       // duplicata da origem. `acrescentarCanal` só age se o campo estiver vazio, e mesmo
       // aí ACRESCENTA: o sistema é multicanal ("Facebook - WhatsApp" em 13.448 leads) e
       // sobrescrever apagaria um canal legítimo.
+      for (const v of plano.viraDescarte) {
+        await pool.query(
+          `UPDATE public.crm_leads SET status = $3, updated_at = NOW()
+            WHERE client_id = $1 AND status = $2`,
+          [alvo.client_id, v.statusAtual, v.paraRotulo],
+        ).catch(e => falhas.push(`${alvo.nome} descarte "${v.statusAtual}": ${(e as Error).message}`));
+      }
+
       const entrada = colunas[0].label;
       for (const v of plano.viraEntrada) {
         await pool.query(

@@ -1,6 +1,6 @@
 // node scratchpad/test-status-orfao.mjs
 import assert from 'node:assert';
-import { planejarStatusOrfaos, normalizarRotulo, ehCanalNaoEtapa, acrescentarCanal } from './build/crm-status-orfao.mjs';
+import { planejarStatusOrfaos, normalizarRotulo, ehCanalNaoEtapa, acrescentarCanal, ehMotivoDeDescarte } from './build/crm-status-orfao.mjs';
 let n = 0;
 const eq = (a,b,m) => { assert.strictEqual(a,b,m); n++; };
 const ok = (c,m) => { assert.ok(c,m); n++; };
@@ -81,6 +81,36 @@ eq(normalizarRotulo('  '), '', 'só espaço vira vazio');
   eq(acrescentarCanal('', 'WhatsApp'), 'WhatsApp', 'campo vazio recebe o primeiro');
   eq(acrescentarCanal(null, 'WhatsApp'), 'WhatsApp', 'null idem');
   eq(acrescentarCanal('instagram', 'Instagram'), 'instagram', 'caixa diferente não vira duplicata');
+}
+
+
+// ⚠️ motivo de descarte vai para a coluna de perdido que o cliente JÁ tem — não vira
+// coluna. Sem isso os boards das Sorrifácil iam a 27 colunas (hoje 10), o oposto do que
+// o Matheus pediu na Londrigifts em agosto.
+{
+  const plano = planejarStatusOrfaos(
+    [{ status: 'Número Inválido', leads: 18 }, { status: 'Pessoa Errada', leads: 9 },
+     { status: 'Cadastro Duplicado', leads: 19 }, { status: 'Não Contactado', leads: 500 }],
+    [{ id: 'e', label: 'Entrada', leads: 3 }, { id: 'd', label: 'Desqualificado', leads: 7 }],
+    'Desqualificado',
+  );
+  eq(plano.viraDescarte.length, 3, 'os três motivos de descarte são agrupados');
+  eq(plano.viraDescarte.every(v => v.paraRotulo === 'Desqualificado'), true, 'todos para a coluna de perdido do cliente');
+  eq(plano.criarColunas.length, 1, 'só a etapa de verdade vira coluna');
+  eq(plano.criarColunas[0].label, 'Não Contactado', 'e é a que tem volume');
+}
+// ⚠️ sem coluna de perdido, o descarte NÃO pode sumir: vira coluna mesmo
+{
+  const plano = planejarStatusOrfaos(
+    [{ status: 'Número Inválido', leads: 18 }], [{ id: 'e', label: 'Entrada', leads: 3 }], null);
+  eq(plano.viraDescarte.length, 0, 'sem coluna de perdido não agrupa');
+  eq(plano.criarColunas.length, 1, 'e o lead continua tendo onde aparecer');
+}
+{
+  ok(ehMotivoDeDescarte('Número Inválido') && ehMotivoDeDescarte('cadastro duplicado'),
+    'motivos reconhecidos com qualquer grafia');
+  ok(!ehMotivoDeDescarte('Não Contactado') && !ehMotivoDeDescarte('Avaliação Com Falta'),
+    'etapa de verdade não é confundida com descarte');
 }
 
 console.log(`OK — ${n} asserts`);
