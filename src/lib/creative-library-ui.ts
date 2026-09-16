@@ -20,6 +20,8 @@ export type CreativeRankable = {
   leads: number;
   conversas?: number;
   comparecimentos?: number;
+  qualificados?: number;
+  engajados?: number;
   vendas: number;
   receita: number;
   por_status: Record<string, number>;
@@ -44,6 +46,8 @@ export const RANK_AXES: RankAxis[] = [
   { key: 'leads', label: 'Leads', format: 'int', field: 'leads' },
   { key: 'conversas', label: 'Conversas', format: 'int', field: 'conversas' },
   { key: 'comparecimentos', label: 'Compareceram', format: 'int', field: 'comparecimentos' },
+  { key: 'qualificados', label: 'Qualificados', format: 'int', field: 'qualificados' },
+  { key: 'engajados', label: 'Engajados', format: 'int', field: 'engajados' },
   { key: 'vendas', label: 'Vendas', format: 'int', field: 'vendas' },
   { key: 'receita', label: 'Receita', format: 'currency', field: 'receita' },
 ];

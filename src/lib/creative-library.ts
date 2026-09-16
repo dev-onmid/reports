@@ -24,6 +24,10 @@ export type CreativeStat = {
   /** Leads marcados como compareceu — resultado à prova de funil (boolean, não rótulo de etapa) */
   comparecimentos: number;
   vendas: number;
+  /** Marcados no botão do card pelo gestor — o MQL daquele cliente */
+  qualificados: number;
+  /** Responderam o bastante para contar como conversa real (régua por cliente) */
+  engajados: number;
   receita: number;
   ig_leads: number;
   fb_leads: number;
@@ -134,6 +138,11 @@ export async function aggregateCreatives(
         COUNT(*) FILTER (WHERE r.respondeu)::int          AS conversas,
         COUNT(*) FILTER (WHERE l.compareceu = TRUE)::int  AS comparecimentos,
         COUNT(*) FILTER (WHERE l.fechou = TRUE)::int      AS vendas,
+        -- ⚠️ O ciclo que o Matheus queria fechar (16/09): saber qual ANÚNCIO traz lead
+        -- que presta, não só qual traz mais lead. qualificado é a marca humana (MQL);
+        -- engajado é quem conversou de verdade. Ver src/lib/lead-qualificacao.ts.
+        COUNT(*) FILTER (WHERE l.qualificado = TRUE)::int AS qualificados,
+        COUNT(*) FILTER (WHERE l.engajado = TRUE)::int    AS engajados,
         COALESCE(SUM(l.valor_rs) FILTER (WHERE l.fechou = TRUE), 0)::float AS receita,
         COUNT(*) FILTER (WHERE l.origin = 'instagram')::int AS ig_leads,
         COUNT(*) FILTER (WHERE l.origin = 'meta')::int      AS fb_leads,
@@ -184,6 +193,8 @@ export async function aggregateCreatives(
     conversas: Number(r.conversas ?? 0),
     comparecimentos: Number(r.comparecimentos ?? 0),
     vendas: Number(r.vendas),
+    qualificados: Number(r.qualificados ?? 0),
+    engajados: Number(r.engajados ?? 0),
     receita: Number(r.receita),
     ig_leads: Number(r.ig_leads),
     fb_leads: Number(r.fb_leads),

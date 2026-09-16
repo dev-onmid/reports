@@ -8,8 +8,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Clapperboard, ExternalLink, Search, ImageOff,
-  TrendingUp, Users, MessageCircle,
-} from 'lucide-react';
+  TrendingUp, Users, MessageCircle, BadgeCheck } from 'lucide-react';
 
 // lucide não tem mais ícones de marca — badges de texto no lugar
 const IgBadge = () => <span className="rounded bg-fuchsia-500/15 px-1 text-[9px] font-black text-fuchsia-400">IG</span>;
@@ -31,6 +30,8 @@ export type CreativeRow = {
   leads: number;
   conversas: number;
   comparecimentos: number;
+  qualificados: number;
+  engajados: number;
   vendas: number;
   receita: number;
   ig_leads: number;
@@ -184,7 +185,7 @@ export function CreativeLibrary({ clientId }: { clientId?: string }) {
         (a, b) => (cplOf(a) ?? Number.POSITIVE_INFINITY) - (cplOf(b) ?? Number.POSITIVE_INFINITY),
       );
     }
-    if (isStageAxis(sortBy) || ['leads', 'conversas', 'vendas', 'receita'].includes(sortBy)) {
+    if (isStageAxis(sortBy) || ['leads', 'conversas', 'qualificados', 'engajados', 'vendas', 'receita'].includes(sortBy)) {
       return sortByAxis(list, sortBy);
     }
     return list;
@@ -194,6 +195,7 @@ export function CreativeLibrary({ clientId }: { clientId?: string }) {
     criativos: filtered.length,
     leads: filtered.reduce((a, r) => a + r.leads, 0),
     conversas: filtered.reduce((a, r) => a + (r.conversas ?? 0), 0),
+    qualificados: filtered.reduce((a, r) => a + (r.qualificados ?? 0), 0),
     vendas: filtered.reduce((a, r) => a + r.vendas, 0),
     receita: filtered.reduce((a, r) => a + r.receita, 0),
   }), [filtered]);
@@ -271,6 +273,8 @@ export function CreativeLibrary({ clientId }: { clientId?: string }) {
           <option value="leads">Mais leads</option>
           <option value="conversas">Mais conversas (responderam)</option>
           <option value="taxa_conversa">Maior taxa de conversa</option>
+          <option value="qualificados">Mais qualificados (MQL)</option>
+          <option value="engajados">Mais engajados</option>
           <option value="vendas">Mais vendas</option>
           <option value="receita">Mais receita</option>
           <option value="cpl" disabled={enriching}>Menor CPL{enriching ? ' (carregando gasto…)' : ''}</option>
@@ -284,6 +288,7 @@ export function CreativeLibrary({ clientId }: { clientId?: string }) {
         <span className="flex items-center gap-1.5 font-bold"><Clapperboard className="h-3.5 w-3.5 text-primary" />{totals.criativos} criativos</span>
         <span className="flex items-center gap-1.5 text-muted-foreground"><Users className="h-3.5 w-3.5" />{totals.leads} leads</span>
         <span className="flex items-center gap-1.5 text-muted-foreground"><MessageCircle className="h-3.5 w-3.5" />{totals.conversas} conversas</span>
+        <span className="flex items-center gap-1.5 text-primary"><BadgeCheck className="h-3.5 w-3.5" />{totals.qualificados} qualificados</span>
         <span className="flex items-center gap-1.5 text-muted-foreground"><TrendingUp className="h-3.5 w-3.5" />{totals.vendas} vendas</span>
         <span className="font-bold text-primary">{fmtBRL(totals.receita)} em receita</span>
       </div>
@@ -351,11 +356,15 @@ export function CreativeLibrary({ clientId }: { clientId?: string }) {
                   </div>
                 </div>
 
-                <div className="mt-3 grid grid-cols-3 sm:grid-cols-6 gap-1 text-center">
+                <div className="mt-3 grid grid-cols-3 sm:grid-cols-7 gap-1 text-center">
                   <div><p className="truncate text-[11px] font-black tracking-tight">{r.leads}</p><p className="text-[9px] uppercase text-muted-foreground">Leads</p></div>
                   <div title={`${r.conversas ?? 0} de ${r.leads} leads responderam depois do atendimento`}>
                     <p className="truncate text-[11px] font-black tracking-tight">{r.conversas ?? 0}<span className="ml-0.5 font-semibold text-[9px] text-muted-foreground">({r.leads > 0 ? Math.round(((r.conversas ?? 0) / r.leads) * 100) : 0}%)</span></p>
                     <p className="text-[9px] uppercase text-muted-foreground">Conv.</p>
+                  </div>
+                  <div title={`${r.qualificados ?? 0} de ${r.leads} leads foram marcados como qualificados pelo gestor`}>
+                    <p className="truncate text-[11px] font-black tracking-tight text-primary">{r.qualificados ?? 0}</p>
+                    <p className="text-[9px] uppercase text-muted-foreground">MQL</p>
                   </div>
                   <div><p className="truncate text-[11px] font-black tracking-tight">{r.vendas}</p><p className="text-[9px] uppercase text-muted-foreground">Vendas</p></div>
                   <div><p className="truncate text-[11px] font-black tracking-tight text-primary" title={r.receita > 0 ? fmtBRL(r.receita) : ''}>{r.receita > 0 ? fmtBRL(r.receita) : '—'}</p><p className="text-[9px] uppercase text-muted-foreground">Receita</p></div>
