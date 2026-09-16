@@ -2039,3 +2039,28 @@ Hoje o Meta só recebia "chegou um lead". Ele pediu dois marcadores para a otimi
 - **⚠️ O cron mora em `/api/crm/followup/worker/lembretes`** porque esse prefixo JÁ está em `CRON_PREFIXES` e o `proxy.ts` estava com WIP de outra sessão. Cron sob prefixo não liberado toma **401 do PROXY** (não da rota) e morre em silêncio — foi o que aconteceu com o worker de publicações em 08/2026. Claim atômico (`FOR UPDATE SKIP LOCKED` + `ultimo_disparo` na seleção): dois ticks sobrepostos mandariam o mesmo alarme duas vezes, e alarme duplicado é o que faz alguém desligar o alarme.
 - ✅ **Provado ponta a ponta em produção**: lembrete criado pela rota real para +70s → cron disparou → virou notificação `importante=true` não lida → lembrete `ativo=false` e `proximo=null` (encerrou, como deve). Teste removido do banco depois. Browser: tremor medido no DOM (transform -2,97px → +2,74px), fila de 2 alarmes, "Vi" puxando o próximo, modal criando semanal para outra pessoa com payload correto, 375px sem overflow. 18 + 24 asserts; tsc/build/eslint limpos.
 - Cron na VPS: `* * * * * .../api/crm/followup/worker/lembretes` (backup em `/root/crontab-backup-antes-lembretes.txt`).
+
+### Leads invisíveis no Kanban: 10.148 em 10 clientes (2026-09-16, mesma sessão)
+
+Descoberto ao verificar a migração do Engajado: **`status` sem coluna correspondente faz o lead sumir do board** (o Kanban agrupa POR RÓTULO). A Sorrifácil ingleses tinha **2.787** assim — o gestor abria o CRM e não via. Vem das planilhas das clínicas e continuava acontecendo: o último entrou na véspera.
+
+- **⚠️ Os números obrigaram a dividir o problema em quatro**, e a decisão do Matheus mudou em duas delas depois de ver o impacto medido:
+  - **553 não eram status novo** — `"Sem  Interesse"` com DOIS espaços num cliente que já tem `"Sem Interesse"`. Criar coluna fabricaria uma duplicata com o erro de digitação no nome. Corrige-se o LEAD, não o board.
+  - **385 eram CANAL, não etapa** (`WhatsApp`, `Chatwoot`) — "não é para criar coluna disso, vira uma origem adicional". ⚠️ E a medição foi além: esses leads **já tinham o canal completo no campo certo** (131 com `"Facebook - WhatsApp"`, 54 com `"Chatwoot - WhatsApp"`). O status era duplicata da origem. Vão para a entrada.
+  - **51 eram MOTIVO DE DESCARTE** (`Número Inválido`, `Pessoa Errada`, `Cadastro Duplicado`, `Desligado`). Criar coluna para cada um levaria as Sorrifácil a **24-27 colunas (hoje 10)** — o oposto do pedido da Londrigifts em agosto. Vão para a coluna de perdido **do próprio cliente**, achada pelo GRAU (uns chamam "Desqualificado", outros "Sem Interesse"), nunca por nome fixo.
+  - **9.159 viraram coluna de verdade**, com o grau vindo de `classificarEtapa` — a mesma régua do Funil de Performance.
+- **⚠️⚠️ O sistema JÁ ERA MULTICANAL e ninguém tinha notado**: o formato `"Facebook - WhatsApp"` existe em **13.448 leads** e significa "tem os dois". Por isso `acrescentarCanal` ACRESCENTA e nunca sobrescreve — e só age com o campo vazio. Sobrescrever apagaria canal legítimo. **Canal nunca é campo de valor único neste sistema.**
+- **⚠️ Coluna COM lead jamais é excluída** — apagá-la faria os leads sumirem, que é o problema que a rotina resolve. Só sai coluna vazia e irmã de uma recém-criada.
+- **Sorrifácil Valinhos**: 278 leads e **nenhum funil** (board vazio, caso diferente). Ganhou o funil padrão. ⚠️ Na 1ª passada os status dela foram pulados (a rota cria o funil e segue) — a 2ª passada resolveu, porque a rota é idempotente. Vale rodar duas vezes quando houver cliente sem funil.
+- ✅ **Estado final medido: 0 leads invisíveis no sistema inteiro** (eram 10.148), 0 posições duplicadas, 67+2 colunas criadas, 553 grafias corrigidas, 385 canais para a entrada, 51 descartes agrupados. Boards das Sorrifácil em 17-20 colunas. 37 asserts.
+
+### ⚠️⚠️ A migração do Engajado falhou em silêncio antes disso — e o erro foi meu
+
+Vale como regra geral, não como nota de rodapé: a rota respondeu **"27 clientes ajustados" enquanto TODOS os INSERTs falhavam**. `crm_stages.client_id` é NOT NULL, eu não passava o campo, e um `.catch(() => null)` engoliu o erro.
+
+E o estrago passou de "não criou": a função fazia `position = position + 1` ANTES do INSERT, então o empurrão ficou sem nada entrar — board da Atmos.mov com posições `0,3,4,5,6,7,7` (buraco em 1-2, duas colunas empatadas na 7). Somado a isso, o webhook já havia marcado 30 leads com status `Engajado`, e status sem coluna **faz o lead sumir**.
+
+- **`.catch(() => null)` é aceitável em DDL best-effort, NUNCA no statement que é o objetivo da migração.**
+- **Migração que reporta sucesso sem ter feito nada é pior que migração que falha** — a rota agora devolve 500 com a lista de falhas.
+- **Reconstruir > empurrar**: posições são renumeradas do zero a partir da ordem atual, o que é idempotente e conserta buraco e colisão de uma vez.
+- **Verificar DEPOIS de aplicar, sempre**: a resposta da rota dizia "ok"; só a leitura do board no banco mostrou a verdade.
