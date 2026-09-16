@@ -10,34 +10,68 @@ import { COLUNA_ENGAJADO, devoMoverParaEngajado, estaEngajado } from '@/lib/lead
  */
 
 /** Coluna de config por cliente + a coluna Engajado nos funis que ainda não a têm. */
-export async function garantirEstruturaEngajado(pool: Pool, clientId: string): Promise<void> {
+export async function garantirEstruturaEngajado(
+  pool: Pool, clientId: string,
+): Promise<{ criou: number; erros: string[] }> {
   await pool.query(
     `ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS min_msgs_engajado INTEGER`,
   ).catch(() => null);
 
-  // ⚠️ A coluna entra logo depois da ENTRADA (posição 1) e empurra as outras. Só é criada
-  // se ainda não existir — reabrir o board não pode gerar coluna duplicada (foi o que
-  // encheu o Kanban da Londrigifts de etapas-espelho em 08/2026).
   const { rows: funis } = await pool.query<{ id: string }>(
     `SELECT id FROM public.crm_funnels WHERE client_id = $1`, [clientId],
   ).catch(() => ({ rows: [] }));
 
-  for (const f of funis) {
-    const { rows: existe } = await pool.query(
-      `SELECT 1 FROM public.crm_stages WHERE funnel_id = $1 AND lower(trim(label)) = lower($2) LIMIT 1`,
-      [f.id, COLUNA_ENGAJADO],
-    ).catch(() => ({ rows: [] }));
-    if (existe.length) continue;
+  let criou = 0;
+  const erros: string[] = [];
 
-    await pool.query(`UPDATE public.crm_stages SET position = position + 1 WHERE funnel_id = $1 AND position >= 1`, [f.id]).catch(() => null);
-    await pool.query(
-      // grau `contato`: engajar é aprofundar o topo do funil, não qualificar — quem
-      // qualifica é o humano no botão. Ver a nota do grau genérico em funil-etapas.ts.
-      `INSERT INTO public.crm_stages (funnel_id, label, color, position, etapa_funil)
-       VALUES ($1, $2, '#22d3ee', 1, 'contato')`,
-      [f.id, COLUNA_ENGAJADO],
-    ).catch(() => null);
+  for (const f of funis) {
+    // ⚠️⚠️ Reconstrói as posições do funil INTEIRO em vez de "empurrar" as de baixo.
+    // A 1ª versão fazia `position = position + 1` e depois o INSERT — quando o INSERT
+    // falhava (faltava `client_id`, que é NOT NULL), o empurrão já tinha acontecido e o
+    // board ficava com buraco e duas colunas na mesma posição. Renumerar do zero a
+    // partir da ordem atual é idempotente: rodar de novo não estraga nada.
+    const { rows: stages } = await pool.query<{ id: string; label: string; position: number }>(
+      `SELECT id, label, position FROM public.crm_stages
+        WHERE funnel_id = $1 ORDER BY position ASC, created_at ASC`, [f.id],
+    ).catch(() => ({ rows: [] }));
+    if (!stages.length) continue;
+
+    const jaTem = stages.some(s => s.label.trim().toLowerCase() === COLUNA_ENGAJADO.toLowerCase());
+
+    if (!jaTem) {
+      try {
+        // ⚠️ `client_id` é NOT NULL em crm_stages — foi exatamente o que faltou na 1ª
+        // tentativa e o `.catch(() => null)` escondeu, fazendo a rota reportar sucesso.
+        await pool.query(
+          `INSERT INTO public.crm_stages (funnel_id, client_id, label, color, position, etapa_funil)
+           VALUES ($1, $2, $3, '#22d3ee', $4, 'contato')`,
+          [f.id, clientId, COLUNA_ENGAJADO, stages.length + 1],
+        );
+        criou++;
+      } catch (e) {
+        erros.push(`${f.id}: ${(e as Error)?.message ?? 'falha'}`);
+        continue;
+      }
+    }
+
+    // ordem final: a 1ª coluna continua sendo a entrada, Engajado logo depois, o resto
+    // preservando a ordem que já tinha.
+    const { rows: todas } = await pool.query<{ id: string; label: string; position: number }>(
+      `SELECT id, label, position FROM public.crm_stages
+        WHERE funnel_id = $1 ORDER BY position ASC, created_at ASC`, [f.id],
+    ).catch(() => ({ rows: [] }));
+
+    const eng = todas.filter(s => s.label.trim().toLowerCase() === COLUNA_ENGAJADO.toLowerCase());
+    const resto = todas.filter(s => s.label.trim().toLowerCase() !== COLUNA_ENGAJADO.toLowerCase());
+    const ordem = resto.length ? [resto[0], ...eng, ...resto.slice(1)] : eng;
+
+    for (let i = 0; i < ordem.length; i++) {
+      if (ordem[i].position === i) continue;
+      await pool.query(`UPDATE public.crm_stages SET position = $2 WHERE id = $1`, [ordem[i].id, i])
+        .catch(e => erros.push(`${ordem[i].label}: ${(e as Error)?.message}`));
+    }
   }
+  return { criou, erros };
 }
 
 type LeadEngajamento = {
