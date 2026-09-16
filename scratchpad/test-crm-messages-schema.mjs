@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 // Recompilar antes: npx esbuild src/lib/crm-conversation-sync.ts --bundle --platform=node --format=esm --external:pg --outfile=scratchpad/build/crm-conversation-sync.mjs --alias:@=./src
 import assert from 'node:assert/strict';
 import { ensureCrmMessagesSchema } from './build/crm-conversation-sync.mjs';
@@ -77,4 +78,16 @@ function fakePool({ falharEm = null, falharConexao = false } = {}) {
   ok(erros.length === 1 && erros[0].includes('nova tentativa em 60s'), 'falha é logada uma vez, com o aviso do cooldown');
 }
 
+
+// ⚠️ REGRESSÃO DE 16/09: pool.query DENTRO da transação que tomou a única conexão.
+// O pool é max:1 — um pool.query aqui espera por uma conexão que ele mesmo segura,
+// a promise memoizada nunca resolve e toda request seguinte fica presa nela.
+{
+  const src = readFileSync(new URL('../src/lib/crm-conversation-sync.ts', import.meta.url), 'utf8');
+  const ini = src.indexOf('async function aplicarSchemaMensagens');
+  const fim = src.indexOf('\n}\n', ini);
+  const corpo = src.slice(ini, fim).split('\n').filter(l => !l.trim().startsWith('//')).join('\n');
+  ok(!/\bpool\s*\.\s*query\b/.test(corpo),
+    'aplicarSchemaMensagens NÃO usa pool.query — só o client da própria transação (q())');
+}
 console.log(`OK — ${n} asserts`);
