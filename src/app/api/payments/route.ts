@@ -9,6 +9,7 @@ function rowToJson(r: any) {
     clientName: r.client_name,
     date: r.date,
     destination: r.destination,
+    descricao: r.descricao ?? null,
     amount: Number(r.amount),
     channel: r.channel,
     status: r.status,
@@ -20,6 +21,7 @@ export async function GET() {
   const pool = makeServerPool();
   try {
     await pool.query('ALTER TABLE public.payments ADD COLUMN IF NOT EXISTS extra BOOLEAN DEFAULT FALSE');
+    await pool.query('ALTER TABLE public.payments ADD COLUMN IF NOT EXISTS descricao TEXT');
     const { rows } = await pool.query('SELECT * FROM public.payments ORDER BY date ASC');
     return Response.json(rows.map(rowToJson));
   } finally {
@@ -30,16 +32,22 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   const body = await req.json() as {
     id: string; clientId: string; clientName: string; date: string;
-    destination: string; amount: number; channel: string; status: string; extra?: boolean;
+    destination: string; descricao?: string | null;
+    amount: number; channel: string; status: string; extra?: boolean;
   };
   const pool = makeServerPool();
   try {
+    // A coluna pode não existir ainda se o GET (que roda o ALTER) nunca foi
+    // chamado nesta instalação — o INSERT abaixo a referencia.
+    await pool.query('ALTER TABLE public.payments ADD COLUMN IF NOT EXISTS descricao TEXT');
     const { rows } = await pool.query(
-      `INSERT INTO public.payments (id, client_id, client_name, date, destination, amount, channel, status, extra)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      `INSERT INTO public.payments (id, client_id, client_name, date, destination, descricao, amount, channel, status, extra)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
        ON CONFLICT (id) DO NOTHING
        RETURNING *`,
-      [body.id, body.clientId, body.clientName, body.date, body.destination, body.amount, body.channel, body.status, body.extra ?? false]
+      [body.id, body.clientId, body.clientName, body.date, body.destination,
+       body.descricao?.trim() || null,
+       body.amount, body.channel, body.status, body.extra ?? false]
     );
     return Response.json(rowToJson(rows[0] ?? body), { status: 201 });
   } finally {
@@ -52,7 +60,8 @@ export async function PATCH(req: NextRequest) {
   if (!id) return Response.json({ error: 'Missing id' }, { status: 400 });
   const body = await req.json() as Partial<{
     status: string; date: string; extra: boolean;
-    channel: string; amount: number; clientId: string; clientName: string; destination: string;
+    channel: string; amount: number; clientId: string; clientName: string;
+    destination: string; descricao: string | null;
   }>;
   const sets: string[] = [];
   const vals: unknown[] = [];
@@ -65,10 +74,14 @@ export async function PATCH(req: NextRequest) {
   if (body.clientId    !== undefined) { sets.push(`client_id = $${i++}`);    vals.push(body.clientId); }
   if (body.clientName  !== undefined) { sets.push(`client_name = $${i++}`);  vals.push(body.clientName); }
   if (body.destination !== undefined) { sets.push(`destination = $${i++}`);  vals.push(body.destination); }
+  // Apagar a descrição é uma edição legítima, então string vazia vira NULL em
+  // vez de ser ignorada — é o mesmo estado de "nunca teve descrição".
+  if (body.descricao   !== undefined) { sets.push(`descricao = $${i++}`);    vals.push(body.descricao?.trim() || null); }
   if (sets.length === 0) return new Response(null, { status: 204 });
   vals.push(id);
   const pool = makeServerPool();
   try {
+    await pool.query('ALTER TABLE public.payments ADD COLUMN IF NOT EXISTS descricao TEXT');
     await pool.query(`UPDATE public.payments SET ${sets.join(', ')} WHERE id = $${i}`, vals);
     return new Response(null, { status: 204 });
   } finally {

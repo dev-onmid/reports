@@ -12,6 +12,13 @@ export type InvestmentPayment = {
   clientName: string;
   date: string;
   destination: string;
+  /**
+   * Texto livre do gestor para pagamento fora do padrão ("adiantamento", "taxa
+   * de setup"). Fica NULO por omissão de propósito: `destination` nasce sempre
+   * preenchido com "{cliente} - Novo investimento", então usá-lo como descrição
+   * carimbaria a mesma frase em todo card e não identificaria coisa nenhuma.
+   */
+  descricao?: string | null;
   amount: number;
   channel: PaymentChannel;
   status: PaymentStatus;
@@ -108,6 +115,7 @@ export function PaymentProvider({ children }: { children: React.ReactNode }) {
     if (fields.clientId    !== undefined) body.clientId    = fields.clientId;
     if (fields.clientName  !== undefined) body.clientName  = fields.clientName;
     if (fields.destination !== undefined) body.destination = fields.destination;
+    if (fields.descricao   !== undefined) body.descricao   = fields.descricao;
     const ok = await persist(`/api/payments?id=${id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
