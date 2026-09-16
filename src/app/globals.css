@@ -295,3 +295,14 @@
 .react-grid-item:hover .react-resizable-handle {
   opacity: 0.9;
 }
+
+/* Tremor do alarme de lembrete (src/components/layout/lembrete-alarme.tsx).
+   ⚠️ Deslocamento pequeno e rotação mínima: o card precisa chamar atenção sem ficar
+   ilegível — tremor grande faz o texto virar borrão e a pessoa fecha sem ler. */
+@keyframes lembrete-tremor {
+  0%, 100% { transform: translateX(0) rotate(0deg); }
+  20%      { transform: translateX(-4px) rotate(-0.6deg); }
+  40%      { transform: translateX(4px) rotate(0.6deg); }
+  60%      { transform: translateX(-3px) rotate(-0.4deg); }
+  80%      { transform: translateX(3px) rotate(0.4deg); }
+}
