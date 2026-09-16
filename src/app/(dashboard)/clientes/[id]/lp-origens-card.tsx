@@ -10,7 +10,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import { Check, Copy, Globe, Loader2, Plus, RefreshCw, Trash2 } from 'lucide-react';
+import { Check, Copy, Globe, Loader2, Mail, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 type Origem = {
@@ -21,6 +21,7 @@ type Origem = {
   enabled: boolean;
   last_received_at: string | null;
   total_recebidos: number;
+  notificar_emails: string[] | null;
   url_receptora: string;
 };
 
@@ -62,13 +63,18 @@ export default function LpOrigensCard({ clientId }: { clientId: string }) {
   const [criando, setCriando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   const [copiado, setCopiado] = useState<string | null>(null);
+  // rascunho do campo de e-mails por origem: o input é livre e só vira lista no blur
+  const [emails, setEmails] = useState<Record<string, string>>({});
+  const [salvoEmails, setSalvoEmails] = useState<string | null>(null);
 
   const carregar = useCallback(async () => {
     setCarregando(true);
     try {
       const r = await fetch(`/api/clients/${clientId}/lp-origens`);
       const d = await r.json();
-      setOrigens(d.origens ?? []);
+      const lista: Origem[] = d.origens ?? [];
+      setOrigens(lista);
+      setEmails(Object.fromEntries(lista.map(o => [o.id, (o.notificar_emails ?? []).join(', ')])));
       setLog(d.log ?? []);
     } catch { /* deixa a tela como está */ }
     setCarregando(false);
@@ -96,6 +102,22 @@ export default function LpOrigensCard({ clientId }: { clientId: string }) {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ origemId: o.id, enabled: !o.enabled }),
     }).catch(() => {});
+  }
+
+  async function salvarEmails(o: Origem) {
+    const texto = emails[o.id] ?? '';
+    if (texto === (o.notificar_emails ?? []).join(', ')) return;   // nada mudou
+    const r = await fetch(`/api/clients/${clientId}/lp-origens`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ origemId: o.id, notificar_emails: texto }),
+    }).catch(() => null);
+    if (r?.ok) {
+      setSalvoEmails(o.id);
+      setTimeout(() => setSalvoEmails(c => (c === o.id ? null : c)), 2000);
+      // recarrega para o campo mostrar a lista JÁ NORMALIZADA — endereço
+      // inválido é descartado no servidor, e quem digitou precisa ver isso.
+      await carregar();
+    }
   }
 
   async function remover(o: Origem) {
@@ -189,6 +211,22 @@ export default function LpOrigensCard({ clientId }: { clientId: string }) {
                 {copiado === o.id ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-3 w-3" />}
                 {copiado === o.id ? 'Copiado' : 'Copiar'}
               </button>
+            </div>
+            <div className="mt-2 flex items-center gap-2">
+              <Mail className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              <input
+                value={emails[o.id] ?? ''}
+                onChange={e => setEmails(m => ({ ...m, [o.id]: e.target.value }))}
+                onBlur={() => void salvarEmails(o)}
+                onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+                placeholder="Avisar por e-mail (separe por vírgula)"
+                className="h-8 min-w-0 flex-1 rounded-md border border-border bg-background px-2 text-xs"
+              />
+              {salvoEmails === o.id && (
+                <span className="inline-flex items-center gap-1 text-[11px] text-emerald-400">
+                  <Check className="h-3 w-3" /> salvo
+                </span>
+              )}
             </div>
           </div>
         ))}

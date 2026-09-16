@@ -32,6 +32,12 @@ export function ensureLpOrigensSchema(pool: Pool): Promise<void> {
           created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
       `);
+      // Quem recebe aviso por e-mail a cada lead desta origem. Fica na ORIGEM e
+      // não no cliente porque quem cuida da LP de campanha nem sempre é quem
+      // cuida do site institucional — e mandar tudo para todo mundo vira ruído.
+      await pool.query(
+        `ALTER TABLE public.lp_origens ADD COLUMN IF NOT EXISTS notificar_emails TEXT[]`,
+      );
       // dois sites do mesmo cliente não podem ter o mesmo nome: o nome é o que
       // aparece no rastreio do lead, e repetido não distinguiria nada
       await pool.query(`
@@ -71,9 +77,10 @@ export type LpOrigem = {
   enabled: boolean;
   last_received_at: string | null;
   total_recebidos: number;
+  notificar_emails: string[] | null;
 };
 
-const COLS = 'id, client_id, nome, url, token, enabled, last_received_at, total_recebidos';
+const COLS = 'id, client_id, nome, url, token, enabled, last_received_at, total_recebidos, notificar_emails';
 
 export async function listarOrigens(pool: Pool, clientId: string): Promise<LpOrigem[]> {
   await ensureLpOrigensSchema(pool);
@@ -95,8 +102,36 @@ export async function criarOrigem(
   return rows[0];
 }
 
+/**
+ * Normaliza a lista de destinatários: aceita texto separado por vírgula/ponto
+ * e vírgula/quebra de linha OU array, descarta o que não parece e-mail, tira
+ * repetido (caixa-insensível) e limita a 5.
+ *
+ * ⚠️ Endereço inválido é DESCARTADO em silêncio de propósito: o Gmail recusaria
+ * o envio inteiro por causa de um erro de digitação, e aí o lead não chegaria
+ * para ninguém. Quem digitou vê a lista salva na tela e percebe o que caiu.
+ */
+export function normalizarEmailsNotificacao(valor: unknown): string[] {
+  const bruto = Array.isArray(valor)
+    ? valor.map(v => String(v ?? ''))
+    : String(valor ?? '').split(/[,;\n]/);
+  const vistos = new Set<string>();
+  const saida: string[] = [];
+  for (const item of bruto) {
+    const e = item.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(e)) continue;
+    const chave = e.toLowerCase();
+    if (vistos.has(chave)) continue;
+    vistos.add(chave);
+    saida.push(e);
+    if (saida.length >= 5) break;
+  }
+  return saida;
+}
+
 export async function atualizarOrigem(
-  pool: Pool, id: string, campos: { nome?: string; url?: string | null; enabled?: boolean },
+  pool: Pool, id: string,
+  campos: { nome?: string; url?: string | null; enabled?: boolean; notificarEmails?: unknown },
 ): Promise<void> {
   await ensureLpOrigensSchema(pool);
   const set: string[] = [];
@@ -104,6 +139,13 @@ export async function atualizarOrigem(
   if (campos.nome !== undefined)    { params.push(campos.nome.trim()); set.push(`nome = $${params.length}`); }
   if (campos.url !== undefined)     { params.push(campos.url?.trim() || null); set.push(`url = $${params.length}`); }
   if (campos.enabled !== undefined) { params.push(campos.enabled); set.push(`enabled = $${params.length}`); }
+  if (campos.notificarEmails !== undefined) {
+    const lista = normalizarEmailsNotificacao(campos.notificarEmails);
+    // lista vazia grava NULL: "ninguém é avisado" e "campo nunca preenchido"
+    // são a mesma coisa para quem lê, e NULL evita array vazio no banco.
+    params.push(lista.length ? lista : null);
+    set.push(`notificar_emails = $${params.length}`);
+  }
   if (!set.length) return;
   params.push(id);
   await pool.query(`UPDATE public.lp_origens SET ${set.join(', ')} WHERE id = $${params.length}`, params);

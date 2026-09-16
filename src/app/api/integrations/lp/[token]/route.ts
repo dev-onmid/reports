@@ -13,6 +13,8 @@ import {
 import { regiaoFromPhone } from '@/lib/ddd-regioes';
 import { resolverNomesGoogle, pareceIdGoogle } from '@/lib/google-ad-resolver';
 import { resolveMetaAdHierarchy, pareceIdMeta } from '@/lib/meta-ad-resolver';
+import { notificarLeadPorEmail } from '@/lib/lp-notificacao';
+import { webhookOrigin } from '@/lib/evolution-api';
 
 /**
  * Recebe lead de site/landing page DIRETO, sem intermediário.
@@ -235,6 +237,20 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ token: str
         .filter(Boolean).join(' · '),
       leadId,
     });
+
+    // Aviso para quem atende. Roda DEPOIS de tudo gravado e com catch próprio:
+    // o lead já está salvo, então falha de e-mail não pode virar erro para a LP.
+    if (origem.notificar_emails?.length) {
+      await notificarLeadPorEmail(pool, origem.notificar_emails, {
+        leadId, clientId: origem.client_id, site: origem.nome, criado,
+        nome, telefone: telefoneBruto ?? telefone, email, cidade, estado,
+        campanha: nomes.campaign ?? tracking.utm_campaign ?? null,
+        anuncio: nomes.ad ?? null,
+        origemAnuncio: originFromTracking(tracking),
+        pageUrl: tracking.source_url ?? null,
+        baseUrl: webhookOrigin(req.url),
+      }).catch(err => console.error('[lp] aviso por e-mail', err));
+    }
 
     return resposta({ ok: true, lead_id: leadId, criado, cliente: origem.client_id, site: origem.nome });
   } catch (err) {

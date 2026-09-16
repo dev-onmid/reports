@@ -66,6 +66,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     if (!origemId) return Response.json({ erro: 'origemId obrigatório' }, { status: 400 });
     await atualizarOrigem(pool, origemId, {
       nome: body.nome, url: body.url, enabled: body.enabled,
+      notificarEmails: body.notificar_emails,
     });
     return Response.json({ ok: true });
   } catch (err) {
