@@ -68,6 +68,7 @@ export async function GET(req: NextRequest) {
         cliente: alvo.nome,
         corrigir_grafia: plano.corrigirGrafia.map(g => `${g.leads}× "${g.statusAtual}" → "${g.paraRotulo}"`),
         criar_colunas: plano.criarColunas.map(c => `${c.label} (${c.etapa}, ${c.leads} leads)`),
+        canal_vira_entrada: plano.viraEntrada.map(v => `${v.leads}× "${v.statusAtual}"`),
         excluir_vazias: plano.excluirVazias.map(e => e.label),
       });
       if (dry) continue;
@@ -82,6 +83,22 @@ export async function GET(req: NextRequest) {
           [alvo.client_id, g.statusAtual, g.paraRotulo],
         ).catch(e => falhas.push(`${alvo.nome} grafia "${g.statusAtual}": ${(e as Error).message}`));
       }
+      // ⚠️ Status que é CANAL: o lead vai para a ENTRADA (primeira coluna) e o canal é
+      // preservado. Medido: os 385 já têm o canal completo no campo certo — o status era
+      // duplicata da origem. `acrescentarCanal` só age se o campo estiver vazio, e mesmo
+      // aí ACRESCENTA: o sistema é multicanal ("Facebook - WhatsApp" em 13.448 leads) e
+      // sobrescrever apagaria um canal legítimo.
+      const entrada = colunas[0].label;
+      for (const v of plano.viraEntrada) {
+        await pool.query(
+          `UPDATE public.crm_leads
+              SET canal = CASE WHEN COALESCE(canal,'') = '' THEN $3 ELSE canal END,
+                  status = $4, updated_at = NOW()
+            WHERE client_id = $1 AND status = $2`,
+          [alvo.client_id, v.statusAtual, v.statusAtual, entrada],
+        ).catch(e => falhas.push(`${alvo.nome} canal "${v.statusAtual}": ${(e as Error).message}`));
+      }
+
       for (const c of plano.criarColunas) {
         await pool.query(
           // ⚠️ client_id é NOT NULL aqui — foi o que derrubou a migração do Engajado hoje.

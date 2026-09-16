@@ -1,6 +1,6 @@
 // node scratchpad/test-status-orfao.mjs
 import assert from 'node:assert';
-import { planejarStatusOrfaos, normalizarRotulo } from './build/crm-status-orfao.mjs';
+import { planejarStatusOrfaos, normalizarRotulo, ehCanalNaoEtapa, acrescentarCanal } from './build/crm-status-orfao.mjs';
 let n = 0;
 const eq = (a,b,m) => { assert.strictEqual(a,b,m); n++; };
 const ok = (c,m) => { assert.ok(c,m); n++; };
@@ -55,4 +55,32 @@ eq(normalizarRotulo('  '), '', 'só espaço vira vazio');
   const plano = planejarStatusOrfaos([{ status: '   ', leads: 9 }], [{ id:'a', label:'X', leads:1 }]);
   eq(plano.criarColunas.length, 0, 'status em branco não vira coluna fantasma');
 }
+
+// ⚠️ canal NUNCA vira coluna (decisão do Matheus 16/09) — o board é de etapas
+{
+  const plano = planejarStatusOrfaos(
+    [{ status: 'WhatsApp', leads: 124 }, { status: 'Chatwoot', leads: 39 }, { status: 'Não Contactado', leads: 500 }],
+    [{ id: 'e', label: 'Entrada', leads: 10 }],
+  );
+  eq(plano.criarColunas.length, 1, 'só o status de ETAPA vira coluna');
+  eq(plano.criarColunas[0].label, 'Não Contactado', 'WhatsApp/Chatwoot ficam de fora');
+  eq(plano.viraEntrada.length, 2, 'os dois canais vão para a entrada');
+  eq(plano.viraEntrada.reduce((s, v) => s + v.leads, 0), 163, 'somando os leads que voltam ao board');
+}
+{
+  ok(ehCanalNaoEtapa('WhatsApp') && ehCanalNaoEtapa('chatwoot') && ehCanalNaoEtapa('Instagram'),
+    'canais conhecidos são reconhecidos com qualquer grafia');
+  ok(!ehCanalNaoEtapa('Não Contactado') && !ehCanalNaoEtapa('Avaliação Realizada'),
+    'etapa de verdade não é confundida com canal');
+}
+// ⚠️ MULTICANAL: acrescenta, nunca substitui — "tá o WhatsApp e tá o Instagram"
+{
+  eq(acrescentarCanal('Instagram', 'WhatsApp'), 'Instagram - WhatsApp', 'dois canais convivem');
+  eq(acrescentarCanal('Facebook - WhatsApp', 'WhatsApp'), 'Facebook - WhatsApp', 'não duplica o que já está lá');
+  eq(acrescentarCanal('Facebook - WhatsApp', 'Instagram'), 'Facebook - WhatsApp - Instagram', 'um terceiro entra no fim');
+  eq(acrescentarCanal('', 'WhatsApp'), 'WhatsApp', 'campo vazio recebe o primeiro');
+  eq(acrescentarCanal(null, 'WhatsApp'), 'WhatsApp', 'null idem');
+  eq(acrescentarCanal('instagram', 'Instagram'), 'instagram', 'caixa diferente não vira duplicata');
+}
+
 console.log(`OK — ${n} asserts`);
