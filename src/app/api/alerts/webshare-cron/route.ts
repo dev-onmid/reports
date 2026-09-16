@@ -2,7 +2,7 @@ import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { getWebshareHealth, evaluateWebshareAlert, type WebshareHealth, type WebshareAlertLevel } from '@/lib/webshare';
 import { sendEvolutionText } from '@/lib/evolution-api';
-import { sendGmail } from '@/lib/gmail';
+import { enviarEmail } from '@/lib/email-envio';
 
 export const maxDuration = 60;
 
@@ -27,16 +27,6 @@ async function loadWhatsApp(pool: ReturnType<typeof makeServerPool>): Promise<{ 
 }
 
 // Usa qualquer conta Gmail já conectada no sistema para enviar o e-mail de alerta.
-async function loadGmail(pool: ReturnType<typeof makeServerPool>): Promise<{ email: string; refreshToken: string } | null> {
-  const { rows } = await pool.query<{ email: string; refresh_token: string | null }>(
-    `SELECT email, refresh_token FROM public.google_connections
-      WHERE account_type = 'gmail' AND status = 'connected' AND refresh_token IS NOT NULL
-      ORDER BY updated_at DESC NULLS LAST LIMIT 1`,
-  );
-  if (!rows[0]?.refresh_token) return null;
-  return { email: rows[0].email, refreshToken: rows[0].refresh_token };
-}
-
 function buildMessage(h: WebshareHealth, level: WebshareAlertLevel, reasons: string[], isDayOneReminder: boolean): { subject: string; text: string; html: string } {
   const emoji = level === 'critical' ? '🔴' : level === 'warn' ? '🟡' : '🟢';
   const title = isDayOneReminder && level === 'ok'
@@ -114,12 +104,11 @@ export async function GET(request: NextRequest) {
 
     // E-mail (backup — funciona mesmo se o proxy já caiu)
     const to = process.env.WEBSHARE_ALERT_EMAIL;
-    const gmail = await loadGmail(pool);
-    if (to && gmail) {
-      const r = await sendGmail(gmail, { to, subject: msg.subject, html: msg.html, text: msg.text });
-      results.email = r.ok ? `enviado para ${to}` : `falhou: ${r.error}`;
+    if (to) {
+      const r = await enviarEmail(pool, { to, subject: msg.subject, html: msg.html, text: msg.text });
+      results.email = r.ok ? `enviado para ${to} (${r.via})` : `falhou: ${r.erro}`;
     } else {
-      results.email = !to ? 'WEBSHARE_ALERT_EMAIL não configurado' : 'nenhuma conta Gmail conectada';
+      results.email = 'WEBSHARE_ALERT_EMAIL não configurado';
     }
 
     // Grava o estado do envio (dedupe)

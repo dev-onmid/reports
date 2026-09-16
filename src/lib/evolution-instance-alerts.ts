@@ -1,6 +1,6 @@
 import { makeServerPool } from '@/lib/server-db';
 import { sendEvolutionText } from '@/lib/evolution-api';
-import { sendGmail } from '@/lib/gmail';
+import { enviarEmail } from '@/lib/email-envio';
 import { isZapiConnected } from '@/lib/zapi';
 
 export type InstanceStatus = 'open' | 'close' | 'connecting' | string;
@@ -263,18 +263,9 @@ export async function sendInstanceAlerts(
     // Email
     const to = opts.emailTo ?? process.env.WEBSHARE_ALERT_EMAIL ?? '';
     if (to) {
-      const { rows: gmailRows } = await pool.query<{ email: string; refresh_token: string }>(
-        `SELECT email, refresh_token FROM public.google_connections
-         WHERE account_type = 'gmail' AND status = 'connected' AND refresh_token IS NOT NULL
-         LIMIT 1`,
-      );
-      if (gmailRows[0]) {
-        const { subject, html, text } = buildEmailHtml(newAlerts);
-        const r = await sendGmail({ email: gmailRows[0].email, refreshToken: gmailRows[0].refresh_token }, { to, subject, html, text });
-        result.email = r.ok ? `enviado para ${to}` : `falhou: ${r.error ?? 'erro desconhecido'}`;
-      } else {
-        result.email = 'nenhuma conta Gmail conectada';
-      }
+      const { subject, html, text } = buildEmailHtml(newAlerts);
+      const r = await enviarEmail(pool, { to, subject, html, text });
+      result.email = r.ok ? `enviado para ${to} (${r.via})` : `falhou: ${r.erro ?? 'erro desconhecido'}`;
     }
 
     return result;

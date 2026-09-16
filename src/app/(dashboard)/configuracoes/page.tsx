@@ -29,6 +29,7 @@ import {
 } from '@/components/ui/select';
 import { mockUsers as initialUsers, mockPermissions as initialPermissions, defaultPermission } from '@/lib/mock-data';
 import { IntegrationsPanel } from '@/components/settings/integrations-panel';
+import EmailRemetenteTab from '@/components/settings/email-remetente-tab';
 import { LogsPanel } from '@/components/settings/logs-panel';
 import type { User as UserType, Permission, Team } from '@/lib/mock-data';
 import { cn } from '@/lib/utils';
@@ -501,7 +502,7 @@ function InstancesTab() {
   );
 }
 
-const ABAS_CONFIG = ['usuarios', 'permissoes', 'ia', 'instancias', 'otimizador', 'integracoes', 'logs', 'legal'] as const;
+const ABAS_CONFIG = ['usuarios', 'permissoes', 'ia', 'instancias', 'otimizador', 'email', 'integracoes', 'logs', 'legal'] as const;
 
 export default function ConfiguracoesPage() {
   const [users, setUsers] = useState<UserRow[]>([]);
@@ -848,6 +849,7 @@ export default function ConfiguracoesPage() {
     { key: 'ia' as const, label: 'Uso IA' },
     { key: 'instancias' as const, label: 'Instâncias' },
     { key: 'otimizador' as const, label: 'Alertas WhatsApp' }, // ex-aba Otimizador: sobrou só o destino dos alertas
+    { key: 'email' as const, label: 'E-mail' },
     { key: 'integracoes' as const, label: 'Integrações' },
     { key: 'logs' as const, label: 'Logs' },
     { key: 'legal' as const, label: 'Legal' },
@@ -1694,6 +1696,7 @@ export default function ConfiguracoesPage() {
       {activeTab === 'instancias' && <InstancesTab />}
 
       {/* ── INTEGRAÇÕES e LOGS (ex-páginas próprias, ver src/components/settings/) ── */}
+      {activeTab === 'email' && <EmailRemetenteTab />}
       {activeTab === 'integracoes' && <IntegrationsPanel />}
       {activeTab === 'logs' && <LogsPanel />}
 

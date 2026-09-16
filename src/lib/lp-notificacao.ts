@@ -6,14 +6,17 @@
  * em minutos. O destinatário fica na ORIGEM (`lp_origens.notificar_emails`),
  * então cada site avisa quem cuida dele.
  *
- * ⚠️ É BEST-EFFORT por construção: qualquer falha aqui (Gmail desconectado,
- * token vencido, endereço recusado) é registrada e engolida. O lead já está
+ * Quem entrega é `email-envio` (SMTP próprio, com o Gmail de reserva) — este
+ * arquivo decide O QUE dizer, não POR ONDE sair.
+ *
+ * ⚠️ É BEST-EFFORT por construção: qualquer falha aqui (remetente fora do ar,
+ * senha recusada, endereço inválido) é registrada e engolida. O lead já está
  * gravado quando esta função roda — derrubar a resposta da LP por causa de um
  * e-mail faria a pessoa ver "erro" num cadastro que funcionou.
  */
 
 import type { Pool } from 'pg';
-import { sendGmail } from '@/lib/gmail';
+import { enviarEmail } from '@/lib/email-envio';
 
 export type LeadParaAviso = {
   leadId: string;
@@ -119,24 +122,12 @@ export async function notificarLeadPorEmail(
 ): Promise<{ enviados: number; falhas: number }> {
   if (!destinatarios.length) return { enviados: 0, falhas: 0 };
 
-  const { rows } = await pool.query<{ email: string; refresh_token: string }>(
-    `SELECT email, refresh_token FROM public.google_connections
-      WHERE account_type = 'gmail' AND status = 'connected' AND refresh_token IS NOT NULL
-      ORDER BY connected_at DESC LIMIT 1`,
-  );
-  const conta = rows[0];
-  if (!conta) {
-    console.error('[lp] aviso por e-mail: nenhuma conta Gmail conectada');
-    return { enviados: 0, falhas: destinatarios.length };
-  }
-
   const msg = montarAvisoLead(lead);
   // Responder o aviso fala com a pessoa, não com a agência.
   const replyTo = lead.email ?? undefined;
 
   const saida = await Promise.allSettled(destinatarios.map(to =>
-    sendGmail({ email: conta.email, refreshToken: conta.refresh_token },
-      { to, subject: msg.subject, html: msg.html, text: msg.text, replyTo }),
+    enviarEmail(pool, { to, subject: msg.subject, html: msg.html, text: msg.text, replyTo }),
   ));
 
   let enviados = 0;
@@ -144,7 +135,7 @@ export async function notificarLeadPorEmail(
     const ok = r.status === 'fulfilled' && r.value.ok;
     if (ok) enviados++;
     else {
-      const motivo = r.status === 'fulfilled' ? r.value.error : String(r.reason);
+      const motivo = r.status === 'fulfilled' ? `${r.value.via}: ${r.value.erro}` : String(r.reason);
       console.error(`[lp] aviso por e-mail falhou para ${destinatarios[i]}:`, motivo);
     }
   });
