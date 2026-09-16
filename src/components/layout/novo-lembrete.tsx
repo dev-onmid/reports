@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlarmClockPlus, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getAuthSession } from '@/lib/auth-store';
@@ -48,6 +48,7 @@ export function NovoLembrete() {
   const [diaMes, setDiaMes] = useState(1);
 
   const meuId = useMemo(() => getAuthSession()?.userId ?? '', []);
+  const tituloRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!aberto || usuarios.length) return;
@@ -72,6 +73,12 @@ export function NovoLembrete() {
   }
 
   async function salvar() {
+    if (!titulo.trim()) {
+      setErro('Escreva do que é o lembrete.');
+      tituloRef.current?.focus();
+      tituloRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      return;
+    }
     setErro(null); setSalvando(true);
     const corpo: Record<string, unknown> = { titulo, descricao, recorrencia };
     if (recorrencia === 'once') corpo.run_at = runAt;
@@ -108,12 +115,18 @@ export function NovoLembrete() {
         <AlarmClockPlus className="h-[18px] w-[18px]" />
       </button>
 
+      {/* ⚠️ z-350: acima do alarme (z-300). Um lembrete que tocasse enquanto a pessoa
+          estivesse criando outro cobria o botão "Criar lembrete" e travava a ação. */}
       {aberto && (
-        <div className="fixed inset-0 z-[250] flex items-center justify-center bg-black/60 p-4"
+        <div className="fixed inset-0 z-[350] flex items-center justify-center bg-black/60 p-4"
              onClick={() => setAberto(false)}>
-          <div className="w-full max-w-md rounded-lg border border-border bg-card shadow-2xl"
+          {/* ⚠️ `max-h` + `flex-col` no CONTAINER, não só no corpo. Antes o corpo tinha
+              70vh e o modal inteiro (cabeçalho + corpo + rodapé) passava da altura da
+              tela: em notebook o topo saía de vista e o campo do título — o único
+              obrigatório — ficava escondido, com o botão desabilitado sem explicar. */}
+          <div className="flex max-h-[90vh] w-full max-w-md flex-col rounded-lg border border-border bg-card shadow-2xl"
                onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between border-b border-border px-4 py-3">
+            <div className="flex shrink-0 items-center justify-between border-b border-border px-4 py-3">
               <h2 className="font-heading text-lg uppercase tracking-wide">Novo lembrete</h2>
               <button type="button" onClick={() => setAberto(false)} aria-label="Fechar"
                       className="text-muted-foreground hover:text-foreground transition">
@@ -121,10 +134,10 @@ export function NovoLembrete() {
               </button>
             </div>
 
-            <div className="max-h-[70vh] space-y-3 overflow-y-auto p-4">
+            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
               <div>
                 <label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Lembrar de quê</label>
-                <input value={titulo} onChange={e => setTitulo(e.target.value)} autoFocus
+                <input ref={tituloRef} value={titulo} onChange={e => setTitulo(e.target.value)} autoFocus
                        placeholder="Ligar para o cliente sobre a proposta"
                        className="mt-1 h-9 w-full rounded-md border border-border bg-background px-3 text-sm" />
               </div>
@@ -202,12 +215,15 @@ export function NovoLembrete() {
               {okMsg && <p className="rounded-md border border-primary/40 bg-primary/10 px-3 py-2 text-xs text-primary">{okMsg}</p>}
             </div>
 
-            <div className="flex justify-end gap-2 border-t border-border px-4 py-3">
+            <div className="flex shrink-0 justify-end gap-2 border-t border-border px-4 py-3">
               <button type="button" onClick={() => setAberto(false)}
                       className="rounded-md border border-border px-3 py-2 text-xs text-muted-foreground hover:text-foreground transition">
                 Cancelar
               </button>
-              <button type="button" onClick={() => void salvar()} disabled={salvando || !titulo.trim()}
+              {/* ⚠️ Só desabilita enquanto SALVA. Desabilitar por falta de título deixava o
+                  botão apagado sem dizer o motivo — e o campo que falta pode estar fora
+                  de vista. Clicar agora aponta o que falta e leva o cursor até lá. */}
+              <button type="button" onClick={() => void salvar()} disabled={salvando}
                       className="rounded-md bg-primary px-4 py-2 text-xs font-bold text-primary-foreground hover:brightness-110 disabled:opacity-40 transition">
                 {salvando ? 'Salvando…' : 'Criar lembrete'}
               </button>
