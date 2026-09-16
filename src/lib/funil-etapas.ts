@@ -480,14 +480,18 @@ export function rotuloFonteTopo(fontes: ('crm' | 'anuncios')[]): string {
 // "Comprou" em dado legado.
 export const ETAPAS_PADRAO: { label: string; color: string; position: number; etapa: EtapaFunil }[] = [
   { label: 'Em Atendimento', color: '#0ea5e9', position: 0, etapa: 'qualificado' },
-  { label: 'Agendado',       color: '#3b82f6', position: 1, etapa: 'agendamento' },
-  { label: 'Reagendado',     color: '#7dd3fc', position: 2, etapa: 'agendamento' },
-  { label: 'Fechado',        color: '#10b981', position: 3, etapa: 'fechamento' },
-  { label: 'Paciente',       color: '#a1a1aa', position: 4, etapa: 'fechamento' },
-  { label: 'Não Retorna',    color: '#71717a', position: 5, etapa: 'qualificado' },
-  { label: 'Distante',       color: '#f97316', position: 6, etapa: 'qualificado' },
-  { label: 'Sem Interesse',  color: '#ef4444', position: 7, etapa: 'perdido' },
-  { label: 'Desqualificado', color: '#dc2626', position: 8, etapa: 'perdido' },
+  // ⚠️ Engajado entra como grau `contato`, não `qualificado`: engajar é aprofundar o
+  // TOPO do funil (o lead respondeu), enquanto qualificar é decisão humana no botão do
+  // card — critério de MQL, que muda por cliente. Ver src/lib/lead-qualificacao.ts.
+  { label: 'Engajado',       color: '#22d3ee', position: 1, etapa: 'contato' },
+  { label: 'Agendado',       color: '#3b82f6', position: 2, etapa: 'agendamento' },
+  { label: 'Reagendado',     color: '#7dd3fc', position: 3, etapa: 'agendamento' },
+  { label: 'Fechado',        color: '#10b981', position: 4, etapa: 'fechamento' },
+  { label: 'Paciente',       color: '#a1a1aa', position: 5, etapa: 'fechamento' },
+  { label: 'Não Retorna',    color: '#71717a', position: 6, etapa: 'qualificado' },
+  { label: 'Distante',       color: '#f97316', position: 7, etapa: 'qualificado' },
+  { label: 'Sem Interesse',  color: '#ef4444', position: 8, etapa: 'perdido' },
+  { label: 'Desqualificado', color: '#dc2626', position: 9, etapa: 'perdido' },
 ];
 
 // ------------------------------------------- Funil pelas etapas reais do Kanban

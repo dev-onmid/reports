@@ -1,4 +1,5 @@
 import { makeServerPool } from '@/lib/server-db';
+import { avaliarEngajamento } from '@/lib/lead-qualificacao-server';
 import { normalizeWebhookPayload, type WhatsAppProvider } from '@/lib/whatsapp-provider';
 import { markLeadResponded } from '@/lib/followup-send';
 import { analisarConversa } from '@/lib/crm-ai-analysis';
@@ -530,6 +531,15 @@ export async function POST(
             WHERE lead_id = $1 AND direction = 'in'`,
           [crmLead.id],
         ).catch(() => ({ rows: [{ total_in: 0 }] }));
+        // ⚠️ ENGAJADO (pedido do Matheus, 16/09): sinal de QUALIDADE para o Meta, por
+        // regra determinística — contagem de mensagens recebidas, sem IA no caminho.
+        // `avaliarEngajamento` só devolve `virou: true` na TRANSIÇÃO, então o evento
+        // sai uma vez por lead, nunca a cada mensagem seguinte.
+        const eng = await avaliarEngajamento(pool, clientId, crmLead.id).catch(() => ({ virou: false, movido: false }));
+        if (eng.virou) {
+          await enviarEventoMeta(pool, clientId, 'Lead_Engajado', leadData).catch(() => null);
+        }
+
         if (Number(total_in) === 2) {
           // Second inbound = first reply after initial contact
           await enviarEventoMeta(pool, clientId, 'Contact', leadData).catch(() => null);

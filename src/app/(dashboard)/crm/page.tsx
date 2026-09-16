@@ -15,8 +15,7 @@ import {
   ChevronLeft, ChevronRight, ChevronDown, SlidersHorizontal,
   AlignJustify, Trash2, Pencil, Sparkles, Clock3, LayoutGrid, List, ArrowUpDown,
   BarChart3, UserRound, MessageCircle, X, Send, GripVertical, Layers, WifiOff, Link2,
-  Globe2, Clapperboard, Info, MapPin, ClipboardList,
-} from 'lucide-react';
+  Globe2, Clapperboard, Info, MapPin, ClipboardList, BadgeCheck } from 'lucide-react';
 import { ChatView } from './chat-view';
 import { PortalLinkModal } from './portal-link-modal';
 import { FollowupTab, useActiveFollowups, FollowupBadge } from './followup-tab';
@@ -45,6 +44,8 @@ type CrmLead = {
   pagamento: string | null; analise_credito: boolean;
   data_nasc: string | null; bairro: string | null;
   motivacoes: string | null; dores: string | null;
+  qualificado?: boolean;
+  engajado?: boolean;
   temperatura?: 'quente' | 'morno' | 'frio' | null;
   temperatura_atualizada_em?: string | null;
   ia_ultimo_analise?: string | null;
@@ -623,6 +624,7 @@ const COLS = [
   { key: 'last_contact_at', label: 'Últ. contato', width: 125, min: 110, filter: 'text' },
   { key: 'canal', label: 'Canal', width: 120, min: 90, filter: 'text' },
   { key: 'status', label: 'Status', width: 150, min: 120, filter: 'select' },
+  { key: 'qualificado', label: 'MQL', width: 60, min: 52, filter: 'boolean' },
   { key: 'temperatura', label: 'Temp.', width: 115, min: 94, filter: 'select' },
   { key: 'dia1', label: '1D', width: 46, min: 40, filter: 'boolean' },
   { key: 'dia2', label: '2D', width: 46, min: 40, filter: 'boolean' },
@@ -962,12 +964,13 @@ function QuickEditModal({
 
 // ── Kanban Card (draggable) ──────────────────────────────────────────────────
 function KanbanCard({
-  lead, onEdit, onDelete, onToggleInternal, isDragOverlay, hasActiveFollowup,
+  lead, onEdit, onDelete, onToggleInternal, onToggleQualificado, isDragOverlay, hasActiveFollowup,
 }: {
   lead: CrmLead;
   onEdit: (lead: CrmLead) => void;
   onDelete: (id: string) => void;
   onToggleInternal: (lead: CrmLead) => void;
+  onToggleQualificado: (lead: CrmLead) => void;
   isDragOverlay?: boolean;
   hasActiveFollowup?: boolean;
 }) {
@@ -1014,6 +1017,20 @@ function KanbanCard({
     >
       {/* Ações (aparecem no hover, sobrepostas — não gastam altura) */}
       <div className="absolute right-1 top-1 z-10 flex items-center gap-0.5 rounded-md bg-card/95 opacity-0 group-hover:opacity-100 transition-opacity">
+        <button
+          type="button"
+          title={lead.qualificado ? 'Desmarcar como qualificado' : 'Marcar como QUALIFICADO (vai para o Meta otimizar)'}
+          onPointerDown={e => e.stopPropagation()}
+          onClick={e => { e.stopPropagation(); onToggleQualificado(lead); }}
+          className={cn(
+            'flex h-5 w-5 items-center justify-center rounded transition-colors',
+            lead.qualificado
+              ? 'text-primary hover:bg-primary/10'
+              : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+          )}
+        >
+          <BadgeCheck className="h-3 w-3" />
+        </button>
         <button
           type="button"
           title={lead.time_interno ? 'Remover de time interno' : 'Marcar como time interno'}
@@ -1094,7 +1111,7 @@ function KanbanCard({
 
 // ── Kanban Column (droppable) ────────────────────────────────────────────────
 function KanbanColumn({
-  status, color, leads, onEdit, onDelete, onToggleInternal, activeLead, activeFollowupIds,
+  status, color, leads, onEdit, onDelete, onToggleInternal, onToggleQualificado, activeLead, activeFollowupIds,
 }: {
   status: string;
   color: string;
@@ -1102,6 +1119,7 @@ function KanbanColumn({
   onEdit: (lead: CrmLead) => void;
   onDelete: (id: string) => void;
   onToggleInternal: (lead: CrmLead) => void;
+  onToggleQualificado: (lead: CrmLead) => void;
   activeLead: CrmLead | null;
   activeFollowupIds: Set<string>;
 }) {
@@ -1133,6 +1151,7 @@ function KanbanColumn({
             onEdit={onEdit}
             onDelete={onDelete}
             onToggleInternal={onToggleInternal}
+            onToggleQualificado={onToggleQualificado}
             hasActiveFollowup={activeFollowupIds.has(lead.id)}
           />
         ))}
@@ -1150,7 +1169,7 @@ function KanbanColumn({
 
 // ── Kanban View ──────────────────────────────────────────────────────────────
 function KanbanView({
-  leads, stages, onEdit, onDelete, onStatusChange, onToggleInternal, activeFollowupIds,
+  leads, stages, onEdit, onDelete, onStatusChange, onToggleInternal, onToggleQualificado, activeFollowupIds,
 }: {
   leads: CrmLead[];
   stages: CrmStage[];
@@ -1158,6 +1177,7 @@ function KanbanView({
   onDelete: (id: string) => void;
   onStatusChange: (id: string, status: string) => void;
   onToggleInternal: (lead: CrmLead) => void;
+  onToggleQualificado: (lead: CrmLead) => void;
   activeFollowupIds: Set<string>;
 }) {
   const [activeLead, setActiveLead] = useState<CrmLead | null>(null);
@@ -1202,6 +1222,7 @@ function KanbanView({
             onEdit={onEdit}
             onDelete={onDelete}
             onToggleInternal={onToggleInternal}
+            onToggleQualificado={onToggleQualificado}
             activeLead={activeLead}
             activeFollowupIds={activeFollowupIds}
           />
@@ -1211,6 +1232,7 @@ function KanbanView({
         {activeLead && (
           <KanbanCard
             lead={activeLead}
+            onToggleQualificado={() => {}}
             onEdit={() => {}}
             onDelete={() => {}}
             onToggleInternal={() => {}}
@@ -2575,6 +2597,7 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
     const closedLeads = kanbanLeads.filter(l => l.status === 'Comprou' || l.status === 'Fechado' || l.fechou);
     return {
       total: kanbanLeads.length,
+      qualificados: kanbanLeads.filter(l => l.qualificado).length,
       fechamentos: closedLeads.length,
       faturamento: closedLeads.reduce((s, l) => s + toMoneyNumber(l.valor_rs), 0),
       quentes: kanbanLeads.filter(l => l.temperatura === 'quente').length,
@@ -2795,6 +2818,29 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
     setLeads(prev => prev.filter(lead => !selectedLeadIds.has(lead.id)));
     setSelectedLeadIds(new Set());
     if (editId && selectedLeadIds.has(editId)) setEditId(null);
+  }
+
+  /**
+   * ⚠️ Qualificado é decisão HUMANA e o critério muda por cliente (MQL) — por isso é um
+   * botão, não uma automação. O valor vai para o Meta otimizar por lead bom, então
+   * marcar/desmarcar tem consequência fora do sistema: o commit avisa o servidor, que
+   * dispara a conversão só na virada.
+   */
+  async function toggleLeadQualificado(lead: CrmLead) {
+    const next = !lead.qualificado;
+    setLeads(prev => prev.map(l => l.id === lead.id ? { ...l, qualificado: next } : l));
+    const res = await fetch(`/api/crm/${lead.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ qualificado: next }),
+    }).catch(() => null);
+    if (res?.ok) {
+      const saved = await res.json() as CrmLead;
+      setLeads(prev => prev.map(l => l.id === lead.id ? { ...l, qualificado: saved.qualificado } : l));
+    } else {
+      // reverte: sem isto o card mentiria sobre um sinal que o Meta nunca recebeu
+      setLeads(prev => prev.map(l => l.id === lead.id ? { ...l, qualificado: lead.qualificado } : l));
+    }
   }
 
   async function toggleLeadInternal(lead: CrmLead) {
@@ -3289,6 +3335,7 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
         <div className="shrink-0 flex flex-wrap items-center justify-between gap-x-6 gap-y-2 rounded-xl border border-border bg-card px-6 py-2.5">
           {([
             { label: 'leads no funil', value: stats.total.toLocaleString('pt-BR'), Icon: Users, color: '#8b5cf6' },
+            { label: 'qualificados', value: stats.qualificados.toLocaleString('pt-BR'), Icon: BadgeCheck, color: '#55f52f' },
             { label: 'comprou', value: stats.fechamentos.toLocaleString('pt-BR'), Icon: HeartHandshake, color: '#10b981' },
             { label: 'faturamento', value: formatCurrencyBRL(stats.faturamento), Icon: CircleDollarSign, color: '#7c3aed' },
           ] as const).map(({ label, value, Icon, color }) => (
@@ -3518,6 +3565,7 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
                 onEdit={setKanbanEditLead}
                 onDelete={id => void deleteRow(id)}
                 onStatusChange={(id, status) => void changeLeadStatus(id, status)}
+                onToggleQualificado={lead => void toggleLeadQualificado(lead)}
                 onToggleInternal={lead => void toggleLeadInternal(lead)}
                 activeFollowupIds={activeFollowupLeadIds}
               />
