@@ -138,9 +138,18 @@ export async function ingerirNegocioSults(
       });
 
     if (achado) {
-      const { rows: [match] } = await pool.query<{ funnel_id: string | null }>(
-        `SELECT funnel_id FROM public.crm_leads WHERE id = $1`, [achado.id]);
+      const { rows: [match] } = await pool.query<{ funnel_id: string | null; external_id: string | null }>(
+        `SELECT funnel_id, external_id FROM public.crm_leads WHERE id = $1`, [achado.id]);
       if (!match) { await pool.query('ROLLBACK'); return null; }
+
+      // ⚠️ Um lead, UM negócio dono da etapa. Se o lead já está preso a outro
+      // negócio do SULTS (ex.: o duplicado que a ida criou por engano), este
+      // negócio não sobrescreve a etapa — senão os dois se revezam a cada
+      // varredura e o lead "anda" sozinho no Kanban.
+      if (match.external_id?.startsWith('sults:') && match.external_id !== externalId) {
+        await pool.query('COMMIT');
+        return { leadId: achado.id, criado: false };
+      }
 
       await pool.query(
         `UPDATE public.crm_leads SET

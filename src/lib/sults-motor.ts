@@ -55,6 +55,20 @@ export async function varrerLeads(pool: Pool, conn: ConexaoSults): Promise<numbe
         AND l.created_at >= $2::timestamptz
         AND COALESCE(l.time_interno, false) = false
         AND ($3::text[] IS NULL OR lower(COALESCE(l.canal, '')) = ANY($3::text[]))
+        -- ⚠️⚠️ Lead que JÁ EXISTE no SULTS nunca volta pra lá. Sem estas três
+        -- travas, a ingestão da volta (que cria o lead aqui com created_at de
+        -- hoje) fazia a ida devolver o acervo inteiro como negócio NOVO —
+        -- ~1.800 duplicados no CondoStore em 16/09/2026, sem DELETE na API.
+        -- Três sinais porque cada um cobre uma janela: origin/external_id são
+        -- gravados na MESMA transação que cria o lead (não há intervalo em que
+        -- o worker o veja sem marca); sults_negocios cobre lead que já existia
+        -- e só foi casado por telefone.
+        AND COALESCE(l.origin, '') <> 'sults'
+        AND COALESCE(l.external_id, '') NOT LIKE 'sults:%'
+        AND NOT EXISTS (
+          SELECT 1 FROM public.sults_negocios n
+           WHERE n.client_id = l.client_id AND n.lead_id = l.id
+        )
      ON CONFLICT (client_id, lead_id) DO NOTHING`,
     [conn.client_id, conn.desde, canais ? canais.map(c => c.toLowerCase()) : null],
   );
