@@ -7,9 +7,15 @@ export function makeServerPool() {
     process.env.POSTGRES_PRISMA_URL;
 
   if (connectionString) {
+    // ⚠️ Banco na PRÓPRIA VPS (rede interna do docker) não fala SSL — o Postgres
+    // oficial sobe sem certificado. Forçar `ssl` aqui derruba a conexão com
+    // "The server does not support SSL connections". O tráfego não sai do host,
+    // então texto puro na rede interna é aceitável; para qualquer host remoto
+    // (Supabase e afins) o SSL continua obrigatório.
+    const interno = /@(onmid-reports-db|localhost|127\.0\.0\.1|postgres)(:\d+)?\//.test(connectionString);
     return new Pool({
       connectionString,
-      ssl: { rejectUnauthorized: false },
+      ssl: interno ? false : { rejectUnauthorized: false },
       max: 1,
     });
   }
