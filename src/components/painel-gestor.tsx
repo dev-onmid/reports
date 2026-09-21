@@ -299,7 +299,7 @@ export function PainelGestor() {
           )}
 
           {nadaNoQuadro ? (
-            <div className="mt-4 flex items-start gap-3 rounded-[var(--radius)] border border-primary/30 bg-primary/10 p-4 text-primary">
+            <div className="mt-4 flex items-start gap-3 rounded-[var(--radius)] border border-border bg-surface-soft p-4 text-muted-foreground">
               <Check className="mt-0.5 h-4 w-4 shrink-0" />
               <p className="text-sm">Nada anotado. Quadro limpo.</p>
             </div>
@@ -317,12 +317,12 @@ export function PainelGestor() {
             <Bell className="h-4 w-4 text-foreground" />
             <h2 className="font-heading text-2xl uppercase leading-none text-foreground">Notificações</h2>
             {data.contadores.naoLidas > 0 && (
-              <span className="rounded-md bg-primary/10 px-2 py-0.5 text-[11px] font-bold text-primary">
+              <span className="rounded-[var(--radius)] bg-primary/10 px-2 py-0.5 text-[11px] font-bold text-primary">
                 {data.contadores.naoLidas} {data.contadores.naoLidas === 1 ? 'não lida' : 'não lidas'}
               </span>
             )}
             {data.contadores.importantes > 0 && (
-              <span className="rounded-md bg-yellow-400/10 px-2 py-0.5 text-[11px] font-bold text-yellow-400">
+              <span className="rounded-[var(--radius)] bg-yellow-400/10 px-2 py-0.5 text-[11px] font-bold text-yellow-400">
                 {data.contadores.importantes} {data.contadores.importantes === 1 ? 'importante' : 'importantes'}
               </span>
             )}
@@ -345,7 +345,7 @@ export function PainelGestor() {
           </div>
 
           {totalFeed === 0 ? (
-            <div className="flex items-start gap-3 rounded-[var(--radius)] border border-primary/30 bg-primary/10 p-4 text-primary">
+            <div className="flex items-start gap-3 rounded-[var(--radius)] border border-border bg-surface-soft p-4 text-muted-foreground">
               <Check className="mt-0.5 h-4 w-4 shrink-0" />
               <div>
                 <p className="text-xs font-bold uppercase tracking-wider">Tudo em dia</p>

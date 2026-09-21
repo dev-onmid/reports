@@ -297,7 +297,7 @@ export function RastreioSection() {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-sm font-semibold text-muted-foreground">Rastreio e criativos</p>
+        <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Rastreio e criativos</p>
         <PeriodChips value={periodo} onChange={onChange} />
       </div>
       <RastreioResumoCard from={from} to={to} />
