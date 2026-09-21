@@ -111,7 +111,7 @@ export default function InicioPage() {
           )}
         </div>
         {session && (
-          <div className="flex items-center gap-2 text-xs text-muted-foreground border border-border rounded-lg px-3 py-1.5">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground border border-border rounded-[var(--radius)] px-3 py-1.5">
             <ShieldCheck className="w-4 h-4 text-primary" />
             {session.role} · {session.team === 'parceiro' ? 'Parceiro' : 'Time Onmid'}
           </div>
@@ -124,7 +124,7 @@ export default function InicioPage() {
 
       {/* Acesso rápido */}
       <section>
-        <p className="text-sm font-semibold text-muted-foreground mb-3">Acesso rápido</p>
+        <p className="mb-3 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Acesso rápido</p>
         {quickAccess.length === 0 ? (
           <div className="rounded-[var(--radius)] border border-border bg-card p-6 text-center text-sm text-muted-foreground">
             Você ainda não tem módulos liberados. Fale com um administrador para receber acesso.
@@ -160,7 +160,7 @@ export default function InicioPage() {
             <Bell className="w-4.5 h-4.5 text-foreground" />
             <span className="text-sm font-semibold">Avisos do sistema</span>
             {notes.length > 0 && (
-              <span className="ml-auto text-[11px] text-primary bg-primary/10 px-2 py-0.5 rounded-md font-semibold">
+              <span className="ml-auto text-[11px] text-primary bg-primary/10 px-2 py-0.5 rounded-[var(--radius)] font-semibold">
                 {notes.length}
               </span>
             )}
