@@ -4,6 +4,7 @@ import type { ElementType, ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 import { progressoVisual } from '@/lib/progresso-cor';
 import { T } from '@/lib/dashboard-tipografia';
+import { SUPERFICIE } from './superficie';
 
 /**
  * Card de meta em "bullet graph" (Stephen Few): uma barra só responde as três
@@ -66,7 +67,7 @@ export function BulletMetaCard({
   const pctMeta = temMeta && projecao != null ? (projecao / metaMes) * 100 : null;
 
   return (
-    <section className="relative overflow-hidden rounded-[14px] border border-white/[0.08] bg-[#0d1519]/92 p-5 shadow-[0_18px_60px_rgba(0,0,0,0.28)]">
+    <section className={cn(SUPERFICIE, 'relative h-full overflow-hidden p-5')}>
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_8%_0%,rgba(108,255,47,0.16),transparent_32%),linear-gradient(135deg,rgba(108,255,47,0.05),rgba(22,139,255,0.02))]" />
       <div className="relative flex items-start gap-4">
         <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[#55f52f]/20 bg-[#55f52f]/10 text-[#55f52f]">

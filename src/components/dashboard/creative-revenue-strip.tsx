@@ -71,7 +71,7 @@ export function CreativeRevenueStrip({ criativos, loading, totalAtribuido }: {
         return (
           <div
             key={c.adKey}
-            className="group w-[224px] shrink-0 overflow-hidden rounded-xl border border-white/[0.08] bg-[#0d1519] text-left transition hover:border-[#6cff2f]/40"
+            className="group w-[224px] shrink-0 overflow-hidden rounded-xl bg-white/[0.03] text-left ring-1 ring-white/[0.05] transition hover:ring-[#6cff2f]/40"
           >
             <div className="relative overflow-hidden bg-[#071014]" style={{ aspectRatio: '4/5' }}>
               {c.thumbnail ? (
@@ -103,16 +103,17 @@ export function CreativeRevenueStrip({ criativos, loading, totalAtribuido }: {
                 title={`${fatia.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}% ${baseBarra}`}>
                 <div className="h-full rounded bg-[#6cff2f]/70" style={{ width: `${Math.min(100, fatia)}%` }} />
               </div>
-              <div className="grid grid-cols-2 gap-1">
-                <div className="rounded border border-white/[0.07] bg-white/[0.04] px-1.5 py-1">
-                  <p className="text-[9px] font-black uppercase tracking-[0.06em] text-[#9aa4aa]">Vendas</p>
-                  <p className="text-[11px] font-black tabular-nums text-[#f4f7f8]">{inteiro(c.vendas)}</p>
+              {/* Rótulo/valor em linhas: caixinhas lado a lado cortavam o número. */}
+              <dl className="space-y-1 text-[11px]">
+                <div className="flex items-baseline justify-between gap-2">
+                  <dt className="font-black uppercase tracking-[0.06em] text-[#9aa4aa]">Vendas</dt>
+                  <dd className="whitespace-nowrap font-black tabular-nums text-[#f4f7f8]">{inteiro(c.vendas)}</dd>
                 </div>
-                <div className="rounded border border-white/[0.07] bg-white/[0.04] px-1.5 py-1">
-                  <p className="text-[9px] font-black uppercase tracking-[0.06em] text-[#9aa4aa]">Leads</p>
-                  <p className="text-[11px] font-black tabular-nums text-[#f4f7f8]">{inteiro(c.leads)}</p>
+                <div className="flex items-baseline justify-between gap-2">
+                  <dt className="font-black uppercase tracking-[0.06em] text-[#9aa4aa]">Leads</dt>
+                  <dd className="whitespace-nowrap font-black tabular-nums text-[#f4f7f8]">{inteiro(c.leads)}</dd>
                 </div>
-              </div>
+              </dl>
               {c.clientName && (
                 <p className="mt-1.5 truncate text-[10px] text-[#9aa4aa]" title={c.clientName}>{c.clientName}</p>
               )}

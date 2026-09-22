@@ -102,6 +102,8 @@ import { statusCpl, statusCplComGasto, ROTULO_STATUS_CPL, CLASSE_STATUS_CPL, TEX
 import { Donut } from '@/components/dashboard/donut';
 import { BulletMetaCard } from '@/components/dashboard/bullet-meta';
 import { RitmoMesChart, CplDiarioChart } from '@/components/dashboard/ritmo-chart';
+import { SUPERFICIE, Superficie } from '@/components/dashboard/superficie';
+import { IndicadorCard, IndicadorMini, FaixaIndicadores } from '@/components/dashboard/indicador-card';
 
 type Period = 'yesterday' | 'last_7d' | 'last_14d' | 'last_30d' | 'this_month' | 'last_month' | 'custom';
 type ClientSheetsSummary = { leads: number; funil: ContagemFunil; total: number };
@@ -2046,7 +2048,10 @@ function CampaignPerformanceTable({
   // IS%/IS Orç./Topo Abs. só existem no Google Search: numa tabela só de Meta
   // eram três colunas de "—" empurrando as ações para fora da tela.
   const mostrarIS = campaigns.some(c => c.platform === 'google');
-  const totalColunas = mostrarIS ? 12 : 9;
+  // Tabela de UMA plataforma (o logo já está no título do card): a coluna
+  // "Plataforma" só repetia o mesmo ícone em todas as linhas.
+  const mostrarPlataforma = new Set(campaigns.map(c => c.platform)).size > 1;
+  const totalColunas = (mostrarIS ? 11 : 8) + (mostrarPlataforma ? 1 : 0);
   const [actionLoading, setActionLoading] = useState<Record<string, boolean>>({});
   const [actionError, setActionError] = useState<Record<string, string>>({});
   const [editingBudget, setEditingBudget] = useState<string | null>(null);
@@ -2214,7 +2219,7 @@ function CampaignPerformanceTable({
 
   if (loading) {
     return (
-      <div className="rounded-xl border border-white/15 bg-black/35 p-6">
+      <div className="py-6">
         <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
           <RefreshCw className="h-4 w-4 animate-spin" /> Carregando campanhas do período...
         </div>
@@ -2223,7 +2228,7 @@ function CampaignPerformanceTable({
   }
   if (campaigns.length === 0) {
     return (
-      <div className="rounded-xl border border-white/15 bg-black/35 px-5 py-7">
+      <div className="py-6">
         <p className="text-sm font-semibold text-foreground">Nenhuma campanha ativa no período.</p>
         <p className="mt-1 text-xs text-muted-foreground">Quando houver investido nas contas vinculadas, as campanhas aparecem aqui com métricas e ações rápidas.</p>
       </div>
@@ -2326,7 +2331,7 @@ function CampaignPerformanceTable({
       >
         {/* Name column — whole name area is clickable when expandable */}
         <td
-          className="max-w-[300px] px-2 py-0"
+          className="w-full max-w-0 px-2 py-0"
           style={{ borderLeft: `2px solid ${row.level === 0 ? rowColor + '99' : rowColor + '40'}` }}
           onMouseEnter={isMetaAd ? (e) => {
             if (adPreviewTimer.current) clearTimeout(adPreviewTimer.current);
@@ -2365,7 +2370,7 @@ function CampaignPerformanceTable({
 
             <CampaignStatusDot status={displayStatus} />
             <div className="min-w-0">
-              <p className={cn('truncate font-semibold', row.level === 0 ? 'text-xs font-bold' : row.level === 1 ? 'text-xs' : 'text-[11px] text-foreground/55')}>
+              <p className={cn('truncate font-semibold', row.level === 0 ? 'text-xs font-bold' : row.level === 1 ? 'text-xs' : 'text-[11px] text-foreground/55')} title={displayName}>
                 {displayName}
               </p>
               {row.kind === 'campaign' && (
@@ -2379,16 +2384,18 @@ function CampaignPerformanceTable({
           </div>
         </td>
 
-        <td className="px-3 py-2.5 text-center">
-          {row.kind === 'campaign' ? (
-            <PlatformTableIcon platform={row.data.platform} />
-          ) : (
-            <span className="text-xs text-muted-foreground/30">—</span>
-          )}
-        </td>
+        {mostrarPlataforma && (
+          <td className="px-2 py-2.5 text-center">
+            {row.kind === 'campaign' ? (
+              <PlatformTableIcon platform={row.data.platform} />
+            ) : (
+              <span className="text-xs text-muted-foreground/30">—</span>
+            )}
+          </td>
+        )}
 
         {/* Budget cell — editable for campaign level */}
-        <td className="px-3 py-2.5 text-right">
+        <td className="px-2 py-2.5 text-right">
           {row.kind === 'campaign' && editingBudget === row.data.id ? (
             <div className="flex items-center justify-end gap-1">
               <input
@@ -2420,16 +2427,16 @@ function CampaignPerformanceTable({
         </td>
 
         {/* Metrics */}
-        <td className="whitespace-nowrap px-3 py-2.5 text-right text-xs font-bold text-primary">{formatCurrencyBRL(spend)}</td>
-        <td className="px-3 py-2.5 text-right text-xs font-semibold">{leads > 0 ? Math.round(leads).toLocaleString('pt-BR') : <span className="text-muted-foreground/40">—</span>}</td>
+        <td className="whitespace-nowrap px-2 py-2.5 text-right text-xs font-bold text-primary">{formatCurrencyBRL(spend)}</td>
+        <td className="px-2 py-2.5 text-right text-xs font-semibold">{leads > 0 ? Math.round(leads).toLocaleString('pt-BR') : <span className="text-muted-foreground/40">—</span>}</td>
         <td
-          className={cn('whitespace-nowrap px-3 py-2.5 text-right text-xs font-semibold', cpl > 0 && TEXTO_STATUS_CPL[statusCpl(cpl, metaCpl)])}
+          className={cn('whitespace-nowrap px-2 py-2.5 text-right text-xs font-semibold', cpl > 0 && TEXTO_STATUS_CPL[statusCpl(cpl, metaCpl)])}
           title={cpl > 0 && metaCpl > 0 ? `${(cpl / metaCpl).toFixed(2).replace('.', ',')}× a meta de CPL (${formatCurrencyBRL(metaCpl)})` : undefined}
         >{cpl > 0 ? formatCurrencyBRL(cpl) : semLeadQueimando ? (
           <span className="rounded border border-[#e52020]/40 bg-[#e52020]/14 px-1.5 py-0.5 text-[10px] font-bold uppercase text-[#ff6b6b]" title={`Gastou ${formatCurrencyBRL(spend)} sem nenhum lead — mais de 2× a meta de CPL (${formatCurrencyBRL(metaCpl)})`}>Sem lead</span>
         ) : <span className="text-muted-foreground/40">—</span>}</td>
-        <td className="px-3 py-2.5 text-right text-xs text-muted-foreground">{impressions > 0 ? impressions.toLocaleString('pt-BR') : <span className="opacity-40">—</span>}</td>
-        <td className="px-3 py-2.5 text-right text-xs text-muted-foreground">{ctr > 0 ? `${ctr.toFixed(2).replace('.', ',')}%` : <span className="opacity-40">—</span>}</td>
+        <td className="px-2 py-2.5 text-right text-xs text-muted-foreground">{impressions > 0 ? impressions.toLocaleString('pt-BR') : <span className="opacity-40">—</span>}</td>
+        <td className="px-2 py-2.5 text-right text-xs text-muted-foreground">{ctr > 0 ? `${ctr.toFixed(2).replace('.', ',')}%` : <span className="opacity-40">—</span>}</td>
 
         {/* IS metrics — Google Search campaigns only */}
         {mostrarIS && (() => {
@@ -2439,13 +2446,13 @@ function CampaignPerformanceTable({
           const absTopIS = isGoogleCampaign ? (row.data as CampaignPerformance).searchAbsTopIS : undefined;
           return (
             <>
-              <td className="px-3 py-2.5 text-right text-xs font-semibold">
+              <td className="px-2 py-2.5 text-right text-xs font-semibold">
                 {imprShare != null ? <span className="text-[#6cff2f]">{imprShare.toFixed(1).replace('.', ',')}%</span> : <span className="opacity-40">—</span>}
               </td>
-              <td className="px-3 py-2.5 text-right text-xs font-semibold">
+              <td className="px-2 py-2.5 text-right text-xs font-semibold">
                 {budgetLostIS != null ? <span className={budgetLostIS > 20 ? 'text-red-400' : 'text-muted-foreground'}>{budgetLostIS.toFixed(1).replace('.', ',')}%</span> : <span className="opacity-40">—</span>}
               </td>
-              <td className="px-3 py-2.5 text-right text-xs font-semibold">
+              <td className="px-2 py-2.5 text-right text-xs font-semibold">
                 {absTopIS != null ? <span className="text-[#6cff2f]">{absTopIS.toFixed(1).replace('.', ',')}%</span> : <span className="opacity-40">—</span>}
               </td>
             </>
@@ -2453,7 +2460,7 @@ function CampaignPerformanceTable({
         })()}
 
         {/* Actions */}
-        <td className="px-3 py-2.5">
+        <td className="px-2 py-2.5">
           <div className="flex items-center justify-center gap-1">
             {/* Pause/Activate */}
             {rowKind === 'campaign' && (
@@ -2554,30 +2561,34 @@ function CampaignPerformanceTable({
     <>
       {optimizeCampaign && <CampaignOptimizeDrawer campaign={optimizeCampaign} onClose={() => setOptimizeCampaign(null)} />}
       {adPreview && <AdCreativePreview ad={adPreview.ad} x={adPreview.x} y={adPreview.y} />}
-      <div className="overflow-hidden rounded-xl border border-white/15 bg-black/35 shadow-[0_0_28px_rgba(255,255,255,0.08)]">
+      <div className="-mx-2">
         <div
           className="overflow-auto transition-all duration-300"
           style={{ maxHeight: tableExpanded ? '9999px' : '288px' }}
         >
-          <table className={cn('w-full text-left', mostrarIS ? 'min-w-[1080px]' : 'min-w-[860px]')}>
-            <thead className="border-b border-white/15 bg-white/[0.06] sticky top-0 z-10">
+          {/* Cabeçalhos curtos e sem min-width largo: a tabela do Google tinha
+              12 colunas e passava de 1080px — IS/Perda orç./Topo sumiam à
+              direita num notebook de 1440px. O nome da campanha absorve a
+              sobra (w-full max-w-0) e trunca com o nome inteiro no title. */}
+          <table className={cn('w-full text-left', mostrarIS ? 'min-w-[840px]' : 'min-w-[680px]')}>
+            <thead className="sticky top-0 z-10 border-b border-white/[0.08] bg-[#0d1519]">
               <tr className={T.tabelaCab}>
-                <th className="px-4 py-3">Nome</th>
-                <th className="px-4 py-3 text-center">Plataforma</th>
-                <th className="px-4 py-3 text-right">Verba/dia</th>
-                <th className="px-4 py-3 text-right">Investido</th>
-                <th className="px-4 py-3 text-right">Resultados</th>
-                <th className="px-4 py-3 text-right">CPL</th>
-                <th className="px-4 py-3 text-right">Impressões</th>
-                <th className="px-4 py-3 text-right">CTR</th>
+                <th className="px-2 py-2.5">Nome</th>
+                {mostrarPlataforma && <th className="px-2 py-2.5 text-center">Plat.</th>}
+                <th className="whitespace-nowrap px-2 py-2.5 text-right">Verba/dia</th>
+                <th className="px-2 py-2.5 text-right">Investido</th>
+                <th className="px-2 py-2.5 text-right">Result.</th>
+                <th className="px-2 py-2.5 text-right">CPL</th>
+                <th className="px-2 py-2.5 text-right">Impr.</th>
+                <th className="px-2 py-2.5 text-right">CTR</th>
                 {mostrarIS && (
                   <>
-                    <th className="px-4 py-3 text-right">IS%</th>
-                    <th className="px-4 py-3 text-right">IS Orç.</th>
-                    <th className="px-4 py-3 text-right">Topo Abs.</th>
+                    <th className="px-2 py-2.5 text-right" title="Parcela de impressões na Rede de Pesquisa">IS</th>
+                    <th className="whitespace-nowrap px-2 py-2.5 text-right" title="Parcela de impressões perdida por orçamento">Perda orç.</th>
+                    <th className="px-2 py-2.5 text-right" title="Parcela de impressões no topo absoluto">Topo</th>
                   </>
                 )}
-                <th className="px-4 py-3 text-center">Ações</th>
+                <th className="px-2 py-2.5 text-center">Ações</th>
               </tr>
             </thead>
             <tbody>
@@ -4208,7 +4219,7 @@ function premiumValue(value: number | null | undefined, format: PremiumMetricFor
 
 function PremiumPanel({ children, className = '', style }: { children: ReactNode; className?: string; style?: React.CSSProperties }) {
   return (
-    <section className={cn('rounded-[14px] border border-white/[0.08] bg-[#0d1519]/92 shadow-[0_18px_60px_rgba(0,0,0,0.28)]', className)} style={style}>
+    <section className={cn(SUPERFICIE, className)} style={style}>
       {children}
     </section>
   );
@@ -4364,17 +4375,6 @@ function HeroStatCard({ title, icon: Icon, value, change, sub, estilo = ESTILO_V
   );
 }
 
-/** Sparkline mínima (sem eixo) para os KPIs — só com série diária real. */
-function KpiSparkline({ values, color = '#55f52f' }: { values: number[]; color?: string }) {
-  const path = sparkPathFromValues(values, 120, 32);
-  if (!path) return null;
-  return (
-    <svg viewBox="0 0 120 32" preserveAspectRatio="none" className="mt-2 block h-6 w-full" aria-hidden="true">
-      <path d={path} fill="none" stroke={color} strokeOpacity={0.8} strokeWidth={1.5} strokeLinecap="round" vectorEffect="non-scaling-stroke" />
-    </svg>
-  );
-}
-
 function QuickMetricCard({ title, value, change, icon: Icon, inverseChange, neutralChange, estilo = ESTILO_VAZIO, className, comparacao = 'vs período anterior', serie, dica }: {
   title: string;
   /** Métrica sem direção boa/ruim (ex.: investimento): variação em cinza. */
@@ -4392,29 +4392,26 @@ function QuickMetricCard({ title, value, change, icon: Icon, inverseChange, neut
   /** Tooltip do título (ex.: como o número é calculado). */
   dica?: string;
 }) {
-  const hasChange = change !== null && change !== undefined && Number.isFinite(change);
-  // Sem variação = cinza neutro. Antes o "—" saía VERDE, como se fosse boa notícia.
-  const positive = hasChange && (inverseChange ? change <= 0 : change >= 0);
-  const iconSize = estilo.tamanhoIcone ?? 32;
+  // Delegado ao IndicadorCard — o MESMO card de KPI da Landing page e do
+  // Instagram. O `estilo` (modelo por segmento, food) vira overrides dele.
   return (
-    <PremiumPanel className={cn('relative overflow-hidden p-4', className)} style={estilo.corFundo ? { backgroundColor: estilo.corFundo } : undefined}>
-      <div className="flex items-start gap-3">
-        <span
-          className={cn('flex shrink-0 items-center justify-center rounded-lg border border-current/20 bg-current/10', !estilo.corIcone && 'text-[#6cff2f]')}
-          style={{ width: iconSize, height: iconSize, ...(estilo.corIcone ? { color: estilo.corIcone } : {}) }}
-        >
-          <Icon style={{ width: iconSize * 0.5, height: iconSize * 0.5 }} />
-        </span>
-        <div className="min-w-0 flex-1">
-          <p className={T.kpiRotulo} style={styleTexto(estilo)} title={dica}>{estilo.texto ?? title}</p>
-          <p className={cn('mt-2', T.kpiValor)} style={styleValor(estilo)} title={dica}>{value}</p>
-          <p className={cn('mt-1.5', T.delta, !hasChange || neutralChange ? 'text-[#a7b0b6]' : positive ? 'text-[#6cff2f]' : 'text-red-400')}>
-            {hasChange ? `${change >= 0 ? '+' : ''}${change.toFixed(1).replace('.', ',')}%` : '—'} <span className={T.comparacao}>{comparacao}</span>
-          </p>
-          {serie && serie.length >= 2 && serie.some(v => v > 0) && <KpiSparkline values={serie} />}
-        </div>
-      </div>
-    </PremiumPanel>
+    <IndicadorCard
+      rotulo={estilo.texto ?? title}
+      valor={value}
+      icone={Icon}
+      cor={estilo.corIcone ?? undefined}
+      tamanhoIcone={estilo.tamanhoIcone ?? undefined}
+      variacao={change ?? null}
+      inverso={inverseChange}
+      neutro={neutralChange}
+      comparacao={comparacao}
+      serie={serie}
+      dica={dica}
+      estiloRotulo={styleTexto(estilo)}
+      estiloValor={styleValor(estilo)}
+      className={className}
+      style={estilo.corFundo ? { backgroundColor: estilo.corFundo } : undefined}
+    />
   );
 }
 
@@ -4672,47 +4669,25 @@ function IgMark({ className }: { className?: string }) {
   );
 }
 
-// ── Instagram: card grande e mini-estatística (mesmo padrão da Landing page) ──
-function IgDelta({ v }: { v: number | null }) {
-  if (v === null || !Number.isFinite(v)) return <span className="text-[#7c868c]">—</span>;
-  const cor = Math.abs(v) < 0.05 ? 'text-[#a7b0b6]' : v > 0 ? 'text-[#6cff2f]' : 'text-red-400';
-  return <span className={cn(T.delta, cor)}>{v > 0 ? '+' : ''}{v.toFixed(1).replace('.', ',')}%</span>;
-}
+// ── Instagram: o MESMO IndicadorCard/IndicadorMini do resto da página, só
+// com o ícone em rosa (cor da seção). Antes era um modelo próprio (IgKpi),
+// dentro de uma moldura rosa com brilho.
+const ROSA_IG = '#ff5c93';
 
-function IgKpi({ label, icon: Icon, valor, variacao, comparacao, sub, subRuim }: {
+function IgKpi({ label, icon, valor, variacao, comparacao, sub, subRuim }: {
   label: string; icon: React.ElementType; valor: string; variacao: number | null;
   comparacao?: string; sub?: string; subRuim?: boolean;
 }) {
   return (
-    <div className="rounded-[12px] border border-white/[0.07] bg-[#071014]/80 p-4">
-      <div className="flex items-center gap-2">
-        <span className={cn(T.iconeCaixa, 'border border-[#E1306C]/25 bg-[#E1306C]/10 text-[#ff5c93]')}>
-          <Icon className={T.icone} />
-        </span>
-        <p className={T.kpiRotulo}>{label}</p>
-      </div>
-      <p className={cn('mt-3', T.kpiValor)}>{valor}</p>
-      <p className="mt-1.5 text-xs"><IgDelta v={variacao} /> <span className={T.comparacao}>{comparacao}</span></p>
-      {sub && <p className={cn('mt-1', T.nota, subRuim && 'text-red-400')}>{sub}</p>}
-    </div>
+    <IndicadorCard rotulo={label} icone={icon} cor={ROSA_IG} valor={valor} variacao={variacao}
+      comparacao={comparacao} nota={sub} notaRuim={subRuim} />
   );
 }
 
-function IgMini({ label, icon: Icon, valor, variacao }: {
+function IgMini({ label, icon, valor, variacao }: {
   label: string; icon: React.ElementType; valor: string; variacao: number | null;
 }) {
-  return (
-    <div className="flex items-center gap-3 bg-[#0b1317] px-4 py-3">
-      <Icon className="h-4 w-4 shrink-0 text-[#ff5c93]" />
-      <div className="min-w-0">
-        <p className={cn('truncate', T.miniRotulo)}>{label}</p>
-        <p className="mt-1 flex items-baseline gap-2">
-          <span className={T.miniValor}>{valor}</span>
-          <IgDelta v={variacao} />
-        </p>
-      </div>
-    </div>
-  );
+  return <IndicadorMini rotulo={label} icone={icon} cor={ROSA_IG} valor={valor} variacao={variacao} />;
 }
 
 const FUNNEL_STEP_COLORS = ['#6cff2f', '#0ea5e9', '#7b2cff', '#f97316', '#ec4899', '#f59e0b', '#84cc16'];
@@ -4960,50 +4935,82 @@ function StatusCplPill({ status, titulo }: { status: StatusCpl; titulo?: string 
   );
 }
 
-function ChannelSummaryTable({ rows, metaCpl }: {
-  rows: Array<{ channel: string; investment: string; leads: string; cpl: string; cplNum: number; status: StatusCpl; logo: ReactNode }>;
+type LinhaCanal = {
+  channel: string; logo: ReactNode;
+  investment: string; impressions: string; clicks: string; ctr: string; cpc: string;
+  leads: string; cpl: string; cplNum: number; status: StatusCpl;
+};
+
+/**
+ * Resumo por Canal — TRANSPOSTO: métricas nas linhas, canais (+ Total) nas
+ * colunas. Fica ao lado do funil, que é alto e estreito; com canais nas linhas
+ * eram 2 linhas e um vazio enorme embaixo. Assim o card cabe na mesma coluna
+ * estreita, tem a mesma altura do funil e ganhou impressões, cliques, CTR e CPC.
+ */
+function ChannelSummaryTable({ rows, total, metaCpl }: {
+  rows: LinhaCanal[];
+  total: LinhaCanal;
   metaCpl: number;
 }) {
-  // ⚠️ A coluna "Conversão" saiu: dividia leads do Meta pelo ALCANCE e
+  // ⚠️ A linha "Conversão" saiu: dividia leads do Meta pelo ALCANCE e
   // conversões do Google pelos CLIQUES — duas taxas sem relação lado a lado.
+  const colunas = [...rows, total];
+  const metricas: Array<{ rotulo: string; valor: (l: LinhaCanal) => ReactNode; destaque?: boolean }> = [
+    { rotulo: 'Investimento', valor: l => l.investment, destaque: true },
+    { rotulo: 'Impressões', valor: l => l.impressions },
+    { rotulo: 'Cliques', valor: l => l.clicks },
+    { rotulo: 'CTR', valor: l => l.ctr },
+    { rotulo: 'CPC', valor: l => l.cpc },
+    { rotulo: 'Leads', valor: l => l.leads, destaque: true },
+    { rotulo: 'CPL', valor: l => <span className={cn('font-bold', TEXTO_STATUS_CPL[l.status])}>{l.cpl}</span> },
+  ];
   return (
-    <PremiumPanel className="p-5">
-      <div className="mb-4 flex items-center gap-2">
-        <h3 className={T.cardTitulo}>Resumo por Canal</h3>
+    <Superficie
+      titulo="Resumo por Canal"
+      direita={(
         <span title="Status compara o CPL de cada canal com a meta de CPL do planejamento: até a meta = Na meta; até 1,5× = Atenção; acima = Acima.">
           <Info className="h-3.5 w-3.5 text-[#a7b0b6]" />
         </span>
-      </div>
+      )}
+    >
       <div className="overflow-x-auto">
-        <table className={cn('w-full min-w-[520px] text-left tabular-nums', T.tabelaCel)}>
+        <table className={cn('w-full min-w-[380px] text-left tabular-nums', T.tabelaCel)}>
           <thead className={T.tabelaCab}>
             <tr>
-              <th className="py-2">Canal</th>
-              <th className="text-right">Investimento</th>
-              <th className="text-right">Leads</th>
-              <th className="text-right">CPL</th>
-              <th className="text-right">vs meta de CPL{metaCpl > 0 ? ` (${premiumValue(metaCpl, 'currency')})` : ''}</th>
+              <th className="py-2 pr-2">Métrica</th>
+              {colunas.map((c, i) => (
+                <th key={c.channel} className={cn('py-2 pl-3 text-right', i === colunas.length - 1 && 'text-[#dce4e8]')}>
+                  <span className="inline-flex items-center justify-end gap-1.5">{c.logo}{c.channel}</span>
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody className="divide-y divide-white/[0.07]">
-            {rows.map((row) => (
-              <tr key={row.channel} className="text-[#f4f7f8]">
-                <td className="py-3"><span className="flex items-center gap-2">{row.logo}{row.channel}</span></td>
-                <td className="whitespace-nowrap text-right">{row.investment}</td>
-                <td className="text-right">{row.leads}</td>
-                <td className={cn('whitespace-nowrap text-right font-bold', TEXTO_STATUS_CPL[row.status])}>{row.cpl}</td>
-                <td className="text-right">
-                  <StatusCplPill
-                    status={row.status}
-                    titulo={metaCpl > 0 && row.cplNum > 0 ? `${(row.cplNum / metaCpl).toFixed(2).replace('.', ',')}× a meta` : undefined}
-                  />
-                </td>
+            {metricas.map(m => (
+              <tr key={m.rotulo} className="text-[#f4f7f8]">
+                <td className={cn('py-2.5 pr-2', T.miniRotulo)}>{m.rotulo}</td>
+                {colunas.map((c, i) => (
+                  <td key={c.channel} className={cn('whitespace-nowrap py-2.5 pl-3 text-right', m.destaque && 'font-bold', i === colunas.length - 1 && 'bg-white/[0.02]')}>
+                    {m.valor(c)}
+                  </td>
+                ))}
               </tr>
             ))}
+            <tr>
+              <td className={cn('py-2.5 pr-2', T.miniRotulo)}>vs meta de CPL{metaCpl > 0 ? <span className="block normal-case tracking-normal text-[#7c868c]">{premiumValue(metaCpl, 'currency')}</span> : null}</td>
+              {colunas.map((c, i) => (
+                <td key={c.channel} className={cn('py-2.5 pl-3 text-right', i === colunas.length - 1 && 'bg-white/[0.02]')}>
+                  <StatusCplPill
+                    status={c.status}
+                    titulo={metaCpl > 0 && c.cplNum > 0 ? `${(c.cplNum / metaCpl).toFixed(2).replace('.', ',')}× a meta` : undefined}
+                  />
+                </td>
+              ))}
+            </tr>
           </tbody>
         </table>
       </div>
-    </PremiumPanel>
+    </Superficie>
   );
 }
 
@@ -5147,7 +5154,7 @@ function HorizontalCreativeCard({ creative, index, onPreview }: {
     <button
       type="button"
       onClick={() => onPreview(creative)}
-      className="group w-[170px] shrink-0 overflow-hidden rounded-xl border border-white/[0.08] bg-[#0d1519] text-left transition hover:border-[#6cff2f]/40"
+      className="group w-[184px] shrink-0 overflow-hidden rounded-xl bg-white/[0.03] text-left ring-1 ring-white/[0.05] transition hover:ring-[#6cff2f]/40"
     >
       <div className="relative overflow-hidden bg-[#071014]" style={{ aspectRatio: '4/5' }}>
         {showImage ? (
@@ -5178,21 +5185,23 @@ function HorizontalCreativeCard({ creative, index, onPreview }: {
           {premiumValue(creative.spend, 'currency')}
         </span>
       </div>
-      <div className="p-2">
+      <div className="p-2.5">
         {creative.campaignName && (
           <p className="mb-1 truncate text-[10px] font-semibold uppercase tracking-[0.06em] text-[#6cff2f]/70" title={creative.campaignName}>
             {creative.campaignName}
           </p>
         )}
         <p className={cn('mb-2 truncate', T.listaRotulo)} title={creative.adName}>{creative.adName}</p>
-        <div className="grid grid-cols-3 gap-1">
+        {/* Rótulo/valor em LINHAS: três caixinhas lado a lado em 170px
+            cortavam o CPL em "R$ 4…". */}
+        <dl className="space-y-1 text-[11px]">
           {metrics.map(m => (
-            <div key={m.label} className="rounded border border-white/[0.07] bg-white/[0.04] px-1 py-1">
-              <p className="truncate text-[9px] font-black uppercase tracking-[0.06em] text-[#9aa4aa]">{m.label}</p>
-              <p className="truncate text-[11px] font-black tabular-nums text-[#f4f7f8]">{m.value}</p>
+            <div key={m.label} className="flex items-baseline justify-between gap-2">
+              <dt className="font-black uppercase tracking-[0.06em] text-[#9aa4aa]">{m.label}</dt>
+              <dd className="whitespace-nowrap font-black tabular-nums text-[#f4f7f8]">{m.value}</dd>
             </div>
           ))}
-        </div>
+        </dl>
       </div>
     </button>
   );
@@ -5207,7 +5216,7 @@ function CreativeHorizontalStrip({ creatives, loading, onPreview }: {
     return (
       <div className="flex gap-3 overflow-x-auto pb-2">
         {Array.from({ length: 6 }).map((_, i) => (
-          <div key={i} className="w-[170px] shrink-0 animate-pulse rounded-xl bg-white/[0.06]" style={{ height: 260 }} />
+          <div key={i} className="w-[184px] shrink-0 animate-pulse rounded-xl bg-white/[0.06]" style={{ height: 300 }} />
         ))}
       </div>
     );
@@ -5284,8 +5293,8 @@ function TrafegoResumoTable({ linhas, colunas, comparacao }: { linhas: LinhaTraf
 /** Título de seção da página única (substitui as abas). */
 function TituloSecao({ titulo, sub }: { titulo: string; sub?: string }) {
   return (
-    <div className="flex items-center gap-3 pt-4">
-      <span className="h-4 w-1 rounded-full bg-[#55f52f]" />
+    <div className="mt-6 flex items-center gap-3">
+      <span className="h-4 w-1 rounded-full bg-[#6cff2f]" />
       <h2 className={T.secao}>{titulo}</h2>
       {sub && <span className={T.cardSub}>{sub}</span>}
       <span className="h-px flex-1 bg-white/[0.08]" />
@@ -6497,26 +6506,26 @@ export default function GeneralDashboard() {
     // de fonte), então a quebra sempre fecha com os números exibidos.
     detalhes: i === 2 ? detalhesAgendamento : undefined,
   }));
-  const channelRows = [
-    {
-      channel: 'Meta Ads',
-      investment: premiumValue(metaSpend, 'currency'),
-      leads: premiumValue(metaLeads),
-      cpl: avgCpl > 0 ? premiumValue(avgCpl, 'currency') : '—',
-      cplNum: avgCpl,
-      status: cplMetaSel > 0 ? statusCplComGasto(metaSpend, metaLeads, cplMetaSel) : 'sem_meta' as StatusCpl,
-      logo: <MetaAdsMark className="h-4 w-4 text-[#168BFF]" />,
-    },
-    {
-      channel: 'Google Ads',
-      investment: premiumValue(googleCost, 'currency'),
-      leads: premiumValue(googleConv),
-      cpl: avgCpa > 0 ? premiumValue(avgCpa, 'currency') : '—',
-      cplNum: avgCpa,
-      status: cplMetaSel > 0 ? statusCplComGasto(googleCost, googleConv, cplMetaSel) : 'sem_meta' as StatusCpl,
-      logo: <GoogleAdsMark className="h-4 w-4" />,
-    },
+  const linhaCanal = (channel: string, logo: ReactNode, spend: number, impr: number, clicks: number, leads: number): LinhaCanal => {
+    const cpl = leads > 0 ? spend / leads : 0;
+    return {
+      channel, logo,
+      investment: premiumValue(spend, 'currency'),
+      impressions: impr > 0 ? premiumValue(impr) : '—',
+      clicks: clicks > 0 ? premiumValue(clicks) : '—',
+      ctr: impr > 0 && clicks > 0 ? premiumValue((clicks / impr) * 100, 'percent') : '—',
+      cpc: clicks > 0 && spend > 0 ? premiumValue(spend / clicks, 'currency') : '—',
+      leads: premiumValue(leads),
+      cpl: cpl > 0 ? premiumValue(cpl, 'currency') : '—',
+      cplNum: cpl,
+      status: cplMetaSel > 0 ? statusCplComGasto(spend, leads, cplMetaSel) : 'sem_meta' as StatusCpl,
+    };
+  };
+  const channelRows: LinhaCanal[] = [
+    linhaCanal('Meta Ads', <MetaAdsMark className="h-4 w-4 text-[#168BFF]" />, metaSpend, metaImpressions, metaClicks, metaLeads),
+    linhaCanal('Google Ads', <GoogleAdsMark className="h-4 w-4" />, googleCost, googleImpressions, googleClicks, googleConv),
   ];
+  const channelTotal = linhaCanal('Total', null, totalSpend, metaImpressions + googleImpressions, metaClicks + googleClicks, totalLeads);
 
   // ── Resumo de Tráfego (tabela única) ──────────────────────────────────────
   // Variação só com base anterior ≥ 10 em contagem/dinheiro: "+6900%" sobre
@@ -6693,20 +6702,17 @@ export default function GeneralDashboard() {
               const prevPViews   = sum(prevIg, 'profileViews');
               const igHandles = allIg.map(d => d.username).filter(Boolean);
               return (
-                <PremiumPanel className="border-[#E1306C]/24 shadow-[0_0_40px_rgba(225,48,108,0.10)]">
-                  <div className="flex items-center justify-between px-5 pt-5 pb-3">
-                    <h3 className={cn('flex items-center gap-2', T.cardTitulo)}>
-                      <IgMark className="h-5 w-5" /> Instagram
-                    </h3>
+                // Sem moldura rosa: cards normais direto no fluxo da página,
+                // com o logo + @ numa linha de cabeçalho leve.
+                <>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <IgMark className="h-4 w-4" />
+                    <span className={T.subBloco}>Instagram</span>
                     {igHandles.length > 0 && (
                       <span className={T.cardSub}>{igHandles.map(h => `@${h}`).join(', ')}</span>
                     )}
                   </div>
-                  <div className="px-5 pb-5">
-                    {/* Mesmo padrão da Landing page: 4 números grandes + faixa
-                        compacta — 8 caixinhas numa linha ficavam espremidas e
-                        desproporcionais aos outros cards da página. */}
-                    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
                       {/* ⚠️ Seguidores: o valor grande é o TOTAL (snapshot); a
                           variação é a do GANHO no período contra o ganho anterior
                           — `followers_count` ignora a janela e volta igual nas duas. */}
@@ -6735,14 +6741,13 @@ export default function GeneralDashboard() {
                       />
                       <IgKpi label="Visualizações" icon={BarChart3} valor={pageInsightsLoading ? '…' : igViews > 0 ? premiumValue(igViews) : '—'} variacao={chg(igViews, prevViews)} comparacao={rotuloComp} sub="vezes que o conteúdo foi visto" />
                     </div>
-                    <div className="mt-3 grid grid-cols-2 gap-px overflow-hidden rounded-[12px] border border-white/[0.07] bg-white/[0.07] md:grid-cols-4">
+                    <FaixaIndicadores className="grid-cols-2 md:grid-cols-4">
                       <IgMini label="Cliques na bio" icon={ExternalLink} valor={pageInsightsLoading ? '…' : igClicks > 0 ? premiumValue(igClicks) : '—'} variacao={chg(igClicks, prevClicks)} />
                       <IgMini label="Interações" icon={Zap} valor={pageInsightsLoading ? '…' : igInteract > 0 ? premiumValue(igInteract) : '—'} variacao={chg(igInteract, prevInteract)} />
                       <IgMini label="Salvamentos" icon={Bookmark} valor={pageInsightsLoading ? '…' : igSaves > 0 ? premiumValue(igSaves) : '—'} variacao={chg(igSaves, prevSaves)} />
                       <IgMini label="Visitas ao perfil" icon={Monitor} valor={pageInsightsLoading ? '…' : igPViews > 0 ? premiumValue(igPViews) : '—'} variacao={chg(igPViews, prevPViews)} />
-                    </div>
-                  </div>
-                </PremiumPanel>
+                    </FaixaIndicadores>
+                </>
               );
             })()}
     </>
@@ -6788,90 +6793,71 @@ export default function GeneralDashboard() {
                 quando há responsável ou produto no período — sem isso seria
                 uma seção vazia num cliente que não usa CRM com vendedores. */}
             {(desempenhoLoading || vendedores.length > 0 || categorias.length > 0) && (
-              <PremiumPanel className="p-5">
-                <div className="mb-4 flex items-center gap-2">
-                  <h3 className={T.cardTitulo}>
-                    Performance comercial
-                  </h3>
-                  <span
-                    className="rounded-[4px] bg-[#172027] px-1.5 py-0.5 text-[10px] font-semibold text-[#87929B]"
-                    title="Ganhos pela data do ganho · perdidos pela data da perda · novos pela data de criação"
-                  >
-                    CRM
-                  </span>
-                </div>
-                {/* Os dois cards têm chrome próprio (título + controle) e
-                    `items-stretch` garante a mesma altura visual. */}
-                <div className="grid items-stretch gap-4 lg:grid-cols-2">
-                  <VendedoresCard linhas={vendedores} loading={desempenhoLoading} />
-                  <CategoriasCard linhas={categorias} loading={desempenhoLoading} />
-                </div>
-              </PremiumPanel>
+              // Dois cards de topo, sem o painel "Performance comercial" em volta
+              // (era card dentro de card). O título vem da seção "Comercial".
+              <div
+                className="grid items-stretch gap-4 xl:grid-cols-2"
+                title="Ganhos pela data do ganho · perdidos pela data da perda · novos pela data de criação"
+              >
+                <VendedoresCard linhas={vendedores} loading={desempenhoLoading} />
+                <CategoriasCard linhas={categorias} loading={desempenhoLoading} />
+              </div>
             )}
     </>
   );
   const blocoMeta = (
     <>
-            {/* ── Meta Ads: campanhas expansíveis + criativos ── */}
-            <PremiumPanel className="border-[#168BFF]/28 shadow-[0_0_40px_rgba(22,139,255,0.12)]">
-              <div className="flex items-center px-5 pt-5 pb-3">
-                <h3 className={cn('flex items-center gap-2', T.cardTitulo)}>
-                  <MetaAdsMark className="h-5 w-5 text-[#168BFF]" /> Meta Ads
-                </h3>
-              </div>
+            {/* ── Meta Ads: cards de topo (sem a moldura azul que embrulhava
+                tabela + criativos num "painel dentro do painel"). ── */}
+            <Superficie
+              titulo="Campanhas Meta Ads"
+              icone={<MetaAdsMark className="h-5 w-5 text-[#168BFF]" />}
+              sub="com veiculação no período · clique para abrir conjuntos e anúncios"
+            >
+              <CampaignPerformanceTable
+                campaigns={metaCampaigns}
+                loading={campaignsLoading}
+                period={period}
+                dateFrom={customDateFrom}
+                dateTo={customDateTo}
+                metaCpl={cplMetaSel}
+              />
+            </Superficie>
 
-              {/* Campanhas com Veiculação — expansível em cascata */}
-              <div className="border-b border-white/[0.06] px-5 pb-5">
-                <div className={cn('mb-3', T.subBloco)}>
-                  Campanhas com Veiculação
-                </div>
-                <CampaignPerformanceTable
-                  campaigns={metaCampaigns}
-                  loading={campaignsLoading}
-                  period={period}
-                  dateFrom={customDateFrom}
-                  dateTo={customDateTo}
-                  metaCpl={cplMetaSel}
-                />
-              </div>
-
-              {/* Faturamento por Criativo — o que o anúncio TROUXE (CRM), acima
-                  da faixa de desempenho de mídia. Some quando nenhuma venda do
-                  período tem criativo identificado: caixa vazia aqui seria pior
-                  que ausência, porque parece número zerado em vez de dado que
-                  ainda não existe. */}
-              {(criativosReceitaLoading || criativosReceita.length > 0) && (
-                <div className="border-b border-white/[0.06] px-5 pb-5">
-                  <div className={cn('mb-1 flex items-center gap-2', T.subBloco)}>
-                    Faturamento por Criativo
-                    <span
-                      className="rounded bg-[#6cff2f]/12 px-1.5 py-0.5 text-[9px] font-black text-[#6cff2f]"
-                      title="Receita das vendas cujo lead foi rastreado até este anúncio"
-                    >
-                      CRM
-                    </span>
-                  </div>
-                  <p className={cn('mb-3', T.cardSub)}>
-                    Vendas do período que dá para rastrear até o anúncio que trouxe o lead
-                    {criativosReceita.length > 0 && (
-                      <> · total atribuído {premiumValue(criativosReceitaTotal || criativosReceita.reduce((s, c) => s + c.receita, 0), 'currency')}</>
-                    )}
-                  </p>
-                  <CreativeRevenueStrip criativos={criativosReceita} loading={criativosReceitaLoading} totalAtribuido={criativosReceitaTotal || undefined} />
-                </div>
-              )}
-
-              {/* Melhores Criativos — scroll horizontal, abaixo das campanhas */}
-              <div className="px-5 py-5">
-                <div className={cn('mb-3 flex items-center gap-2', T.subBloco)}>
-                  Melhores Criativos
-                  <span title="Ordenados por leads (e menor CPL no empate); sem leads no período, por investimento.">
-                    <Info className="h-3.5 w-3.5 text-[#9aa4aa]" />
+            {/* Faturamento por Criativo — o que o anúncio TROUXE (CRM). Some
+                quando nenhuma venda do período tem criativo identificado:
+                caixa vazia aqui seria pior que ausência, porque parece número
+                zerado em vez de dado que ainda não existe. */}
+            {(criativosReceitaLoading || criativosReceita.length > 0) && (
+              <Superficie
+                titulo="Faturamento por criativo"
+                icone={<MetaAdsMark className="h-5 w-5 text-[#168BFF]" />}
+                sub={<>
+                  Vendas do período que dá para rastrear até o anúncio que trouxe o lead
+                  {criativosReceita.length > 0 && (
+                    <> · total atribuído {premiumValue(criativosReceitaTotal || criativosReceita.reduce((s, c) => s + c.receita, 0), 'currency')}</>
+                  )}
+                </>}
+                direita={(
+                  <span
+                    className="rounded-[4px] bg-[#172027] px-1.5 py-0.5 text-[10px] font-semibold text-[#87929B]"
+                    title="Receita das vendas cujo lead foi rastreado até este anúncio"
+                  >
+                    CRM
                   </span>
-                </div>
-                <CreativeHorizontalStrip creatives={creatives} loading={creativesLoading} onPreview={setPreviewCreative} />
-              </div>
-            </PremiumPanel>
+                )}
+              >
+                <CreativeRevenueStrip criativos={criativosReceita} loading={criativosReceitaLoading} totalAtribuido={criativosReceitaTotal || undefined} />
+              </Superficie>
+            )}
+
+            <Superficie
+              titulo="Melhores criativos"
+              icone={<MetaAdsMark className="h-5 w-5 text-[#168BFF]" />}
+              sub="ordenados por leads (e menor CPL no empate); sem leads no período, por investimento"
+            >
+              <CreativeHorizontalStrip creatives={creatives} loading={creativesLoading} onPreview={setPreviewCreative} />
+            </Superficie>
     </>
   );
   const blocoGoogle = (
@@ -6882,18 +6868,12 @@ export default function GeneralDashboard() {
                 inteira (o print 09 do briefing). O investimento em Google, se
                 houver, aparece no capítulo Tráfego da DeliveryView. */}
             {!modoFood && (
-            <PremiumPanel className="border-[#4285F4]/24 shadow-[0_0_40px_rgba(66,133,244,0.10)]">
-              <div className="flex items-center px-5 pt-5 pb-3">
-                <h3 className={cn('flex items-center gap-2', T.cardTitulo)}>
-                  <GoogleAdsMark className="h-5 w-5" /> Google Ads
-                </h3>
-              </div>
-
-              {/* Campanhas com Veiculação — expansível em cascata */}
-              <div className="border-b border-white/[0.06] px-5 pb-5">
-                <div className={cn('mb-3', T.subBloco)}>
-                  Campanhas com Veiculação
-                </div>
+            <>
+              <Superficie
+                titulo="Campanhas Google Ads"
+                icone={<GoogleAdsMark className="h-5 w-5" />}
+                sub="com veiculação no período · clique para abrir grupos e anúncios"
+              >
                 <CampaignPerformanceTable
                   campaigns={googleCampaigns}
                   loading={campaignsLoading}
@@ -6902,18 +6882,15 @@ export default function GeneralDashboard() {
                   dateTo={customDateTo}
                   metaCpl={cplMetaSel}
                 />
-              </div>
-
-              {/* Top Palavras-chave — abaixo das campanhas */}
-              <div className="px-5 py-5">
-                <div className={cn('mb-3', T.subBloco)}>
-                  Top Palavras-chave
-                </div>
-                <div className="overflow-x-auto pb-2 [scrollbar-width:thin] [scrollbar-color:#2a2d3a_transparent]">
-                  <CompactKeywordTable keywords={keywords} loading={keywordsLoading} metaCpl={cplMetaSel} />
-                </div>
-              </div>
-            </PremiumPanel>
+              </Superficie>
+              <Superficie
+                titulo="Palavras-chave"
+                icone={<GoogleAdsMark className="h-5 w-5" />}
+                sub="top 5 por investimento"
+              >
+                <CompactKeywordTable keywords={keywords} loading={keywordsLoading} metaCpl={cplMetaSel} />
+              </Superficie>
+            </>
             )}
     </>
   );
@@ -6923,18 +6900,19 @@ export default function GeneralDashboard() {
                 anúncio e o WhatsApp. Só aparece para cliente com propriedade
                 GA4 vinculada (Integrações → Google Analytics). Vários clientes
                 selecionados: um painel por cliente com vínculo. */}
+            {/* Sem PremiumPanel em volta: o Ga4LandingPanel devolve cards de
+                topo que ficam direto sob o título "Landing page". Vários
+                clientes: um sub-cabeçalho leve com o nome antes dos cards. */}
             {!modoFood && selectedClients.filter(c => ga4ByClient[c.id]?.ga4).map(client => (
-              <PremiumPanel key={`ga4-${client.id}`}>
-                {/* O título "Landing page" já vem da seção da página; aqui só o
-                    nome do cliente quando há vários painéis. */}
+              <Fragment key={`ga4-${client.id}`}>
                 {selectedClients.length > 1 && (
-                  <div className="flex items-center justify-between px-5 pt-5 pb-1">
+                  <div className="flex items-baseline gap-2 pt-2">
                     <h3 className={T.cardTitulo}>{client.name}</h3>
                     <span className={T.cardSub}>Google Analytics 4</span>
                   </div>
                 )}
                 <Ga4LandingPanel dados={ga4ByClient[client.id]?.ga4 ?? null} loading={ga4Loading} aviso={ga4ByClient[client.id]?.aviso} />
-              </PremiumPanel>
+              </Fragment>
             ))}
     </>
   );
@@ -7184,7 +7162,9 @@ export default function GeneralDashboard() {
             </div>
           </div>
         ) : (
-          <div className="space-y-5">
+          // Espaçamento único: gap-4 entre cards, mt-6 extra antes de cada
+          // TituloSecao. (space-y brigava com a margem do título de seção.)
+          <div className="flex flex-col gap-4">
             {modoFood ? (
               <>
                 {blocoAlertas}
@@ -7275,6 +7255,9 @@ export default function GeneralDashboard() {
                 {blocoTrafegoAntigo}
                 {blocoInstagram}
                 {blocoCanais}
+                {/* O painel "Performance comercial" virou dois cards soltos; o
+                    título vem daqui, como na página de lead-gen. */}
+                {secaoVisivel.comercial && <TituloSecao titulo="Comercial" sub="CRM" />}
                 {blocoComercial}
                 {blocoMeta}
                 {blocoResumoCliente}
@@ -7317,7 +7300,7 @@ export default function GeneralDashboard() {
                         ) : undefined}
                       />
                     </div>
-                    <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
+                    <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-6">
                       {quickMetrics.map((metric) => <QuickMetricCard key={metric.title} {...metric} comparacao={rotuloComp} />)}
                     </div>
                     {(ritmo || temGraficoCpl) && (
@@ -7344,7 +7327,7 @@ export default function GeneralDashboard() {
                       ) : (
                         <SimpleFunnel steps={funnelStepsNew} totalRate={funnelTaxa > 0 ? premiumValue(funnelTaxa, 'percent') : '—'} fonteLabel={fonteTopoLabel} onStageClick={setFunilStageIdx} />
                       )}
-                      <ChannelSummaryTable rows={channelRows} metaCpl={cplMetaSel} />
+                      <ChannelSummaryTable rows={channelRows} total={channelTotal} metaCpl={cplMetaSel} />
                     </div>
                     {blocoCanais}
                   </>

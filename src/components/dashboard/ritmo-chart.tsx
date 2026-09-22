@@ -1,28 +1,22 @@
 'use client';
 
 import {
-  ComposedChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine, ResponsiveContainer, Legend,
+  ComposedChart, Line, Area, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine, ResponsiveContainer, Legend,
 } from 'recharts';
-import { T } from '@/lib/dashboard-tipografia';
+import { Superficie } from './superficie';
+import {
+  COR_PRIMARIA, COR_SECUNDARIA, COR_REFERENCIA, TRACO_REFERENCIA, TRACO_PROJECAO, ALTURA_GRAFICO, AREA_OPACIDADE,
+  eixoXProps, eixoYProps, gradeProps, margemGrafico, tooltipProps, legendaProps,
+} from './grafico-estilo';
 
 /**
  * Gráficos de ritmo da Visão geral.
  *
  * Só renderizam com série diária de verdade — sem dado, o componente devolve
  * null (caixa vazia parece número zerado, não dado ausente).
+ *
+ * Estilo: `grafico-estilo.ts` (o mesmo da Evolução diária da Landing page).
  */
-
-const VERDE = '#55f52f';
-const CINZA = '#8a959b';
-const AZUL = '#3987e5';
-const GRID = 'rgba(255,255,255,0.06)';
-const EIXO = '#9aa4aa';
-
-const tooltipStyle = {
-  contentStyle: { background: '#0b1216', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 10, fontSize: 12 },
-  labelStyle: { color: '#f4f7f8', fontWeight: 700 },
-  itemStyle: { color: '#dce4e8' },
-};
 
 const moeda = (n: number) => n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 });
 const moedaCent = (n: number) => n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -36,13 +30,20 @@ function ddmm(iso: string) {
 
 function Moldura({ titulo, sub, children }: { titulo: string; sub?: string; children: React.ReactNode }) {
   return (
-    <section className="rounded-[14px] border border-white/[0.08] bg-[#0d1519]/92 p-5 shadow-[0_18px_60px_rgba(0,0,0,0.28)]">
-      <div className="mb-3 flex flex-wrap items-baseline gap-2">
-        <h3 className={T.cardTitulo}>{titulo}</h3>
-        {sub && <span className={T.cardSub}>{sub}</span>}
-      </div>
-      <div className="h-[220px] w-full">{children}</div>
-    </section>
+    <Superficie titulo={titulo} sub={sub}>
+      <div className="w-full" style={{ height: ALTURA_GRAFICO }}>{children}</div>
+    </Superficie>
+  );
+}
+
+function Degrade({ id }: { id: string }) {
+  return (
+    <defs>
+      <linearGradient id={id} x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stopColor={COR_PRIMARIA} stopOpacity={AREA_OPACIDADE.topo} />
+        <stop offset="100%" stopColor={COR_PRIMARIA} stopOpacity={AREA_OPACIDADE.base} />
+      </linearGradient>
+    </defs>
   );
 }
 
@@ -90,28 +91,27 @@ export function RitmoMesChart({ titulo, sub, dias, diario, metaTotal, formato, p
   return (
     <Moldura titulo={titulo} sub={sub}>
       <ResponsiveContainer width="100%" height="100%">
-        <ComposedChart data={dados} margin={{ top: 6, right: 8, left: 0, bottom: 0 }}>
-          <CartesianGrid stroke={GRID} vertical={false} />
-          <XAxis dataKey="dia" tick={{ fill: EIXO, fontSize: 10 }} tickLine={false} axisLine={{ stroke: GRID }} interval="preserveStartEnd" minTickGap={18} />
+        <ComposedChart data={dados} margin={margemGrafico}>
+          <Degrade id="ritmo-realizado" />
+          <CartesianGrid {...gradeProps} />
+          <XAxis dataKey="dia" {...eixoXProps} />
           <YAxis
+            {...eixoYProps}
             domain={[0, 'auto']}
-            tick={{ fill: EIXO, fontSize: 10 }}
-            tickLine={false}
-            axisLine={false}
             width={formato === 'currency' ? 64 : 40}
             tickFormatter={(v: number) => (formato === 'currency' ? `R$ ${compacto(v)}` : compacto(v))}
           />
           <Tooltip
-            {...tooltipStyle}
+            {...tooltipProps}
             formatter={(v, name) => [v == null ? '—' : fmt(Number(v)), String(name)]}
           />
-          <Legend wrapperStyle={{ fontSize: 11, color: '#a7b0b6' }} iconType="plainline" />
+          <Legend {...legendaProps} />
           {metaTotal > 0 && (
-            <Line type="linear" dataKey="meta" name="Meta (linear)" stroke={CINZA} strokeWidth={2} strokeDasharray="2 4" dot={false} isAnimationActive={false} />
+            <Line type="linear" dataKey="meta" name="Meta (linear)" stroke={COR_REFERENCIA} strokeWidth={1.5} strokeDasharray={TRACO_REFERENCIA} dot={false} isAnimationActive={false} />
           )}
-          <Line type="monotone" dataKey="realizado" name={rotuloSerie} stroke={VERDE} strokeWidth={2} dot={false} connectNulls={false} isAnimationActive={false} />
+          <Area type="monotone" dataKey="realizado" name={rotuloSerie} stroke={COR_PRIMARIA} strokeWidth={2} fill="url(#ritmo-realizado)" dot={false} connectNulls={false} isAnimationActive={false} />
           {projetar && (
-            <Line type="linear" dataKey="projecao" name="Projeção" stroke={VERDE} strokeOpacity={0.55} strokeWidth={2} strokeDasharray="6 5" dot={false} isAnimationActive={false} />
+            <Line type="linear" dataKey="projecao" name="Projeção" stroke={COR_PRIMARIA} strokeOpacity={0.55} strokeWidth={2} strokeDasharray={TRACO_PROJECAO} dot={false} isAnimationActive={false} />
           )}
         </ComposedChart>
       </ResponsiveContainer>
@@ -144,32 +144,32 @@ export function CplDiarioChart({ dias, gasto, leads, metaCpl }: {
   return (
     <Moldura titulo="CPL diário" sub="investimento ÷ leads das plataformas · média móvel de 7 dias">
       <ResponsiveContainer width="100%" height="100%">
-        <ComposedChart data={dados} margin={{ top: 6, right: 8, left: 0, bottom: 0 }}>
-          <CartesianGrid stroke={GRID} vertical={false} />
-          <XAxis dataKey="dia" tick={{ fill: EIXO, fontSize: 10 }} tickLine={false} axisLine={{ stroke: GRID }} interval="preserveStartEnd" minTickGap={18} />
+        <ComposedChart data={dados} margin={margemGrafico}>
+          <Degrade id="cpl-media7" />
+          <CartesianGrid {...gradeProps} />
+          <XAxis dataKey="dia" {...eixoXProps} />
           <YAxis
+            {...eixoYProps}
             domain={[0, 'auto']}
-            tick={{ fill: EIXO, fontSize: 10 }}
-            tickLine={false}
-            axisLine={false}
             width={56}
             tickFormatter={(v: number) => `R$ ${compacto(v)}`}
           />
           <Tooltip
-            {...tooltipStyle}
+            {...tooltipProps}
             formatter={(v, name) => [v == null ? '—' : moedaCent(Number(v)), String(name)]}
           />
-          <Legend wrapperStyle={{ fontSize: 11, color: '#a7b0b6' }} iconType="plainline" />
+          <Legend {...legendaProps} />
           {metaCpl > 0 && (
             <ReferenceLine
               y={metaCpl}
-              stroke="#f5a524"
-              strokeDasharray="4 4"
-              label={{ value: `meta ${moedaCent(metaCpl)}`, fill: '#f5a524', fontSize: 10, position: 'insideTopRight' }}
+              stroke={COR_REFERENCIA}
+              strokeWidth={1.5}
+              strokeDasharray={TRACO_REFERENCIA}
+              label={{ value: `meta ${moedaCent(metaCpl)}`, fill: COR_REFERENCIA, fontSize: 10, position: 'insideTopRight' }}
             />
           )}
-          <Line type="monotone" dataKey="cpl" name="CPL do dia" stroke={AZUL} strokeOpacity={0.7} strokeWidth={1.5} dot={{ r: 2 }} connectNulls={false} isAnimationActive={false} />
-          <Line type="monotone" dataKey="media7" name="Média 7 dias" stroke={VERDE} strokeWidth={2} dot={false} isAnimationActive={false} />
+          <Area type="monotone" dataKey="media7" name="Média 7 dias" stroke={COR_PRIMARIA} strokeWidth={2} fill="url(#cpl-media7)" dot={false} isAnimationActive={false} />
+          <Line type="monotone" dataKey="cpl" name="CPL do dia" stroke={COR_SECUNDARIA} strokeWidth={1.5} dot={{ r: 2, fill: COR_SECUNDARIA, strokeWidth: 0 }} connectNulls={false} isAnimationActive={false} />
         </ComposedChart>
       </ResponsiveContainer>
     </Moldura>

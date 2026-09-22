@@ -17,6 +17,7 @@ import { ArrowRight } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip } from 'recharts';
 import { cn, formatCurrencyBRL } from '@/lib/utils';
 import { T } from '@/lib/dashboard-tipografia';
+import { SUPERFICIE } from './superficie';
 
 export type LinhaVendedor = {
   responsavel: string;
@@ -60,9 +61,11 @@ function Cartao({ titulo, acao, children }: {
   titulo: string; acao?: React.ReactNode; children: React.ReactNode;
 }) {
   return (
-    <section className="flex h-full min-w-0 flex-col rounded-[12px] border border-[#233038] bg-[#0B1115] p-4">
+    // Mesma superfície de todo card do dashboard (superficie.tsx) — antes era
+    // um card mais escuro aninhado dentro do painel "Performance comercial".
+    <section className={cn(SUPERFICIE, 'flex h-full flex-col p-5')}>
       <div className="mb-4 flex items-center justify-between gap-3">
-        <h4 className={T.cardTitulo}>{titulo}</h4>
+        <h3 className={T.cardTitulo}>{titulo}</h3>
         {acao}
       </div>
       {children}
