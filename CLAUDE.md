@@ -2069,7 +2069,7 @@ E o estrago passou de "não criou": a função fazia `position = position + 1` A
 
 Lâmina "Landing page" do dashboard (`src/lib/ga4-landing.ts` +
 `src/components/dashboard/ga4-landing-panel.tsx`, rota `/api/clients/[id]/ga4`,
-cache `ga4:v2`) ganhou 4 abas: **Visão geral** (KPIs + engajamento, tempo médio,
+cache `ga4:v3`) ganhou 4 abas: **Visão geral** (KPIs + engajamento, tempo médio,
 novos, páginas/sessão, vídeos), **Tráfego pago** (qualidade por canal; campanhas
 do Google Ads com custo/cliques/custo por conversão; todas as campanhas por UTM —
 Meta entra aqui; palavras-chave; termos pesquisados), **Audiência** (dispositivo,
@@ -2097,6 +2097,19 @@ página de entrada, vídeos, posição do clique).
   `click_telefone`, `lead_form`). Site com nomes próprios (Londrigifts:
   `click_whatsapp_topo`…) mostra 0 contatos, mas conversões por canal/campanha
   (keyEvents) funcionam.
+- **WhatsApp x Formulário x Telefone separados** (pedido do Matheus, 21/09) em
+  toda tabela: `categoriaConversao` classifica cada evento-chave pelo NOME
+  (whats/wpp → WhatsApp; form/lead/orçamento/cadastro/confirmado → Formulário;
+  telefone → Telefone; resto — purchase, maps — só no total). Cada corte tem um
+  relatório irmão `conv:<corte>` com `eventName` como última dimensão (métrica
+  `keyEvents:<nome>` não serve: nome com acento, ex. `Solicitou_orçamento`, dá
+  400). Site fora do padrão ONMID (Ingleses `envio_whatsapp`/
+  `form_contato_enviado`, Londrigifts) passa a ter WhatsApp/Formulário nos KPIs
+  via `completaTotais` — só preenche o que o evento padrão deixou zerado.
+- Palavras-chave e termos: lista COMPLETA dos que trouxeram contato (limite
+  1000 no GA4; com 250 a Ingleses perdia 13 termos de pouca visita) + bloco
+  "sem nenhum contato" (10+ visitas). Termos: o Google esconde os de pouco
+  volume e os da PMax — a soma fica abaixo do total (Ingleses: 394 de 645).
 - Teste: `node scratchpad/test-ga4-landing.mjs` (build no cabeçalho do arquivo).
   Harness visual: `scratchpad/harness-ga4.tsx`, com `?json=arquivo.json` para
   ver um consolidado real (não versionar dado de cliente).

@@ -4,7 +4,7 @@
 //     --outfile=scratchpad/build-ga4/ga4-landing.mjs --tsconfig=tsconfig.json
 //   node scratchpad/test-ga4-landing.mjs
 import assert from 'node:assert/strict';
-import { parseTotais, parseEventos, parseOrigens, parseLinhas, parseDiario, parseSeg, parseSemanaHora, parseFunil, ordenaRolagem, somaSeg, consolidar, faixasDoPeriodo, totaisVazios } from './build-ga4/ga4-landing.mjs';
+import { parseTotais, parseEventos, parseOrigens, parseLinhas, parseDiario, parseSeg, parseSemanaHora, parseFunil, ordenaRolagem, somaSeg, categoriaConversao, juntaConversoes, parseConvTotais, completaTotais, consolidar, faixasDoPeriodo, totaisVazios } from './build-ga4/ga4-landing.mjs';
 
 let n = 0; const t = (nome, fn) => { fn(); n++; };
 const row = (dims, mets) => ({ dimensionValues: dims.map(v => ({ value: v })), metricValues: mets.map(v => ({ value: String(v) })) });
@@ -76,11 +76,11 @@ const rel = (id, wa, sess) => ({
   detalhes: id === '1' ? [{ param: 'peca', rotulo: 'Peças mais pedidas', linhas: [{ valor: 'Caçamba', n: wa }] }] : [{ param: 'material', rotulo: 'Materiais', linhas: [{ valor: 'Aço', n: wa }] }],
   diario: [{ date: '2026-09-01', sessoes: sess, contatos: wa }],
   pago: {
-    canais: [{ valor: 'Paid Search', sessoes: sess, engajadas: sess / 2, tempo: sess * 30, conversoes: wa, sessoesConv: wa }],
+    canais: [{ valor: 'Paid Search', sessoes: sess, engajadas: sess / 2, tempo: sess * 30, conversoes: wa, sessoesConv: wa, whatsapp: wa, formulario: 1, telefone: 0 }],
     campanhas: [], palavras: [], termos: [],
-    googleAds: [{ valor: 'Pesquisa', sessoes: sess, engajadas: 0, tempo: 0, conversoes: wa, sessoesConv: wa, custo: 100, cliques: sess }],
+    googleAds: [{ valor: 'Pesquisa', sessoes: sess, engajadas: 0, tempo: 0, conversoes: wa, sessoesConv: wa, whatsapp: wa, formulario: 1, telefone: 0, custo: 100, cliques: sess }],
   },
-  audiencia: { dispositivos: [{ valor: 'mobile', sessoes: sess, engajadas: 0, tempo: 0, conversoes: wa, sessoesConv: wa }], cidades: [], novosRecorrentes: [], idades: [], generos: [], semanaHora: [{ dia: 1, hora: 10, sessoes: sess, conversoes: wa }] },
+  audiencia: { dispositivos: [{ valor: 'mobile', sessoes: sess, engajadas: 0, tempo: 0, conversoes: wa, sessoesConv: wa, whatsapp: wa, formulario: 1, telefone: 0 }], cidades: [], novosRecorrentes: [], idades: [], generos: [], semanaHora: [{ dia: 1, hora: 10, sessoes: sess, conversoes: wa }] },
   comportamento: { paginasEntrada: [], rolagem: [{ valor: '90', n: 5 }, { valor: '25', n: 50 }], secoes: [{ valor: 'form', n: 20 }], funil: { visitantes: sess, formInicio: 10, formErro: 1, leadForm: 5, leadConfirmado: 4 }, videos: [] },
 });
 t('consolidar soma totais, origens, posições e diário; taxa recalculada no total', () => {
@@ -104,7 +104,7 @@ t('consolidar de uma LP só = a própria LP', () => {
 // cortes com qualidade (tráfego pago, audiência, comportamento)
 t('parseSeg: 2ª dimensão vira sub, métricas na ordem sessions/engaged/duração/keyEvents', () => {
   const r = parseSeg({ rows: [row(['[ON] Pesquisa', 'google / cpc'], [100, 60, 3000, 12, 0.08]), row(['(not set)', 'x'], [999, 0, 0, 0])] });
-  assert.deepEqual(r, [{ valor: '[ON] Pesquisa', sub: 'google / cpc', sessoes: 100, engajadas: 60, tempo: 3000, conversoes: 12, sessoesConv: 8 }]);
+  assert.deepEqual(r, [{ valor: '[ON] Pesquisa', sub: 'google / cpc', sessoes: 100, engajadas: 60, tempo: 3000, conversoes: 12, sessoesConv: 8, whatsapp: 0, formulario: 0, telefone: 0 }]);
 });
 t('parseSeg comCusto lê custo e cliques; linha só com custo (0 sessões) fica', () => {
   const r = parseSeg({ rows: [row(['PMax'], [0, 0, 0, 0, 0, 55.5, 30])] }, { comCusto: true });
@@ -126,8 +126,8 @@ t('ordenaRolagem põe as marcas em ordem numérica', () => {
   assert.deepEqual(ordenaRolagem([{ valor: '90', n: 1 }, { valor: '25', n: 9 }, { valor: '50', n: 5 }]).map(l => l.valor), ['25', '50', '90']);
 });
 t('somaSeg junta pelo par valor+sub e soma custo só onde existe', () => {
-  const r = somaSeg([[{ valor: 'A', sessoes: 1, engajadas: 1, tempo: 10, conversoes: 1, sessoesConv: 1, custo: 5 }], [{ valor: 'A', sessoes: 2, engajadas: 0, tempo: 5, conversoes: 0, sessoesConv: 0, custo: 7 }, { valor: 'A', sub: 'x', sessoes: 9, engajadas: 0, tempo: 0, conversoes: 0, sessoesConv: 0 }]]);
-  assert.equal(r[0].sub, 'x'); assert.equal(r[1].sessoes, 3); assert.equal(r[1].custo, 12); assert.equal(r[1].sessoesConv, 1); assert.equal(r[0].custo, undefined);
+  const r = somaSeg([[{ valor: 'A', sessoes: 1, engajadas: 1, tempo: 10, conversoes: 1, sessoesConv: 1, whatsapp: 1, formulario: 0, telefone: 0, custo: 5 }], [{ valor: 'A', sessoes: 2, engajadas: 0, tempo: 5, conversoes: 0, sessoesConv: 0, whatsapp: 2, formulario: 1, telefone: 0, custo: 7 }, { valor: 'A', sub: 'x', sessoes: 9, engajadas: 0, tempo: 0, conversoes: 0, sessoesConv: 0, whatsapp: 0, formulario: 0, telefone: 0 }]]);
+  assert.equal(r[0].sub, 'x'); assert.equal(r[1].sessoes, 3); assert.equal(r[1].custo, 12); assert.equal(r[1].sessoesConv, 1); assert.equal(r[1].whatsapp, 3); assert.equal(r[1].formulario, 1); assert.equal(r[0].custo, undefined);
 });
 t('consolidar soma pago, audiência, semana×hora e funil de duas LPs', () => {
   const c = consolidar([rel('1', 10, 100), rel('2', 30, 100)]);
@@ -136,6 +136,35 @@ t('consolidar soma pago, audiência, semana×hora e funil de duas LPs', () => {
   assert.deepEqual(c.audiencia.semanaHora, [{ dia: 1, hora: 10, sessoes: 200, conversoes: 40 }]);
   assert.deepEqual(c.comportamento.rolagem.map(l => l.valor), ['25', '90']);
   assert.equal(c.comportamento.funil.leadForm, 10); assert.equal(c.comportamento.funil.visitantes, 200);
+});
+
+// WhatsApp x formulário separados
+t('categoriaConversao entende nomes padrão e antigos', () => {
+  const c = n => categoriaConversao(n);
+  assert.equal(c('click_whatsapp'), 'whatsapp'); assert.equal(c('envio_whatsapp'), 'whatsapp'); assert.equal(c('click_whatsapp_topo'), 'whatsapp');
+  assert.equal(c('lead_form'), 'formulario'); assert.equal(c('lead_confirmado'), 'formulario'); assert.equal(c('form_contato_enviado'), 'formulario');
+  assert.equal(c('Solicitou_orçamento'), 'formulario'); assert.equal(c('click_telefone'), 'telefone');
+  assert.equal(c('purchase'), null); assert.equal(c('lead_form_erro'), null); assert.equal(c('click_maps'), null);
+});
+t('juntaConversoes soma por tipo pela chave valor+sub (eventName é a última dimensão)', () => {
+  const segs = parseSeg({ rows: [row(['dentista'], [815, 450, 4000, 246, 0.28]), row(['facetas'], [47, 20, 600, 0, 0])] });
+  juntaConversoes(segs, { rows: [row(['dentista', 'envio_whatsapp'], [244]), row(['dentista', 'form_contato_enviado'], [2]), row(['dentista', 'purchase'], [9]), row(['nao-listada', 'envio_whatsapp'], [5])] });
+  assert.equal(segs[0].whatsapp, 244); assert.equal(segs[0].formulario, 2); assert.equal(segs[1].whatsapp, 0);
+  const c = parseSeg({ rows: [row(['Camp', 'google / cpc'], [10, 5, 50, 3, 0.2])] });
+  juntaConversoes(c, { rows: [row(['Camp', 'google / cpc', 'lead_confirmado'], [3])] });
+  assert.equal(c[0].formulario, 3);
+});
+t('site fora do padrão: totais vêm dos eventos-chave classificados', () => {
+  const tot = parseEventos({ rows: [] }, parseTotais({ rows: [row(['date_range_0'], [2690, 2338, 3158])] }));
+  const porTipo = parseConvTotais({ dimensionHeaders: [{ name: 'eventName' }, { name: 'dateRange' }], rows: [row(['envio_whatsapp', 'date_range_0'], [637]), row(['form_contato_enviado', 'date_range_0'], [8]), row(['envio_whatsapp', 'date_range_1'], [752])] });
+  completaTotais(tot.atual, porTipo.atual);
+  assert.equal(tot.atual.whatsapp, 637); assert.equal(tot.atual.leadForm, 8); assert.equal(tot.atual.contatos, 645);
+  assert.equal(porTipo.anterior.whatsapp, 752);
+});
+t('site no padrão: evento padrão não é sobrescrito pelo evento-chave', () => {
+  const tot = parseEventos({ rows: [row(['click_whatsapp', 'date_range_0'], [11])] }, parseTotais({ rows: [row(['date_range_0'], [91, 79, 111])] }));
+  completaTotais(tot.atual, { whatsapp: 99, formulario: 6, telefone: 0 });
+  assert.equal(tot.atual.whatsapp, 11); assert.equal(tot.atual.leadForm, 6);
 });
 
 console.log(`${n} asserts ok`);

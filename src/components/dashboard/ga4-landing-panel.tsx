@@ -87,16 +87,22 @@ function Barras({ titulo, dica, linhas, total, rotuloValor }: { titulo: string; 
   );
 }
 
-type Coluna = 'sessoes' | 'engaj' | 'tempo' | 'conv' | 'taxa' | 'custo' | 'cliques' | 'cpa';
+type Coluna = 'sessoes' | 'engaj' | 'tempo' | 'conv' | 'wa' | 'form' | 'tel' | 'taxa' | 'custo' | 'cliques' | 'cpa';
 const CABECALHO: Record<Coluna, string> = {
-  sessoes: 'Sessões', engaj: 'Engaj.', tempo: 'Tempo', conv: 'Conv.', taxa: 'Converteu', custo: 'Custo', cliques: 'Cliques', cpa: 'Custo/conv.',
+  sessoes: 'Sessões', engaj: 'Engaj.', tempo: 'Tempo', conv: 'Conv.', wa: 'WhatsApp', form: 'Formulário', tel: 'Telefone',
+  taxa: 'Converteu', custo: 'Custo', cliques: 'Cliques', cpa: 'Custo/conv.',
 };
+const POR_TIPO: Coluna[] = ['wa', 'form', 'tel'];
+const contatosSeg = (s: Ga4Seg) => s.whatsapp + s.formulario + s.telefone;
 function celula(c: Coluna, s: Ga4Seg) {
   switch (c) {
     case 'sessoes': return fmtN(s.sessoes);
     case 'engaj': return fmtPct(div(s.engajadas, s.sessoes));
     case 'tempo': return fmtTempo(div(s.tempo, s.sessoes));
     case 'conv': return fmtN(s.conversoes);
+    case 'wa': return fmtN(s.whatsapp);
+    case 'form': return fmtN(s.formulario);
+    case 'tel': return fmtN(s.telefone);
     case 'taxa': return fmtPct(div(s.sessoesConv, s.sessoes));
     case 'custo': return s.custo ? fmtBRL(s.custo) : '—';
     case 'cliques': return s.cliques ? fmtN(s.cliques) : '—';
@@ -105,19 +111,27 @@ function celula(c: Coluna, s: Ga4Seg) {
 }
 
 /**
- * Tabela de cortes: sessões, engajamento, tempo médio, conversões e taxa (+ custo no Google Ads).
- * "Conv." = eventos-chave (uma sessão pode ter vários); "Converteu" = % das sessões com ao menos um.
+ * Tabela de cortes: sessões, engajamento, tempo médio, contatos por tipo e taxa (+ custo no Google Ads).
+ * WhatsApp / Formulário / Telefone = eventos-chave separados pelo nome; coluna sem nenhum
+ * contato some. Se a propriedade não tem conversão classificável, cai para "Conv." (todos
+ * os eventos-chave). "Converteu" = % das sessões com ao menos um evento-chave.
  */
-function TabelaSeg({ titulo, dica, linhas, colunas = ['sessoes', 'engaj', 'tempo', 'conv', 'taxa'], rotulo = 'Nome' }: {
-  titulo: string; dica?: string; linhas: Ga4Seg[]; colunas?: Coluna[]; rotulo?: string;
+function TabelaSeg({ titulo, dica, linhas, colunas: pedidas = ['sessoes', 'engaj', 'tempo', 'wa', 'form', 'tel', 'taxa'], rotulo = 'Nome', altura }: {
+  titulo: string; dica?: string; linhas: Ga4Seg[]; colunas?: Coluna[]; rotulo?: string; altura?: number;
 }) {
   if (linhas.length === 0) return null;
+  const soma = (c: Coluna) => linhas.reduce((t, s) => t + (c === 'wa' ? s.whatsapp : c === 'form' ? s.formulario : s.telefone), 0);
+  let colunas = pedidas.filter(c => !POR_TIPO.includes(c) || soma(c) > 0);
+  if (pedidas.some(c => POR_TIPO.includes(c)) && !colunas.some(c => POR_TIPO.includes(c))) {
+    const i = pedidas.findIndex(c => POR_TIPO.includes(c));
+    colunas = [...colunas.slice(0, i), 'conv', ...colunas.slice(i)];
+  }
   return (
     <div className="min-w-0">
       <Titulo dica={dica}>{titulo}</Titulo>
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto overflow-y-auto" style={altura ? { maxHeight: altura } : undefined}>
         <table className="w-full text-xs">
-          <thead>
+          <thead className={altura ? 'sticky top-0 bg-[#0d1519]' : undefined}>
             <tr className="text-[10px] uppercase tracking-wider text-[#7c868c]">
               <th className="text-left font-bold pb-1 pr-2">{rotulo}</th>
               {colunas.map(c => <th key={c} className="text-right font-bold pb-1 pl-2 whitespace-nowrap">{CABECALHO[c]}</th>)}
@@ -131,13 +145,34 @@ function TabelaSeg({ titulo, dica, linhas, colunas = ['sessoes', 'engaj', 'tempo
                   {s.sub && <div className="truncate text-[10px] text-[#6c767c]" title={s.sub}>{s.sub}</div>}
                 </td>
                 {colunas.map(c => (
-                  <td key={c} className={`py-1.5 pl-2 text-right tabular-nums whitespace-nowrap ${c === 'conv' || c === 'cpa' ? 'font-bold text-[#dce4e8]' : 'text-[#9aa4aa]'}`}>{celula(c, s)}</td>
+                  <td key={c} className={`py-1.5 pl-2 text-right tabular-nums whitespace-nowrap ${c === 'conv' || c === 'cpa' || POR_TIPO.includes(c) ? 'font-bold text-[#dce4e8]' : 'text-[#9aa4aa]'}`}>{celula(c, s)}</td>
                 ))}
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Palavras-chave / termos pesquisados: TODOS os que trouxeram contato (por tipo),
+ * e à parte os que gastam visitas sem trazer nenhum.
+ */
+function ListaBusca({ titulo, rotulo, linhas, dica }: { titulo: string; rotulo: string; linhas: Ga4Seg[]; dica?: string }) {
+  if (linhas.length === 0) return null;
+  const temTipo = linhas.some(s => contatosSeg(s) > 0);
+  const total = (s: Ga4Seg) => (temTipo ? contatosSeg(s) : s.conversoes);
+  const com = linhas.filter(s => total(s) > 0).sort((a, b) => total(b) - total(a) || b.sessoes - a.sessoes);
+  const sem = linhas.filter(s => total(s) === 0 && s.sessoes >= 10).sort((a, b) => b.sessoes - a.sessoes).slice(0, 15);
+  return (
+    <div className="min-w-0 space-y-4">
+      <TabelaSeg titulo={`${titulo} que trouxeram contato (${com.length})`} rotulo={rotulo} linhas={com} dica={dica}
+        colunas={['sessoes', 'wa', 'form', 'tel', 'taxa']} altura={420} />
+      {com.length === 0 && <p className="text-xs text-[#7c868c]">{titulo}: nenhum contato no período.</p>}
+      <TabelaSeg titulo={`${titulo} sem nenhum contato`} rotulo={rotulo} linhas={sem} colunas={['sessoes', 'engaj', 'tempo']}
+        dica="10+ visitas pagas e zero contato — candidatas a pausar ou negativar." />
     </div>
   );
 }
@@ -310,25 +345,25 @@ export function Ga4LandingPanel({ dados, loading, aviso }: { dados: Ga4Consolida
           <TabelaSeg titulo="Qualidade por canal" rotulo="Canal" linhas={pago.canais.map(traduz(CANAIS))}
             dica="Engajamento e tempo mostram se o clique é de gente interessada." />
           <TabelaSeg titulo="Campanhas do Google Ads" rotulo="Campanha" linhas={pago.googleAds}
-            colunas={['custo', 'cliques', 'sessoes', 'engaj', 'conv', 'taxa', 'cpa']}
+            colunas={['custo', 'cliques', 'sessoes', 'engaj', 'wa', 'form', 'tel', 'taxa', 'cpa']}
             dica={semCusto ? 'Custo vazio: a propriedade GA4 não está vinculada ao Google Ads.' : 'Custo e cliques do Google Ads; conversões pelo GA4. Custo/conv. = custo ÷ sessões que converteram.'} />
           <TabelaSeg titulo="Todas as campanhas (UTM)" rotulo="Campanha" linhas={pago.campanhas}
             dica="Inclui Meta Ads e outras origens — só aparece o que tem utm_campaign no link." />
-          <TabelaSeg titulo="Palavras-chave compradas" rotulo="Palavra-chave" linhas={pago.palavras} colunas={['sessoes', 'engaj', 'conv', 'taxa']} />
-          <TabelaSeg titulo="Termos pesquisados" rotulo="O que a pessoa digitou" linhas={pago.termos} colunas={['sessoes', 'engaj', 'conv', 'taxa']}
-            dica="Termo sem conversão e com volume = candidato a palavra negativa." />
+          <ListaBusca titulo="Palavras-chave" rotulo="Palavra-chave" linhas={pago.palavras} />
+          <ListaBusca titulo="Termos pesquisados" rotulo="O que a pessoa digitou" linhas={pago.termos}
+            dica="O Google esconde termos de pouco volume e da Performance Max — a soma fica abaixo do total." />
           {pago.canais.length + pago.googleAds.length + pago.campanhas.length === 0 && <p className="text-xs text-[#7c868c]">Sem dado no período.</p>}
         </div>
       )}
 
       {aba === 'audiencia' && (
         <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
-          <TabelaSeg titulo="Dispositivo" rotulo="Aparelho" linhas={au.dispositivos.map(traduz(DISPOSITIVOS))} colunas={['sessoes', 'engaj', 'conv', 'taxa']} />
-          <TabelaSeg titulo="Novos x recorrentes" rotulo="Visitante" linhas={au.novosRecorrentes.map(traduz(NOVOS))} colunas={['sessoes', 'engaj', 'conv', 'taxa']}
+          <TabelaSeg titulo="Dispositivo" rotulo="Aparelho" linhas={au.dispositivos.map(traduz(DISPOSITIVOS))} colunas={['sessoes', 'engaj', 'wa', 'form', 'tel', 'taxa']} />
+          <TabelaSeg titulo="Novos x recorrentes" rotulo="Visitante" linhas={au.novosRecorrentes.map(traduz(NOVOS))} colunas={['sessoes', 'engaj', 'wa', 'form', 'tel', 'taxa']}
             dica="Recorrente convertendo mais = remarketing vale a pena." />
-          <TabelaSeg titulo="Cidades" rotulo="Cidade" linhas={au.cidades} colunas={['sessoes', 'engaj', 'conv', 'taxa']} />
-          <TabelaSeg titulo="Idade" rotulo="Faixa" linhas={au.idades} colunas={['sessoes', 'conv', 'taxa']} />
-          <TabelaSeg titulo="Gênero" rotulo="Gênero" linhas={au.generos.map(traduz(GENEROS))} colunas={['sessoes', 'conv', 'taxa']} />
+          <TabelaSeg titulo="Cidades" rotulo="Cidade" linhas={au.cidades} colunas={['sessoes', 'engaj', 'wa', 'form', 'tel', 'taxa']} />
+          <TabelaSeg titulo="Idade" rotulo="Faixa" linhas={au.idades} colunas={['sessoes', 'wa', 'form', 'tel', 'taxa']} />
+          <TabelaSeg titulo="Gênero" rotulo="Gênero" linhas={au.generos.map(traduz(GENEROS))} colunas={['sessoes', 'wa', 'form', 'tel', 'taxa']} />
           {au.idades.length + au.generos.length === 0 && (
             <p className="text-[10px] text-[#7c868c] md:col-span-2 xl:col-span-3">Idade e gênero não aparecem: o GA4 esconde com pouco volume ou sem Google Signals ligado.</p>
           )}
@@ -341,7 +376,7 @@ export function Ga4LandingPanel({ dados, loading, aviso }: { dados: Ga4Consolida
           <Barras titulo="Até onde rolam" dica="% dos visitantes que chegaram a cada ponto da página." linhas={co.rolagem} total={visitantes} rotuloValor={v => `${v}% da página`} />
           <Barras titulo="Seções vistas" dica="% dos visitantes que viram cada seção." linhas={co.secoes} total={visitantes} />
           <Funil f={co.funil} />
-          <TabelaSeg titulo="Página de entrada" rotulo="Página" linhas={co.paginasEntrada} colunas={['sessoes', 'engaj', 'tempo', 'conv', 'taxa']} />
+          <TabelaSeg titulo="Página de entrada" rotulo="Página" linhas={co.paginasEntrada} colunas={['sessoes', 'engaj', 'tempo', 'wa', 'form', 'tel', 'taxa']} />
           {co.videos.length > 0 && <Barras titulo="Vídeos assistidos" linhas={co.videos} total={a.video} />}
           <Barras titulo="Onde clicam para falar" linhas={dados.posicoes} total={totalContatos} />
         </div>

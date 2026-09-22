@@ -7,7 +7,7 @@ import { Ga4LandingPanel } from '../src/components/dashboard/ga4-landing-panel';
 import type { Ga4Consolidado, Ga4Seg } from '../src/lib/ga4-landing';
 
 const t = (sessoes: number, whatsapp: number, telefone: number, cta: number) => ({ sessoes, usuarios: Math.round(sessoes * 0.85), novos: Math.round(sessoes * 0.7), pageviews: sessoes * 2, engajadas: Math.round(sessoes * 0.6), tempo: sessoes * 42, whatsapp, telefone, cta, leadForm: 0, video: 0, contatos: whatsapp + telefone, taxaContato: sessoes ? (whatsapp + telefone) / sessoes : 0 });
-const seg = (valor: string, sessoes: number, conversoes: number, extra: Partial<Ga4Seg> = {}): Ga4Seg => ({ valor, sessoes, engajadas: Math.round(sessoes * 0.6), tempo: sessoes * 40, conversoes, sessoesConv: Math.round(conversoes * 0.8), ...extra });
+const seg = (valor: string, sessoes: number, conversoes: number, extra: Partial<Ga4Seg> = {}): Ga4Seg => ({ valor, sessoes, engajadas: Math.round(sessoes * 0.6), tempo: sessoes * 40, conversoes, sessoesConv: Math.round(conversoes * 0.8), whatsapp: Math.round(conversoes * 0.85), formulario: conversoes - Math.round(conversoes * 0.85), telefone: 0, ...extra });
 const dados: Ga4Consolidado = {
   atual: t(1240, 96, 31, 210), anterior: t(980, 70, 40, 150),
   origens: [

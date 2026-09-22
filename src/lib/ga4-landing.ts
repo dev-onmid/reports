@@ -33,6 +33,10 @@ export type Ga4Seg = {
   conversoes: number;
   /** sessões com pelo menos um evento-chave (sessionKeyEventRate × sessões) — base da taxa */
   sessoesConv: number;
+  /** eventos-chave separados por tipo (ver categoriaConversao) */
+  whatsapp: number;
+  formulario: number;
+  telefone: number;
   custo?: number;
   cliques?: number;
 };
@@ -223,7 +227,7 @@ export function parseSeg(rep: Ga4Report | null, opts: { limite?: number; comCust
     .map(r => {
       const dv = (r.dimensionValues ?? []).map(d => d.value ?? '');
       const m = (i: number) => num(r.metricValues?.[i]?.value);
-      const s: Ga4Seg = { valor: dv[0] ?? '', sessoes: m(0), engajadas: m(1), tempo: m(2), conversoes: m(3), sessoesConv: Math.round(m(4) * m(0)) };
+      const s: Ga4Seg = { valor: dv[0] ?? '', sessoes: m(0), engajadas: m(1), tempo: m(2), conversoes: m(3), sessoesConv: Math.round(m(4) * m(0)), whatsapp: 0, formulario: 0, telefone: 0 };
       if (dv.length > 1) s.sub = dv.slice(1).join(' / ');
       if (comCusto) { s.custo = m(5); s.cliques = m(6); }
       return s;
@@ -262,6 +266,67 @@ export function ordenaRolagem(l: Ga4Linha[]): Ga4Linha[] {
   return [...l].sort((a, b) => Number(a.valor) - Number(b.valor));
 }
 
+// ── conversões por tipo ───────────────────────────────────────────────────────
+export type CategoriaConv = 'whatsapp' | 'formulario' | 'telefone';
+
+/**
+ * Classifica um evento-chave pelo nome, para separar WhatsApp de formulário
+ * também em sites com nomes antigos (envio_whatsapp, click_whatsapp_topo,
+ * form_contato_enviado, Solicitou_orçamento, lead_confirmado...).
+ * null = não é contato (purchase, maps, instagram...) — fica só no total.
+ */
+export function categoriaConversao(nome: string): CategoriaConv | null {
+  const n = nome.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  if (/whats|wpp|zap/.test(n)) return 'whatsapp';
+  if (/telefone|phone|ligacao|ligar|(^|_)tel(_|$)/.test(n)) return 'telefone';
+  if (/erro/.test(n)) return null;
+  if (/form|lead|orcamento|cadastro|contato_enviado|obrigado|confirmado|agendamento/.test(n)) return 'formulario';
+  return null;
+}
+
+/**
+ * Soma nas linhas de `segs` os eventos-chave por tipo, lidos de um relatório
+ * complementar com as MESMAS dimensões + eventName (última) e métrica keyEvents.
+ * A chave de junção é a mesma de parseSeg: valor + sub (" / ").
+ */
+export function juntaConversoes(segs: Ga4Seg[], rep: Ga4Report | null): Ga4Seg[] {
+  const idx = new Map(segs.map(s => [`${s.valor}|${s.sub ?? ''}`, s]));
+  for (const r of rep?.rows ?? []) {
+    const dv = (r.dimensionValues ?? []).map(d => d.value ?? '');
+    const ev = dv.pop() ?? '';
+    const cat = categoriaConversao(ev);
+    if (!cat) continue;
+    const s = idx.get(`${dv[0] ?? ''}|${dv.length > 1 ? dv.slice(1).join(' / ') : ''}`);
+    if (s) s[cat] += num(r.metricValues?.[0]?.value);
+  }
+  return segs;
+}
+
+/** Totais por tipo a partir de dims [eventName, dateRange] + keyEvents (duas faixas). */
+export function parseConvTotais(rep: Ga4Report | null): Record<'atual' | 'anterior', Record<CategoriaConv, number>> {
+  const z = () => ({ whatsapp: 0, formulario: 0, telefone: 0 });
+  const out = { atual: z(), anterior: z() };
+  const iFaixa = indiceDim(rep, 'dateRange', 1), iEv = indiceDim(rep, 'eventName', 0);
+  for (const r of rep?.rows ?? []) {
+    const cat = categoriaConversao(r.dimensionValues?.[iEv]?.value ?? '');
+    if (!cat) continue;
+    const alvo = r.dimensionValues?.[iFaixa]?.value === 'date_range_1' ? out.anterior : out.atual;
+    alvo[cat] += num(r.metricValues?.[0]?.value);
+  }
+  return out;
+}
+
+/**
+ * Site fora do padrão ONMID (sem click_whatsapp/lead_form) → usa os
+ * eventos-chave classificados. Só preenche o que veio zerado.
+ */
+export function completaTotais(t: Ga4Totais, porTipo: Record<CategoriaConv, number>): Ga4Totais {
+  if (t.whatsapp === 0) t.whatsapp = porTipo.whatsapp;
+  if (t.leadForm === 0) t.leadForm = porTipo.formulario;
+  if (t.telefone === 0) t.telefone = porTipo.telefone;
+  return fechaTotais(t);
+}
+
 // ── agregação de várias propriedades (cliente com mais de uma LP) ─────────────
 function somaTotais(lista: Ga4Totais[]): Ga4Totais {
   const t = totaisVazios();
@@ -283,6 +348,7 @@ export function somaSeg(listas: Ga4Seg[][], limite = 10): Ga4Seg[] {
     const k = `${s.valor}|${s.sub ?? ''}`; const cur = m.get(k);
     if (!cur) { m.set(k, { ...s }); continue; }
     cur.sessoes += s.sessoes; cur.engajadas += s.engajadas; cur.tempo += s.tempo; cur.conversoes += s.conversoes; cur.sessoesConv += s.sessoesConv;
+    cur.whatsapp += s.whatsapp; cur.formulario += s.formulario; cur.telefone += s.telefone;
     if (s.custo !== undefined) cur.custo = (cur.custo ?? 0) + s.custo;
     if (s.cliques !== undefined) cur.cliques = (cur.cliques ?? 0) + s.cliques;
   }
@@ -326,7 +392,7 @@ export function consolidar(rels: Ga4Relatorio[]): Ga4Consolidado {
     posicoes: somaLinhas(rels.map(r => r.posicoes)),
     detalhes,
     diario: [...diario.values()].sort((a, b) => a.date.localeCompare(b.date)),
-    pago: { canais: pago('canais', 10), campanhas: pago('campanhas'), googleAds: pago('googleAds'), palavras: pago('palavras', 15), termos: pago('termos', 15) },
+    pago: { canais: pago('canais', 10), campanhas: pago('campanhas'), googleAds: pago('googleAds'), palavras: pago('palavras', 1000), termos: pago('termos', 1000) },
     audiencia: {
       dispositivos: aud('dispositivos'), cidades: aud('cidades', 12), novosRecorrentes: aud('novosRecorrentes'),
       idades: aud('idades'), generos: aud('generos'),
@@ -365,14 +431,20 @@ async function post<T>(url: string, token: string, body: unknown): Promise<T | n
   return res.json() as Promise<T>;
 }
 
-/** Dimensões personalizadas registradas na propriedade ("customEvent:posicao"...). */
-async function dimensoesPersonalizadas(propertyId: string, token: string): Promise<Set<string>> {
+/**
+ * Metadados da propriedade: dimensões personalizadas registradas
+ * ("customEvent:posicao"...) e nomes dos eventos-chave (métricas "keyEvents:<nome>").
+ */
+async function metadados(propertyId: string, token: string): Promise<{ custom: Set<string>; eventosChave: string[] }> {
   const res = await fetch(`${DATA_API}/properties/${propertyId}/metadata`, {
     headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(15000),
   }).catch(() => null);
-  if (!res?.ok) return new Set();
-  const j = await res.json().catch(() => null) as { dimensions?: Array<{ apiName?: string }> } | null;
-  return new Set((j?.dimensions ?? []).map(d => d.apiName ?? '').filter(n => n.startsWith('customEvent:')));
+  if (!res?.ok) return { custom: new Set(), eventosChave: [] };
+  const j = await res.json().catch(() => null) as { dimensions?: Array<{ apiName?: string }>; metrics?: Array<{ apiName?: string }> } | null;
+  return {
+    custom: new Set((j?.dimensions ?? []).map(d => d.apiName ?? '').filter(n => n.startsWith('customEvent:'))),
+    eventosChave: (j?.metrics ?? []).map(m => m.apiName ?? '').filter(n => n.startsWith('keyEvents:')).map(n => n.slice('keyEvents:'.length)),
+  };
 }
 
 /**
@@ -405,10 +477,22 @@ const porSessoes = [{ metric: { metricName: 'sessions' }, desc: true }];
 export async function relatorioLanding(propertyId: string, nome: string, token: string, atual: Faixa, anterior: Faixa): Promise<Ga4Relatorio> {
   const duas = [atual, anterior];
   const um = [atual];
-  const custom = await dimensoesPersonalizadas(propertyId, token);
+  const { custom, eventosChave } = await metadados(propertyId, token);
   const tem = (p: string) => custom.has(`customEvent:${p}`);
+  // Eventos-chave que são contato (WhatsApp/formulário/telefone). Nome com
+  // acento não serve como métrica ("keyEvents:Solicitou_orçamento" dá 400),
+  // então cada corte ganha um relatório irmão com eventName como última dimensão.
+  const contatos = eventosChave.filter(e => categoriaConversao(e));
   const seg = (d: string[], limite = 12, m: readonly string[] = METRICAS_SEG): Pedido =>
     ({ dateRanges: um, dimensions: dims(...d), metrics: metricas(m), limit: limite, orderBys: porSessoes });
+  const conv = (d: string[], limite = 1000): Pedido =>
+    ({ dateRanges: um, dimensions: dims(...d, 'eventName'), metrics: metricas(['keyEvents']), dimensionFilter: filtroEvento(contatos), limit: limite });
+  const CORTES: Array<[string, string[], number]> = [
+    ['canais', ['sessionDefaultChannelGroup'], 12], ['campanhas', ['sessionCampaignName', 'sessionSourceMedium'], 20],
+    ['googleAds', ['sessionGoogleAdsCampaignName'], 20], ['palavras', ['sessionGoogleAdsKeyword'], 1000], ['termos', ['sessionGoogleAdsQuery'], 1000],
+    ['dispositivos', ['deviceCategory'], 12], ['cidades', ['city'], 15], ['novosRecorrentes', ['newVsReturning'], 12],
+    ['idades', ['userAgeBracket'], 12], ['generos', ['userGender'], 12], ['paginasEntrada', ['landingPage'], 12],
+  ];
 
   // Pedidos nomeados — a ordem aqui é a ordem das respostas. Dimensão
   // personalizada só entra se estiver registrada (senão o lote inteiro dá 400).
@@ -417,24 +501,16 @@ export async function relatorioLanding(propertyId: string, nome: string, token: 
     ['eventos', { dateRanges: duas, dimensions: dims('eventName'), metrics: metricas(['eventCount']), dimensionFilter: filtroEvento(EVENTOS_LIDOS) }],
     ['origens', { dateRanges: um, dimensions: dims('sessionSource', 'sessionMedium'), metrics: metricas(['sessions', 'keyEvents']), limit: 12, orderBys: porSessoes }],
     ['diario', { dateRanges: um, dimensions: dims('date'), metrics: metricas(['sessions', 'keyEvents']), limit: 400 }],
-    // tráfego pago
-    ['canais', seg(['sessionDefaultChannelGroup'])],
-    ['campanhas', seg(['sessionCampaignName', 'sessionSourceMedium'], 20)],
-    ['googleAds', seg(['sessionGoogleAdsCampaignName'], 20, METRICAS_ADS)],
-    ['palavras', seg(['sessionGoogleAdsKeyword'], 25)],
-    ['termos', seg(['sessionGoogleAdsQuery'], 25)],
-    // audiência
-    ['dispositivos', seg(['deviceCategory'])],
-    ['cidades', seg(['city'], 15)],
-    ['novosRecorrentes', seg(['newVsReturning'])],
-    ['idades', seg(['userAgeBracket'])],
-    ['generos', seg(['userGender'])],
     ['semanaHora', { dateRanges: um, dimensions: dims('dayOfWeek', 'hour'), metrics: metricas(['sessions', 'keyEvents']), limit: 200 }],
-    // comportamento
-    ['paginasEntrada', seg(['landingPage'])],
     ['rolagem', { dateRanges: um, dimensions: dims('percentScrolled'), metrics: metricas(['totalUsers']), dimensionFilter: filtroUm('scroll') }],
     ['funil', { dateRanges: um, dimensions: dims('eventName'), metrics: metricas(['totalUsers']), dimensionFilter: filtroEvento(EVENTOS_FUNIL) }],
   ];
+  // cortes com qualidade (tráfego pago, audiência, página de entrada)
+  for (const [k, d, lim] of CORTES) pedidos.push([k, seg(d, lim, k === 'googleAds' ? METRICAS_ADS : METRICAS_SEG)]);
+  if (contatos.length) {
+    pedidos.push(['conv:totais', { dateRanges: duas, dimensions: dims('eventName'), metrics: metricas(['keyEvents']), dimensionFilter: filtroEvento(contatos) }]);
+    for (const [k, d] of CORTES) pedidos.push([`conv:${k}`, conv(d)]);
+  }
   if (tem('posicao')) pedidos.push(['posicoes', { dateRanges: um, dimensions: dims('customEvent:posicao'), metrics: metricas(['eventCount']), dimensionFilter: filtroEvento(EVENTOS_CONTATO), limit: 12 }]);
   if (tem('secao')) pedidos.push(['secoes', { dateRanges: um, dimensions: dims('customEvent:secao'), metrics: metricas(['totalUsers']), dimensionFilter: filtroUm('view_secao'), limit: 15 }]);
   const video = tem('video_titulo') ? 'video_titulo' : tem('video_id') ? 'video_id' : '';
@@ -451,6 +527,9 @@ export async function relatorioLanding(propertyId: string, nome: string, token: 
 
   // Com 2 faixas o GA4 acrescenta a dimensão dateRange (ver indiceDim).
   const totais = parseEventos(r('eventos'), parseTotais(r('totais')));
+  const porTipo = parseConvTotais(r('conv:totais'));
+  completaTotais(totais.atual, porTipo.atual); completaTotais(totais.anterior, porTipo.anterior);
+  const S = (k: string, opts: Parameters<typeof parseSeg>[1] = {}) => juntaConversoes(parseSeg(r(k), opts), r(`conv:${k}`));
   const detalhes: Ga4Detalhe[] = [];
   for (const d of DETALHES) { const linhas = parseLinhas(r(`det:${d.param}`)); if (linhas.length) detalhes.push({ param: d.param, rotulo: d.rotulo, linhas }); }
   return {
@@ -461,22 +540,22 @@ export async function relatorioLanding(propertyId: string, nome: string, token: 
     detalhes,
     diario: parseDiario(r('diario')),
     pago: {
-      canais: parseSeg(r('canais'), { manterVazios: true }),
-      campanhas: parseSeg(r('campanhas'), { limite: 12 }).filter(s => !/^\((direct|organic|referral)\)$/.test(s.valor)),
-      googleAds: parseSeg(r('googleAds'), { limite: 12, comCusto: true }),
-      palavras: parseSeg(r('palavras'), { limite: 15 }),
-      termos: parseSeg(r('termos'), { limite: 15 }),
+      canais: S('canais', { manterVazios: true }),
+      campanhas: S('campanhas', { limite: 12 }).filter(x => !/^\((direct|organic|referral)\)$/.test(x.valor)),
+      googleAds: S('googleAds', { limite: 12, comCusto: true }),
+      palavras: S('palavras', { limite: 1000 }),
+      termos: S('termos', { limite: 1000 }),
     },
     audiencia: {
-      dispositivos: parseSeg(r('dispositivos')),
-      cidades: parseSeg(r('cidades'), { limite: 12 }),
-      novosRecorrentes: parseSeg(r('novosRecorrentes')),
-      idades: parseSeg(r('idades')),
-      generos: parseSeg(r('generos')),
+      dispositivos: S('dispositivos'),
+      cidades: S('cidades', { limite: 12 }),
+      novosRecorrentes: S('novosRecorrentes'),
+      idades: S('idades'),
+      generos: S('generos'),
       semanaHora: parseSemanaHora(r('semanaHora')),
     },
     comportamento: {
-      paginasEntrada: parseSeg(r('paginasEntrada')),
+      paginasEntrada: S('paginasEntrada'),
       rolagem: ordenaRolagem(parseLinhas(r('rolagem'))),
       secoes: parseLinhas(r('secoes'), 12),
       funil: parseFunil(r('funil'), totais.atual.usuarios),
