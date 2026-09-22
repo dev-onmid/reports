@@ -47,7 +47,7 @@ const dados: Ga4Consolidado = {
 const vazio: Ga4Consolidado = { ...dados, atual: t(0, 0, 0, 0), origens: [], posicoes: [], detalhes: [], propriedades: [] };
 
 function Panel({ children }: { children: React.ReactNode }) {
-  return <section className="rounded-[14px] border border-white/[0.08] bg-[#0d1519]/92 shadow-[0_18px_60px_rgba(0,0,0,0.28)] border-[#F9AB00]/24 mb-6">{children}</section>;
+  return <section className="rounded-[14px] border border-white/[0.08] bg-[#0d1519]/92 shadow-[0_18px_60px_rgba(0,0,0,0.28)] mb-6">{children}</section>;
 }
 function App() {
   const q = new URLSearchParams(location.search);
@@ -58,7 +58,7 @@ function App() {
     <div className="p-6 bg-[#070c0f] min-h-screen text-white" style={{ maxWidth: 1200 }}>
       <Panel>
         <div className="flex items-center justify-between px-4 pt-4 pb-3">
-          <h3 className="flex items-center gap-2 text-sm font-black uppercase tracking-[0.07em] text-[#f4f7f8]"><span className="inline-block h-2.5 w-2.5 rounded-sm bg-[#F9AB00]" /> Landing page</h3>
+          <h3 className="flex items-center gap-2 text-sm font-black uppercase tracking-[0.07em] text-[#f4f7f8]"><span className="inline-block h-2.5 w-2.5 rounded-sm bg-[#6cff2f]" /> Landing page</h3>
           <span className="text-[10px] text-[#7c868c]">Google Analytics 4</span>
         </div>
         {cenario === 'cheio' && <Ga4LandingPanel dados={q.get('json') ? real : dados} loading={!!q.get('json') && !real} />}
