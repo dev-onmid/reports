@@ -53,8 +53,11 @@ const PUBLIC_PREFIXES = [
   '/api/meta/webhook',
   '/api/webhooks/',
   '/api/automations/multi/trigger/',
-  // Datalytics: token de 48 hex POR CLIENTE na URL é a credencial (mesma
-  // classe de exposição de /api/webhooks/).
+  // Webhook de entrada de lead: token de 48 hex POR WEBHOOK na URL é a
+  // credencial (mesma classe de exposição de /api/webhooks/).
+  '/api/integrations/webhook/',
+  // Endereço original do mesmo receptor, de quando a integração se chamava só
+  // "Datalytics". Permanente: há URL desse formato recebendo lead em produção.
   '/api/integrations/datalytics/',
   // Site/LP manda lead direto: quem chama é o navegador do visitante ou a
   // função da própria página, sem sessão. O token de 48 hex é a credencial.

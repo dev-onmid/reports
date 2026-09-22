@@ -6,11 +6,11 @@ import {
   Copy, Check, Trash2, Plus, RefreshCw, Eye, EyeOff,
   Settings2, MessageCircle, ShoppingCart, X, TrendingUp, Wifi, WifiOff, QrCode,
   HelpCircle, Zap, AlertCircle, Globe, BarChart3, Search,
-  Database, Building2, Store, Flame,
+  Webhook, Building2, Store, Flame,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ConversaoTile, GuideStepModal } from './conversao-guias';
-import { DatalyticsCard } from './datalytics-card';
+import { WebhooksCard } from './webhooks-card';
 import { AgendorCard } from './agendor-card';
 import SultsCard from './sults-card';
 import LpOrigensCard from './lp-origens-card';
@@ -215,14 +215,21 @@ function SectionHeader({ icon: Icon, title, subtitle, color = 'text-muted-foregr
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-const SUBABAS_RASTREIO = ['whatsapp', 'sites', 'conversoes', 'datalytics', 'agendor', 'sults', 'delivery', 'heatmap', 'log'] as const;
+const SUBABAS_RASTREIO = ['whatsapp', 'sites', 'conversoes', 'webhooks', 'agendor', 'sults', 'delivery', 'heatmap', 'log'] as const;
+
+/**
+ * A sub-aba "Datalytics" virou "Webhooks" (genérica, N por cliente). Link
+ * antigo com `?sub=datalytics` cairia no default e a pessoa acharia que a tela
+ * sumiu — aqui ele chega no lugar certo.
+ */
+const normalizarSubaba = (v: string) => (v === 'datalytics' ? 'webhooks' : v);
 
 export function ClientTrackingTab({ clientId }: { clientId: string }) {
 
   // ── Sub-tab ────────────────────────────────────────────────────────────
   // `sub` e não `tab`: a aba do CLIENTE já ocupa `?tab=` — o mesmo nome faria
   // uma sobrescrever a outra na URL.
-  const [activeTab, setActiveTab] = useAbaPersistida('cliente-rastreio', SUBABAS_RASTREIO, 'whatsapp', { param: 'sub' });
+  const [activeTab, setActiveTab] = useAbaPersistida('cliente-rastreio', SUBABAS_RASTREIO, 'whatsapp', { param: 'sub', normalizar: normalizarSubaba });
 
   // ── Legacy tracking ────────────────────────────────────────────────────
   const [config, setConfig] = useState<TrackingConfig>({
@@ -565,7 +572,7 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
           { id: 'whatsapp'  as const, label: 'WhatsApp',   icon: Wifi },
           { id: 'sites' as const, label: 'Sites e LPs', icon: Globe },
           { id: 'conversoes' as const, label: 'Conversões', icon: Zap },
-          { id: 'datalytics' as const, label: 'Datalytics', icon: Database },
+          { id: 'webhooks' as const, label: 'Webhooks', icon: Webhook },
           { id: 'agendor' as const, label: 'Agendor', icon: Building2 },
           { id: 'sults' as const, label: 'SULTS', icon: Building2 },
           { id: 'delivery' as const, label: 'Delivery', icon: Store },
@@ -1087,10 +1094,10 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
         </div>
       )}
 
-      {/* ══════════ TAB: Datalytics ══════════ */}
       {activeTab === 'sites' && <LpOrigensCard clientId={clientId} />}
 
-      {activeTab === 'datalytics' && <DatalyticsCard clientId={clientId} />}
+      {/* ══════════ TAB: Webhooks ══════════ */}
+      {activeTab === 'webhooks' && <WebhooksCard clientId={clientId} />}
 
       {activeTab === 'agendor' && <AgendorCard clientId={clientId} />}
 
