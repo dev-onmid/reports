@@ -52,6 +52,8 @@ export type TopCreative = {
   permalink?: string;
   headline?: string;
   body?: string;
+  /** effective_status do anúncio no Meta (ACTIVE, PAUSED, ADSET_PAUSED, ARCHIVED…) — para o selo Ativo/Pausado. */
+  status?: string;
   spend: number;
   impressions: number;
   clicks: number;
@@ -224,7 +226,7 @@ export async function GET(request: NextRequest) {
             'instagram_permalink_url', 'effective_object_story_id',
           ].join(',');
           const batchRes = await fetch(
-            `https://graph.facebook.com/v21.0/?ids=${adIds.join(',')}&fields=name,creative{${creativeFields}}&access_token=${token}`
+            `https://graph.facebook.com/v21.0/?ids=${adIds.join(',')}&fields=name,effective_status,creative{${creativeFields}}&access_token=${token}`
           );
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const batchData: Record<string, any> = batchRes.ok ? await batchRes.json() : {};
@@ -339,6 +341,7 @@ export async function GET(request: NextRequest) {
               permalink,
               headline: (creative.title as string | undefined) ?? undefined,
               body: (creative.body as string | undefined) ?? undefined,
+              status: (adData.effective_status as string | undefined) ?? undefined,
               spend,
               impressions,
               clicks,

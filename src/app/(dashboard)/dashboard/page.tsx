@@ -1204,6 +1204,7 @@ function CreativeCard({
 }) {
   const [imgError, setImgError] = useState(false);
   const imgUrl = creative.imageUrl ?? creative.thumbnailUrl;
+  const st = creativeStatusInfo(creative.status);
 
   const primaryMetric = (() => {
     switch (sortBy) {
@@ -1247,6 +1248,12 @@ function CreativeCard({
         <div className="absolute top-2 right-2 rounded-full bg-black/70 px-2 py-0.5 text-[11px] font-bold text-primary">
           {primaryMetric.value}
         </div>
+        {/* Selo Ativo/Pausado */}
+        {st && (
+          <span className={cn('absolute bottom-2 left-2 inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wide backdrop-blur-sm', st.pill)} title={st.titulo}>
+            <span className={cn('h-1.5 w-1.5 rounded-full', st.dot)} /> {st.label}
+          </span>
+        )}
       </div>
 
       <div className="p-3 space-y-2">
@@ -1380,7 +1387,7 @@ function CreativePreviewOverlay({
             <img
               src={resolvedImgUrl}
               alt={creative.adName}
-              className="h-full w-full bg-black object-cover"
+              className="h-full w-full bg-black object-contain"
               style={{ imageRendering: 'auto' }}
               loading="eager"
               onError={handleImgError}
@@ -1421,7 +1428,17 @@ function CreativePreviewOverlay({
           )}
         </div>
         <div className="w-[min(82vw,560px)] rounded-xl border border-white/15 bg-white/10 p-4 text-white shadow-[0_0_40px_rgba(255,255,255,0.08)] backdrop-blur-md lg:w-full" onClick={(event) => event.stopPropagation()}>
-          <p className="text-xs font-bold uppercase tracking-widest text-white/50">Criativo</p>
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-xs font-bold uppercase tracking-widest text-white/50">Criativo</p>
+            {(() => {
+              const st = creativeStatusInfo(creative.status);
+              return st ? (
+                <span className={cn('inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-[10px] font-black uppercase tracking-wide', st.pill)} title={st.titulo}>
+                  <span className={cn('h-1.5 w-1.5 rounded-full', st.dot)} /> {st.label}
+                </span>
+              ) : null;
+            })()}
+          </div>
           <h3 className="mt-2 text-lg font-bold leading-snug">{creative.adName}</h3>
           {creative.headline && <p className="mt-3 text-sm font-semibold text-white/80">{creative.headline}</p>}
           {creative.body && <p className="mt-2 text-sm text-white/60">{creative.body}</p>}
@@ -1452,6 +1469,25 @@ function CreativePreviewOverlay({
       </div>
     </div>
   );
+}
+
+/**
+ * Selo Ativo/Pausado do criativo a partir do effective_status do Meta.
+ * Cor + rótulo (nunca cor sozinha): verde = rodando, âmbar = pausado,
+ * cinza = arquivado/desconhecido, vermelho = com restrição/reprovado.
+ * `null` quando o status não veio (não inventa "Ativo").
+ */
+function creativeStatusInfo(status?: string): { label: string; dot: string; pill: string; titulo: string } | null {
+  if (!status) return null;
+  const s = status.toUpperCase();
+  if (s === 'ACTIVE') return { label: 'Ativo', dot: 'bg-emerald-400', pill: 'border-emerald-400/30 bg-emerald-400/15 text-emerald-300', titulo: 'Anúncio ativo' };
+  if (s === 'PAUSED' || s === 'ADSET_PAUSED' || s === 'CAMPAIGN_PAUSED')
+    return { label: 'Pausado', dot: 'bg-amber-400', pill: 'border-amber-400/30 bg-amber-400/15 text-amber-300', titulo: `Pausado (${s})` };
+  if (s === 'DISAPPROVED' || s === 'WITH_ISSUES')
+    return { label: 'Com restrição', dot: 'bg-red-400', pill: 'border-red-400/30 bg-red-400/15 text-red-300', titulo: `Com restrição no Meta (${s})` };
+  if (s === 'PENDING_REVIEW' || s === 'IN_PROCESS' || s === 'PENDING_BILLING_INFO' || s === 'PREAPPROVED')
+    return { label: 'Em análise', dot: 'bg-sky-400', pill: 'border-sky-400/30 bg-sky-400/15 text-sky-300', titulo: `Em análise (${s})` };
+  return { label: 'Inativo', dot: 'bg-[#9aa4aa]', pill: 'border-white/15 bg-white/[0.08] text-[#c3ccd1]', titulo: `Inativo (${s})` };
 }
 
 function CampaignStatusDot({ status }: { status: string }) {
@@ -5139,6 +5175,7 @@ function HorizontalCreativeCard({ creative, index, onPreview }: {
   const imgUrl = imgStage === 'primary' ? (primaryUrl ?? thumbUrl) : imgStage === 'thumb' ? thumbUrl : undefined;
   const hasVideo = !!creative.videoUrl;
   const metrics = creativeObjectiveMetrics(creative);
+  const st = creativeStatusInfo(creative.status);
 
   function handleImgError() {
     if (imgStage === 'primary' && primaryUrl && thumbUrl && thumbUrl !== primaryUrl) {
@@ -5174,10 +5211,18 @@ function HorizontalCreativeCard({ creative, index, onPreview }: {
             <ImageIcon className="h-6 w-6 text-[#9aa4aa]/40" />
           </div>
         )}
-        {/* Play icon — only when videoUrl exists (confirma que o vídeo toca no modal) */}
+        {/* Play centralizado — só quando há vídeo (confirma que toca no modal) */}
         {hasVideo && showImage && (
-          <span className="absolute left-2 top-2 flex h-5 w-5 items-center justify-center rounded-full bg-black/70">
-            <Play className="h-2.5 w-2.5 fill-white text-white" />
+          <span className="pointer-events-none absolute inset-0 flex items-center justify-center">
+            <span className="flex h-9 w-9 items-center justify-center rounded-full bg-black/55 ring-1 ring-white/30 backdrop-blur-sm">
+              <Play className="h-3.5 w-3.5 fill-white text-white" />
+            </span>
+          </span>
+        )}
+        {/* Selo Ativo/Pausado — leitura instantânea do status do anúncio */}
+        {st && (
+          <span className={cn('absolute left-2 top-2 inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wide backdrop-blur-sm', st.pill)} title={st.titulo}>
+            <span className={cn('h-1.5 w-1.5 rounded-full', st.dot)} /> {st.label}
           </span>
         )}
         <span className="absolute bottom-2 left-2 flex h-5 w-5 items-center justify-center rounded-full bg-black/85 text-[10px] font-black text-white">{index + 1}</span>
