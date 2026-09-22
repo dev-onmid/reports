@@ -1477,6 +1477,18 @@ function CreativePreviewOverlay({
   );
 }
 
+/** "agora" / "5 min" / "3 h" / "2 dias" — a partir de segundos de idade. */
+function idadeCurta(segundos: number): string {
+  if (!Number.isFinite(segundos) || segundos < 0) return '—';
+  if (segundos < 60) return 'agora';
+  const min = Math.round(segundos / 60);
+  if (min < 60) return `${min} min`;
+  const h = Math.round(segundos / 3600);
+  if (h < 24) return `${h} h`;
+  const d = Math.round(segundos / 86400);
+  return `${d} ${d === 1 ? 'dia' : 'dias'}`;
+}
+
 /**
  * Selo Ativo/Pausado do criativo a partir do effective_status do Meta.
  * Cor + rótulo (nunca cor sozinha): verde = rodando, âmbar = pausado,
@@ -5415,6 +5427,12 @@ export default function GeneralDashboard() {
   const [audienceLoading, setAudienceLoading] = useState(false);
   const [balancesLoading, setBalancesLoading] = useState(false);
   const [dataCacheAge, setDataCacheAge] = useState<number | null>(null);
+  /** Frescor por fonte (selo discreto no topo): idade em segundos do cache das
+   *  métricas Meta/Google (X-Cache-Age da rota de metrics — as duas plataformas
+   *  vêm na MESMA chamada, então têm a mesma idade) e ISO da última entrada
+   *  de lead no CRM (não é idade de cache: é quando o dado chegou). */
+  const [metricsCacheAge, setMetricsCacheAge] = useState<number | null>(null);
+  const [crmUltimaPorCliente, setCrmUltimaPorCliente] = useState<{ porCliente: Record<string, string>; em: number }>({ porCliente: {}, em: 0 });
   const editMode = true;
   const [customizerOpen, setCustomizerOpen] = useState(false);
   const [dashboardPrefs, setDashboardPrefs] = useState<DashboardPrefs>(DEFAULT_DASHBOARD_PREFS);
@@ -5704,13 +5722,22 @@ export default function GeneralDashboard() {
         const res = await fetch(`/api/clients/${id}/metrics?${periodParams}`);
         if (cancelled) return null;
         const data: ApiMetrics = res.ok ? await res.json() : { meta: null, google: null, crm: null };
-        return [id, data] as const;
+        const age = res.headers.get('X-Cache-Age');
+        return [id, data, age === null ? null : Number(age)] as const;
       })
     ).then(results => {
       if (cancelled) return;
       const map: Record<string, ApiMetrics> = {};
-      for (const r of results) if (r.status === 'fulfilled' && r.value !== null) map[r.value[0]] = r.value[1];
+      // Com vários clientes, o selo mostra o MAIS VELHO — é o que responde
+      // "há quanto tempo o dado mais antigo desta tela foi buscado".
+      let maisVelho: number | null = null;
+      for (const r of results) if (r.status === 'fulfilled' && r.value !== null) {
+        map[r.value[0]] = r.value[1];
+        const a = r.value[2];
+        if (a !== null && Number.isFinite(a)) maisVelho = maisVelho === null ? a : Math.max(maisVelho, a);
+      }
       setMetricsByClient(map);
+      setMetricsCacheAge(maisVelho);
     }).finally(() => { if (!cancelled) setMetricsLoading(false); });
     return () => { cancelled = true; };
   }, [selectedIds, period, customDateFrom, customDateTo, customReady]);
@@ -5867,13 +5894,23 @@ export default function GeneralDashboard() {
   useEffect(() => {
     const params = new URLSearchParams({ from: faixaSel.from, to: faixaSel.to });
     fetch(`/api/crm/summary?${params}`)
-      .then(r => r.ok ? r.json() as Promise<{ clientId: string; leads: number; funil: ContagemFunil; total: number }[]> : [])
+      .then(r => r.ok ? r.json() as Promise<{ clientId: string; leads: number; funil: ContagemFunil; total: number; ultimaAtualizacao?: string | null }[]> : [])
       .then(data => {
         const map: Record<string, ClientSheetsSummary> = {};
-        for (const item of data) map[item.clientId] = { leads: item.leads, funil: item.funil, total: item.total };
+        // Guarda a última entrada de lead POR cliente: o selo de frescor deriva
+        // o mais recente entre os selecionados na hora de renderizar, sem
+        // refazer este fetch (que já é da carteira inteira) ao trocar de cliente.
+        const ultimas: Record<string, string> = {};
+        for (const item of data) {
+          map[item.clientId] = { leads: item.leads, funil: item.funil, total: item.total };
+          if (item.ultimaAtualizacao) ultimas[item.clientId] = item.ultimaAtualizacao;
+        }
         setCrmSummary(map);
+        // "agora" capturado AQUI (no efeito), não no render: a idade do CRM não
+        // precisa ticar e Date.now() em render é impuro (regra do compilador).
+        setCrmUltimaPorCliente({ porCliente: ultimas, em: Date.now() });
       })
-      .catch(() => setCrmSummary({}));
+      .catch(() => { setCrmSummary({}); setCrmUltimaPorCliente({ porCliente: {}, em: 0 }); });
   }, [period, customDateFrom, customDateTo, faixaSel.from, faixaSel.to]);
 
   // Faturamento e leads por canal — de onde vem o dinheiro e de onde vem o lead.
@@ -7148,11 +7185,35 @@ export default function GeneralDashboard() {
               Modo {perfilAtivo.rotuloSegmento}
             </span>
           )}
+          <div className="ml-auto flex items-center gap-2">
+          {/* Frescor por fonte (pedido do Matheus): há quanto tempo a tela
+              buscou Meta/Google e quando o CRM recebeu o último lead. Discreto,
+              no padrão do selo de saldos ao lado. Meta e Google vêm na MESMA
+              chamada, então mostram a mesma idade — é verdade, não redundância. */}
+          {(() => {
+            const crmIso = [...selectedIds].map(id => crmUltimaPorCliente.porCliente[id]).filter(Boolean).sort().at(-1) ?? null;
+            const crmSeg = crmIso && crmUltimaPorCliente.em > 0 ? Math.max(0, (crmUltimaPorCliente.em - new Date(crmIso).getTime()) / 1000) : null;
+            if (metricsCacheAge === null && crmSeg === null) return null;
+            const item = (logo: ReactNode, rotulo: string, seg: number | null, dica: string) => (
+              <span className="inline-flex items-center gap-1" title={dica}>
+                {logo}
+                <span className="text-[#9aa4aa]">{rotulo}</span>
+                <span className="text-[#dce4e8]">{seg === null ? '—' : idadeCurta(seg)}</span>
+              </span>
+            );
+            return (
+              <span className="inline-flex items-center gap-3 rounded-[10px] border border-white/[0.08] bg-[#0b1216] px-3 py-2 text-[11px] font-semibold">
+                {item(<MetaAdsMark className="h-3.5 w-3.5 text-[#168BFF]" />, 'Meta', metricsCacheAge, metricsCacheAge === null ? 'Sem dado do Meta nesta tela' : `Métricas do Meta buscadas há ${idadeCurta(metricsCacheAge)}`)}
+                {item(<GoogleAdsMark className="h-3.5 w-3.5" />, 'Google', metricsCacheAge, metricsCacheAge === null ? 'Sem dado do Google nesta tela' : `Métricas do Google buscadas há ${idadeCurta(metricsCacheAge)}`)}
+                {item(<Users className="h-3.5 w-3.5 text-[#6cff2f]" />, 'CRM', crmSeg, crmSeg === null ? 'Nenhum lead no CRM dos clientes selecionados' : `Último lead entrou ou foi atualizado no CRM há ${idadeCurta(crmSeg)}`)}
+              </span>
+            );
+          })()}
           {/* ⚠️ O X-Cache-Age vem SÓ da rota de saldos do Google Ads — o selo
               fala dos saldos, não da tela inteira (antes dizia "Cache", como se
               todo número tivesse aquela idade). */}
           <span
-            className="ml-auto inline-flex items-center gap-2 rounded-[10px] border border-white/[0.08] bg-[#0b1216] px-3 py-2 text-xs font-semibold text-[#dce4e8]"
+            className="inline-flex items-center gap-2 rounded-[10px] border border-white/[0.08] bg-[#0b1216] px-3 py-2 text-xs font-semibold text-[#dce4e8]"
             title={dataCacheAge === null || dataCacheAge === 0
               ? 'Saldos das contas de anúncio recém-buscados da API'
               : `Saldos das contas de anúncio (Meta/Google) em cache — buscados há ${Math.round(dataCacheAge / 60)} min, atualizados a cada 15 min. As métricas do período não usam este cache.`}
@@ -7160,6 +7221,7 @@ export default function GeneralDashboard() {
             <span className={cn('h-2 w-2 rounded-full', dataCacheAge === null || dataCacheAge === 0 ? 'bg-[#6cff2f]' : 'bg-amber-400')} />
             {dataCacheAge === null || dataCacheAge === 0 ? 'Saldos ao vivo' : `Saldos · cache ${Math.round(dataCacheAge / 60)} min`}
           </span>
+          </div>
           {/* "Métricas" e "Copiar layout" saíram: configuravam componentes que
               não são mais renderizados (grades RGL antigas) — clicar não mudava
               nada na tela. Os componentes continuam no arquivo, sem botão. */}

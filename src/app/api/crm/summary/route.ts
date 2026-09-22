@@ -103,6 +103,20 @@ export async function GET(req: NextRequest) {
       // sem crm_stages (ou sem a coluna etapa_funil ainda) → auto-classificação pura
     }
 
+    // Última vez que o CRM de cada cliente RECEBEU dado (lead novo ou
+    // atualizado), fora do filtro de período: é o "atualizado há N" do selo de
+    // frescor no topo da dashboard. Best-effort — sem a coluna, fica null.
+    const ultimaPorCliente = new Map<string, string>();
+    try {
+      const { rows: ult } = await pool.query(
+        `SELECT client_id, MAX(GREATEST(COALESCE(updated_at, created_at), created_at)) AS ultima
+           FROM public.crm_leads GROUP BY client_id`
+      );
+      for (const r of ult) if (r.ultima) ultimaPorCliente.set(String(r.client_id), new Date(r.ultima).toISOString());
+    } catch {
+      // sem updated_at/created_at → sem selo de CRM
+    }
+
     const leadsPorCliente = new Map<string, LeadParaFunil[]>();
     for (const row of rows) {
       const cid = String(row.client_id);
@@ -132,6 +146,8 @@ export async function GET(req: NextRequest) {
           funil,
           /** Receita dos fechados (nome herdado do shape antigo). */
           total: funil.receita,
+          /** ISO da última entrada/atualização de lead deste cliente (selo de frescor). */
+          ultimaAtualizacao: ultimaPorCliente.get(clientId) ?? null,
         };
       })
     );
