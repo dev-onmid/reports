@@ -32,7 +32,13 @@ export type FunilLeadRow = {
 };
 
 type Props = {
-  etapa: EtapaFunil;
+  /** Modo semântico: etapa do funil genérico. Ausente no modo etapa-real. */
+  etapa?: EtapaFunil;
+  /**
+   * Modo ETAPA REAL do Kanban: índice do degrau na escada do cliente. Quando
+   * definido, a rota filtra por etapa real (um cliente só) e `etapa` é ignorada.
+   */
+  stageIndex?: number;
   /** Rótulo do degrau como aparece no card (vem do planejamento do cliente). */
   tituloEtapa: string;
   /** Número exibido no card — o modo cumulativo tem de bater com ele. */
@@ -59,8 +65,9 @@ function fmtData(iso: string | null): string | null {
 }
 
 export function FunilLeadsModal({
-  etapa, tituloEtapa, totalNoCard, clientIds, from, to, topoDeAnuncios, onClose,
+  etapa, stageIndex, tituloEtapa, totalNoCard, clientIds, from, to, topoDeAnuncios, onClose,
 }: Props) {
+  const stageMode = stageIndex !== undefined;
   const [modo, setModo] = useState<'alcancou' | 'atual'>('alcancou');
   const [rows, setRows] = useState<FunilLeadRow[] | null>(null);
   const [total, setTotal] = useState(0);
@@ -70,7 +77,9 @@ export function FunilLeadsModal({
   /** Lead cujo detalhe está aberto por cima da lista. */
   const [detalhe, setDetalhe] = useState<FunilLeadRow | null>(null);
 
-  const semLista = etapa === 'contato' && topoDeAnuncios;
+  // No modo etapa-real sempre há CRM por trás (o funil veio das etapas do
+  // Kanban), então nunca é "topo estimado por anúncio".
+  const semLista = !stageMode && etapa === 'contato' && topoDeAnuncios;
   // ⚠️ Dependa do VALOR, não da referência: o pai passa `[...selectedIds]`, um
   // array novo a cada render — usar o array direto no useEffect refaz o fetch
   // em toda re-renderização do dashboard (visto no harness: 3 chamadas iguais
@@ -88,7 +97,9 @@ export function FunilLeadsModal({
     let alive = true;
     setRows(null);
     setErro(false);
-    const params = new URLSearchParams({ etapa, modo, from, to, limit: '500' });
+    const params = new URLSearchParams({ modo, from, to, limit: '500' });
+    if (stageMode) params.set('stageIndex', String(stageIndex));
+    else if (etapa) params.set('etapa', etapa);
     if (clientKey) params.set('clientIds', clientKey);
     fetch(`/api/crm/funil-leads?${params}`)
       .then(r => r.json())
@@ -100,7 +111,7 @@ export function FunilLeadsModal({
       })
       .catch(() => { if (alive) { setRows([]); setErro(true); } });
     return () => { alive = false; };
-  }, [etapa, modo, from, to, clientKey, semLista]);
+  }, [etapa, stageIndex, stageMode, modo, from, to, clientKey, semLista]);
 
   /** Canais presentes na lista, para o filtro só oferecer o que existe. */
   const canais = useMemo(() => {

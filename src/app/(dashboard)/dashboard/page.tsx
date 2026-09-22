@@ -80,7 +80,7 @@ import { MetaAdsMark, GoogleAdsMark } from '@/components/platform-logos';
 import {
   FUNIL_VAZIO, somarFunis, resolverTopoFunil, rotuloFonteTopo, normalizarFonteTopo,
   ETAPAS_FUNIL,
-  type ContagemFunil, type EtapaFunil,
+  type ContagemFunil, type EtapaFunil, type FunilPorStage,
 } from '@/lib/funil-etapas';
 import { FunilLeadsModal } from '@/components/funil-leads-modal';
 import { normalizarSegmento, perfilDaSelecao } from '@/lib/dashboard-segmento';
@@ -106,7 +106,7 @@ import { SUPERFICIE, Superficie } from '@/components/dashboard/superficie';
 import { IndicadorCard, IndicadorMini, FaixaIndicadores } from '@/components/dashboard/indicador-card';
 
 type Period = 'yesterday' | 'last_7d' | 'last_14d' | 'last_30d' | 'this_month' | 'last_month' | 'custom';
-type ClientSheetsSummary = { leads: number; funil: ContagemFunil; total: number };
+type ClientSheetsSummary = { leads: number; funil: ContagemFunil; total: number; funilStages: FunilPorStage | null };
 type ApiMetrics = {
   meta: { spend: number; reach?: number; impressions: number; clicks: number; leads: number; formLeads?: number; siteLeads?: number; conversations?: number; cpl: number } | null;
   google: { cost: number; impressions: number; clicks: number; cpc: number; conversions: number; cpa: number;
@@ -4746,7 +4746,7 @@ function IgMini({ label, icon, valor, variacao }: {
 
 const FUNNEL_STEP_COLORS = ['#6cff2f', '#0ea5e9', '#7b2cff', '#f97316', '#ec4899', '#f59e0b', '#84cc16'];
 
-function SimpleFunnel({ steps, totalRate, fonteLabel, onStageClick }: {
+function SimpleFunnel({ steps, totalRate, fonteLabel, onStageClick, todosClicaveis }: {
   steps: Array<{
     label: string; actual: number; planned: number; color: string;
     /** Quebra explicativa sob o número (ex: quantos ainda vêm × quantos furaram). */
@@ -4757,7 +4757,12 @@ function SimpleFunnel({ steps, totalRate, fonteLabel, onStageClick }: {
   fonteLabel?: string;
   /** Abre a lista de leads do degrau. Índice mapeia em ETAPAS_FUNIL (0=contato…4=fechamento). */
   onStageClick?: (index: number) => void;
+  /** Funil personalizado pelo Kanban: TODOS os degraus são clicáveis (não só os 5 semânticos). */
+  todosClicaveis?: boolean;
 }) {
+  // No funil por etapa real, cada degrau tem lista própria; no semântico, só os
+  // índices que existem em ETAPAS_FUNIL abrem modal.
+  const podeClicar = (i: number) => !!onStageClick && (todosClicaveis || !!ETAPAS_FUNIL[i]);
   if (!steps.length) return null;
   // Funil de verdade: faixas CENTRALIZADAS e empilhadas, cada uma um trapézio
   // cuja borda de cima tem a largura do degrau e a de baixo a do próximo — o
@@ -4786,7 +4791,7 @@ function SimpleFunnel({ steps, totalRate, fonteLabel, onStageClick }: {
           const actualPct = i === 0 ? null : prev && prev.actual > 0 ? (step.actual / prev.actual) * 100 : 0;
           const plannedPct = i === 0 ? null : prev && prev.planned > 0 ? (step.planned / prev.planned) * 100 : 0;
           const isBottleneck = actualPct !== null && plannedPct !== null && plannedPct > 0 && actualPct < plannedPct * 0.85;
-          const clicavel = !!onStageClick && !!ETAPAS_FUNIL[i];
+          const clicavel = podeClicar(i);
           const cima = larguraDe(step.actual);
           const baixo = next ? larguraDe(next.actual) : Math.max(PISO * 0.8, cima * 0.82);
           const cor = step.color || FUNNEL_STEP_COLORS[i % FUNNEL_STEP_COLORS.length];
@@ -5894,7 +5899,7 @@ export default function GeneralDashboard() {
   useEffect(() => {
     const params = new URLSearchParams({ from: faixaSel.from, to: faixaSel.to });
     fetch(`/api/crm/summary?${params}`)
-      .then(r => r.ok ? r.json() as Promise<{ clientId: string; leads: number; funil: ContagemFunil; total: number; ultimaAtualizacao?: string | null }[]> : [])
+      .then(r => r.ok ? r.json() as Promise<{ clientId: string; leads: number; funil: ContagemFunil; total: number; funilStages: FunilPorStage | null; ultimaAtualizacao?: string | null }[]> : [])
       .then(data => {
         const map: Record<string, ClientSheetsSummary> = {};
         // Guarda a última entrada de lead POR cliente: o selo de frescor deriva
@@ -5902,7 +5907,7 @@ export default function GeneralDashboard() {
         // refazer este fetch (que já é da carteira inteira) ao trocar de cliente.
         const ultimas: Record<string, string> = {};
         for (const item of data) {
-          map[item.clientId] = { leads: item.leads, funil: item.funil, total: item.total };
+          map[item.clientId] = { leads: item.leads, funil: item.funil, total: item.total, funilStages: item.funilStages ?? null };
           if (item.ultimaAtualizacao) ultimas[item.clientId] = item.ultimaAtualizacao;
         }
         setCrmSummary(map);
@@ -6591,16 +6596,47 @@ export default function GeneralDashboard() {
   if (funilCrm.agendamentoSemData > 0) {
     detalhesAgendamento.push({ texto: `${funilCrm.agendamentoSemData} sem data`, tom: 'neutro' });
   }
-  const funnelStepsNew = firstPlanningForFunnel.stages.map((stage, i) => ({
-    label: cleanFunnelLabel(stage.name),
-    actual: actualFunnelVolumes[i] ?? 0,
-    planned: plannedFunnelAgg[i] ?? 0,
-    color: FUNNEL_STEP_COLORS[i % FUNNEL_STEP_COLORS.length],
-    // Só no degrau de agendamentos. Vale mesmo com topo estimado por anúncio:
-    // agendamentos e comparecimentos vêm do CRM nos dois casos (só o TOPO muda
-    // de fonte), então a quebra sempre fecha com os números exibidos.
-    detalhes: i === 2 ? detalhesAgendamento : undefined,
-  }));
+  // Funil pelas ETAPAS REAIS do Kanban do cliente — nome, cor e nº de degraus
+  // vêm do CRM dele (pedido do Matheus, 2026-09-14). Só com UM cliente
+  // selecionado: Kanbans de clientes diferentes não se somam num funil só, então
+  // seleção múltipla / "Todos" mantém o funil semântico de 5 degraus.
+  const stageFunilSolo = selectedIds.size === 1
+    ? (crmSummary[[...selectedIds][0]]?.funilStages ?? null)
+    : null;
+  const usaStageFunil = !!stageFunilSolo && stageFunilSolo.degraus.length > 0;
+
+  const funnelStepsNew = usaStageFunil
+    ? stageFunilSolo!.degraus.map((d, i) => {
+        // A quebra "a comparecer / faltaram" vai no ÚLTIMO degrau de agendamento
+        // que tenha um comparecimento depois. Os números vêm do funil semântico
+        // do próprio cliente (funilCrm) — no modo 1-cliente, é a mesma base.
+        const restante = stageFunilSolo!.degraus.slice(i + 1);
+        const ehUltimoAgendamento = d.etapa === 'agendamento'
+          && !restante.some(x => x.etapa === 'agendamento')
+          && restante.some(x => x.etapa === 'comparecimento');
+        return {
+          label: d.label,
+          actual: d.alcancaram,
+          planned: 0,
+          color: d.color,
+          detalhes: ehUltimoAgendamento ? detalhesAgendamento : undefined,
+        };
+      })
+    : firstPlanningForFunnel.stages.map((stage, i) => ({
+        label: cleanFunnelLabel(stage.name),
+        actual: actualFunnelVolumes[i] ?? 0,
+        planned: plannedFunnelAgg[i] ?? 0,
+        color: FUNNEL_STEP_COLORS[i % FUNNEL_STEP_COLORS.length],
+        // Só no degrau de agendamentos. Vale mesmo com topo estimado por anúncio:
+        // agendamentos e comparecimentos vêm do CRM nos dois casos (só o TOPO muda
+        // de fonte), então a quebra sempre fecha com os números exibidos.
+        detalhes: i === 2 ? detalhesAgendamento : undefined,
+      }));
+  // Conversão geral do funil real = fechamento (último degrau) sobre o topo dele.
+  const funnelTaxaFinal = usaStageFunil && stageFunilSolo!.degraus.length > 1
+    ? (stageFunilSolo!.degraus[stageFunilSolo!.degraus.length - 1].alcancaram
+        / Math.max(stageFunilSolo!.degraus[0].alcancaram, 1)) * 100
+    : funnelTaxa;
   const linhaCanal = (channel: string, logo: ReactNode, spend: number, impr: number, clicks: number, leads: number): LinhaCanal => {
     const cpl = leads > 0 ? spend / leads : 0;
     return {
@@ -7462,7 +7498,7 @@ export default function GeneralDashboard() {
                       {deliverySoloId ? (
                         <DeliveryResumoCard clientId={deliverySoloId} from={deliveryRange.from} to={deliveryRange.to} />
                       ) : (
-                        <SimpleFunnel steps={funnelStepsNew} totalRate={funnelTaxa > 0 ? premiumValue(funnelTaxa, 'percent') : '—'} fonteLabel={fonteTopoLabel} onStageClick={setFunilStageIdx} />
+                        <SimpleFunnel steps={funnelStepsNew} totalRate={funnelTaxaFinal > 0 ? premiumValue(funnelTaxaFinal, 'percent') : '—'} fonteLabel={usaStageFunil ? 'fonte: CRM' : fonteTopoLabel} onStageClick={setFunilStageIdx} todosClicaveis={usaStageFunil} />
                       )}
                       <ChannelSummaryTable rows={channelRows} total={channelTotal} metaCpl={cplMetaSel} />
                     </div>
@@ -7505,7 +7541,20 @@ export default function GeneralDashboard() {
 
       <CreativePreviewOverlay creative={previewCreative} onClose={() => setPreviewCreative(null)} />
 
-      {funilStageIdx !== null && ETAPAS_FUNIL[funilStageIdx] && (
+      {/* Modo etapa REAL do Kanban: drill-down por índice do degrau (um cliente só). */}
+      {usaStageFunil && funilStageIdx !== null && stageFunilSolo?.degraus[funilStageIdx] && (
+        <FunilLeadsModal
+          stageIndex={funilStageIdx}
+          tituloEtapa={funnelStepsNew[funilStageIdx]?.label ?? ''}
+          totalNoCard={funnelStepsNew[funilStageIdx]?.actual ?? 0}
+          clientIds={[...selectedIds]}
+          from={periodoISO.from}
+          to={periodoISO.to}
+          onClose={() => setFunilStageIdx(null)}
+        />
+      )}
+      {/* Modo semântico (vários clientes / cliente sem etapas): 5 degraus fixos. */}
+      {!usaStageFunil && funilStageIdx !== null && ETAPAS_FUNIL[funilStageIdx] && (
         <FunilLeadsModal
           etapa={ETAPAS_FUNIL[funilStageIdx] as EtapaFunil}
           tituloEtapa={funnelStepsNew[funilStageIdx]?.label ?? ''}
