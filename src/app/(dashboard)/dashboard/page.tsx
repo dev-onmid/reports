@@ -2312,6 +2312,11 @@ function CampaignPerformanceTable({
     const rowColor = CAMPAIGN_ROW_COLORS[row.colorIdx % CAMPAIGN_ROW_COLORS.length];
 
     const isMetaAd = row.kind === 'meta-ad';
+    // Campanha que gastou 2× a meta de CPL sem nenhum lead. Fica fora quem tem
+    // objetivo que não busca lead (tráfego/alcance/vídeo): ali 0 lead é esperado.
+    const objetivoCampanha = row.kind === 'campaign' ? String(row.data.objective ?? '') : '';
+    const semLeadQueimando = row.kind === 'campaign' && !(leads > 0) && metaCpl > 0 && spend >= metaCpl * 2
+      && !/TRAFFIC|AWARENESS|REACH|VIDEO/i.test(objetivoCampanha);
 
     return (
       <tr
@@ -2419,7 +2424,9 @@ function CampaignPerformanceTable({
         <td
           className={cn('whitespace-nowrap px-3 py-2.5 text-right text-xs font-semibold', cpl > 0 && TEXTO_STATUS_CPL[statusCpl(cpl, metaCpl)])}
           title={cpl > 0 && metaCpl > 0 ? `${(cpl / metaCpl).toFixed(2).replace('.', ',')}× a meta de CPL (${formatCurrencyBRL(metaCpl)})` : undefined}
-        >{cpl > 0 ? formatCurrencyBRL(cpl) : <span className="text-muted-foreground/40">—</span>}</td>
+        >{cpl > 0 ? formatCurrencyBRL(cpl) : semLeadQueimando ? (
+          <span className="rounded border border-[#e52020]/40 bg-[#e52020]/14 px-1.5 py-0.5 text-[10px] font-bold uppercase text-[#ff6b6b]" title={`Gastou ${formatCurrencyBRL(spend)} sem nenhum lead — mais de 2× a meta de CPL (${formatCurrencyBRL(metaCpl)})`}>Sem lead</span>
+        ) : <span className="text-muted-foreground/40">—</span>}</td>
         <td className="px-3 py-2.5 text-right text-xs text-muted-foreground">{impressions > 0 ? impressions.toLocaleString('pt-BR') : <span className="opacity-40">—</span>}</td>
         <td className="px-3 py-2.5 text-right text-xs text-muted-foreground">{ctr > 0 ? `${ctr.toFixed(2).replace('.', ',')}%` : <span className="opacity-40">—</span>}</td>
 
@@ -4478,8 +4485,10 @@ function KpiSparkline({ values, color = '#55f52f' }: { values: number[]; color?:
   );
 }
 
-function QuickMetricCard({ title, value, change, icon: Icon, inverseChange, estilo = ESTILO_VAZIO, className, comparacao = 'vs período anterior', serie, dica }: {
+function QuickMetricCard({ title, value, change, icon: Icon, inverseChange, neutralChange, estilo = ESTILO_VAZIO, className, comparacao = 'vs período anterior', serie, dica }: {
   title: string;
+  /** Métrica sem direção boa/ruim (ex.: investimento): variação em cinza. */
+  neutralChange?: boolean;
   value: string;
   change?: number | null;
   icon: React.ElementType;
@@ -4509,7 +4518,7 @@ function QuickMetricCard({ title, value, change, icon: Icon, inverseChange, esti
         <div className="min-w-0 flex-1">
           <p className="text-[11px] font-black uppercase tracking-[0.06em] text-[#dce4e8]" style={styleTexto(estilo)} title={dica}>{estilo.texto ?? title}</p>
           <p className="mt-2 font-heading text-2xl leading-none text-[#f4f7f8]" style={styleValor(estilo)} title={dica}>{value}</p>
-          <p className={cn('mt-1 text-xs font-bold', !hasChange ? 'text-[#7c868c]' : positive ? 'text-[#6cff2f]' : 'text-red-400')}>
+          <p className={cn('mt-1 text-xs font-bold', !hasChange || neutralChange ? 'text-[#a7b0b6]' : positive ? 'text-[#6cff2f]' : 'text-red-400')}>
             {hasChange ? `${change >= 0 ? '+' : ''}${change.toFixed(1).replace('.', ',')}%` : '—'} <span className="font-medium text-[#a7b0b6]">{comparacao}</span>
           </p>
           {serie && serie.length >= 2 && serie.some(v => v > 0) && <KpiSparkline values={serie} />}
@@ -5280,7 +5289,7 @@ function CreativeHorizontalStrip({ creatives, loading, onPreview }: {
 // ── Resumo de Tráfego: uma tabela, as MESMAS colunas nas duas plataformas ──
 // Antes eram dois blocos com métricas diferentes de cada lado (Meta mostrava
 // alcance/CTR, Google impressões/cliques/CPC) — nada era comparável.
-type CelulaTrafego = { valor: string; delta?: number | null; inverso?: boolean };
+type CelulaTrafego = { valor: string; delta?: number | null; inverso?: boolean; /** sem direção boa/ruim (investimento) */ neutro?: boolean };
 type LinhaTrafego = { plataforma: string; logo: ReactNode; celulas: CelulaTrafego[] };
 
 function TrafegoResumoTable({ linhas, colunas, comparacao }: { linhas: LinhaTrafego[]; colunas: string[]; comparacao: string }) {
@@ -5309,7 +5318,7 @@ function TrafegoResumoTable({ linhas, colunas, comparacao }: { linhas: LinhaTraf
                     <td key={colunas[i]} className="whitespace-nowrap py-3 text-right align-top">
                       <span className="font-heading text-base leading-none">{c.valor}</span>
                       {tem && (
-                        <span className={cn('block text-[10px] font-bold', bom ? 'text-[#6cff2f]' : 'text-red-400')}>
+                        <span className={cn('block text-[10px] font-bold', c.neutro ? 'text-[#a7b0b6]' : bom ? 'text-[#6cff2f]' : 'text-red-400')}>
                           {c.delta! >= 0 ? '+' : ''}{c.delta!.toFixed(1).replace('.', ',')}%
                         </span>
                       )}
@@ -6559,7 +6568,7 @@ export default function GeneralDashboard() {
     const roasAtual = roasFood(dadosFood.vendas.receita, totalSpend);
     const roasPrev = dadosFood.anterior ? roasFood(dadosFood.anterior.receita, prevTotalSpend) : null;
     return [
-      { title: 'Investimento Total', value: premiumValue(totalSpend, 'currency'), change: pctChange(totalSpend, prevTotalSpend), icon: CreditCard },
+      { title: 'Investimento Total', value: premiumValue(totalSpend, 'currency'), change: pctChange(totalSpend, prevTotalSpend), icon: CreditCard, neutralChange: true },
       { title: 'Custo por pedido', value: formatarMetrica(cppAtual, 'moeda'), change: cppAtual !== null && cppPrev !== null && cppPrev > 0 ? pctChange(cppAtual, cppPrev) : null, icon: Tag, inverseChange: true },
       { title: 'ROAS', value: formatarMetrica(roasAtual, 'multiplicador'), change: roasAtual !== null && roasPrev !== null && roasPrev > 0 ? pctChange(roasAtual, roasPrev) : null, icon: TrendingUp },
       { title: 'Ticket médio', value: formatarMetrica(dadosFood.vendas.ticket, 'moeda'), change: dadosFood.variacao.ticket, icon: Receipt },
@@ -6593,7 +6602,7 @@ export default function GeneralDashboard() {
   const temSerieGasto = gastoDia.some(v => v > 0);
 
   const quickMetrics = [
-    { title: 'Investimento Total', value: premiumValue(totalSpend, 'currency'), change: pctChange(totalSpend, prevTotalSpend), icon: CreditCard, serie: temSerieGasto ? gastoDia : undefined },
+    { title: 'Investimento Total', value: premiumValue(totalSpend, 'currency'), change: pctChange(totalSpend, prevTotalSpend), icon: CreditCard, neutralChange: true, serie: temSerieGasto ? gastoDia : undefined },
     { title: 'CPL Médio', value: totalCostPerLead > 0 ? premiumValue(totalCostPerLead, 'currency') : '—', change: pctChange(totalCostPerLead, prevCpl), icon: Tag, inverseChange: true, serie: temSerieGasto && leadsDia.some(v => v > 0) ? cplSeries : undefined, dica: 'Investimento Meta + Google ÷ leads reportados pelas plataformas · linha = CPL acumulado dia a dia' },
     // Ticket médio = faturamento ÷ VENDAS do CRM (não ÷ conversions, que cai em
     // fallback de funil/Google e daria um ticket calculado sobre um denominador
@@ -6670,7 +6679,7 @@ export default function GeneralDashboard() {
       logo: <MetaAdsMark className="h-4 w-4 text-[#168BFF]" />,
       celulas: [
         { valor: metaBalance > 0 ? premiumValue(metaBalance, 'currency') : '—' },
-        { valor: metaSpend > 0 ? premiumValue(metaSpend, 'currency') : '—', delta: deltaBase(metaSpend, prevMetaSpend) },
+        { valor: metaSpend > 0 ? premiumValue(metaSpend, 'currency') : '—', delta: deltaBase(metaSpend, prevMetaSpend), neutro: true },
         { valor: metaImpressions > 0 ? premiumValue(metaImpressions) : '—', delta: deltaBase(metaImpressions, prevMetaImpressions) },
         { valor: metaClicks > 0 ? premiumValue(metaClicks) : '—', delta: deltaBase(metaClicks, prevMetaClicks) },
         { valor: metaCtr > 0 ? premiumValue(metaCtr, 'percent') : '—', delta: deltaTaxa(metaCtr, prevMetaCtr) },
@@ -6685,7 +6694,7 @@ export default function GeneralDashboard() {
       logo: <GoogleAdsMark className="h-4 w-4" />,
       celulas: [
         { valor: googleBalance > 0 ? premiumValue(googleBalance, 'currency') : '—' },
-        { valor: hasGoogleData && googleCost > 0 ? premiumValue(googleCost, 'currency') : '—', delta: hasGoogleData ? deltaBase(googleCost, prevGoogleCost) : null },
+        { valor: hasGoogleData && googleCost > 0 ? premiumValue(googleCost, 'currency') : '—', delta: hasGoogleData ? deltaBase(googleCost, prevGoogleCost) : null, neutro: true },
         { valor: hasGoogleData && googleImpressions > 0 ? premiumValue(googleImpressions) : '—', delta: hasGoogleData ? deltaBase(googleImpressions, prevGoogleImpressions) : null },
         { valor: hasGoogleData && googleClicks > 0 ? premiumValue(googleClicks) : '—', delta: hasGoogleData ? deltaBase(googleClicks, prevGoogleClicks) : null },
         { valor: googleCtrValue > 0 ? premiumValue(googleCtrValue, 'percent') : '—', delta: deltaTaxa(googleCtrValue, prevGoogleCtr) },
