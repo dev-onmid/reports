@@ -113,6 +113,9 @@ async function loadConfig(pool: Pool, clientId: string): Promise<ConversionConfi
   return cfg ?? null;
 }
 
+/** Log de conversão enviada — exportado para o CAPI de site (meta-capi-site.ts). */
+export const registrarLogConversao = (pool: Pool, data: Parameters<typeof logConversion>[1]) => logConversion(pool, data);
+
 async function logConversion(pool: Pool, data: {
   clientId: string;
   leadId?: string | null;
