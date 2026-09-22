@@ -5334,14 +5334,17 @@ function TrafegoResumoTable({ linhas, colunas, comparacao }: { linhas: LinhaTraf
   );
 }
 
-type AbaDashboard = 'geral' | 'midia' | 'lp' | 'social' | 'comercial';
-const ABAS: { id: AbaDashboard; label: string }[] = [
-  { id: 'geral', label: 'Visão geral' },
-  { id: 'midia', label: 'Mídia paga' },
-  { id: 'lp', label: 'Landing page' },
-  { id: 'social', label: 'Social' },
-  { id: 'comercial', label: 'Comercial' },
-];
+/** Título de seção da página única (substitui as abas). */
+function TituloSecao({ titulo, sub }: { titulo: string; sub?: string }) {
+  return (
+    <div className="flex items-center gap-3 pt-4">
+      <span className="h-4 w-1 rounded-full bg-[#55f52f]" />
+      <h2 className="text-base font-black uppercase tracking-[0.08em] text-[#f4f7f8]">{titulo}</h2>
+      {sub && <span className="text-xs text-[#9aa4aa]">{sub}</span>}
+      <span className="h-px flex-1 bg-white/[0.08]" />
+    </div>
+  );
+}
 
 // ── Main Dashboard ───────────────────────────────────────────────────────────
 export default function GeneralDashboard() {
@@ -5447,23 +5450,7 @@ export default function GeneralDashboard() {
   const creativesFetchStartedRef = useRef('');
   const keywordsFetchStartedRef = useRef('');
   const igPostsFetchStartedRef = useRef('');
-  // Aba ativa do lead-gen, espelhada em ?aba= (replaceState nativo — o App
-  // Router sincroniza; evita useSearchParams, que exigiria Suspense na página).
-  const [aba, setAbaState] = useState<AbaDashboard>('geral');
-  useEffect(() => {
-    const q = new URLSearchParams(window.location.search).get('aba');
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (q && ABAS.some(t => t.id === q)) setAbaState(q as AbaDashboard);
-  }, []);
-  function setAba(id: AbaDashboard) {
-    setAbaState(id);
-    try {
-      const params = new URLSearchParams(window.location.search);
-      if (id === 'geral') params.delete('aba'); else params.set('aba', id);
-      const qs = params.toString();
-      window.history.replaceState(null, '', `${window.location.pathname}${qs ? `?${qs}` : ''}`);
-    } catch { /* ignore */ }
-  }
+
 
   const [alertsCollapsed, setAlertsCollapsed] = useState(() => {
     if (typeof window === 'undefined') return false;
@@ -7070,13 +7057,14 @@ export default function GeneralDashboard() {
                 selecionados: um painel por cliente com vínculo. */}
             {!modoFood && selectedClients.filter(c => ga4ByClient[c.id]?.ga4).map(client => (
               <PremiumPanel key={`ga4-${client.id}`}>
-                <div className="flex items-center justify-between px-4 pt-4 pb-3">
-                  <h3 className="flex items-center gap-2 text-sm font-black uppercase tracking-[0.07em] text-[#f4f7f8]">
-                    <span className="inline-block h-2.5 w-2.5 rounded-sm bg-[#6cff2f]" /> Landing page
-                    {selectedClients.length > 1 && <span className="text-[#9aa4aa]">· {client.name}</span>}
-                  </h3>
-                  <span className="text-[10px] text-[#7c868c]">Google Analytics 4</span>
-                </div>
+                {/* O título "Landing page" já vem da seção da página; aqui só o
+                    nome do cliente quando há vários painéis. */}
+                {selectedClients.length > 1 && (
+                  <div className="flex items-center justify-between px-4 pt-4 pb-1">
+                    <h3 className="text-sm font-black uppercase tracking-[0.07em] text-[#f4f7f8]">{client.name}</h3>
+                    <span className="text-[10px] text-[#7c868c]">Google Analytics 4</span>
+                  </div>
+                )}
                 <Ga4LandingPanel dados={ga4ByClient[client.id]?.ga4 ?? null} loading={ga4Loading} aviso={ga4ByClient[client.id]?.aviso} />
               </PremiumPanel>
             ))}
@@ -7106,16 +7094,13 @@ export default function GeneralDashboard() {
     </>
   );
 
-  // ── Abas (só lead-gen) ────────────────────────────────────────────────────
-  // Aba sem conteúdo para a seleção some; se a aba ativa sumir, cai na Visão geral.
-  const abaVisivel: Record<AbaDashboard, boolean> = {
-    geral: true,
+  // ── Seções da página única (só lead-gen) — seção sem conteúdo some ────────
+  const secaoVisivel = {
     midia: campaignsLoading || metricsLoading || totalSpend > 0 || campaigns.length > 0 || creatives.length > 0 || metaBalance > 0 || googleBalance > 0,
     lp: selectedClients.some(c => ga4ByClient[c.id]?.ga4),
     social: pageInsightsLoading || pageInsights.some(pi => pi.instagram),
     comercial: desempenhoLoading || vendedores.length > 0 || categorias.length > 0,
   };
-  const abaAtiva: AbaDashboard = abaVisivel[aba] ? aba : 'geral';
   const temGraficoCpl = diasSel.length >= 2 && gastoDia.some(v => v > 0) && leadsDia.some(v => v > 0);
 
   return (
@@ -7437,27 +7422,7 @@ export default function GeneralDashboard() {
               </>
             ) : (
               <>
-                {/* Abas do lead-gen — a aba ativa vive na URL (?aba=), então o
-                    link copiado abre na mesma aba. */}
-                <div role="tablist" aria-label="Seções do dashboard" className="flex gap-1 overflow-x-auto border-b border-white/[0.08]">
-                  {ABAS.filter(t => abaVisivel[t.id]).map(t => (
-                    <button
-                      key={t.id}
-                      type="button"
-                      role="tab"
-                      aria-selected={abaAtiva === t.id}
-                      onClick={() => setAba(t.id)}
-                      className={cn(
-                        '-mb-px whitespace-nowrap border-b-2 px-4 py-2.5 text-xs font-black uppercase tracking-[0.07em] transition-colors',
-                        abaAtiva === t.id ? 'border-[#55f52f] text-[#f4f7f8]' : 'border-transparent text-[#9aa4aa] hover:text-[#dce4e8]',
-                      )}
-                    >
-                      {t.label}
-                    </button>
-                  ))}
-                </div>
-
-                {abaAtiva === 'geral' && (
+                {/* Página única — ordem: negócio → mídia paga → landing page → social → comercial. */}
                   <>
                     <div className="grid gap-4 xl:grid-cols-2">
                       <BulletMetaCard
@@ -7523,21 +7488,36 @@ export default function GeneralDashboard() {
                       <ChannelSummaryTable rows={channelRows} metaCpl={cplMetaSel} />
                     </div>
                     {blocoCanais}
-                    {blocoResumoCliente}
                   </>
-                )}
 
-                {abaAtiva === 'midia' && (
+                {secaoVisivel.midia && (
                   <>
+                    <TituloSecao titulo="Mídia paga" sub="Meta Ads e Google Ads" />
                     <TrafegoResumoTable linhas={linhasTrafego} colunas={colunasTrafego} comparacao={rotuloComp} />
                     {blocoMeta}
                     {blocoGoogle}
                   </>
                 )}
 
-                {abaAtiva === 'lp' && blocoGa4}
-                {abaAtiva === 'social' && blocoInstagram}
-                {abaAtiva === 'comercial' && blocoComercial}
+                {secaoVisivel.lp && (
+                  <>
+                    <TituloSecao titulo="Landing page" sub="comportamento de quem chegou pelos anúncios" />
+                    {blocoGa4}
+                  </>
+                )}
+                {secaoVisivel.social && (
+                  <>
+                    <TituloSecao titulo="Social" sub="Instagram orgânico" />
+                    {blocoInstagram}
+                  </>
+                )}
+                {secaoVisivel.comercial && (
+                  <>
+                    <TituloSecao titulo="Comercial" sub="CRM" />
+                    {blocoComercial}
+                  </>
+                )}
+                {blocoResumoCliente}
               </>
             )}
           </div>
