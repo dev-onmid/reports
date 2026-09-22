@@ -34,7 +34,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const dateTo = request.nextUrl.searchParams.get('dateTo') ?? '';
   const faixas = faixasDoPeriodo(resolveMetaPeriod(period, dateFrom, dateTo));
 
-  const cacheKey = `ga4:v1:${clientId}:${faixas.atual.startDate}:${faixas.atual.endDate}`;
+  const cacheKey = `ga4:v3:${clientId}:${faixas.atual.startDate}:${faixas.atual.endDate}`;
   const cached = getCached(cacheKey);
   if (cached) return cachedJson(cached.data, true, cached.cachedAt);
 

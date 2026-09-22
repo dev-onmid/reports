@@ -2064,3 +2064,52 @@ E o estrago passou de "não criou": a função fazia `position = position + 1` A
 - **Migração que reporta sucesso sem ter feito nada é pior que migração que falha** — a rota agora devolve 500 com a lista de falhas.
 - **Reconstruir > empurrar**: posições são renumeradas do zero a partir da ordem atual, o que é idempotente e conserta buraco e colisão de uma vez.
 - **Verificar DEPOIS de aplicar, sempre**: a resposta da rota dizia "ok"; só a leitura do board no banco mostrou a verdade.
+
+## Landing page (GA4) — tráfego pago, audiência e comportamento (2026-09-21)
+
+Lâmina "Landing page" do dashboard (`src/lib/ga4-landing.ts` +
+`src/components/dashboard/ga4-landing-panel.tsx`, rota `/api/clients/[id]/ga4`,
+cache `ga4:v3`) ganhou 4 abas: **Visão geral** (KPIs + engajamento, tempo médio,
+novos, páginas/sessão, vídeos), **Tráfego pago** (qualidade por canal; campanhas
+do Google Ads com custo/cliques/custo por conversão; todas as campanhas por UTM —
+Meta entra aqui; palavras-chave; termos pesquisados), **Audiência** (dispositivo,
+cidade, novos x recorrentes, idade, gênero, grade dia da semana × hora) e
+**Comportamento** (rolagem 25/50/75/90, seções vistas, funil do formulário,
+página de entrada, vídeos, posição do clique).
+
+- ⚠️ **Bug corrigido (estava no ar desde 04/09): com DUAS faixas de data o GA4
+  põe a dimensão `dateRange` como ÚLTIMA coluna**, não a primeira. O parse lia
+  `dimensionValues[1]` como nome do evento → WhatsApp/telefone/formulário/
+  contatos saíam SEMPRE 0. Agora a posição vem de `dimensionHeaders`
+  (`indiceDim`). Conferido na Romanza LP: 11 WhatsApp / 5 formulários.
+- Pedidos vão em `batchRunReports` (lotes de 5, até 3 lotes simultâneos — o GA4
+  limita pedidos concorrentes por propriedade); lote que falha é refeito um a um.
+- Dimensão personalizada só é pedida se estiver registrada (`/metadata`) —
+  uma só inexistente derruba o lote inteiro com 400.
+- "Conv." = eventos-chave (uma sessão pode ter vários); "Converteu" =
+  `sessionKeyEventRate` (guardado como contagem `sessoesConv` para somar
+  propriedades). Custo/conv. = custo ÷ sessões que converteram.
+- Custo, palavra-chave e termo só vêm com a propriedade GA4 **vinculada ao
+  Google Ads**; sem vínculo o painel avisa (Romanza LP em 21/09: sem vínculo —
+  campanhas aparecem só como ID numérico do gclid). Idade/gênero dependem do
+  Google Signals e somem com pouco volume.
+- Contatos contam só os eventos do padrão ONMID (`click_whatsapp`,
+  `click_telefone`, `lead_form`). Site com nomes próprios (Londrigifts:
+  `click_whatsapp_topo`…) mostra 0 contatos, mas conversões por canal/campanha
+  (keyEvents) funcionam.
+- **WhatsApp x Formulário x Telefone separados** (pedido do Matheus, 21/09) em
+  toda tabela: `categoriaConversao` classifica cada evento-chave pelo NOME
+  (whats/wpp → WhatsApp; form/lead/orçamento/cadastro/confirmado → Formulário;
+  telefone → Telefone; resto — purchase, maps — só no total). Cada corte tem um
+  relatório irmão `conv:<corte>` com `eventName` como última dimensão (métrica
+  `keyEvents:<nome>` não serve: nome com acento, ex. `Solicitou_orçamento`, dá
+  400). Site fora do padrão ONMID (Ingleses `envio_whatsapp`/
+  `form_contato_enviado`, Londrigifts) passa a ter WhatsApp/Formulário nos KPIs
+  via `completaTotais` — só preenche o que o evento padrão deixou zerado.
+- Palavras-chave e termos: lista COMPLETA dos que trouxeram contato (limite
+  1000 no GA4; com 250 a Ingleses perdia 13 termos de pouca visita) + bloco
+  "sem nenhum contato" (10+ visitas). Termos: o Google esconde os de pouco
+  volume e os da PMax — a soma fica abaixo do total (Ingleses: 394 de 645).
+- Teste: `node scratchpad/test-ga4-landing.mjs` (build no cabeçalho do arquivo).
+  Harness visual: `scratchpad/harness-ga4.tsx`, com `?json=arquivo.json` para
+  ver um consolidado real (não versionar dado de cliente).

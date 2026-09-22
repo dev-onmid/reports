@@ -7164,10 +7164,10 @@ export default function GeneralDashboard() {
                 GA4 vinculada (Integrações → Google Analytics). Vários clientes
                 selecionados: um painel por cliente com vínculo. */}
             {!modoFood && selectedClients.filter(c => ga4ByClient[c.id]?.ga4).map(client => (
-              <PremiumPanel key={`ga4-${client.id}`} className="border-[#F9AB00]/24 shadow-[0_0_40px_rgba(249,171,0,0.08)]">
+              <PremiumPanel key={`ga4-${client.id}`}>
                 <div className="flex items-center justify-between px-4 pt-4 pb-3">
                   <h3 className="flex items-center gap-2 text-sm font-black uppercase tracking-[0.07em] text-[#f4f7f8]">
-                    <span className="inline-block h-2.5 w-2.5 rounded-sm bg-[#F9AB00]" /> Landing page
+                    <span className="inline-block h-2.5 w-2.5 rounded-sm bg-[#6cff2f]" /> Landing page
                     {selectedClients.length > 1 && <span className="text-[#9aa4aa]">· {client.name}</span>}
                   </h3>
                   <span className="text-[10px] text-[#7c868c]">Google Analytics 4</span>
