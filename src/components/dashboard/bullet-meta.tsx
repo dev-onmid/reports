@@ -3,6 +3,7 @@
 import type { ElementType, ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 import { progressoVisual } from '@/lib/progresso-cor';
+import { T } from '@/lib/dashboard-tipografia';
 
 /**
  * Card de meta em "bullet graph" (Stephen Few): uma barra só responde as três
@@ -73,7 +74,7 @@ export function BulletMetaCard({
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <h2 className="text-sm font-black uppercase tracking-[0.07em] text-[#f4f7f8]">{titulo}</h2>
+            <h2 className={T.cardTitulo}>{titulo}</h2>
             <span
               className="rounded-[4px] bg-[#172027] px-1.5 py-0.5 text-[10px] font-semibold text-[#87929B]"
               title={fonteTitulo}
@@ -84,22 +85,22 @@ export function BulletMetaCard({
 
           <div className="mt-4 grid grid-cols-3 gap-3">
             <div className="min-w-0">
-              <p className="truncate font-heading text-3xl leading-none text-[#f4f7f8]">
+              <p className={cn('truncate', T.kpiValor)}>
                 {realizado > 0 ? formatar(realizado) : '—'}
               </p>
-              <p className="mt-1.5 text-xs font-medium text-[#a7b0b6]">Realizado</p>
+              <p className={cn('mt-1.5', T.valorRotulo)}>Realizado</p>
             </div>
             {mostraEsperado ? (
               <div className="min-w-0">
-                <p className="truncate font-heading text-2xl leading-none text-[#f4f7f8]">{formatar(esperado)}</p>
-                <p className="mt-1.5 flex items-center gap-1.5 text-xs font-medium text-[#a7b0b6]">
+                <p className={cn('truncate', T.kpiValorSec)}>{formatar(esperado)}</p>
+                <p className={cn('mt-1.5 flex items-center gap-1.5', T.valorRotulo)}>
                   <span className="inline-block h-3 w-0.5 bg-[#f4f7f8]" /> {rotuloEsperado}
                 </p>
               </div>
             ) : <div />}
             <div className="min-w-0">
-              <p className="truncate font-heading text-2xl leading-none text-[#f4f7f8]">{temMeta ? formatar(metaMes) : '—'}</p>
-              <p className="mt-1.5 text-xs font-medium text-[#a7b0b6]">Meta do mês</p>
+              <p className={cn('truncate', T.kpiValorSec)}>{temMeta ? formatar(metaMes) : '—'}</p>
+              <p className={cn('mt-1.5', T.valorRotulo)}>Meta do mês</p>
             </div>
           </div>
 
@@ -155,7 +156,7 @@ export function BulletMetaCard({
               )}
             </div>
           ) : (
-            <p className="mt-5 text-xs text-[#9aa4aa]">Sem meta cadastrada no planejamento do cliente.</p>
+            <p className={cn('mt-5', T.cardSub)}>Sem meta cadastrada no planejamento do cliente.</p>
           )}
           {rodape && <div className="mt-2 text-xs text-[#a7b0b6]">{rodape}</div>}
         </div>

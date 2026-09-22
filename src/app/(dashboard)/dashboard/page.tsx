@@ -60,6 +60,7 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { useClients } from '@/lib/client-store';
 import { cn, formatCurrencyBRL } from '@/lib/utils';
+import { T } from '@/lib/dashboard-tipografia';
 import { ClientAvatar } from '@/components/client-avatar';
 import { CreativeRevenueStrip, type CriativoReceita } from '@/components/dashboard/creative-revenue-strip';
 import { VendedoresCard, CategoriasCard, type LinhaVendedor, type LinhaCategoria } from '@/components/dashboard/desempenho-comercial';
@@ -2364,7 +2365,7 @@ function CampaignPerformanceTable({
 
             <CampaignStatusDot status={displayStatus} />
             <div className="min-w-0">
-              <p className={cn('truncate font-semibold', row.level === 0 ? 'text-sm font-bold' : row.level === 1 ? 'text-xs' : 'text-[11px] text-foreground/55')}>
+              <p className={cn('truncate font-semibold', row.level === 0 ? 'text-xs font-bold' : row.level === 1 ? 'text-xs' : 'text-[11px] text-foreground/55')}>
                 {displayName}
               </p>
               {row.kind === 'campaign' && (
@@ -2560,7 +2561,7 @@ function CampaignPerformanceTable({
         >
           <table className={cn('w-full text-left', mostrarIS ? 'min-w-[1080px]' : 'min-w-[860px]')}>
             <thead className="border-b border-white/15 bg-white/[0.06] sticky top-0 z-10">
-              <tr className="text-[10px] font-bold uppercase tracking-widest text-foreground/62">
+              <tr className={T.tabelaCab}>
                 <th className="px-4 py-3">Nome</th>
                 <th className="px-4 py-3 text-center">Plataforma</th>
                 <th className="px-4 py-3 text-right">Verba/dia</th>
@@ -4405,10 +4406,10 @@ function QuickMetricCard({ title, value, change, icon: Icon, inverseChange, neut
           <Icon style={{ width: iconSize * 0.5, height: iconSize * 0.5 }} />
         </span>
         <div className="min-w-0 flex-1">
-          <p className="text-[11px] font-black uppercase tracking-[0.06em] text-[#dce4e8]" style={styleTexto(estilo)} title={dica}>{estilo.texto ?? title}</p>
-          <p className="mt-2 font-heading text-2xl leading-none text-[#f4f7f8]" style={styleValor(estilo)} title={dica}>{value}</p>
-          <p className={cn('mt-1 text-xs font-bold', !hasChange || neutralChange ? 'text-[#a7b0b6]' : positive ? 'text-[#6cff2f]' : 'text-red-400')}>
-            {hasChange ? `${change >= 0 ? '+' : ''}${change.toFixed(1).replace('.', ',')}%` : '—'} <span className="font-medium text-[#a7b0b6]">{comparacao}</span>
+          <p className={T.kpiRotulo} style={styleTexto(estilo)} title={dica}>{estilo.texto ?? title}</p>
+          <p className={cn('mt-2', T.kpiValor)} style={styleValor(estilo)} title={dica}>{value}</p>
+          <p className={cn('mt-1.5', T.delta, !hasChange || neutralChange ? 'text-[#a7b0b6]' : positive ? 'text-[#6cff2f]' : 'text-red-400')}>
+            {hasChange ? `${change >= 0 ? '+' : ''}${change.toFixed(1).replace('.', ',')}%` : '—'} <span className={T.comparacao}>{comparacao}</span>
           </p>
           {serie && serie.length >= 2 && serie.some(v => v > 0) && <KpiSparkline values={serie} />}
         </div>
@@ -4570,19 +4571,19 @@ function CanalDonutCard({ titulo, fatiasBrutas, total, semCanal, formato, aviso 
   })();
 
   return (
-    <PremiumPanel className="p-4">
+    <PremiumPanel className="p-5">
       <div className="mb-3 flex items-baseline justify-between gap-2">
-        <h3 className="flex items-center gap-2 text-sm font-black uppercase tracking-[0.07em] text-[#f4f7f8]">
+        <h3 className={cn('flex items-center gap-2', T.cardTitulo)}>
           <DollarSign className="h-4 w-4 text-[#6cff2f]" /> {titulo}
         </h3>
         {total > 0 && (
-          <span className="text-xs font-semibold text-[#9aa4aa]">
+          <span className={T.cardSub}>
             {fatias.length} {fatias.length === 1 ? 'canal' : 'canais'}
           </span>
         )}
       </div>
       {fatias.length === 0 ? (
-        <p className="py-6 text-center text-xs text-[#9aa4aa]">Sem dado no período.</p>
+        <p className={cn('py-6 text-center', T.cardSub)}>Sem dado no período.</p>
       ) : (
         <div className="grid items-center gap-4 md:grid-cols-[170px_1fr]">
         <Donut fatias={fatiasDonut} centroValor={premiumValue(total, formato)} formatar={(n) => premiumValue(n, formato)} />
@@ -4599,9 +4600,9 @@ function CanalDonutCard({ titulo, fatiasBrutas, total, semCanal, formato, aviso 
                   ) : (
                     <span className="h-2.5 w-2.5 shrink-0 self-center rounded-sm" style={{ backgroundColor: cor }} />
                   )}
-                  <span className="min-w-0 flex-1 truncate text-xs font-semibold text-[#dce4e8]">{o.label}</span>
-                  <span className="w-12 shrink-0 text-right text-[10px] text-[#9aa4aa]">{pctTotal.toFixed(1).replace('.', ',')}%</span>
-                  <span className="shrink-0 whitespace-nowrap text-right text-xs font-bold text-[#f4f7f8]">{premiumValue(o.valor, formato)}</span>
+                  <span className={cn('min-w-0 flex-1 truncate', T.listaRotulo)}>{o.label}</span>
+                  <span className={cn('w-12 shrink-0 text-right tabular-nums', T.nota)}>{pctTotal.toFixed(1).replace('.', ',')}%</span>
+                  <span className="shrink-0 whitespace-nowrap text-right text-xs font-bold tabular-nums text-[#f4f7f8]">{premiumValue(o.valor, formato)}</span>
                 </div>
               </div>
             );
@@ -4613,7 +4614,7 @@ function CanalDonutCard({ titulo, fatiasBrutas, total, semCanal, formato, aviso 
           "não informado". A verdade é que o CRM não registrou de onde veio —
           é lacuna de cadastro, não canal. */}
       {fatias.length > 0 && pctSemCanal >= 20 && (
-        <p className="mt-3 border-t border-white/[0.07] pt-2.5 text-[10px] leading-snug text-amber-300/80">
+        <p className="mt-3 border-t border-white/[0.07] pt-2.5 text-[11px] leading-snug text-amber-300/80">
           {pctSemCanal >= 99.5 ? 'Tudo' : `${pctSemCanal.toFixed(0)}%`} do período está{' '}
           <strong>sem canal registrado</strong> no CRM. {aviso}
         </p>
@@ -4675,7 +4676,7 @@ function IgMark({ className }: { className?: string }) {
 function IgDelta({ v }: { v: number | null }) {
   if (v === null || !Number.isFinite(v)) return <span className="text-[#7c868c]">—</span>;
   const cor = Math.abs(v) < 0.05 ? 'text-[#a7b0b6]' : v > 0 ? 'text-[#6cff2f]' : 'text-red-400';
-  return <span className={cn('font-bold', cor)}>{v > 0 ? '+' : ''}{v.toFixed(1).replace('.', ',')}%</span>;
+  return <span className={cn(T.delta, cor)}>{v > 0 ? '+' : ''}{v.toFixed(1).replace('.', ',')}%</span>;
 }
 
 function IgKpi({ label, icon: Icon, valor, variacao, comparacao, sub, subRuim }: {
@@ -4685,14 +4686,14 @@ function IgKpi({ label, icon: Icon, valor, variacao, comparacao, sub, subRuim }:
   return (
     <div className="rounded-[12px] border border-white/[0.07] bg-[#071014]/80 p-4">
       <div className="flex items-center gap-2">
-        <span className="flex h-7 w-7 items-center justify-center rounded-lg border border-[#E1306C]/25 bg-[#E1306C]/10 text-[#ff5c93]">
-          <Icon className="h-3.5 w-3.5" />
+        <span className={cn(T.iconeCaixa, 'border border-[#E1306C]/25 bg-[#E1306C]/10 text-[#ff5c93]')}>
+          <Icon className={T.icone} />
         </span>
-        <p className="text-[11px] font-black uppercase tracking-[0.06em] text-[#dce4e8]">{label}</p>
+        <p className={T.kpiRotulo}>{label}</p>
       </div>
-      <p className="mt-3 font-heading text-3xl leading-none text-[#f4f7f8]">{valor}</p>
-      <p className="mt-1.5 text-xs"><IgDelta v={variacao} /> <span className="text-[#9aa4aa]">{comparacao}</span></p>
-      {sub && <p className={cn('mt-1 text-[11px]', subRuim ? 'text-red-400' : 'text-[#7c868c]')}>{sub}</p>}
+      <p className={cn('mt-3', T.kpiValor)}>{valor}</p>
+      <p className="mt-1.5 text-xs"><IgDelta v={variacao} /> <span className={T.comparacao}>{comparacao}</span></p>
+      {sub && <p className={cn('mt-1', T.nota, subRuim && 'text-red-400')}>{sub}</p>}
     </div>
   );
 }
@@ -4704,10 +4705,10 @@ function IgMini({ label, icon: Icon, valor, variacao }: {
     <div className="flex items-center gap-3 bg-[#0b1317] px-4 py-3">
       <Icon className="h-4 w-4 shrink-0 text-[#ff5c93]" />
       <div className="min-w-0">
-        <p className="truncate text-[10px] font-black uppercase tracking-[0.06em] text-[#9aa4aa]">{label}</p>
-        <p className="flex items-baseline gap-2">
-          <span className="font-heading text-lg leading-none text-[#f4f7f8]">{valor}</span>
-          <span className="text-[10px]"><IgDelta v={variacao} /></span>
+        <p className={cn('truncate', T.miniRotulo)}>{label}</p>
+        <p className="mt-1 flex items-baseline gap-2">
+          <span className={T.miniValor}>{valor}</span>
+          <IgDelta v={variacao} />
         </p>
       </div>
     </div>
@@ -4741,10 +4742,10 @@ function SimpleFunnel({ steps, totalRate, fonteLabel, onStageClick }: {
     <PremiumPanel className="p-5">
       <div className="mb-4 flex items-center justify-between">
         <div className="flex items-baseline gap-2">
-          <h3 className="text-sm font-black uppercase tracking-[0.07em] text-[#f4f7f8]">Funil de Performance</h3>
-          {fonteLabel && <span className="text-[10px] text-[#9aa4aa]">· {fonteLabel}</span>}
+          <h3 className={T.cardTitulo}>Funil de Performance</h3>
+          {fonteLabel && <span className={T.cardSub}>· {fonteLabel}</span>}
         </div>
-        <span className="text-xs text-[#9aa4aa]" title="Fechamentos ÷ contatos do funil">
+        <span className={T.cardSub} title="Fechamentos ÷ contatos do funil">
           Conversão geral: <span className="font-black text-[#6cff2f]">{totalRate}</span>
         </span>
       </div>
@@ -4790,7 +4791,7 @@ function SimpleFunnel({ steps, totalRate, fonteLabel, onStageClick }: {
                   <span className="font-heading text-xl text-white" style={{ textShadow: '0 1px 3px rgba(0,0,0,0.7)' }}>
                     {Math.round(step.actual).toLocaleString('pt-BR')}
                   </span>
-                  <span className="mt-0.5 text-[9px] font-black uppercase tracking-wider text-white/90" style={{ textShadow: '0 1px 2px rgba(0,0,0,0.7)' }}>
+                  <span className="mt-0.5 text-[10px] font-black uppercase tracking-[0.06em] text-white/90" style={{ textShadow: '0 1px 2px rgba(0,0,0,0.7)' }}>
                     {step.label}
                   </span>
                 </div>
@@ -4800,16 +4801,16 @@ function SimpleFunnel({ steps, totalRate, fonteLabel, onStageClick }: {
               <div className="min-w-0">
                 {actualPct !== null ? (
                   <p className="whitespace-nowrap text-xs">
-                    <span className={cn('font-heading text-lg leading-none', isBottleneck ? 'text-red-400' : 'text-[#6cff2f]')} title="Conversão do degrau anterior para este">
+                    <span className={cn(T.miniValor, isBottleneck ? 'text-red-400' : 'text-[#6cff2f]')} title="Conversão do degrau anterior para este">
                       {actualPct.toFixed(1).replace('.', ',')}%
                     </span>
                     {plannedPct !== null && plannedPct > 0 && (
-                      <span className="ml-1.5 text-[10px] text-[#9aa4aa]" title="Conversão planejada para este degrau">meta {plannedPct.toFixed(0)}%</span>
+                      <span className={cn('ml-1.5', T.nota)} title="Conversão planejada para este degrau">meta {plannedPct.toFixed(0)}%</span>
                     )}
-                    {isBottleneck && <span className="ml-1 text-[10px] font-black text-red-400" title="Gargalo: abaixo de 85% da conversão planejada">⚠ gargalo</span>}
+                    {isBottleneck && <span className="ml-1 text-[11px] font-black text-red-400" title="Gargalo: abaixo de 85% da conversão planejada">⚠ gargalo</span>}
                   </p>
                 ) : (
-                  <p className="text-[10px] uppercase tracking-wider text-[#7c868c]">topo do funil</p>
+                  <p className={T.miniRotulo}>topo do funil</p>
                 )}
                 {step.detalhes && step.detalhes.length > 0 && (
                   <div className="mt-1 flex flex-wrap gap-1">
@@ -4966,16 +4967,16 @@ function ChannelSummaryTable({ rows, metaCpl }: {
   // ⚠️ A coluna "Conversão" saiu: dividia leads do Meta pelo ALCANCE e
   // conversões do Google pelos CLIQUES — duas taxas sem relação lado a lado.
   return (
-    <PremiumPanel className="p-4">
+    <PremiumPanel className="p-5">
       <div className="mb-4 flex items-center gap-2">
-        <h3 className="text-sm font-black uppercase tracking-[0.07em] text-[#f4f7f8]">Resumo por Canal</h3>
+        <h3 className={T.cardTitulo}>Resumo por Canal</h3>
         <span title="Status compara o CPL de cada canal com a meta de CPL do planejamento: até a meta = Na meta; até 1,5× = Atenção; acima = Acima.">
           <Info className="h-3.5 w-3.5 text-[#a7b0b6]" />
         </span>
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[520px] text-left text-xs">
-          <thead className="text-[10px] uppercase tracking-[0.08em] text-[#9aa4aa]">
+        <table className={cn('w-full min-w-[520px] text-left tabular-nums', T.tabelaCel)}>
+          <thead className={T.tabelaCab}>
             <tr>
               <th className="py-2">Canal</th>
               <th className="text-right">Investimento</th>
@@ -5012,12 +5013,12 @@ function CompactCampaignTable({ campaigns, loading, platform }: {
   platform: AdsPlatform;
 }) {
   const rows = campaigns.slice(0, 4);
-  if (loading) return <div className="py-8 text-center text-sm text-[#9aa4aa]">Carregando campanhas...</div>;
-  if (!rows.length) return <div className="py-8 text-center text-sm text-[#9aa4aa]">Nenhuma campanha encontrada.</div>;
+  if (loading) return <div className="py-8 text-center text-xs text-[#9aa4aa]">Carregando campanhas...</div>;
+  if (!rows.length) return <div className="py-8 text-center text-xs text-[#9aa4aa]">Nenhuma campanha encontrada.</div>;
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[560px] text-left text-xs">
-        <thead className="text-[10px] uppercase tracking-[0.08em] text-[#9aa4aa]">
+      <table className={cn('w-full min-w-[560px] text-left tabular-nums', T.tabelaCel)}>
+        <thead className={T.tabelaCab}>
           <tr>
             <th className="py-2">Campanha</th>
             <th>Investimento</th>
@@ -5055,12 +5056,12 @@ function CompactKeywordTable({ keywords, loading, metaCpl }: { keywords: GoogleK
     .sort((a, b) => temCusto ? (b.spend ?? 0) - (a.spend ?? 0) : (b.conversions ?? 0) - (a.conversions ?? 0))
     .slice(0, 5);
   const temCtr = rows.some(k => (k.ctr ?? 0) > 0);
-  if (loading) return <div className="py-8 text-center text-sm text-[#9aa4aa]">Carregando palavras-chave...</div>;
-  if (!rows.length) return <div className="py-8 text-center text-sm text-[#9aa4aa]">Nenhuma palavra-chave encontrada.</div>;
+  if (loading) return <div className="py-8 text-center text-xs text-[#9aa4aa]">Carregando palavras-chave...</div>;
+  if (!rows.length) return <div className="py-8 text-center text-xs text-[#9aa4aa]">Nenhuma palavra-chave encontrada.</div>;
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[620px] text-left text-xs">
-        <thead className="text-[10px] uppercase tracking-[0.08em] text-[#9aa4aa]">
+      <table className={cn('w-full min-w-[620px] text-left tabular-nums', T.tabelaCel)}>
+        <thead className={T.tabelaCab}>
           <tr>
             <th className="py-2">Palavra-chave</th>
             <th className="text-right">Investimento</th>
@@ -5081,7 +5082,7 @@ function CompactKeywordTable({ keywords, loading, metaCpl }: { keywords: GoogleK
               : keyword.clicks > 0 ? statusCplComGasto(gasto, 0, metaCpl) : 'sem_dado';
             return (
               <tr key={`${keyword.text}-${index}`} className="text-[#f4f7f8]">
-                <td className="max-w-[220px] truncate py-3" title={keyword.text}><span className="mr-2 rounded bg-[#6cff2f]/18 px-1.5 py-0.5 text-[#6cff2f]">{index + 1}</span>{keyword.text}</td>
+                <td className="max-w-[220px] truncate py-3" title={keyword.text}><span className="mr-2 rounded bg-[#6cff2f]/18 px-1.5 py-0.5 font-bold text-[#6cff2f]">{index + 1}</span>{keyword.text}</td>
                 <td className="whitespace-nowrap text-right">{gasto > 0 ? premiumValue(gasto, 'currency') : '—'}</td>
                 <td className="text-right">{premiumValue(keyword.clicks)}</td>
                 {temCtr && <td className="whitespace-nowrap text-right">{keyword.ctr > 0 ? premiumValue(keyword.ctr, 'percent') : '—'}</td>}
@@ -5179,16 +5180,16 @@ function HorizontalCreativeCard({ creative, index, onPreview }: {
       </div>
       <div className="p-2">
         {creative.campaignName && (
-          <p className="mb-1 truncate text-[9px] font-semibold uppercase tracking-[0.05em] text-[#6cff2f]/70" title={creative.campaignName}>
+          <p className="mb-1 truncate text-[10px] font-semibold uppercase tracking-[0.06em] text-[#6cff2f]/70" title={creative.campaignName}>
             {creative.campaignName}
           </p>
         )}
-        <p className="mb-2 truncate text-[10px] font-bold text-[#dce4e8]" title={creative.adName}>{creative.adName}</p>
+        <p className={cn('mb-2 truncate', T.listaRotulo)} title={creative.adName}>{creative.adName}</p>
         <div className="grid grid-cols-3 gap-1">
           {metrics.map(m => (
             <div key={m.label} className="rounded border border-white/[0.07] bg-white/[0.04] px-1 py-1">
-              <p className="text-[8px] font-bold uppercase tracking-wider text-[#9aa4aa]">{m.label}</p>
-              <p className="text-[10px] font-black text-[#f4f7f8]">{m.value}</p>
+              <p className="truncate text-[9px] font-black uppercase tracking-[0.06em] text-[#9aa4aa]">{m.label}</p>
+              <p className="truncate text-[11px] font-black tabular-nums text-[#f4f7f8]">{m.value}</p>
             </div>
           ))}
         </div>
@@ -5212,7 +5213,7 @@ function CreativeHorizontalStrip({ creatives, loading, onPreview }: {
     );
   }
   if (!creatives.length) {
-    return <div className="py-8 text-center text-sm text-[#9aa4aa]">Nenhum criativo encontrado.</div>;
+    return <div className="py-8 text-center text-xs text-[#9aa4aa]">Nenhum criativo encontrado.</div>;
   }
   // "Melhores" = mais leads e, no empate, menor CPL. A API ordena por gasto —
   // que mostra o que mais CUSTOU, não o que mais rendeu. Sem nenhum lead no
@@ -5240,14 +5241,14 @@ type LinhaTrafego = { plataforma: string; logo: ReactNode; celulas: CelulaTrafeg
 
 function TrafegoResumoTable({ linhas, colunas, comparacao }: { linhas: LinhaTrafego[]; colunas: string[]; comparacao: string }) {
   return (
-    <PremiumPanel className="p-4">
+    <PremiumPanel className="p-5">
       <div className="mb-3 flex flex-wrap items-baseline gap-2">
-        <h3 className="text-sm font-black uppercase tracking-[0.07em] text-[#f4f7f8]">Resumo de Tráfego</h3>
-        <span className="text-[10px] text-[#9aa4aa]">variação {comparacao}</span>
+        <h3 className={T.cardTitulo}>Resumo de Tráfego</h3>
+        <span className={T.cardSub}>variação {comparacao}</span>
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[820px] text-left text-xs">
-          <thead className="text-[10px] uppercase tracking-[0.08em] text-[#9aa4aa]">
+        <table className={cn('w-full min-w-[820px] text-left tabular-nums', T.tabelaCel)}>
+          <thead className={T.tabelaCab}>
             <tr>
               <th className="py-2">Plataforma</th>
               {colunas.map(c => <th key={c} className="text-right">{c}</th>)}
@@ -5262,9 +5263,9 @@ function TrafegoResumoTable({ linhas, colunas, comparacao }: { linhas: LinhaTraf
                   const bom = tem && (c.inverso ? c.delta! <= 0 : c.delta! >= 0);
                   return (
                     <td key={colunas[i]} className="whitespace-nowrap py-3 text-right align-top">
-                      <span className="font-heading text-base leading-none">{c.valor}</span>
+                      <span className={T.miniValor}>{c.valor}</span>
                       {tem && (
-                        <span className={cn('block text-[10px] font-bold', c.neutro ? 'text-[#a7b0b6]' : bom ? 'text-[#6cff2f]' : 'text-red-400')}>
+                        <span className={cn('mt-1 block', T.delta, c.neutro ? 'text-[#a7b0b6]' : bom ? 'text-[#6cff2f]' : 'text-red-400')}>
                           {c.delta! >= 0 ? '+' : ''}{c.delta!.toFixed(1).replace('.', ',')}%
                         </span>
                       )}
@@ -5285,8 +5286,8 @@ function TituloSecao({ titulo, sub }: { titulo: string; sub?: string }) {
   return (
     <div className="flex items-center gap-3 pt-4">
       <span className="h-4 w-1 rounded-full bg-[#55f52f]" />
-      <h2 className="text-base font-black uppercase tracking-[0.08em] text-[#f4f7f8]">{titulo}</h2>
-      {sub && <span className="text-xs text-[#9aa4aa]">{sub}</span>}
+      <h2 className={T.secao}>{titulo}</h2>
+      {sub && <span className={T.cardSub}>{sub}</span>}
       <span className="h-px flex-1 bg-white/[0.08]" />
     </div>
   );
@@ -6598,7 +6599,7 @@ export default function GeneralDashboard() {
       {/* A faixa lista O QUE está fora do padrão — antes só dizia "N alertas". */}
       {!metricsLoading && alerts.length > 0 && (
         <div className="rounded-[14px] border border-amber-400/20 bg-amber-400/[0.06] px-4 py-3">
-          <p className="mb-2 flex items-center gap-2 text-xs font-black uppercase tracking-[0.07em] text-amber-200">
+          <p className="mb-2 flex items-center gap-2 text-sm font-black uppercase tracking-[0.07em] text-amber-200">
             <AlertTriangle className="h-3.5 w-3.5" />
             {alerts.length} alerta{alerts.length > 1 ? 's' : ''} fora do padrão
           </p>
@@ -6693,15 +6694,15 @@ export default function GeneralDashboard() {
               const igHandles = allIg.map(d => d.username).filter(Boolean);
               return (
                 <PremiumPanel className="border-[#E1306C]/24 shadow-[0_0_40px_rgba(225,48,108,0.10)]">
-                  <div className="flex items-center justify-between px-4 pt-4 pb-3">
-                    <h3 className="flex items-center gap-2 text-sm font-black uppercase tracking-[0.07em] text-[#f4f7f8]">
+                  <div className="flex items-center justify-between px-5 pt-5 pb-3">
+                    <h3 className={cn('flex items-center gap-2', T.cardTitulo)}>
                       <IgMark className="h-5 w-5" /> Instagram
                     </h3>
                     {igHandles.length > 0 && (
-                      <span className="text-[10px] text-[#9aa4aa]">{igHandles.map(h => `@${h}`).join(', ')}</span>
+                      <span className={T.cardSub}>{igHandles.map(h => `@${h}`).join(', ')}</span>
                     )}
                   </div>
-                  <div className="px-4 pb-4">
+                  <div className="px-5 pb-5">
                     {/* Mesmo padrão da Landing page: 4 números grandes + faixa
                         compacta — 8 caixinhas numa linha ficavam espremidas e
                         desproporcionais aos outros cards da página. */}
@@ -6787,9 +6788,9 @@ export default function GeneralDashboard() {
                 quando há responsável ou produto no período — sem isso seria
                 uma seção vazia num cliente que não usa CRM com vendedores. */}
             {(desempenhoLoading || vendedores.length > 0 || categorias.length > 0) && (
-              <PremiumPanel className="p-4">
+              <PremiumPanel className="p-5">
                 <div className="mb-4 flex items-center gap-2">
-                  <h3 className="text-sm font-bold uppercase tracking-[0.07em] text-[#F1F4F5]">
+                  <h3 className={T.cardTitulo}>
                     Performance comercial
                   </h3>
                   <span
@@ -6813,15 +6814,15 @@ export default function GeneralDashboard() {
     <>
             {/* ── Meta Ads: campanhas expansíveis + criativos ── */}
             <PremiumPanel className="border-[#168BFF]/28 shadow-[0_0_40px_rgba(22,139,255,0.12)]">
-              <div className="flex items-center px-4 pt-4 pb-3">
-                <h3 className="flex items-center gap-2 text-sm font-black uppercase tracking-[0.07em] text-[#f4f7f8]">
+              <div className="flex items-center px-5 pt-5 pb-3">
+                <h3 className={cn('flex items-center gap-2', T.cardTitulo)}>
                   <MetaAdsMark className="h-5 w-5 text-[#168BFF]" /> Meta Ads
                 </h3>
               </div>
 
               {/* Campanhas com Veiculação — expansível em cascata */}
-              <div className="border-b border-white/[0.06] px-4 pb-4">
-                <div className="mb-3 text-xs font-black uppercase tracking-[0.07em] text-[#dce4e8]">
+              <div className="border-b border-white/[0.06] px-5 pb-5">
+                <div className={cn('mb-3', T.subBloco)}>
                   Campanhas com Veiculação
                 </div>
                 <CampaignPerformanceTable
@@ -6840,8 +6841,8 @@ export default function GeneralDashboard() {
                   que ausência, porque parece número zerado em vez de dado que
                   ainda não existe. */}
               {(criativosReceitaLoading || criativosReceita.length > 0) && (
-                <div className="border-b border-white/[0.06] px-4 pb-4">
-                  <div className="mb-1 flex items-center gap-2 text-xs font-black uppercase tracking-[0.07em] text-[#dce4e8]">
+                <div className="border-b border-white/[0.06] px-5 pb-5">
+                  <div className={cn('mb-1 flex items-center gap-2', T.subBloco)}>
                     Faturamento por Criativo
                     <span
                       className="rounded bg-[#6cff2f]/12 px-1.5 py-0.5 text-[9px] font-black text-[#6cff2f]"
@@ -6850,7 +6851,7 @@ export default function GeneralDashboard() {
                       CRM
                     </span>
                   </div>
-                  <p className="mb-3 text-[10px] text-[#9aa4aa]">
+                  <p className={cn('mb-3', T.cardSub)}>
                     Vendas do período que dá para rastrear até o anúncio que trouxe o lead
                     {criativosReceita.length > 0 && (
                       <> · total atribuído {premiumValue(criativosReceitaTotal || criativosReceita.reduce((s, c) => s + c.receita, 0), 'currency')}</>
@@ -6861,8 +6862,8 @@ export default function GeneralDashboard() {
               )}
 
               {/* Melhores Criativos — scroll horizontal, abaixo das campanhas */}
-              <div className="px-4 py-4">
-                <div className="mb-3 flex items-center gap-2 text-xs font-black uppercase tracking-[0.07em] text-[#dce4e8]">
+              <div className="px-5 py-5">
+                <div className={cn('mb-3 flex items-center gap-2', T.subBloco)}>
                   Melhores Criativos
                   <span title="Ordenados por leads (e menor CPL no empate); sem leads no período, por investimento.">
                     <Info className="h-3.5 w-3.5 text-[#9aa4aa]" />
@@ -6882,15 +6883,15 @@ export default function GeneralDashboard() {
                 houver, aparece no capítulo Tráfego da DeliveryView. */}
             {!modoFood && (
             <PremiumPanel className="border-[#4285F4]/24 shadow-[0_0_40px_rgba(66,133,244,0.10)]">
-              <div className="flex items-center px-4 pt-4 pb-3">
-                <h3 className="flex items-center gap-2 text-sm font-black uppercase tracking-[0.07em] text-[#f4f7f8]">
+              <div className="flex items-center px-5 pt-5 pb-3">
+                <h3 className={cn('flex items-center gap-2', T.cardTitulo)}>
                   <GoogleAdsMark className="h-5 w-5" /> Google Ads
                 </h3>
               </div>
 
               {/* Campanhas com Veiculação — expansível em cascata */}
-              <div className="border-b border-white/[0.06] px-4 pb-4">
-                <div className="mb-3 text-xs font-black uppercase tracking-[0.07em] text-[#dce4e8]">
+              <div className="border-b border-white/[0.06] px-5 pb-5">
+                <div className={cn('mb-3', T.subBloco)}>
                   Campanhas com Veiculação
                 </div>
                 <CampaignPerformanceTable
@@ -6904,8 +6905,8 @@ export default function GeneralDashboard() {
               </div>
 
               {/* Top Palavras-chave — abaixo das campanhas */}
-              <div className="px-4 py-4">
-                <div className="mb-3 text-xs font-black uppercase tracking-[0.07em] text-[#dce4e8]">
+              <div className="px-5 py-5">
+                <div className={cn('mb-3', T.subBloco)}>
                   Top Palavras-chave
                 </div>
                 <div className="overflow-x-auto pb-2 [scrollbar-width:thin] [scrollbar-color:#2a2d3a_transparent]">
@@ -6927,9 +6928,9 @@ export default function GeneralDashboard() {
                 {/* O título "Landing page" já vem da seção da página; aqui só o
                     nome do cliente quando há vários painéis. */}
                 {selectedClients.length > 1 && (
-                  <div className="flex items-center justify-between px-4 pt-4 pb-1">
-                    <h3 className="text-sm font-black uppercase tracking-[0.07em] text-[#f4f7f8]">{client.name}</h3>
-                    <span className="text-[10px] text-[#7c868c]">Google Analytics 4</span>
+                  <div className="flex items-center justify-between px-5 pt-5 pb-1">
+                    <h3 className={T.cardTitulo}>{client.name}</h3>
+                    <span className={T.cardSub}>Google Analytics 4</span>
                   </div>
                 )}
                 <Ga4LandingPanel dados={ga4ByClient[client.id]?.ga4 ?? null} loading={ga4Loading} aviso={ga4ByClient[client.id]?.aviso} />
@@ -6940,15 +6941,15 @@ export default function GeneralDashboard() {
   const blocoResumoCliente = (
     <>
             {selectedClients.length > 1 && (
-              <PremiumPanel className="p-4">
-                <p className="mb-3 text-[10px] font-black uppercase tracking-[0.08em] text-[#9aa4aa]">Resumo por cliente</p>
+              <PremiumPanel className="p-5">
+                <h3 className={cn('mb-3', T.cardTitulo)}>Resumo por cliente</h3>
                 <div className="divide-y divide-white/[0.07]">
                   {selectedClients.map(client => {
                     const m = metricsByClient[client.id];
                     const leads = (m?.meta?.leads ?? 0) + (m?.google?.conversions ?? 0);
                     const spend = (m?.meta?.spend ?? 0) + (m?.google?.cost ?? 0);
                     return (
-                      <div key={client.id} className="flex items-center justify-between gap-4 py-3 text-xs text-[#a7b0b6]">
+                      <div key={client.id} className={cn('flex items-center justify-between gap-4 py-3 tabular-nums text-[#a7b0b6]', T.tabelaCel)}>
                         <Link href={`/clientes/${client.id}`} className="font-black text-[#f4f7f8] hover:text-[#6cff2f]">{client.name}</Link>
                         <span>{premiumValue(leads)} leads</span>
                         <span>{spend > 0 ? premiumValue(spend, 'currency') : '—'}</span>
@@ -7128,7 +7129,7 @@ export default function GeneralDashboard() {
           return (
             <div className="mt-3 flex flex-wrap items-end gap-3">
               <label className="flex flex-col gap-1">
-                <span className="text-[10px] font-black uppercase tracking-[0.08em] text-[#9aa4aa]">De</span>
+                <span className={T.miniRotulo}>De</span>
                 <input
                   type="date"
                   value={customDateFrom}
@@ -7139,7 +7140,7 @@ export default function GeneralDashboard() {
               </label>
               <span className="pb-3 text-xs text-[#9aa4aa]">até</span>
               <label className="flex flex-col gap-1">
-                <span className="text-[10px] font-black uppercase tracking-[0.08em] text-[#9aa4aa]">Até</span>
+                <span className={T.miniRotulo}>Até</span>
                 <input
                   type="date"
                   value={customDateTo}

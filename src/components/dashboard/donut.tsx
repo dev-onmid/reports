@@ -1,6 +1,8 @@
 'use client';
 
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts';
+import { cn } from '@/lib/utils';
+import { T } from '@/lib/dashboard-tipografia';
 
 /**
  * Donut de composição (parte do todo). Use só com POUCAS fatias — acima de 6
@@ -53,8 +55,8 @@ export function Donut({
       </ResponsiveContainer>
       {centroValor && (
         <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-          <span className="text-[10px] font-black uppercase tracking-[0.08em] text-[#9aa4aa]">{centroTitulo}</span>
-          <span className="font-heading text-lg leading-tight text-[#f4f7f8]">{centroValor}</span>
+          <span className={T.miniRotulo}>{centroTitulo}</span>
+          <span className={cn('mt-1', T.miniValor)}>{centroValor}</span>
         </div>
       )}
     </div>

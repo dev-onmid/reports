@@ -2,6 +2,8 @@
 
 import { ImageIcon } from 'lucide-react';
 import { formatCurrencyBRL } from '@/lib/utils';
+import { cn } from '@/lib/utils';
+import { T } from '@/lib/dashboard-tipografia';
 
 /** Contagem: nunca com casa decimal (mesma regra do premiumValue do dashboard). */
 const inteiro = (n: number) => Math.round(n).toLocaleString('pt-BR');
@@ -59,7 +61,7 @@ export function CreativeRevenueStrip({ criativos, loading, totalAtribuido }: {
     : `entre os ${criativos.length} principais criativos exibidos`;
   return (
     <>
-    <p className="mb-2 text-[10px] text-[#7c868c]">
+    <p className={cn('mb-2', T.nota)}>
       Barra de cada card = fatia do faturamento {baseBarra}
       {!temTotalGeral && <> (soma {formatCurrencyBRL(somaExibidos)})</>}.
     </p>
@@ -87,13 +89,13 @@ export function CreativeRevenueStrip({ criativos, loading, totalAtribuido }: {
             </div>
             <div className="p-2.5">
               {c.campaignName && (
-                <p className="mb-1 truncate text-[9px] font-semibold uppercase tracking-[0.05em] text-[#6cff2f]/70" title={c.campaignName}>
+                <p className="mb-1 truncate text-[10px] font-semibold uppercase tracking-[0.06em] text-[#6cff2f]/70" title={c.campaignName}>
                   {c.campaignName}
                 </p>
               )}
-              <p className="mb-2 truncate text-[11px] font-bold text-[#dce4e8]" title={c.adName}>{c.adName}</p>
-              <p className="text-[9px] font-bold uppercase tracking-wider text-[#9aa4aa]">Faturamento</p>
-              <p className="mb-2 text-lg font-black leading-tight text-[#6cff2f]">
+              <p className={cn('mb-2 truncate', T.listaRotulo)} title={c.adName}>{c.adName}</p>
+              <p className={T.miniRotulo}>Faturamento</p>
+              <p className={cn('mb-2 mt-1 tabular-nums', T.miniValor, 'text-[#6cff2f]')}>
                 {formatCurrencyBRL(c.receita)}
               </p>
               {/* Barra: fatia deste criativo — base explicada na legenda acima. */}
@@ -103,16 +105,16 @@ export function CreativeRevenueStrip({ criativos, loading, totalAtribuido }: {
               </div>
               <div className="grid grid-cols-2 gap-1">
                 <div className="rounded border border-white/[0.07] bg-white/[0.04] px-1.5 py-1">
-                  <p className="text-[8px] font-bold uppercase tracking-wider text-[#9aa4aa]">Vendas</p>
-                  <p className="text-[11px] font-black text-[#f4f7f8]">{inteiro(c.vendas)}</p>
+                  <p className="text-[9px] font-black uppercase tracking-[0.06em] text-[#9aa4aa]">Vendas</p>
+                  <p className="text-[11px] font-black tabular-nums text-[#f4f7f8]">{inteiro(c.vendas)}</p>
                 </div>
                 <div className="rounded border border-white/[0.07] bg-white/[0.04] px-1.5 py-1">
-                  <p className="text-[8px] font-bold uppercase tracking-wider text-[#9aa4aa]">Leads</p>
-                  <p className="text-[11px] font-black text-[#f4f7f8]">{inteiro(c.leads)}</p>
+                  <p className="text-[9px] font-black uppercase tracking-[0.06em] text-[#9aa4aa]">Leads</p>
+                  <p className="text-[11px] font-black tabular-nums text-[#f4f7f8]">{inteiro(c.leads)}</p>
                 </div>
               </div>
               {c.clientName && (
-                <p className="mt-1.5 truncate text-[9px] text-[#9aa4aa]" title={c.clientName}>{c.clientName}</p>
+                <p className="mt-1.5 truncate text-[10px] text-[#9aa4aa]" title={c.clientName}>{c.clientName}</p>
               )}
             </div>
           </div>

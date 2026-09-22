@@ -26,6 +26,7 @@ import { TrendingUp, TrendingDown, Info, ChevronDown } from 'lucide-react';
 import type { Ga4Celula, Ga4Consolidado, Ga4Linha, Ga4Seg, Ga4Totais } from '@/lib/ga4-landing';
 import { EvolucaoDiaria, Sparkline } from './ga4-landing-graficos';
 import { Donut } from './donut';
+import { T } from '@/lib/dashboard-tipografia';
 
 const cx = (...a: Array<string | false | undefined>) => a.filter(Boolean).join(' ');
 
@@ -85,8 +86,8 @@ function Titulo({ children, dica, direita }: { children: ReactNode; dica?: strin
   return (
     <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
       <div className="min-w-0">
-        <div className="text-sm font-black uppercase tracking-[0.07em] text-[#f4f7f8]">{children}</div>
-        {dica && <p className="mt-0.5 text-[10px] leading-snug text-[#7c868c]">{dica}</p>}
+        <div className={T.cardTitulo}>{children}</div>
+        {dica && <p className={cx('mt-0.5 leading-snug', T.cardSub)}>{dica}</p>}
       </div>
       {direita}
     </div>
@@ -99,7 +100,7 @@ function Secao({ titulo, children }: { titulo: string; children: ReactNode }) {
     <section className="space-y-3">
       <div className="flex items-center gap-2 pt-1">
         <span className="h-3.5 w-1 rounded-full bg-[#6cff2f]" />
-        <h4 className="text-xs font-black uppercase tracking-[0.12em] text-[#9aa4aa]">{titulo}</h4>
+        <h4 className={T.subBloco}>{titulo}</h4>
         <span className="h-px flex-1 bg-white/[0.06]" />
       </div>
       {children}
@@ -125,7 +126,7 @@ function Chip({ cor, children }: { cor: string; children: ReactNode }) {
 function Delta({ atual, anterior, inverter = false, pp = false, grande = false }: {
   atual: number; anterior: number; inverter?: boolean; pp?: boolean; grande?: boolean;
 }) {
-  const tam = grande ? 'text-xs' : 'text-[10px]';
+  const tam = 'text-xs';
   if (!Number.isFinite(atual) || !Number.isFinite(anterior) || (!pp && !anterior) || (pp && !anterior && !atual)) {
     return <span className={cx(tam, 'text-[#7c868c]')}>—</span>;
   }
@@ -154,16 +155,16 @@ function KpiHero({ rotulo, valor, atual, anterior, pp, sub, dica, serie, destaqu
       'relative flex min-w-0 flex-col overflow-hidden rounded-[12px] border p-4',
       destaque ? 'border-[#6cff2f]/25 bg-gradient-to-br from-[#6cff2f]/[0.09] to-[#111a20]/80' : 'border-white/[0.07] bg-[#111a20]/80',
     )} title={dica}>
-      <p className="flex items-center gap-1 text-[10px] font-black uppercase tracking-[0.08em] text-[#9aa4aa]">
+      <p className={cx('flex items-center gap-1', T.kpiRotulo)}>
         <span className="truncate">{rotulo}</span>
         {dica && <Info className="h-3 w-3 shrink-0 text-[#6c767c]" aria-label={dica} />}
       </p>
-      <p className="mt-2 font-heading text-[44px] leading-none text-[#f4f7f8] tabular-nums">{valor}</p>
+      <p className={cx('mt-3 tabular-nums', T.kpiValor)}>{valor}</p>
       <p className="mt-2 flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
         <Delta atual={atual} anterior={anterior} pp={pp} grande />
-        <span className="text-[10px] text-[#7c868c]">vs período anterior</span>
+        <span className={T.comparacao}>vs período anterior</span>
       </p>
-      {sub && <p className="mt-0.5 truncate text-[10px] text-[#7c868c]">{sub}</p>}
+      {sub && <p className={cx('mt-1 truncate', T.nota)}>{sub}</p>}
       <div className="mt-auto pt-3">
         {serie && serie.length > 1 ? <Sparkline valores={serie} /> : <div className="h-[36px]" />}
       </div>
@@ -175,9 +176,9 @@ function KpiHero({ rotulo, valor, atual, anterior, pp, sub, dica, serie, destaqu
 function Mini({ rotulo, valor, atual, anterior, pp, dica }: { rotulo: string; valor: string; atual: number; anterior: number; pp?: boolean; dica?: string }) {
   return (
     <div className="min-w-0 px-4 py-2.5" title={dica}>
-      <p className="truncate text-[9px] font-black uppercase tracking-[0.08em] text-[#7c868c]">{rotulo}</p>
+      <p className={cx('truncate', T.miniRotulo)}>{rotulo}</p>
       <p className="mt-1 flex items-baseline gap-2">
-        <span className="font-heading text-xl leading-none text-[#f4f7f8] tabular-nums">{valor}</span>
+        <span className={cx('tabular-nums', T.miniValor)}>{valor}</span>
         <Delta atual={atual} anterior={anterior} pp={pp} />
       </p>
     </div>
@@ -204,7 +205,7 @@ function ListaBarras({ itens, cor = VERDE }: { itens: ItemBarra[]; cor?: string 
           <div className="mt-1 h-2 rounded-full bg-white/[0.05]">
             <div className="h-2 rounded-full" style={{ width: `${Math.max(2, (i.valor / max) * 100)}%`, background: i.cor ?? cor }} />
           </div>
-          {i.extra && <div className="mt-0.5 text-[10px] text-[#7c868c]">{i.extra}</div>}
+          {i.extra && <div className="mt-0.5 text-[11px] text-[#7c868c]">{i.extra}</div>}
         </li>
       ))}
     </ul>
@@ -221,7 +222,7 @@ function barrasSeg(linhas: Ga4Seg[], opts: { limite?: number; engaj?: boolean } 
     direita: (
       <>
         <span className="font-bold text-[#f4f7f8]">{fmtN(s.sessoes)}</span>
-        <span className="ml-1 text-[10px] text-[#7c868c]">sessões</span>
+        <span className="ml-1 text-[11px] text-[#7c868c]">sessões</span>
       </>
     ),
     extra: (
@@ -254,12 +255,12 @@ function Empilhada({ linhas }: { linhas: Ga4Seg[] }) {
       <div className="grid w-full min-w-0 gap-2.5">
         {fatias.map((s, i) => (
           <div key={s.valor} className="min-w-0">
-            <p className="flex items-center gap-1.5 truncate text-[11px] font-semibold text-[#dce4e8]">
+            <p className={cx('flex items-center gap-1.5 truncate', T.listaRotulo)}>
               <span className="h-2 w-2 shrink-0 rounded-sm" style={{ background: cor(i) }} />
               {s.valor}
-              <span className="ml-auto font-heading text-lg leading-none text-[#f4f7f8] tabular-nums">{fmtPct(s.sessoes / total, 0)}</span>
+              <span className={cx('ml-auto tabular-nums', T.miniValor)}>{fmtPct(s.sessoes / total, 0)}</span>
             </p>
-            <p className="mt-0.5 text-[10px] text-[#7c868c]">{fmtN(s.sessoes)} sessões · converte <b className="text-[#c7d0d5]">{fmtPct(div(s.sessoesConv, s.sessoes))}</b></p>
+            <p className="mt-0.5 text-[11px] text-[#7c868c]">{fmtN(s.sessoes)} sessões · converte <b className="text-[#c7d0d5]">{fmtPct(div(s.sessoesConv, s.sessoes))}</b></p>
           </div>
         ))}
       </div>
@@ -297,7 +298,7 @@ function FunilClique({ ads, atual }: { ads: Ga4Seg[]; atual: Ga4Totais }) {
   const aCada100 = Math.round(connect * 100);
 
   return (
-    <Card className="p-5">
+    <Card>
       <Titulo dica={comAds
         ? 'Campanhas do Google Ads: do clique pago até o contato. Cliques e custo vêm do Google Ads; o resto, do GA4.'
         : 'Sem dados do Google Ads vinculados — funil com todas as sessões da página.'}>
@@ -312,7 +313,7 @@ function FunilClique({ ads, atual }: { ads: Ga4Seg[]; atual: Ga4Totais }) {
             return (
               <li key={e.rotulo}>
                 {i > 0 && (
-                  <div className="flex items-center gap-2 py-1 pl-1 text-[10px] text-[#7c868c]">
+                  <div className="flex items-center gap-2 py-1 pl-1 text-[11px] text-[#7c868c]">
                     <ChevronDown className="h-3 w-3" />
                     <span className="font-bold tabular-nums text-[#c7d0d5]">{fmtPct(passo)}</span>
                     <span>{i === 1 && comAds ? 'connect rate' : 'da etapa anterior'}</span>
@@ -320,15 +321,15 @@ function FunilClique({ ads, atual }: { ads: Ga4Seg[]; atual: Ga4Totais }) {
                 )}
                 <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-3">
                   <div className="w-full shrink-0 sm:w-[170px]">
-                    <p className="text-xs font-bold text-[#dce4e8]">{e.rotulo}</p>
-                    <p className="text-[10px] text-[#6c767c]">{e.sub}</p>
+                    <p className={T.listaRotulo}>{e.rotulo}</p>
+                    <p className={T.nota}>{e.sub}</p>
                   </div>
                   <div className="relative h-9 flex-1 rounded-[8px] bg-white/[0.04]">
                     <div className="flex h-9 items-center rounded-[8px] px-3" style={{ width: `${largura}%`, background: `rgba(108,255,47,${0.18 + 0.6 * opac})` }}>
-                      {largura >= 18 && <span className="font-heading text-xl leading-none text-[#071006] tabular-nums">{fmtN(e.n)}</span>}
+                      {largura >= 18 && <span className="font-heading text-lg leading-none text-[#071006] tabular-nums">{fmtN(e.n)}</span>}
                     </div>
                     {largura < 18 && (
-                      <span className="absolute top-1/2 -translate-y-1/2 font-heading text-xl leading-none text-[#f4f7f8] tabular-nums" style={{ left: `calc(${largura}% + 8px)` }}>
+                      <span className="absolute top-1/2 -translate-y-1/2 font-heading text-lg leading-none text-[#f4f7f8] tabular-nums" style={{ left: `calc(${largura}% + 8px)` }}>
                         {fmtN(e.n)}
                       </span>
                     )}
@@ -341,13 +342,13 @@ function FunilClique({ ads, atual }: { ads: Ga4Seg[]; atual: Ga4Totais }) {
 
         {comAds && (
           <div className="flex flex-col justify-center rounded-[12px] border p-4" style={{ borderColor: `${st.cor}40`, background: `${st.cor}0f` }}>
-            <p className="text-[10px] font-black uppercase tracking-[0.08em] text-[#9aa4aa]">Connect rate</p>
-            <p className="mt-1 font-heading text-6xl leading-none tabular-nums" style={{ color: st.cor }}>{fmtPct(connect, 0)}</p>
+            <p className={T.kpiRotulo}>Connect rate</p>
+            <p className={cx('mt-3 tabular-nums', T.kpiValor)} style={{ color: st.cor }}>{fmtPct(connect, 0)}</p>
             <div className="mt-2"><Chip cor={st.cor}>{st.rotulo}</Chip></div>
             <p className="mt-3 text-xs leading-snug text-[#c7d0d5]">
               De cada 100 cliques, <b className="text-[#f4f7f8]">{fmtN(aCada100)}</b> chegaram na página.
             </p>
-            <p className="mt-1 text-[10px] leading-snug text-[#7c868c]">
+            <p className="mt-1 text-[11px] leading-snug text-[#7c868c]">
               Sessões ÷ cliques. Abaixo de 80% costuma ser página lenta, redirecionamento ou tag do GA4 fora do ar.
             </p>
           </div>
@@ -366,7 +367,7 @@ function Campanhas({ ads, utm, semCusto }: { ads: Ga4Seg[]; utm: Ga4Seg[]; semCu
   const contUtm = contador(outras);
   const ordenadas = [...ads].sort((a, b) => (b.custo ?? 0) - (a.custo ?? 0) || b.sessoes - a.sessoes);
   const maxCusto = Math.max(1, ...ordenadas.map(a => a.custo ?? 0));
-  const th = 'pb-2 pl-3 text-right text-[10px] font-bold uppercase tracking-wider text-[#7c868c] whitespace-nowrap';
+  const th = cx('pb-2 pl-3 text-right whitespace-nowrap', T.tabelaCab);
   const td = 'py-2.5 pl-3 text-right tabular-nums whitespace-nowrap';
 
   return (
@@ -380,7 +381,7 @@ function Campanhas({ ads, utm, semCusto }: { ads: Ga4Seg[]; utm: Ga4Seg[]; semCu
         <table className="w-full min-w-[680px] text-xs">
           <thead>
             <tr>
-              <th className="pb-2 pr-2 text-left text-[10px] font-bold uppercase tracking-wider text-[#7c868c]">Campanha</th>
+              <th className={cx('pb-2 pr-2 text-left', T.tabelaCab)}>Campanha</th>
               <th className={th}>Custo</th>
               <th className={th}>Cliques</th>
               <th className={th}>Sessões</th>
@@ -473,7 +474,7 @@ function PalavrasChave({ palavras, termos }: { palavras: Ga4Seg[]; termos: Ga4Se
             {boas.length > 0 ? (
               <ListaBarras itens={boas.map(s => ({
                 chave: s.valor, rotulo: s.valor, valor: cont(s),
-                direita: <><span className="font-bold text-[#f4f7f8]">{fmtN(cont(s))}</span><span className="ml-1 text-[10px] text-[#7c868c]">contato(s)</span></>,
+                direita: <><span className="font-bold text-[#f4f7f8]">{fmtN(cont(s))}</span><span className="ml-1 text-[11px] text-[#7c868c]">contato(s)</span></>,
                 extra: <>{fmtN(s.sessoes)} sessões · taxa <b className="text-[#c7d0d5]">{fmtPct(div(cont(s), s.sessoes))}</b></>,
               }))} />
             ) : <p className="text-xs text-[#7c868c]">Nenhuma palavra-chave trouxe contato no período.</p>}
@@ -485,7 +486,7 @@ function PalavrasChave({ palavras, termos }: { palavras: Ga4Seg[]; termos: Ga4Se
             {ruins.length > 0 ? (
               <ListaBarras cor={VERMELHO} itens={ruins.map(s => ({
                 chave: s.valor, rotulo: s.valor, valor: s.sessoes,
-                direita: <><span className="font-bold text-[#f4f7f8]">{fmtN(s.sessoes)}</span><span className="ml-1 text-[10px] text-[#7c868c]">sessões</span></>,
+                direita: <><span className="font-bold text-[#f4f7f8]">{fmtN(s.sessoes)}</span><span className="ml-1 text-[11px] text-[#7c868c]">sessões</span></>,
                 extra: <>engajamento {fmtPct(div(s.engajadas, s.sessoes))} · tempo médio {fmtTempo(div(s.tempo, s.sessoes))}</>,
               }))} />
             ) : <p className="text-xs text-[#7c868c]">Nenhuma palavra com 10+ sessões sem contato.</p>}
@@ -501,15 +502,15 @@ function PalavrasChave({ palavras, termos }: { palavras: Ga4Seg[]; termos: Ga4Se
           </button>
           {abrirTermos && (
             <div className="border-t border-white/[0.06] px-4 pb-4 pt-3">
-              <p className="mb-2 text-[10px] text-[#7c868c]">O que a pessoa digitou no Google. O Google esconde termos de pouco volume e da Performance Max — a soma fica abaixo do total.</p>
+              <p className="mb-2 text-[11px] text-[#7c868c]">O que a pessoa digitou no Google. O Google esconde termos de pouco volume e da Performance Max — a soma fica abaixo do total.</p>
               <div className="max-h-[360px] overflow-y-auto">
                 <table className="w-full text-xs">
                   <thead className="sticky top-0 bg-[#111a20]">
-                    <tr className="text-[10px] uppercase tracking-wider text-[#7c868c]">
-                      <th className="pb-1 text-left font-bold">Termo</th>
-                      <th className="pb-1 pl-3 text-right font-bold">Sessões</th>
-                      <th className="pb-1 pl-3 text-right font-bold">Contatos</th>
-                      <th className="pb-1 pl-3 text-right font-bold">Taxa</th>
+                    <tr className={T.tabelaCab}>
+                      <th className="pb-1 text-left">Termo</th>
+                      <th className="pb-1 pl-3 text-right">Sessões</th>
+                      <th className="pb-1 pl-3 text-right">Contatos</th>
+                      <th className="pb-1 pl-3 text-right">Taxa</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -585,10 +586,10 @@ function Rolagem({ linhas, visitantes }: { linhas: Ga4Linha[]; visitantes: numbe
     return (
       <Card>
         <Titulo>Rolagem da página</Titulo>
-        <p className="font-heading text-5xl leading-none text-[#f4f7f8] tabular-nums">{fmtPct(pct, 0)}</p>
+        <p className={cx('tabular-nums', T.kpiValor)}>{fmtPct(pct, 0)}</p>
         <p className="mt-1 text-xs text-[#c7d0d5]">dos visitantes chegaram a 90% da página</p>
         <div className="mt-3 h-2 rounded-full bg-white/[0.05]"><div className="h-2 rounded-full bg-[#6cff2f]" style={{ width: `${Math.min(100, pct * 100)}%` }} /></div>
-        <p className="mt-3 text-[10px] leading-snug text-[#7c868c]">O GA4 padrão só mede 90%. Os marcos de 25/50/75% exigem o gatilho de profundidade de rolagem no GTM.</p>
+        <p className="mt-3 text-[11px] leading-snug text-[#7c868c]">O GA4 padrão só mede 90%. Os marcos de 25/50/75% exigem o gatilho de profundidade de rolagem no GTM.</p>
       </Card>
     );
   }
@@ -603,7 +604,7 @@ function Rolagem({ linhas, visitantes }: { linhas: Ga4Linha[]; visitantes: numbe
             <div key={l.valor} className="flex flex-1 flex-col items-center justify-end gap-1">
               <span className="text-[10px] font-bold tabular-nums text-[#dce4e8]">{fmtPct(p, 0)}</span>
               <div className="w-full rounded-t-[4px] bg-[#6cff2f]" style={{ height: `${Math.max(3, p * 90)}px`, opacity: 0.35 + 0.65 * p }} />
-              <span className="text-[10px] text-[#7c868c]">{l.valor}%</span>
+              <span className="text-[11px] text-[#7c868c]">{l.valor}%</span>
             </div>
           );
         })}
@@ -641,7 +642,7 @@ function BlocoContagem({ titulo, dica, linhas, total, rotulo }: { titulo: string
       <Titulo dica={dica}>{titulo}</Titulo>
       <ListaBarras itens={linhas.slice(0, 8).map(l => ({
         chave: l.valor, rotulo: rotulo ? rotulo(l.valor) : l.valor, valor: l.n,
-        direita: <><span className="font-bold text-[#f4f7f8]">{fmtN(l.n)}</span>{total > 0 && <span className="ml-1 text-[10px] text-[#7c868c]">{fmtPct(l.n / total)}</span>}</>,
+        direita: <><span className="font-bold text-[#f4f7f8]">{fmtN(l.n)}</span>{total > 0 && <span className="ml-1 text-[11px] text-[#7c868c]">{fmtPct(l.n / total)}</span>}</>,
       }))} />
     </Card>
   );
@@ -654,8 +655,8 @@ export function resumoTotais(t: Ga4Totais) {
 // ───────────────────────────── painel ─────────────────────────────
 
 export function Ga4LandingPanel({ dados, loading, aviso }: { dados: Ga4Consolidado | null; loading: boolean; aviso?: string }) {
-  if (loading) return <p className="px-4 pb-4 text-xs text-[#9aa4aa]">Carregando Google Analytics…</p>;
-  if (!dados) return <p className="px-4 pb-4 text-xs text-[#9aa4aa]">{aviso ?? 'Sem propriedade GA4 vinculada a este cliente.'}</p>;
+  if (loading) return <p className="px-5 pb-5 text-xs text-[#9aa4aa]">Carregando Google Analytics…</p>;
+  if (!dados) return <p className="px-5 pb-5 text-xs text-[#9aa4aa]">{aviso ?? 'Sem propriedade GA4 vinculada a este cliente.'}</p>;
   const { atual: a, anterior: b, pago, audiencia: au, comportamento: co } = dados;
   const semCusto = pago.googleAds.length > 0 && pago.googleAds.every(g => !g.custo);
   // Tem pesquisa paga mas nenhuma linha do Google Ads = propriedade sem vínculo com o Ads
@@ -689,7 +690,7 @@ export function Ga4LandingPanel({ dados, loading, aviso }: { dados: Ga4Consolida
   const rotuloForm = a.leadForm > 0 ? 'Formulário' : 'Cliques em botões';
 
   return (
-    <div className="space-y-7 px-4 pb-5">
+    <div className="space-y-7 px-5 pb-5">
       {/* 1 ── Visão geral */}
       <Secao titulo="Visão geral">
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -784,7 +785,7 @@ export function Ga4LandingPanel({ dados, loading, aviso }: { dados: Ga4Consolida
             )}
           </div>
           {au.idades.length + au.generos.length === 0 && (
-            <p className="text-[10px] text-[#7c868c]">Idade e gênero não aparecem: o GA4 esconde com pouco volume ou sem Google Signals ligado.</p>
+            <p className="text-[11px] text-[#7c868c]">Idade e gênero não aparecem: o GA4 esconde com pouco volume ou sem Google Signals ligado.</p>
           )}
           <MapaSemanaHora celulas={au.semanaHora} />
         </Secao>
@@ -808,8 +809,8 @@ export function Ga4LandingPanel({ dados, loading, aviso }: { dados: Ga4Consolida
                   chave: `${o.origem}/${o.midia}`, rotulo: o.origem, sub: o.midia,
                   valor: origensTemConv ? o.contatos : o.sessoes,
                   direita: origensTemConv
-                    ? <><span className="font-bold text-[#f4f7f8]">{fmtN(o.contatos)}</span><span className="ml-1 text-[10px] text-[#7c868c]">conv.</span></>
-                    : <><span className="font-bold text-[#f4f7f8]">{fmtN(o.sessoes)}</span><span className="ml-1 text-[10px] text-[#7c868c]">sessões</span></>,
+                    ? <><span className="font-bold text-[#f4f7f8]">{fmtN(o.contatos)}</span><span className="ml-1 text-[11px] text-[#7c868c]">conv.</span></>
+                    : <><span className="font-bold text-[#f4f7f8]">{fmtN(o.sessoes)}</span><span className="ml-1 text-[11px] text-[#7c868c]">sessões</span></>,
                   extra: origensTemConv ? <>{fmtN(o.sessoes)} sessões</> : undefined,
                 }))} />
               </Card>
@@ -833,7 +834,7 @@ export function Ga4LandingPanel({ dados, loading, aviso }: { dados: Ga4Consolida
       )}
 
       {faltando.length > 0 && (
-        <p className="text-[10px] text-[#7c868c]">
+        <p className="text-[11px] text-[#7c868c]">
           Sem eventos configurados (ou sem disparo no período): {faltando.join(' · ')}.
         </p>
       )}

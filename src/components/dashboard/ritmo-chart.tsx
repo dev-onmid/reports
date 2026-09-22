@@ -3,6 +3,7 @@
 import {
   ComposedChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine, ResponsiveContainer, Legend,
 } from 'recharts';
+import { T } from '@/lib/dashboard-tipografia';
 
 /**
  * Gráficos de ritmo da Visão geral.
@@ -15,7 +16,7 @@ const VERDE = '#55f52f';
 const CINZA = '#8a959b';
 const AZUL = '#3987e5';
 const GRID = 'rgba(255,255,255,0.06)';
-const EIXO = '#7c868c';
+const EIXO = '#9aa4aa';
 
 const tooltipStyle = {
   contentStyle: { background: '#0b1216', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 10, fontSize: 12 },
@@ -35,10 +36,10 @@ function ddmm(iso: string) {
 
 function Moldura({ titulo, sub, children }: { titulo: string; sub?: string; children: React.ReactNode }) {
   return (
-    <section className="rounded-[14px] border border-white/[0.08] bg-[#0d1519]/92 p-4 shadow-[0_18px_60px_rgba(0,0,0,0.28)]">
+    <section className="rounded-[14px] border border-white/[0.08] bg-[#0d1519]/92 p-5 shadow-[0_18px_60px_rgba(0,0,0,0.28)]">
       <div className="mb-3 flex flex-wrap items-baseline gap-2">
-        <h3 className="text-sm font-black uppercase tracking-[0.07em] text-[#f4f7f8]">{titulo}</h3>
-        {sub && <span className="text-[10px] text-[#9aa4aa]">{sub}</span>}
+        <h3 className={T.cardTitulo}>{titulo}</h3>
+        {sub && <span className={T.cardSub}>{sub}</span>}
       </div>
       <div className="h-[220px] w-full">{children}</div>
     </section>

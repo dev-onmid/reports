@@ -7,11 +7,13 @@ import {
   Area, AreaChart, Bar, BarChart, CartesianGrid, ComposedChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts';
 import type { Ga4Dia } from '@/lib/ga4-landing';
+import { cn } from '@/lib/utils';
+import { T } from '@/lib/dashboard-tipografia';
 
 const VERDE = '#6cff2f';
 const AZUL = '#3987e5';
 const GRID = 'rgba(255,255,255,0.06)';
-const EIXO = '#7c868c';
+const EIXO = '#9aa4aa';
 
 const tooltipStyle = {
   contentStyle: { background: '#0b1216', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 10, fontSize: 12 },
@@ -81,7 +83,7 @@ export function EvolucaoDiaria({ diario }: { diario: Ga4Dia[] }) {
   );
 
   const legenda = (
-    <div className="flex flex-wrap items-center gap-3 text-[10px] text-[#9aa4aa]">
+    <div className={cn('flex flex-wrap items-center gap-3', T.nota, 'text-[#9aa4aa]')}>
       <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-sm" style={{ background: VERDE }} />Sessões</span>
       {maxC > 0 && <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-sm" style={{ background: AZUL }} />Contatos (eventos-chave)</span>}
     </div>

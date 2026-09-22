@@ -16,6 +16,7 @@ import { useMemo, useState } from 'react';
 import { ArrowRight } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip } from 'recharts';
 import { cn, formatCurrencyBRL } from '@/lib/utils';
+import { T } from '@/lib/dashboard-tipografia';
 
 export type LinhaVendedor = {
   responsavel: string;
@@ -61,7 +62,7 @@ function Cartao({ titulo, acao, children }: {
   return (
     <section className="flex h-full min-w-0 flex-col rounded-[12px] border border-[#233038] bg-[#0B1115] p-4">
       <div className="mb-4 flex items-center justify-between gap-3">
-        <h4 className="text-[13px] font-bold uppercase tracking-[0.06em] text-[#F1F4F5]">{titulo}</h4>
+        <h4 className={T.cardTitulo}>{titulo}</h4>
         {acao}
       </div>
       {children}
@@ -85,7 +86,7 @@ function BotaoRodape({ texto, onClick }: { texto: string; onClick: () => void })
 }
 
 function Vazio({ texto }: { texto: string }) {
-  return <p className="flex-1 py-10 text-center text-[12px] text-[#87929B]">{texto}</p>;
+  return <p className="flex-1 py-10 text-center text-xs text-[#9aa4aa]">{texto}</p>;
 }
 
 function Esqueleto() {
@@ -171,10 +172,10 @@ export function VendedoresCard({ linhas, loading }: { linhas: LinhaVendedor[]; l
                 </span>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-baseline justify-between gap-3">
-                    <span className="truncate text-[14px] font-semibold text-[#F1F4F5]" title={l.responsavel}>
+                    <span className={cn('truncate', T.listaRotulo)} title={l.responsavel}>
                       {l.responsavel}
                     </span>
-                    <span className="shrink-0 text-[14px] font-bold text-[#F1F4F5]">
+                    <span className={cn('shrink-0 tabular-nums', T.miniValor)}>
                       {formatCurrencyBRL(l.ganhos_valor)}
                     </span>
                   </div>
@@ -201,7 +202,7 @@ export function VendedoresCard({ linhas, loading }: { linhas: LinhaVendedor[]; l
       )}
       {/* ⚠️ Sem esta linha o valor de perdidos/novos é lido como dinheiro real.
           Só o faturamento acima é receita gravada. */}
-      <p className="mt-3 text-[10px] leading-snug text-[#6b7478]">
+      <p className={cn('mt-3 leading-snug', T.nota)}>
         Valor = faturamento dos negócios ganhos. Perdidos e novos aparecem em quantidade porque o valor deles
         é estimativa do CRM.
       </p>
@@ -304,9 +305,9 @@ export function CategoriasCard({ linhas, loading }: { linhas: LinhaCategoria[]; 
                 </PieChart>
               </ResponsiveContainer>
               <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-                <span className="text-[10px] font-medium uppercase tracking-[0.08em] text-[#87929B]">Total</span>
-                <span className="mt-0.5 text-[22px] font-bold leading-none text-[#F1F4F5]">{fmtTotal}</span>
-                <span className="mt-1 text-[10px] text-[#87929B]">
+                <span className={T.miniRotulo}>Total</span>
+                <span className={cn('mt-1 tabular-nums', T.kpiValorSec)}>{fmtTotal}</span>
+                <span className={cn('mt-1', T.nota)}>
                   {eixo === 'itens' ? 'itens vendidos' : 'faturado'}
                 </span>
               </div>
@@ -318,12 +319,12 @@ export function CategoriasCard({ linhas, loading }: { linhas: LinhaCategoria[]; 
                 return (
                   <div key={f.nome} className="flex items-center gap-2">
                     <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: corDe(f.nome, i) }} />
-                    <span className="min-w-0 flex-1 truncate text-[12px] text-[#dfe6ea]" title={f.nome}>{f.nome}</span>
+                    <span className={cn('min-w-0 flex-1 truncate', T.listaRotulo)} title={f.nome}>{f.nome}</span>
                     <span className="hidden h-1.5 w-[86px] shrink-0 overflow-hidden rounded-full bg-[#172027] sm:block">
                       <span className="block h-full rounded-full"
                         style={{ width: `${maior > 0 ? Math.max((f.valor / maior) * 100, 6) : 0}%`, backgroundColor: corDe(f.nome, i) }} />
                     </span>
-                    <span className="w-[46px] shrink-0 text-right text-[12px] font-bold text-[#F1F4F5]">{pct(p)}</span>
+                    <span className="w-[46px] shrink-0 text-right text-xs font-bold tabular-nums text-[#f4f7f8]">{pct(p)}</span>
                   </div>
                 );
               })}
@@ -337,7 +338,7 @@ export function CategoriasCard({ linhas, loading }: { linhas: LinhaCategoria[]; 
           onClick={() => setTudo((t) => !t)}
         />
       )}
-      <p className="mt-3 text-[10px] leading-snug text-[#6b7478]">
+      <p className={cn('mt-3 leading-snug', T.nota)}>
         Só negócios ganhos no período · {eixo === 'itens' ? 'soma da quantidade de cada item' : 'soma do valor de cada item'}
       </p>
     </Cartao>
