@@ -2113,3 +2113,30 @@ página de entrada, vídeos, posição do clique).
 - Teste: `node scratchpad/test-ga4-landing.mjs` (build no cabeçalho do arquivo).
   Harness visual: `scratchpad/harness-ga4.tsx`, com `?json=arquivo.json` para
   ver um consolidado real (não versionar dado de cliente).
+
+## Meta · API de Conversões para lead de SITE (2026-09-22)
+
+`src/lib/meta-capi-site.ts` + chamada em `/api/integrations/lp/[token]`: todo
+lead que chega de formulário de site/LP também vai para a Meta pelo SERVIDOR.
+
+- **Por que não reusar `enviarEventoMeta`** (conversions.ts): aquele é o fluxo de
+  WhatsApp — `action_source: 'business_messaging'` + `messaging_channel` +
+  `page_id`, e manda SÓ o telefone (`ph`). Lead de site precisa de
+  `action_source: 'website'`, `event_source_url` e o máximo de sinal de
+  correspondência. Os dois convivem; nada do fluxo de WhatsApp mudou.
+- **Sinais enviados** (todos em SHA-256, menos os técnicos): em, ph, fn, ln, ct,
+  st, country, external_id (lead id), fbp, fbc, client_ip_address,
+  client_user_agent. É isso que leva a "qualidade de correspondência" do
+  Gerenciador de Eventos de ~5-7 (Pixel sozinho) para 9+.
+- **Dedupe:** o `event_id` vem no corpo (o mesmo que o Pixel do navegador usa em
+  `eventID`) — a Meta junta e conta UM evento. Sem `event_id`, usa `lp-<leadId>`.
+- **fbp/fbc:** cookies do Meta, lidos no navegador e mandados no corpo (o
+  servidor não enxerga cookie de outro domínio). Sem `_fbc`, monta do `fbclid`
+  (`fb.1.<ms>.<fbclid>`).
+- **Nunca quebra a captura:** cliente sem Pixel/token → devolve `sem_pixel` e
+  segue; erro da Meta vira log em `conversion_log` (resposta prefixada com
+  `[site em+ph+...]` para saber quais sinais foram).
+- Config por cliente segue em `client_conversion_config` (aba Rastreio →
+  Meta CAPI: Pixel ID, token, test event code).
+- Teste: `node scratchpad/test-meta-capi.mjs` (build no cabeçalho do arquivo) —
+  9 asserts, incluindo "nada identificável sai em texto puro".

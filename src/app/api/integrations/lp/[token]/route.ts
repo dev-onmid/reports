@@ -14,6 +14,7 @@ import { regiaoFromPhone } from '@/lib/ddd-regioes';
 import { resolverNomesGoogle, pareceIdGoogle } from '@/lib/google-ad-resolver';
 import { resolveMetaAdHierarchy, pareceIdMeta } from '@/lib/meta-ad-resolver';
 import { notificarLeadPorEmail } from '@/lib/lp-notificacao';
+import { enviarLeadSiteParaMeta, primeiroIp } from '@/lib/meta-capi-site';
 import { webhookOrigin } from '@/lib/evolution-api';
 
 /**
@@ -238,6 +239,24 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ token: str
       leadId,
     });
 
+    // Meta · API de Conversões (evento de SITE). Roda depois de o lead estar
+    // gravado e com catch próprio: se a Meta recusar ou o cliente não tiver
+    // Pixel, o lead continua salvo. O `event_id` vem do Pixel do navegador
+    // (mesmo id nos dois lados = a Meta conta UM evento, sem duplicar); sem
+    // ele, gera um aqui — o evento vale como "só servidor".
+    const eventoMeta = await enviarLeadSiteParaMeta(pool, {
+      clientId: origem.client_id,
+      leadId,
+      eventName: txt(c.meta_event_name) ?? 'Lead',
+      eventId: txt(c.event_id) ?? `lp-${leadId}`,
+      nome, email, telefone: telefoneBruto ?? telefone, cidade,
+      estado: estado ?? regiao?.uf ?? null,
+      pageUrl: tracking.source_url ?? txt(c.page_url) ?? null,
+      fbp: txt(c.fbp), fbc: txt(c.fbc), fbclid: tracking.fbclid ?? txt(c.fbclid),
+      ip: primeiroIp(req.headers.get('x-forwarded-for')) ?? req.headers.get('x-real-ip'),
+      userAgent: req.headers.get('user-agent'),
+    }).catch(err => { console.error('[lp] meta capi', err); return { enviado: false as const }; });
+
     // Aviso para quem atende. Roda DEPOIS de tudo gravado e com catch próprio:
     // o lead já está salvo, então falha de e-mail não pode virar erro para a LP.
     if (origem.notificar_emails?.length) {
@@ -252,7 +271,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ token: str
       }).catch(err => console.error('[lp] aviso por e-mail', err));
     }
 
-    return resposta({ ok: true, lead_id: leadId, criado, cliente: origem.client_id, site: origem.nome });
+    return resposta({ ok: true, lead_id: leadId, criado, cliente: origem.client_id, site: origem.nome, meta: eventoMeta });
   } catch (err) {
     console.error('[lp origens] erro', err);
     await registrarLog(pool, { origemId: null, clientId: null, raw,
