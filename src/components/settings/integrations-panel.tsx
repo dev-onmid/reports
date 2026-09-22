@@ -2272,7 +2272,7 @@ function SpreadsheetImportPanel() {
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type IntegrationId = 'meta-ads' | 'google-ads' | 'google-my-business' | 'website' | 'spreadsheet' | 'leadlovers' | 'clickup';
+type IntegrationId = 'meta-ads' | 'google-ads' | 'google-my-business' | 'website' | 'spreadsheet' | 'leadlovers' | 'clickup' | 'sorrifacil';
 
 type Integration = {
   id: IntegrationId;
@@ -2332,6 +2332,13 @@ const BASE_INTEGRATIONS: Integration[] = [
     category: 'Gestão',
     logo: <LogoClickUp size="lg" />,
   },
+  {
+    id: 'sorrifacil',
+    name: 'CRM Sorrifácil',
+    description: 'Baixa e importa todo dia as planilhas de Faturamento e Leads.',
+    category: 'Importação',
+    logo: <FileSpreadsheet className="h-10 w-10 text-primary" />,
+  },
 ];
 
 const CATEGORIES = ['Todas', 'Anúncios', 'Analytics', 'Automação', 'Gestão', 'Importação'];
@@ -2383,6 +2390,7 @@ export function IntegrationsPanel() {
   const [expandedId, setExpandedId] = useState<IntegrationId | null>(null);
   const [clickupInfo, setClickupInfo] = useState<{ workspace_name?: string; user_name?: string; linked?: number } | null>(null);
   const [leadloversOn, setLeadloversOn] = useState(false);
+  const [sorrifacil, setSorrifacil] = useState<{ ativo: boolean; clinicas: number } | null>(null);
   const [comoFunciona, setComoFunciona] = useState(false);
   const [verTodas, setVerTodas] = useState(false);
   const clickupConnected = !!clickupInfo;
@@ -2399,6 +2407,10 @@ export function IntegrationsPanel() {
     fetch('/api/leadlovers/config', { headers: callerHeaders() })
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => setLeadloversOn(!!d))
+      .catch(() => {});
+    fetch('/api/sorrifacil/config', { headers: callerHeaders() })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setSorrifacil(d?.tem_senha ? { ativo: !!d.ativo, clinicas: d.mapa?.length ?? 0 } : null))
       .catch(() => {});
   }, []);
 
@@ -2490,6 +2502,10 @@ export function IntegrationsPanel() {
       router.push('/integracoes/clickup');
       return;
     }
+    if (id === 'sorrifacil') {
+      router.push('/integracoes/sorrifacil');
+      return;
+    }
   }
 
   // Contas REAIS já carregadas pelos hooks — nada de fetch novo só pra desenhar
@@ -2530,6 +2546,10 @@ export function IntegrationsPanel() {
         return { length: leadloversOn ? 1 : 0,
           itens: leadloversOn ? [{ id: 'll', nome: 'Leadlovers', sub: 'Webhook configurado' }] : [],
           rotulo: rot(leadloversOn ? 1 : 0, 'conta conectada', 'contas conectadas'), vazio: 'Conecte sua conta e automatize seus leads.' };
+      case 'sorrifacil':
+        return { length: sorrifacil ? 1 : 0,
+          itens: sorrifacil ? [{ id: 'sf', nome: 'CRM Sorrifácil', sub: `${sorrifacil.clinicas} clínicas · rotina ${sorrifacil.ativo ? 'ligada' : 'desligada'}` }] : [],
+          rotulo: rot(sorrifacil ? 1 : 0, 'conta conectada', 'contas conectadas'), vazio: 'Informe o login do CRM e importe todo dia sozinho.' };
       case 'spreadsheet':
         return { length: 0, itens: [], rotulo: '',
           vazio: 'Abra para enviar uma planilha de campanhas, leads ou clientes.' };
@@ -2563,6 +2583,7 @@ export function IntegrationsPanel() {
     if (id === 'clickup') return clickupConnected;
     if (id === 'website') return googleConns.some((c) => c.accountType === 'ga4');
     if (id === 'leadlovers') return leadloversOn;
+    if (id === 'sorrifacil') return !!sorrifacil;
     return false;
   }
 
