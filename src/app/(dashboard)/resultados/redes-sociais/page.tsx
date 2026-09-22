@@ -296,7 +296,9 @@ export default function RedesSociaisPage() {
       if (sortBy === 'posts')       return nul(b.snap?.posts30d ?? null) - nul(a.snap?.posts30d ?? null);
       if (sortBy === 'seguidores')  return nul(b.snap?.followers ?? null) - nul(a.snap?.followers ?? null);
       if (sortBy === 'alcance')     return nul(b.snap?.reach28d ?? null) - nul(a.snap?.reach28d ?? null);
-      if (sortBy === 'engajamento') return nul(b.engaj) - nul(a.engaj);
+      // Pela TAXA (engajamento ÷ seguidores), que é o que a coluna mostra como
+      // comparável — o absoluto só premiava quem tem mais seguidores.
+      if (sortBy === 'engajamento') return nul(b.engajPct) - nul(a.engajPct);
       // default: mais dias sem post primeiro (o core é achar cliente abandonado); "sem dados" por último
       return nul(b.days) - nul(a.days);
     });
@@ -310,7 +312,15 @@ export default function RedesSociaisPage() {
   const reds = activeRows.filter(r => r.sev === 'vermelho');
   const noAccount = activeRows.filter(r => r.sev === 'sem');
   const daysList = monitored.map(r => r.days).filter((d): d is number => d !== null);
-  const avgDays = daysList.length ? Math.round(daysList.reduce((s, d) => s + d, 0) / daysList.length * 10) / 10 : null;
+  // MEDIANA, não média: um cliente abandonado há 400 dias puxava a média da
+  // carteira inteira para cima.
+  const medianDays = (() => {
+    if (!daysList.length) return null;
+    const v = [...daysList].sort((a, b) => a - b);
+    const m = Math.floor(v.length / 2);
+    const med = v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2;
+    return Math.round(med * 10) / 10;
+  })();
 
   // Aviso ATIVO sem instância/grupo salva "ligado" e nunca envia nada — o servidor
   // recusa (400) e a tela explica antes, em vez de dizer que deu certo.
@@ -366,7 +376,7 @@ export default function RedesSociaisPage() {
           { label: 'Monitorados', value: String(monitored.length), Icon: AtSign, color: '#55f52f' },
           { label: 'Sem post (vermelho)', value: String(reds.length), Icon: AlertTriangle, color: '#ef4444' },
           { label: 'Sem conta / erro', value: String(noAccount.length), Icon: WifiOff, color: '#94a3b8' },
-          { label: 'Média de dias sem post', value: avgDays !== null ? String(avgDays).replace('.', ',') : '—', Icon: Camera, color: '#7b2cff' },
+          { label: 'Mediana de dias sem post', value: medianDays !== null ? String(medianDays).replace('.', ',') : '—', Icon: Camera, color: '#7b2cff' },
         ] as const).map(({ label, value, Icon, color }) => (
           <div key={label} className="rounded-[var(--radius)] border border-border bg-card px-5 py-4">
             <div className="flex items-center gap-2">
@@ -407,7 +417,7 @@ export default function RedesSociaisPage() {
           <option value="posts">Mais posts (30d)</option>
           <option value="seguidores">Mais seguidores</option>
           <option value="alcance">Maior alcance (28d)</option>
-          <option value="engajamento">Maior engajamento</option>
+          <option value="engajamento">Maior engajamento (% dos seguidores)</option>
         </select>
         {(hiddenCount > 0 || showHidden) && (
           <button
@@ -525,8 +535,14 @@ export default function RedesSociaisPage() {
             <table className="min-w-[1150px] w-full">
               <thead>
                 <tr className="border-b border-border">
-                  {['CLIENTE', 'ÚLTIMO POST', 'RÉGUA (DIAS)', 'POSTS 30D', 'SEGUIDORES', 'ALCANCE 28D', 'ENGAJ. MÉDIO/POST', 'PUBLICAÇÃO', ''].map((label, i) => (
-                    <th key={i} className="sticky top-0 z-10 bg-card px-4 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-muted-foreground whitespace-nowrap after:absolute after:inset-x-0 after:bottom-0 after:border-b after:border-border">
+                  {['CLIENTE', 'ÚLTIMO POST', 'RÉGUA (DIAS)', 'POSTS 30D', 'SEGUIDORES', 'ALCANCE 28D (SOMA DIÁRIA)', 'ENGAJ. MÉDIO/POST', 'PUBLICAÇÃO', ''].map((label, i) => (
+                    <th
+                      key={i}
+                      className="sticky top-0 z-10 bg-card px-4 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-muted-foreground whitespace-nowrap after:absolute after:inset-x-0 after:bottom-0 after:border-b after:border-border"
+                      title={label.startsWith('ALCANCE')
+                        ? 'Soma do alcance diário dos últimos 28 dias. A mesma pessoa alcançada em dias diferentes conta várias vezes, então este número é MAIOR que o alcance único do período.'
+                        : undefined}
+                    >
                       {label}
                     </th>
                   ))}

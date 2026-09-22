@@ -14,7 +14,10 @@ import {
 const IgBadge = () => <span className="rounded bg-fuchsia-500/15 px-1 text-[9px] font-black text-fuchsia-400">IG</span>;
 const FbBadge = () => <span className="rounded bg-blue-500/15 px-1 text-[9px] font-black text-blue-400">FB</span>;
 import { cn } from '@/lib/utils';
-import { isStageAxis, sortByAxis, stageAxesFrom } from '@/lib/creative-library-ui';
+import {
+  isStageAxis, sortByAxis, stageAxesFrom,
+  MIN_LEADS_RANKING, isRateSort, hasMinSample, sortWithMinSample,
+} from '@/lib/creative-library-ui';
 
 export type CreativeRow = {
   client_id: string;
@@ -168,8 +171,10 @@ export function CreativeLibrary({ clientId }: { clientId?: string }) {
     // Eixos que dependem do enrich (gasto da Graph API) ficam aqui, porque o módulo
     // compartilhado só conhece o que vem do CRM. O resto — leads/conversas/vendas/
     // receita/etapa — delega pro sortByAxis, fonte única dos desempates.
+    // Taxas exigem amostra mínima (MIN_LEADS_RANKING): quem tem menos vai depois.
     if (sortBy === 'taxa_conversa') {
-      return [...list].sort(
+      return sortWithMinSample(
+        list,
         (a, b) =>
           ((b.conversas ?? 0) / Math.max(b.leads, 1)) - ((a.conversas ?? 0) / Math.max(a.leads, 1)) ||
           b.leads - a.leads,
@@ -181,7 +186,8 @@ export function CreativeLibrary({ clientId }: { clientId?: string }) {
     if (sortBy === 'gasto') return [...list].sort((a, b) => (spendOf(b) ?? -1) - (spendOf(a) ?? -1));
     if (sortBy === 'cpl') {
       // Menor CPL primeiro (melhor); sem gasto vai pro fim
-      return [...list].sort(
+      return sortWithMinSample(
+        list,
         (a, b) => (cplOf(a) ?? Number.POSITIVE_INFINITY) - (cplOf(b) ?? Number.POSITIVE_INFINITY),
       );
     }
@@ -321,6 +327,7 @@ export function CreativeLibrary({ clientId }: { clientId?: string }) {
             const cpl = spend !== null && r.leads > 0 ? spend / r.leads : null;
             const sortedStage = sortBy.startsWith('etapa:') ? sortBy.slice(6) : null;
             const topStatus = Object.entries(r.por_status).sort((a, b) => b[1] - a[1]).slice(0, 5);
+            const amostraPequena = isRateSort(sortBy) && !hasMinSample(r);
             return (
               <div key={`${r.client_id}|${r.ad_key}`} className="rounded-md border border-border bg-card p-3">
                 <div className="flex items-start gap-3">
@@ -338,6 +345,14 @@ export function CreativeLibrary({ clientId }: { clientId?: string }) {
                       {r.campaign_name ?? 'Campanha não identificada'}
                     </p>
                     <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                      {amostraPequena && (
+                        <span
+                          className="rounded bg-muted/40 px-1.5 py-0.5 text-[10px] text-muted-foreground"
+                          title={`Menos de ${MIN_LEADS_RANKING} leads — a taxa não é confiável, então fica depois dos criativos com amostra.`}
+                        >
+                          amostra pequena
+                        </span>
+                      )}
                       {!clientId && (
                         <span className="rounded bg-secondary/15 px-1.5 py-0.5 text-[10px] font-bold text-secondary-foreground">
                           {r.client_name ?? r.client_id}

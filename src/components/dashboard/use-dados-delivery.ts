@@ -72,7 +72,13 @@ export function useDadosDelivery(
     // contagem viva de cada etapa mora em `.clientes`.
     const etapas = bruto.funil?.periodo?.etapas ?? {};
     const conta = (e: string): number => etapas[e]?.clientes ?? 0;
-    const dias = Math.max(1, Math.round((Date.parse(ate) - Date.parse(de)) / 86_400_000) + 1);
+    // ⚠️ Dias DECORRIDOS, não dias da janela: em "este mês" a janela vai até o
+    // dia 30, mas só houve venda até hoje — dividir por 30 derrubava Receita/dia
+    // e Pedidos/dia e esticava a duração do saldo. Se a janela passa de hoje
+    // (fuso de Brasília), o fim efetivo é hoje.
+    const hojeBRT = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
+    const fimEfetivo = ate > hojeBRT && de <= hojeBRT ? hojeBRT : ate;
+    const dias = Math.max(1, Math.round((Date.parse(fimEfetivo) - Date.parse(de)) / 86_400_000) + 1);
 
     const canais: CanalTrafego[] = [];
     if (trafego.metaSpend > 0 || trafego.metaImpressions > 0) {

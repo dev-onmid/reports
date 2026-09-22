@@ -20,7 +20,7 @@ export type KpiCardProps = {
   label: string;
   /** Já formatado pelo caller (fmt.brl, fmt.int…) — o card não decide formato. */
   valor: string;
-  /** Fração (0.12 = +12%). `null` = sem base de comparação. */
+  /** PONTOS PERCENTUAIS (12 = +12%), como a rota do cardápio devolve. `null` = sem base de comparação. */
   delta?: number | null;
   menorMelhor?: boolean;
   spark?: number[];
@@ -95,6 +95,7 @@ export type TileProps = {
   tom?: TomGrafico;
   label: string;
   valor: string;
+  /** Variação em PONTOS PERCENTUAIS (12.5 = +12,5%), mesmo contrato do `Delta`. */
   delta?: number | null;
   menorMelhor?: boolean;
   nota?: string;
@@ -123,7 +124,7 @@ export function Tile({ icon: Icon, tom = 'primary', label, valor, delta, menorMe
       <p className="mt-1.5 font-heading text-2xl leading-none text-foreground" style={styleValor(estilo)}>{valor}</p>
       {temDelta && (
         <p className={cn('mt-1 text-[11px] font-bold', bom ? 'text-primary' : 'text-destructive')}>
-          {(delta >= 0 ? '+' : '') + (delta * 100).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%
+          {(delta >= 0 ? '+' : '') + delta.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%
         </p>
       )}
       {nota && <p className="mt-1 text-[11px] font-semibold text-primary">{nota}</p>}

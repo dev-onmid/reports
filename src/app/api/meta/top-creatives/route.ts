@@ -2,21 +2,11 @@ import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { resolveMetaPeriod, applyMetaDateToUrl } from '@/lib/period-utils';
 import { getFreshMetaToken } from '@/lib/meta-token';
+import { countMetaResults, type MetaAction } from '@/lib/meta-results';
 
-const LEAD_ACTIONS = [
-  'lead',
-  'onsite_conversion.lead_grouped',
-  'offsite_conversion.fb_pixel_lead',
-  'offsite_conversion.lead',
-  'onsite_conversion.lead',
-  'onsite_web_lead',
-  'onsite_web_app_lead',
-  'onsite_conversion.messaging_conversation_started_7d',
-  'onsite_conversion.total_messaging_connection',
-  'messaging_conversation_started_7d',
-  'total_messaging_connection',
-  'onsite_conversion.messaging_first_reply',
-];
+// Leads/conversas pela contagem CANÔNICA (lib/meta-results): uma prioridade por
+// família, nunca somando aliases. A lista local antiga somava `lead` +
+// `onsite_conversion.lead_grouped` + … e contava o mesmo lead 2–3 vezes.
 
 function normalizeMetaAccountId(accountId: string) {
   return accountId.replace(/^act_/, '');
@@ -317,10 +307,7 @@ export async function GET(request: NextRequest) {
 
             const mediaType = detectMediaType(creative);
 
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const leads = ((insight.actions ?? []) as { action_type: string; value: string }[])
-              .filter(a => LEAD_ACTIONS.includes(a.action_type))
-              .reduce((sum, a) => sum + parseInt(a.value || '0', 10), 0);
+            const leads = countMetaResults(insight.actions as MetaAction[] | undefined);
             const spend = parseFloat(insight.spend || '0');
             const clicks = parseInt(insight.clicks || '0', 10);
             const impressions = parseInt(insight.impressions || '0', 10);

@@ -114,6 +114,12 @@ export function IconTile({ icon: Icon, tom = 'primary', size = 40, cor }: {
 /**
  * Selo de variação. `null` vira travessão — variação sem base anterior não é
  * "+0%", é desconhecida.
+ *
+ * ⚠️ Recebe PONTOS PERCENTUAIS (12.5 → "+12,5%"), NÃO fração — diferente do
+ * `fmt.pct`. É o formato que a rota do cardápio devolve (`variacao()` em
+ * lib/cardapioweb-recorrencia já multiplica por 100) e que o page.tsx também
+ * consome como % em `dadosFood.variacao`. Multiplicar de novo aqui mostrava a
+ * variação 100× maior (+1.250% em vez de +12,5%).
  */
 export function Delta({ valor, menorMelhor, small }: {
   valor: number | null; menorMelhor?: boolean; small?: boolean;
@@ -133,7 +139,7 @@ export function Delta({ valor, menorMelhor, small }: {
       )}
     >
       <Icone className="h-3 w-3" />
-      {(subiu ? '+' : '') + nf1.format(valor * 100)}%
+      {(subiu ? '+' : '') + nf1.format(valor)}%
     </span>
   );
 }

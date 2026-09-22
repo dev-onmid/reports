@@ -20,7 +20,7 @@ export async function GET(
     const ctx = await resolvePortalToken(pool, token);
     if (!ctx) return Response.json({ error: 'Link inválido ou revogado' }, { status: 404 });
 
-    const [stages, leads, kpis] = await Promise.all([
+    const [stages, leads, kpis, etapas] = await Promise.all([
       // Etapas do funil principal (primeiro funil do cliente)
       pool.query<{ label: string; color: string; position: number }>(
         `SELECT s.label, s.color, s.position
@@ -63,16 +63,25 @@ export async function GET(
             AND time_interno IS NOT TRUE`,
         [ctx.clientId, String(days)],
       ),
+      // ⚠️ Funil por agregação, na MESMA janela/filtro dos KPIs. Antes contava
+      // em cima da lista acima (LIMIT 300) e, acima de 300 leads no período, o
+      // funil somava menos que o "total" do card ao lado.
+      pool.query<{ status: string; n: number }>(
+        `SELECT COALESCE(status, 'Em Atendimento') AS status, COUNT(*)::int AS n
+           FROM public.crm_leads
+          WHERE client_id = $1
+            AND created_at > NOW() - ($2 || ' days')::interval
+            AND time_interno IS NOT TRUE
+          GROUP BY 1`,
+        [ctx.clientId, String(days)],
+      ),
     ]);
 
     const k = kpis.rows[0] ?? { total: 0, fechados: 0, valor: 0, com_origem: 0 };
 
     // Contagem por etapa (status é texto — mesmo agrupamento do Kanban interno)
     const porEtapa = new Map<string, number>();
-    for (const l of leads.rows as Array<{ status: string | null }>) {
-      const s = l.status ?? 'Em Atendimento';
-      porEtapa.set(s, (porEtapa.get(s) ?? 0) + 1);
-    }
+    for (const e of etapas.rows) porEtapa.set(e.status, Number(e.n) || 0);
 
     return Response.json({
       clientName: ctx.clientName,

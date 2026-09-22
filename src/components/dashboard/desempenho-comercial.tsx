@@ -14,7 +14,6 @@
 
 import { useMemo, useState } from 'react';
 import { ArrowRight } from 'lucide-react';
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip } from 'recharts';
 import { cn, formatCurrencyBRL } from '@/lib/utils';
 
 export type LinhaVendedor = {
@@ -219,28 +218,27 @@ export function CategoriasCard({ linhas, loading }: { linhas: LinhaCategoria[]; 
 
   const valorDe = (l: LinhaCategoria) => (eixo === 'itens' ? l.itens : l.valor);
 
-  const { fatias, lista, total } = useMemo(() => {
+  const { lista, total } = useMemo(() => {
     const ordenadas = [...linhas]
       .map((l) => ({ nome: l.categoria, valor: valorDe(l) }))
       .filter((l) => l.valor > 0)
       .sort((a, b) => b.valor - a.valor);
     const soma = ordenadas.reduce((s, l) => s + l.valor, 0);
     if (ordenadas.length <= TOPO_CATEGORIAS + 1) {
-      return { fatias: ordenadas, lista: ordenadas, total: soma };
+      return { lista: ordenadas, total: soma };
     }
     const cabeca = ordenadas.slice(0, TOPO_CATEGORIAS);
     const cauda = ordenadas.slice(TOPO_CATEGORIAS);
     // ⚠️ "Outras" leva o RESTO exato: se levasse só a soma da cauda visível, as
-    // fatias não fechariam com o número do miolo.
+    // barras não fechariam com o total do topo.
     const comOutras = [...cabeca, {
       nome: `Outras ${cauda.length} categoria${cauda.length === 1 ? '' : 's'}`,
       valor: soma - cabeca.reduce((s, l) => s + l.valor, 0),
     }];
-    // ⚠️ O DONUT fica sempre no top 5 + Outras, mesmo expandido: são 5 tons na
-    // paleta, e desenhar 12 fatias obrigaria a repetir cor — duas categorias
-    // com o mesmo verde tornam o gráfico impossível de ler. "Ver todas" abre a
-    // LISTA, que não depende de cor para identificar a linha.
-    return { fatias: comOutras, lista: tudo ? ordenadas : comOutras, total: soma };
+    // Recolhido: top 5 + "Outras". "Ver todas" abre a lista inteira — as barras
+    // são identificadas pelo rótulo, então as que passam do 5º ficam em cinza
+    // sem repetir tom.
+    return { lista: tudo ? ordenadas : comOutras, total: soma };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [linhas, eixo, tudo]);
 
@@ -276,58 +274,38 @@ export function CategoriasCard({ linhas, loading }: { linhas: LinhaCategoria[]; 
       {loading ? <Esqueleto />
         : lista.length === 0 ? <Vazio texto="Nenhum produto lançado nos negócios ganhos do período." />
         : (
-          <div className="grid items-center gap-4 sm:grid-cols-[42%_1fr]">
-            <div className="relative mx-auto h-[190px] w-[190px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={fatias}
-                    dataKey="valor"
-                    nameKey="nome"
-                    innerRadius={62}
-                    outerRadius={92}
-                    paddingAngle={0}
-                    // Anel da própria superfície entre as fatias: sem ele dois
-                    // tons vizinhos encostam e a fronteira some.
-                    stroke="#0B1115"
-                    strokeWidth={3}
-                    isAnimationActive={false}
-                  >
-                    {fatias.map((f, i) => <Cell key={f.nome} fill={corDe(f.nome, i)} />)}
-                  </Pie>
-                  <RechartsTooltip
-                    contentStyle={{ background: '#111A20', border: '1px solid #233038', borderRadius: 8, fontSize: 12 }}
-                    labelStyle={{ color: '#F1F4F5' }}
-                    itemStyle={{ color: '#87929B' }}
-                    formatter={(v) => (eixo === 'itens' ? nf.format(Number(v)) : formatCurrencyBRL(Number(v)))}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
-              <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-                <span className="text-[10px] font-medium uppercase tracking-[0.08em] text-[#87929B]">Total</span>
-                <span className="mt-0.5 text-[22px] font-bold leading-none text-[#F1F4F5]">{fmtTotal}</span>
-                <span className="mt-1 text-[10px] text-[#87929B]">
-                  {eixo === 'itens' ? 'itens vendidos' : 'faturado'}
-                </span>
-              </div>
+          // ⚠️ Era um donut: com uma categoria dominante ele virava um anel de
+          // uma cor só. Barras horizontais ORDENADAS comparam por comprimento,
+          // com rótulo, valor e % lado a lado.
+          <div className="min-w-0">
+            <div className="mb-3 flex items-baseline justify-between gap-2">
+              <span className="text-[10px] font-medium uppercase tracking-[0.08em] text-[#87929B]">
+                Total {eixo === 'itens' ? 'de itens vendidos' : 'faturado'}
+              </span>
+              <span className="font-heading text-[22px] leading-none text-[#F1F4F5]">{fmtTotal}</span>
             </div>
-
-            <div className={cn('min-w-0 space-y-2.5', tudo && 'max-h-[190px] overflow-y-auto pr-1')}>
+            <ul className={cn('space-y-3', tudo && 'max-h-[260px] overflow-y-auto pr-1')}>
               {lista.map((f, i) => {
                 const p = total > 0 ? (f.valor / total) * 100 : 0;
+                const cor = corDe(f.nome, i);
                 return (
-                  <div key={f.nome} className="flex items-center gap-2">
-                    <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: corDe(f.nome, i) }} />
-                    <span className="min-w-0 flex-1 truncate text-[12px] text-[#dfe6ea]" title={f.nome}>{f.nome}</span>
-                    <span className="hidden h-1.5 w-[86px] shrink-0 overflow-hidden rounded-full bg-[#172027] sm:block">
-                      <span className="block h-full rounded-full"
-                        style={{ width: `${maior > 0 ? Math.max((f.valor / maior) * 100, 6) : 0}%`, backgroundColor: corDe(f.nome, i) }} />
-                    </span>
-                    <span className="w-[46px] shrink-0 text-right text-[12px] font-bold text-[#F1F4F5]">{pct(p)}</span>
-                  </div>
+                  <li key={f.nome} className="min-w-0">
+                    <div className="flex items-baseline gap-2">
+                      <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: cor }} />
+                      <span className="min-w-0 flex-1 truncate text-[12px] text-[#dfe6ea]" title={f.nome}>{f.nome}</span>
+                      <span className="shrink-0 text-[11px] tabular-nums text-[#87929B]">
+                        {eixo === 'itens' ? nf.format(Math.round(f.valor)) : formatCurrencyBRL(f.valor)}
+                      </span>
+                      <span className="w-[46px] shrink-0 text-right text-[12px] font-bold tabular-nums text-[#F1F4F5]">{pct(p)}</span>
+                    </div>
+                    <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-[#172027]">
+                      <div className="h-full rounded-full"
+                        style={{ width: `${maior > 0 ? Math.max((f.valor / maior) * 100, 1.5) : 0}%`, backgroundColor: cor }} />
+                    </div>
+                  </li>
                 );
               })}
-            </div>
+            </ul>
           </div>
         )}
 

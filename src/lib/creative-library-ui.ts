@@ -148,3 +148,39 @@ export function formatAxisValue(axisKey: string, value: number): string {
   }
   return value.toLocaleString('pt-BR');
 }
+
+// ── Volume mínimo para rankings por TAXA ─────────────────────────────────────
+// ⚠️ Eixos que são razão (taxa de conversa, CPL) não têm volume embutido: um
+// criativo com 1 lead que conversou vira "100%" e sobe para o 1º lugar acima de
+// um com 200 leads e 60%. Abaixo deste piso o item continua na lista, mas DEPOIS
+// dos que têm amostra — e a tela marca como "amostra pequena".
+export const MIN_LEADS_RANKING = 5;
+
+/** Eixos em que a amostra mínima se aplica. */
+export const RATE_SORT_KEYS = ['taxa_conversa', 'cpl'] as const;
+
+export function isRateSort(sortKey: string): boolean {
+  return (RATE_SORT_KEYS as readonly string[]).includes(sortKey);
+}
+
+export function hasMinSample(row: Pick<CreativeRankable, 'leads'>): boolean {
+  return row.leads >= MIN_LEADS_RANKING;
+}
+
+/**
+ * Ordena por uma taxa sem deixar amostra pequena furar a fila: quem tem
+ * ≥ MIN_LEADS_RANKING vem antes, cada grupo ordenado pelo mesmo comparador.
+ * Estável e sem mutar a entrada.
+ */
+export function sortWithMinSample<T extends Pick<CreativeRankable, 'leads'>>(
+  rows: T[],
+  compare: (a: T, b: T) => number,
+): T[] {
+  return [...rows].sort((a, b) => {
+    const sa = hasMinSample(a) ? 0 : 1;
+    const sb = hasMinSample(b) ? 0 : 1;
+    if (sa !== sb) return sa - sb;
+    const c = compare(a, b);
+    return Number.isNaN(c) ? 0 : c; // ∞ − ∞ (dois sem gasto) empata
+  });
+}

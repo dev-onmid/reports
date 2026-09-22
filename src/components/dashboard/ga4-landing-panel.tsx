@@ -9,26 +9,22 @@
 //
 // ⚠️ A linguagem visual é a MESMA das primeiras lâminas do dashboard, de
 // propósito (pedido do Matheus): cards no verde da marca (#6cff2f) com badge de
-// ícone e número em `font-heading` (padrão QuickMetricCard), donut de composição
-// na paleta categórica validada do dashboard (idêntica à CanalDonutCard) e
-// superfície de card #111a20 sobre o painel (padrão MiniPlatformMetric). Nada de
-// amber. A paleta do donut é a mesma já validada em produção — não inventar tom.
+// ícone e número em `font-heading` (padrão QuickMetricCard), composição em
+// barras horizontais ordenadas e superfície de card #111a20 sobre o painel
+// (padrão MiniPlatformMetric). Nada de amber.
+//
+// ⚠️ A composição de origens era um donut — com uma fatia de ~93% ele não dizia
+// nada além de "quase tudo é X". Barras ordenadas com valor e % leem melhor.
 
 import { useState, type ReactNode, type ElementType } from 'react';
 import {
-  PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RTooltip,
-} from 'recharts';
-import {
   MousePointerClick, MessagesSquare, Percent, MessageCircle, Phone,
   ClipboardList, Sparkles, Clock, UserPlus, Files, PlayCircle, DollarSign,
+  TrendingUp, TrendingDown, Info,
 } from 'lucide-react';
 import type { Ga4Celula, Ga4Consolidado, Ga4Linha, Ga4Seg, Ga4Totais } from '@/lib/ga4-landing';
 
-// Paleta categórica idêntica à da CanalDonutCard do dashboard — 8 tons validados
-// contra a superfície do painel (banda de luminosidade, piso de croma, separação
-// sob daltonismo, contraste ≥ 3:1). Do 8º canal em diante vira "Outros".
-const CORES = ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#008300', '#9085e9', '#e66767'];
-const CINZA = '#6b7478';
+/** Quantas origens aparecem antes de agrupar o resto em "Outras". */
 const MAX_FATIAS = 7;
 
 const cx = (...a: Array<string | false | undefined>) => a.filter(Boolean).join(' ');
@@ -74,27 +70,46 @@ function Titulo({ children, dica, icon: Icon }: { children: ReactNode; dica?: st
   );
 }
 
+/**
+ * Variação vs período anterior, CIENTE DA DIREÇÃO: por padrão subir é bom
+ * (sessões, contatos, engajamento) → verde; cair → vermelho. `inverter` troca o
+ * sentido para métricas em que menos é melhor. Variação que arredonda para 0%
+ * fica cinza — "+0%" verde sugeriria melhora que não houve.
+ */
 function Delta({ atual, anterior, inverter = false }: { atual: number; anterior: number; inverter?: boolean }) {
   if (!anterior || !Number.isFinite(atual) || !Number.isFinite(anterior)) return <span className="text-[10px] text-[#7c868c]">—</span>;
-  const d = (atual - anterior) / anterior;
-  const bom = inverter ? d < 0 : d > 0;
-  const cor = d === 0 ? 'text-[#a7b0b6]' : bom ? 'text-[#6cff2f]' : 'text-red-400';
-  return <span className={`text-[11px] font-bold ${cor}`}>{d > 0 ? '+' : ''}{(d * 100).toLocaleString('pt-BR', { maximumFractionDigits: 0 })}%</span>;
+  const d = (atual - anterior) / Math.abs(anterior);
+  const pct = Math.round(d * 100);
+  if (pct === 0) return <span className="text-[11px] font-bold text-[#a7b0b6]">0%</span>;
+  const subiu = d > 0;
+  const bom = inverter ? !subiu : subiu;
+  const Icone = subiu ? TrendingUp : TrendingDown;
+  return (
+    <span className={`inline-flex items-center gap-0.5 text-[11px] font-bold ${bom ? 'text-[#6cff2f]' : 'text-[#ff5a5a]'}`}>
+      <Icone className="h-3 w-3" />
+      {subiu ? '+' : ''}{pct.toLocaleString('pt-BR')}%
+    </span>
+  );
 }
 
 /** Card de KPI no padrão QuickMetricCard do dashboard: badge de ícone verde,
  * valor em font-heading e variação vs período anterior. */
-function Kpi({ rotulo, valor, atual, anterior, sub, icon: Icon, inverter }: {
+function Kpi({ rotulo, valor, atual, anterior, sub, icon: Icon, inverter, dica }: {
   rotulo: string; valor: string; atual: number; anterior: number; sub?: string; icon: ElementType; inverter?: boolean;
+  /** Explicação da métrica no hover (title nativo). */
+  dica?: string;
 }) {
   return (
-    <div className="rounded-[12px] border border-white/[0.07] bg-[#111a20]/80 p-3.5 min-w-0">
+    <div className="rounded-[12px] border border-white/[0.07] bg-[#111a20]/80 p-3.5 min-w-0" title={dica}>
       <div className="flex items-start gap-3">
         <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[#6cff2f]/20 bg-[#6cff2f]/10 text-[#6cff2f]">
           <Icon className="h-4 w-4" />
         </span>
         <div className="min-w-0">
-          <p className="truncate text-[10px] font-black uppercase tracking-[0.06em] text-[#9aa4aa]">{rotulo}</p>
+          <p className="flex items-center gap-1 text-[10px] font-black uppercase tracking-[0.06em] text-[#9aa4aa]">
+            <span className="truncate">{rotulo}</span>
+            {dica && <Info className="h-3 w-3 shrink-0 text-[#6c767c]" aria-label={dica} />}
+          </p>
           <p className="mt-1.5 font-heading text-2xl leading-none text-[#f4f7f8] tabular-nums">{valor}</p>
           <p className="mt-1 flex items-center gap-1.5">
             <Delta atual={atual} anterior={anterior} inverter={inverter} />
@@ -107,105 +122,70 @@ function Kpi({ rotulo, valor, atual, anterior, sub, icon: Icon, inverter }: {
   );
 }
 
-/**
- * Cor por NOME do rótulo (não por posição): trocar o período reordena as fatias,
- * e cor por rank faria a mesma origem mudar de cor a cada filtro. Mesma regra da
- * CanalDonutCard — hash escolhe o tom, colisão cai no próximo livre; "Outros" é cinza.
- */
-function coresPorLabel(labels: string[]): Record<string, string> {
-  const usados = new Set<number>();
-  const out: Record<string, string> = {};
-  for (const label of [...labels].sort()) {
-    if (label.startsWith('Outros')) { out[label] = CINZA; continue; }
-    let h = 0;
-    for (let i = 0; i < label.length; i++) h = (h * 31 + label.charCodeAt(i)) >>> 0;
-    let slot = h % CORES.length;
-    for (let t = 0; t < CORES.length && usados.has(slot); t++) slot = (slot + 1) % CORES.length;
-    usados.add(slot);
-    out[label] = CORES[slot];
-  }
-  return out;
-}
-
 type Fatia = { label: string; valor: number };
 
 /**
- * Donut de composição — mesma linguagem da CanalDonutCard do dashboard: anel com
- * total no miolo, gap de 2px na cor da superfície entre fatias, legenda com % e
- * valor (rótulo direto = codificação secundária além da cor). "Outros" absorve a
- * diferença até o total, como no dashboard, senão a soma das fatias não fecha.
+ * Composição em barras horizontais ORDENADAS (maior → menor): rótulo, valor e %
+ * do total. Substitui o donut — com uma origem dominante (~93%) o anel virava um
+ * círculo de uma cor só e escondia o resto. Do 8º item em diante vira "Outras",
+ * e "Outras" absorve a diferença até o total, senão a soma não fecha.
  */
-function DonutComposicao({ titulo, dica, fatias: brutas, total }: {
+function BarrasComposicao({ titulo, dica, fatias: brutas, total }: {
   titulo: string; dica?: string; fatias: Fatia[]; total: number;
 }) {
   const positivas = brutas.filter(f => f.valor > 0).sort((a, b) => b.valor - a.valor);
   if (positivas.length === 0 || total <= 0) return null;
-  const cabe = positivas.length <= CORES.length;
-  const cabeca = cabe ? positivas : positivas.slice(0, MAX_FATIAS);
-  const cauda = cabe ? [] : positivas.slice(MAX_FATIAS);
+  const cabeca = positivas.slice(0, MAX_FATIAS);
+  const cauda = positivas.slice(MAX_FATIAS);
   const somaCabeca = cabeca.reduce((s, o) => s + o.valor, 0);
   const resto = Math.max(0, total - somaCabeca);
   const fatias: Fatia[] = resto > 0
-    ? [...cabeca, { label: cauda.length > 0 ? `Outros (${cauda.length}+)` : 'Outros', valor: resto }]
+    ? [...cabeca, { label: cauda.length > 0 ? `Outras (${cauda.length})` : 'Outras', valor: resto }]
     : cabeca;
-  const cores = coresPorLabel(fatias.map(f => f.label));
+  const max = Math.max(1, ...fatias.map(f => f.valor));
   return (
     <Card>
       <Titulo dica={dica} icon={DollarSign}>{titulo}</Titulo>
-      <div className="mt-1 flex flex-col items-center gap-4">
-        <div className="relative h-[150px] w-[150px]">
-          <ResponsiveContainer width="100%" height="100%">
-            <PieChart>
-              <Pie data={fatias} dataKey="valor" nameKey="label" innerRadius={44} outerRadius={72} paddingAngle={0}
-                stroke="#111a20" strokeWidth={2} isAnimationActive={false}>
-                {fatias.map(f => <Cell key={f.label} fill={cores[f.label]} />)}
-              </Pie>
-              <RTooltip
-                contentStyle={{ background: '#0b1216', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 10, fontSize: 12 }}
-                labelStyle={{ color: '#f4f7f8' }} itemStyle={{ color: '#dce4e8' }}
-                formatter={(v) => fmtN(Number(v))} />
-            </PieChart>
-          </ResponsiveContainer>
-          <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-            <span className="text-[10px] font-black uppercase tracking-[0.08em] text-[#9aa4aa]">Total</span>
-            <span className="font-heading text-lg leading-tight text-[#f4f7f8]">{fmtN(total)}</span>
-          </div>
-        </div>
-        <div className="w-full space-y-1.5">
-          {fatias.map(o => (
-            <div key={o.label} className="flex items-baseline gap-2">
-              <span className="mt-0.5 h-2.5 w-2.5 shrink-0 rounded-sm" style={{ backgroundColor: cores[o.label] }} />
-              <span className="min-w-0 flex-1 truncate text-xs font-semibold text-[#dce4e8]">{o.label}</span>
-              <span className="shrink-0 text-[10px] text-[#9aa4aa]">{((o.valor / total) * 100).toFixed(1).replace('.', ',')}%</span>
-              <span className="shrink-0 text-xs font-bold text-[#f4f7f8]">{fmtN(o.valor)}</span>
-            </div>
-          ))}
-        </div>
-      </div>
+      <ul className="mt-1 space-y-2">
+        {fatias.map(o => {
+          const outras = o.label.startsWith('Outras');
+          return (
+            <li key={o.label} className="text-xs">
+              <div className="flex items-baseline gap-2">
+                <span className="min-w-0 flex-1 truncate font-semibold text-[#dce4e8]" title={o.label}>{o.label}</span>
+                <span className="shrink-0 text-[10px] tabular-nums text-[#9aa4aa]">{fmtPct(o.valor / total)}</span>
+                <span className="w-12 shrink-0 text-right font-bold tabular-nums text-[#f4f7f8]">{fmtN(o.valor)}</span>
+              </div>
+              <div className="mt-1 h-1.5 rounded-full bg-white/[0.06]">
+                <div className={`h-1.5 rounded-full ${outras ? 'bg-[#6b7478]' : 'bg-[#6cff2f]'}`} style={{ width: `${(o.valor / max) * 100}%` }} />
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+      <p className="mt-2 text-[10px] text-[#7c868c]">Total: <span className="font-bold text-[#dce4e8]">{fmtN(total)}</span></p>
     </Card>
   );
 }
 
 function Barras({ titulo, dica, linhas, total, rotuloValor }: { titulo: string; dica?: string; linhas: Ga4Linha[]; total: number; rotuloValor?: (v: string) => string }) {
+  // Sem dado não desenha caixa vazia — o painel lista o que falta numa linha só.
+  if (linhas.length === 0) return null;
   const max = Math.max(1, ...linhas.map(l => l.n));
   return (
     <Card>
       <Titulo dica={dica}>{titulo}</Titulo>
-      {linhas.length === 0 ? (
-        <p className="text-xs text-[#7c868c]">Sem dado no período.</p>
-      ) : (
-        <ul className="space-y-1.5">
-          {linhas.map(l => (
-            <li key={l.valor} className="text-xs">
-              <div className="flex items-center justify-between gap-2">
-                <span className="truncate text-[#dce4e8]">{rotuloValor ? rotuloValor(l.valor) : l.valor}</span>
-                <span className="shrink-0 tabular-nums text-[#9aa4aa]">{fmtN(l.n)}{total > 0 && <span className="ml-1 text-[#6c767c]">({fmtPct(l.n / total)})</span>}</span>
-              </div>
-              <div className="mt-1 h-1.5 rounded-full bg-white/[0.06]"><div className="h-1.5 rounded-full bg-[#6cff2f]" style={{ width: `${(l.n / max) * 100}%` }} /></div>
-            </li>
-          ))}
-        </ul>
-      )}
+      <ul className="space-y-1.5">
+        {linhas.map(l => (
+          <li key={l.valor} className="text-xs">
+            <div className="flex items-center justify-between gap-2">
+              <span className="truncate text-[#dce4e8]">{rotuloValor ? rotuloValor(l.valor) : l.valor}</span>
+              <span className="shrink-0 tabular-nums text-[#9aa4aa]">{fmtN(l.n)}{total > 0 && <span className="ml-1 text-[#6c767c]">({fmtPct(l.n / total)})</span>}</span>
+            </div>
+            <div className="mt-1 h-1.5 rounded-full bg-white/[0.06]"><div className="h-1.5 rounded-full bg-[#6cff2f]" style={{ width: `${(l.n / max) * 100}%` }} /></div>
+          </li>
+        ))}
+      </ul>
     </Card>
   );
 }
@@ -214,6 +194,15 @@ type Coluna = 'sessoes' | 'engaj' | 'tempo' | 'conv' | 'wa' | 'form' | 'tel' | '
 const CABECALHO: Record<Coluna, string> = {
   sessoes: 'Sessões', engaj: 'Engaj.', tempo: 'Tempo', conv: 'Conv.', wa: 'WhatsApp', form: 'Formulário', tel: 'Telefone',
   taxa: 'Converteu', custo: 'Custo', cliques: 'Cliques', cpa: 'Custo/conv.',
+};
+/** Dica (hover) dos cabeçalhos — deixa claro que as colunas de conversão são EVENTOS-CHAVE do GA4. */
+const DICA_CABECALHO: Partial<Record<Coluna, string>> = {
+  conv: 'Conversões (eventos-chave) do GA4 — uma sessão pode gerar várias.',
+  wa: 'Eventos-chave de WhatsApp contados pelo GA4.',
+  form: 'Eventos-chave de formulário contados pelo GA4.',
+  tel: 'Eventos-chave de telefone contados pelo GA4.',
+  taxa: '% das sessões com pelo menos um evento-chave.',
+  tempo: 'Tempo médio de engajamento por sessão (GA4).',
 };
 const POR_TIPO: Coluna[] = ['wa', 'form', 'tel'];
 const contatosSeg = (s: Ga4Seg) => s.whatsapp + s.formulario + s.telefone;
@@ -239,10 +228,13 @@ function celula(c: Coluna, s: Ga4Seg) {
  * contato some. Se a propriedade não tem conversão classificável, cai para "Conv." (todos
  * os eventos-chave). "Converteu" = % das sessões com ao menos um evento-chave.
  */
-function TabelaSeg({ titulo, dica, linhas, colunas: pedidas = ['sessoes', 'engaj', 'tempo', 'wa', 'form', 'tel', 'taxa'], rotulo = 'Nome', altura, semCard = false }: {
+function TabelaSeg({ titulo, dica, linhas, colunas: pedidas = ['sessoes', 'engaj', 'tempo', 'wa', 'form', 'tel', 'taxa'], rotulo = 'Nome', altura, semCard = false, barra = false }: {
   titulo: string; dica?: string; linhas: Ga4Seg[]; colunas?: Coluna[]; rotulo?: string; altura?: number; semCard?: boolean;
+  /** Barra de dado sob o rótulo, proporcional às sessões da maior linha (idade, gênero). */
+  barra?: boolean;
 }) {
   if (linhas.length === 0) return null;
+  const maxSessoes = Math.max(1, ...linhas.map(s => s.sessoes));
   const soma = (c: Coluna) => linhas.reduce((t, s) => t + (c === 'wa' ? s.whatsapp : c === 'form' ? s.formulario : s.telefone), 0);
   let colunas = pedidas.filter(c => !POR_TIPO.includes(c) || soma(c) > 0);
   if (pedidas.some(c => POR_TIPO.includes(c)) && !colunas.some(c => POR_TIPO.includes(c))) {
@@ -257,7 +249,7 @@ function TabelaSeg({ titulo, dica, linhas, colunas: pedidas = ['sessoes', 'engaj
           <thead className={altura ? 'sticky top-0 bg-[#111a20]' : undefined}>
             <tr className="text-[10px] uppercase tracking-wider text-[#7c868c]">
               <th className="text-left font-bold pb-1 pr-2">{rotulo}</th>
-              {colunas.map(c => <th key={c} className="text-right font-bold pb-1 pl-2 whitespace-nowrap">{CABECALHO[c]}</th>)}
+              {colunas.map(c => <th key={c} title={DICA_CABECALHO[c]} className="text-right font-bold pb-1 pl-2 whitespace-nowrap">{CABECALHO[c]}</th>)}
             </tr>
           </thead>
           <tbody>
@@ -266,6 +258,11 @@ function TabelaSeg({ titulo, dica, linhas, colunas: pedidas = ['sessoes', 'engaj
                 <td className="py-1.5 pr-2 max-w-[260px]">
                   <div className="truncate text-[#dce4e8]" title={s.valor}>{s.valor}</div>
                   {s.sub && <div className="truncate text-[10px] text-[#6c767c]" title={s.sub}>{s.sub}</div>}
+                  {barra && (
+                    <div className="mt-1 h-1.5 min-w-[64px] rounded-full bg-white/[0.06]">
+                      <div className="h-1.5 rounded-full bg-[#6cff2f]" style={{ width: `${(s.sessoes / maxSessoes) * 100}%` }} />
+                    </div>
+                  )}
                 </td>
                 {colunas.map(c => (
                   <td key={c} className={`py-1.5 pl-2 text-right tabular-nums whitespace-nowrap ${c === 'conv' || c === 'cpa' || POR_TIPO.includes(c) ? 'font-bold text-[#dce4e8]' : 'text-[#9aa4aa]'}`}>{celula(c, s)}</td>
@@ -404,11 +401,28 @@ export function Ga4LandingPanel({ dados, loading, aviso }: { dados: Ga4Consolida
   // Tem pesquisa paga mas nenhuma linha do Google Ads = propriedade sem vínculo com o Ads
   const semVinculoAds = pago.googleAds.length === 0 && pago.canais.some(c => c.valor === 'Paid Search' || c.valor === 'Cross-network');
 
-  // Composição de "de onde vêm os contatos" (donut na linguagem da CanalDonutCard).
-  // Sem contatos no período, cai para a composição de sessões pra não ficar vazio.
-  const origContato = dados.origens.map(o => ({ label: `${o.origem} / ${o.midia}`, valor: o.contatos }));
-  const temContato = origContato.some(f => f.valor > 0);
+  // Composição por origem / mídia em barras ordenadas. ⚠️ `o.contatos` aqui são
+  // EVENTOS-CHAVE (keyEvents) do GA4, não a soma de cliques do KPI "Contatos" —
+  // por isso o bloco se chama "conversões (GA4)" e o total é a soma das próprias
+  // origens (as 12 maiores por sessão), não `a.contatos`: misturar as duas bases
+  // fazia as barras não fecharem com o número do topo.
+  const origConv = dados.origens.map(o => ({ label: `${o.origem} / ${o.midia}`, valor: o.contatos }));
+  const totalOrigConv = origConv.reduce((t, f) => t + f.valor, 0);
+  const temConv = totalOrigConv > 0;
   const origSessao = dados.origens.map(o => ({ label: `${o.origem} / ${o.midia}`, valor: o.sessoes }));
+  const totalOrigSessao = origSessao.reduce((t, f) => t + f.valor, 0);
+
+  // Rolagem: o GA4 padrão (medição otimizada) só dispara o marco de 90%. Os
+  // marcos 25/50/75 exigem o gatilho de profundidade de rolagem no GTM.
+  const soNoventa = co.rolagem.length > 0 && co.rolagem.every(l => Number(l.valor) === 90);
+
+  // Blocos de evento sem dado não desenham caixa vazia — viram uma linha no fim.
+  const faltando = [
+    dados.posicoes.length === 0 && 'onde clicam para falar (parâmetro posicao)',
+    co.secoes.length === 0 && 'seções vistas (evento view_secao)',
+    co.rolagem.length === 0 && 'rolagem (evento scroll)',
+    ...dados.detalhes.filter(d => d.linhas.length === 0).map(d => d.rotulo.toLowerCase()),
+  ].filter((x): x is string => Boolean(x));
 
   // Seção sem dado nenhum não aparece — nada de lâmina vazia.
   const temPago = pago.canais.length + pago.googleAds.length + pago.campanhas.length + pago.palavras.length + pago.termos.length > 0;
@@ -420,13 +434,16 @@ export function Ga4LandingPanel({ dados, loading, aviso }: { dados: Ga4Consolida
       <Secao titulo="Visão geral">
           <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 xl:grid-cols-6">
             <Kpi rotulo="Sessões" valor={fmtN(a.sessoes)} atual={a.sessoes} anterior={b.sessoes} sub={`${fmtN(a.usuarios)} usuários`} icon={MousePointerClick} />
-            <Kpi rotulo="Contatos" valor={fmtN(a.contatos)} atual={a.contatos} anterior={b.contatos} sub="WhatsApp + telefone + formulário" icon={MessagesSquare} />
-            <Kpi rotulo="Taxa de contato" valor={fmtPct(a.taxaContato)} atual={a.taxaContato} anterior={b.taxaContato} sub="contatos por sessão" icon={Percent} />
+            <Kpi rotulo="Contatos" valor={fmtN(a.contatos)} atual={a.contatos} anterior={b.contatos} sub="WhatsApp + telefone + formulário"
+              dica="Soma dos EVENTOS de clique no WhatsApp, no telefone e de envio de formulário. Uma pessoa pode gerar mais de um." icon={MessagesSquare} />
+            <Kpi rotulo="Contatos por sessão" valor={fmtPct(a.taxaContato)} atual={a.taxaContato} anterior={b.taxaContato} sub="eventos de contato ÷ sessões"
+              dica="Eventos de contato divididos pelas sessões. Conta EVENTOS, não pessoas: quem clica no WhatsApp duas vezes conta dois — por isso pode passar de 100%." icon={Percent} />
             <Kpi rotulo="WhatsApp" valor={fmtN(a.whatsapp)} atual={a.whatsapp} anterior={b.whatsapp} icon={MessageCircle} />
             <Kpi rotulo="Telefone" valor={fmtN(a.telefone)} atual={a.telefone} anterior={b.telefone} icon={Phone} />
             <Kpi rotulo={a.leadForm > 0 ? 'Formulários' : 'Cliques em botões'} valor={fmtN(a.leadForm > 0 ? a.leadForm : a.cta)} atual={a.leadForm > 0 ? a.leadForm : a.cta} anterior={a.leadForm > 0 ? b.leadForm : b.cta} icon={ClipboardList} />
             <Kpi rotulo="Engajamento" valor={fmtPct(div(a.engajadas, a.sessoes))} atual={div(a.engajadas, a.sessoes)} anterior={div(b.engajadas, b.sessoes)} sub="sessões com +10s ou interação" icon={Sparkles} />
-            <Kpi rotulo="Tempo médio" valor={fmtTempo(div(a.tempo, a.sessoes))} atual={div(a.tempo, a.sessoes)} anterior={div(b.tempo, b.sessoes)} sub="engajado, por sessão" icon={Clock} />
+            <Kpi rotulo="Tempo médio de engajamento" valor={fmtTempo(div(a.tempo, a.sessoes))} atual={div(a.tempo, a.sessoes)} anterior={div(b.tempo, b.sessoes)} sub="média do GA4, por sessão"
+              dica="Tempo em que a página ficou em primeiro plano, em média por sessão (userEngagementDuration ÷ sessões)." icon={Clock} />
             <Kpi rotulo="Visitantes novos" valor={fmtPct(div(a.novos, a.usuarios))} atual={div(a.novos, a.usuarios)} anterior={div(b.novos, b.usuarios)} sub={`${fmtN(a.novos)} primeira visita`} icon={UserPlus} />
             <Kpi rotulo="Páginas vistas" valor={fmtN(a.pageviews)} atual={a.pageviews} anterior={b.pageviews} sub={`${div(a.pageviews, a.sessoes).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} por sessão`} icon={Files} />
             {a.video > 0 && <Kpi rotulo="Vídeos assistidos" valor={fmtN(a.video)} atual={a.video} anterior={b.video} sub="plays" icon={PlayCircle} />}
@@ -443,11 +460,13 @@ export function Ga4LandingPanel({ dados, loading, aviso }: { dados: Ga4Consolida
           )}
 
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            <DonutComposicao
-              titulo={temContato ? 'De onde vêm os contatos' : 'De onde vêm as sessões'}
-              dica={temContato ? 'Origem / mídia que mais trouxe contato.' : 'Origem / mídia com mais sessões.'}
-              fatias={temContato ? origContato : origSessao}
-              total={temContato ? a.contatos : a.sessoes} />
+            <BarrasComposicao
+              titulo={temConv ? 'De onde vêm as conversões (GA4)' : 'De onde vêm as sessões'}
+              dica={temConv
+                ? 'Conversões (eventos-chave do GA4) por origem / mídia, entre as 12 origens com mais sessões. Base diferente do KPI "Contatos", que soma cliques.'
+                : 'Sessões por origem / mídia, entre as 12 origens com mais sessões.'}
+              fatias={temConv ? origConv : origSessao}
+              total={temConv ? totalOrigConv : totalOrigSessao} />
             <Barras titulo="Onde clicam para falar" linhas={dados.posicoes} total={totalContatos} />
             {dados.detalhes.map(d => (
               <Barras key={d.param} titulo={d.rotulo} linhas={d.linhas} total={d.param === 'cta_id' ? a.cta : a.whatsapp} />
@@ -485,8 +504,8 @@ export function Ga4LandingPanel({ dados, loading, aviso }: { dados: Ga4Consolida
           <TabelaSeg titulo="Novos x recorrentes" rotulo="Visitante" linhas={au.novosRecorrentes.map(traduz(NOVOS))} colunas={['sessoes', 'engaj', 'wa', 'form', 'tel', 'taxa']}
             dica="Recorrente convertendo mais = remarketing vale a pena." />
           <TabelaSeg titulo="Cidades" rotulo="Cidade" linhas={au.cidades} colunas={['sessoes', 'engaj', 'wa', 'form', 'tel', 'taxa']} />
-          <TabelaSeg titulo="Idade" rotulo="Faixa" linhas={au.idades} colunas={['sessoes', 'wa', 'form', 'tel', 'taxa']} />
-          <TabelaSeg titulo="Gênero" rotulo="Gênero" linhas={au.generos.map(traduz(GENEROS))} colunas={['sessoes', 'wa', 'form', 'tel', 'taxa']} />
+          <TabelaSeg titulo="Idade" rotulo="Faixa" linhas={au.idades} colunas={['sessoes', 'wa', 'form', 'tel', 'taxa']} barra />
+          <TabelaSeg titulo="Gênero" rotulo="Gênero" linhas={au.generos.map(traduz(GENEROS))} colunas={['sessoes', 'wa', 'form', 'tel', 'taxa']} barra />
           {au.idades.length + au.generos.length === 0 && (
             <p className="text-[10px] text-[#7c868c] md:col-span-2 xl:col-span-3">Idade e gênero não aparecem: o GA4 esconde com pouco volume ou sem Google Signals ligado.</p>
           )}
@@ -498,13 +517,24 @@ export function Ga4LandingPanel({ dados, loading, aviso }: { dados: Ga4Consolida
       {temComportamento && (
         <Secao titulo="Comportamento">
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          <Barras titulo="Até onde rolam" dica="% dos visitantes que chegaram a cada ponto da página." linhas={co.rolagem} total={visitantes} rotuloValor={v => `${v}% da página`} />
+          <Barras
+            titulo={soNoventa ? 'Chegaram a 90% da página' : 'Até onde rolam'}
+            dica={soNoventa
+              ? '% dos visitantes que rolaram até 90% da página. Os marcos de 25/50/75% só aparecem com o gatilho de profundidade de rolagem configurado no GTM.'
+              : '% dos visitantes que chegaram a cada ponto da página.'}
+            linhas={co.rolagem} total={visitantes} rotuloValor={v => `${v}% da página`} />
           <Barras titulo="Seções vistas" dica="% dos visitantes que viram cada seção." linhas={co.secoes} total={visitantes} />
           <Funil f={co.funil} />
           <TabelaSeg titulo="Página de entrada" rotulo="Página" linhas={co.paginasEntrada} colunas={['sessoes', 'engaj', 'tempo', 'wa', 'form', 'tel', 'taxa']} />
           {co.videos.length > 0 && <Barras titulo="Vídeos assistidos" linhas={co.videos} total={a.video} />}
         </div>
         </Secao>
+      )}
+
+      {faltando.length > 0 && (
+        <p className="text-[10px] text-[#7c868c]">
+          Sem eventos configurados (ou sem disparo no período): {faltando.join(' · ')}.
+        </p>
       )}
     </div>
   );

@@ -1,6 +1,6 @@
 "use client";
 
-import { type ElementType, useEffect, useMemo, useState } from 'react';
+import { type ElementType, type ReactNode, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
   ArrowRight, TrendingUp, Users, Target, RefreshCw,
@@ -16,7 +16,8 @@ import { cn, formatCurrencyBRL } from '@/lib/utils';
 import {
   ordenarLinhas, filtrarLinhas, categoriasDisponiveis, proximaOrdem,
   situacaoDaMeta, temAlgumaMeta, METRICAS,
-  type ColunaRadar, type DirecaoOrdem, type FiltroSituacao, type MetricaRadar,
+  totaisSemDuplicar, compartilhamentoDeConta, chaveConta, mediana,
+  type ColunaRadar, type FonteRadar, type DirecaoOrdem, type FiltroSituacao, type MetricaRadar,
 } from '@/lib/radar-tabela';
 
 type ApiMetrics = {
@@ -135,7 +136,15 @@ function calcPct(atual: number, meta: number, inverse = false): number | null {
   if (meta === 0) return null; // sem meta definida → sem cor
   if (atual === 0) return 0;
   const raw = inverse ? (meta / atual) * 100 : (atual / meta) * 100;
-  return Math.min(100, Math.round(raw));
+  // % REAL (ex.: 132%) — antes saía travado em 100 e quem passou muito da meta
+  // empatava com quem bateu no limite, inclusive na ordenação. Não há barra
+  // proporcional nesta tela; se surgir, ela é que deve limitar a 100.
+  return Math.round(raw);
+}
+
+/** Lead de Google vem fracionado (atribuição) — na tela é sempre inteiro. */
+function fmtLeads(n: number): string {
+  return Math.round(n).toLocaleString('pt-BR');
 }
 
 const NEUTRAL_COLORS = {
@@ -190,35 +199,25 @@ const FUNNEL_LABELS = ['Cont.', 'Qualif.', 'Agend.', 'Comp.', 'Fecha.'];
 const FUNNEL_ICONS = [Eye, Users2, Calendar, ShoppingBag, CheckCircle2];
 const ZERO_FUNNEL: ClientFunnel = { contatos: 0, qualificados: 0, agendamentos: 0, comparecimentos: 0, fechamentos: 0 };
 
-function ResultSparkline({ color }: { color: string }) {
-  return (
-    <svg width="100%" height="28" viewBox="0 0 120 28" preserveAspectRatio="none" className="mt-5 opacity-80">
-      <path
-        d="M0,17 L8,18 L16,18 L24,16 L32,18 L40,15 L48,16 L56,13 L64,13 L72,15 L80,13 L88,17 L96,17 L104,14 L112,17 L120,18"
-        fill="none"
-        stroke={color}
-        strokeWidth="1.7"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
 function ResultKpiCard({
   label,
   value,
   icon: Icon,
   color,
+  sub,
+  title,
 }: {
   label: string;
   value: string;
   icon: ElementType;
   color: string;
+  sub?: ReactNode;
+  title?: string;
 }) {
   return (
     <div
       className="relative min-h-[170px] overflow-hidden rounded-[var(--radius)] border border-border bg-card px-7 py-7"
+      title={title}
       style={{
         background: `radial-gradient(circle at 11% 36%, ${color}18, transparent 31%), linear-gradient(145deg, rgba(17,22,35,0.92), rgba(8,11,18,0.97))`,
         boxShadow: `0 0 30px ${color}0d, inset 0 0 0 1px rgba(255,255,255,0.025)`,
@@ -244,10 +243,8 @@ function ResultKpiCard({
           <p className="mt-3 font-heading font-normal text-xl leading-none tabular-nums" style={{ color }}>
             {value}
           </p>
+          {sub && <div className="mt-3 text-xs font-semibold text-muted-foreground">{sub}</div>}
         </div>
-      </div>
-      <div className="absolute bottom-6 left-10 right-8">
-        <ResultSparkline color={color} />
       </div>
     </div>
   );
@@ -294,6 +291,22 @@ export default function ResultadosPage() {
   const [goalsByClient, setGoalsByClient] = useState<Record<string, GoalConfig | null>>({});
   const [planningByClient, setPlanningByClient] = useState<Record<string, ClientPlanningConfig>>({});
   const [loadingMetrics, setLoadingMetrics] = useState(false);
+  // Contas de anúncio vinculadas por cliente — só para apontar quem divide
+  // conta com quem (ver `compartilhamentoDeConta`). Uma chamada para todos.
+  const [contasByClient, setContasByClient] = useState<Record<string, string[]>>({});
+  useEffect(() => {
+    fetch('/api/clients/links')
+      .then(r => r.ok ? r.json() as Promise<{ clientId: string; platform: string; accountId: string }[]> : [])
+      .then(links => {
+        const map: Record<string, string[]> = {};
+        for (const l of links) {
+          if (!l?.clientId || !l.accountId || (l.platform !== 'meta_ads' && l.platform !== 'google_ads')) continue;
+          (map[l.clientId] ??= []).push(chaveConta(l.platform, String(l.accountId)));
+        }
+        setContasByClient(map);
+      })
+      .catch(() => setContasByClient({}));
+  }, []);
 
   // Filtro e ordenação da tabela (só apresentação — os KPIs do topo continuam
   // somando a carteira inteira, senão o "total" mudaria conforme o filtro).
@@ -457,8 +470,18 @@ export default function ResultadosPage() {
     const pctCac    = calcPct(cac, metaCac, true);
     const funnelPcts = FUNNEL_KEYS.map((k) => calcPct(funil[k], metaFunilFinal[k]));
 
+    const fonte: FonteRadar = {
+      id: client.id,
+      nome: client.name,
+      meta: api?.meta ? { gasto: api.meta.spend ?? 0, leads: api.meta.leads ?? 0 } : null,
+      google: api?.google ? { gasto: api.google.cost ?? 0, leads: api.google.conversions ?? 0 } : null,
+      extraGasto: api ? 0 : gastoAnuncio,
+      extraLeads: api ? 0 : leads,
+      contas: contasByClient[client.id] ?? [],
+    };
+
     return {
-      client, hardcoded, api,
+      client, hardcoded, api, fonte,
       leads, cpl, cac,
       resultado: resultadoFinal,
       metaTarget: metaTargetFinal,
@@ -500,12 +523,25 @@ export default function ResultadosPage() {
   const emReais   = comMeta.filter((r) => !r.ehSocial);
   const totMeta   = emReais.reduce((s, r) => s + r.metaTarget, 0);
   const totResult = emReais.reduce((s, r) => s + r.resultado, 0);
-  const totLeads  = comMeta.reduce((s, r) => s + r.leads, 0);
   // Agora soma GASTO de anúncio do mês — antes somava todo o histórico de Pix,
   // o que dava R$ 834 mil ao lado de um CPL de 30 dias.
-  const totInvest = comMeta.reduce((s, r) => s + r.totalInvest, 0);
+  // ⚠️ Conta compartilhada entre clientes entra UMA vez (ver radar-tabela).
+  // As linhas seguem mostrando o número da conta inteira em cada cliente.
+  const dedup = totaisSemDuplicar(comMeta.map((r) => r.fonte));
+  const totLeads  = dedup.leads;
+  const totInvest = dedup.investimento;
+  const compartilhaCom = compartilhamentoDeConta(rows.map((r) => r.fonte));
   const overallPct = calcPct(totResult, totMeta);
-  const overC = pctColors(overallPct);
+  // ⚠️ A soma é dominada por quem tem a maior meta (uma meta de R$ 1,2 mi
+  // engole o resto). A MEDIANA do % por cliente diz como a carteira anda.
+  const comMetaEmReais = emReais.filter((r) => r.metaTarget > 0);
+  const pctMediana = mediana(
+    comMetaEmReais.map((r) => r.pctResult).filter((p): p is number => p !== null),
+  );
+  const pctMedianaInt = pctMediana === null ? null : Math.round(pctMediana);
+  const overC = pctColors(pctMedianaInt ?? overallPct);
+  const subMeta = `${comMetaEmReais.length} cliente(s) com meta em R$`;
+  const tituloMeta = 'Soma das metas em R$. Uma meta muito grande domina esta soma — por isso o % da carteira ao lado usa a mediana dos clientes.';
 
   return (
     <div className="space-y-6 pb-8">
@@ -534,12 +570,26 @@ export default function ResultadosPage() {
       {/* ── KPI Cards ── */}
       <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
         {([
-          { label: 'META TOTAL',      value: formatCurrencyBRL(totMeta),      Icon: Target,     color: '#8b5cf6' },
-          { label: 'RESULTADO TOTAL', value: formatCurrencyBRL(totResult),     Icon: TrendingUp, color: overC.text === 'text-emerald-300' ? '#22c55e' : overC.text === 'text-orange-300' ? '#fb923c' : '#ef4444' },
-          { label: 'TOTAL DE LEADS',  value: totLeads.toLocaleString('pt-BR'), Icon: Users,      color: '#2f85ff' },
-          { label: 'INVESTIMENTO',    value: formatCurrencyBRL(totInvest),     Icon: DollarSign, color: '#f5d000' },
-        ] as const).map(({ label, value, Icon, color }) => (
-          <ResultKpiCard key={label} label={label} value={value} icon={Icon} color={color} />
+          { label: 'META TOTAL',      value: formatCurrencyBRL(totMeta),      Icon: Target,     color: '#8b5cf6',
+            sub: subMeta, title: tituloMeta },
+          { label: 'RESULTADO TOTAL', value: formatCurrencyBRL(totResult),     Icon: TrendingUp,
+            color: overallPct === null && pctMedianaInt === null ? '#94a3b8' : overC.text === 'text-emerald-300' ? '#22c55e' : overC.text === 'text-orange-300' ? '#fb923c' : '#ef4444',
+            sub: (
+              <>
+                {pctMedianaInt !== null && <p><span className="text-foreground">{pctMedianaInt}%</span> — mediana dos clientes</p>}
+                {overallPct !== null && <p className="mt-0.5 opacity-80">{overallPct}% da soma das metas</p>}
+                <p className="mt-0.5 opacity-80">{subMeta}</p>
+              </>
+            ),
+            title: 'Mediana do % de cada cliente com meta em R$ — a soma das metas é dominada pela maior delas, então o % da soma aparece só como referência.' },
+          { label: 'TOTAL DE LEADS',  value: fmtLeads(totLeads), Icon: Users,      color: '#2f85ff',
+            sub: dedup.contasCompartilhadas > 0 ? `${dedup.contasCompartilhadas} conta(s) compartilhada(s) contada(s) uma vez` : undefined,
+            title: 'Leads das plataformas no mês (Meta + conversões do Google, arredondadas). Conta de anúncio ligada a mais de um cliente entra uma vez só.' },
+          { label: 'INVESTIMENTO',    value: formatCurrencyBRL(totInvest),     Icon: DollarSign, color: '#f5d000',
+            sub: dedup.contasCompartilhadas > 0 ? `${dedup.contasCompartilhadas} conta(s) compartilhada(s) contada(s) uma vez` : undefined,
+            title: 'Gasto em anúncio no mês (Meta + Google). Conta de anúncio ligada a mais de um cliente entra uma vez só.' },
+        ] as { label: string; value: string; Icon: ElementType; color: string; sub?: ReactNode; title?: string }[]).map(({ label, value, Icon, color, sub, title }) => (
+          <ResultKpiCard key={label} label={label} value={value} icon={Icon} color={color} sub={sub} title={title} />
         ))}
       </div>
 
@@ -722,6 +772,14 @@ export default function ResultadosPage() {
                         <div>
                           <p className="text-sm font-bold">{row.client.name}</p>
                           <p className="text-xs text-muted-foreground mt-0.5">{row.client.segment}</p>
+                          {(compartilhaCom[row.client.id]?.length ?? 0) > 0 && (
+                            <span
+                              className="mt-1 inline-block rounded-full border border-border bg-muted/30 px-2 py-0.5 text-[10px] font-semibold text-muted-foreground"
+                              title="Mesma conta de anúncio: o gasto e os leads desta linha são os da conta inteira e aparecem também no outro cliente. Nos cards do topo ela entra uma vez só."
+                            >
+                              conta compartilhada com {compartilhaCom[row.client.id].join(', ')}
+                            </span>
+                          )}
                         </div>
                       </Link>
                     </td>
@@ -765,9 +823,9 @@ export default function ResultadosPage() {
                     </td>
                     <td
                       className={cn('px-4 py-3 text-sm font-bold', row.pctLeads === null ? 'text-blue-400' : leadsC.text)}
-                      title={row.metaLeads > 0 ? `Meta: ${row.metaLeads.toLocaleString('pt-BR')} leads` : undefined}
+                      title={row.metaLeads > 0 ? `Meta: ${fmtLeads(row.metaLeads)} leads` : undefined}
                     >
-                      {row.leads > 0 ? row.leads.toLocaleString('pt-BR') : '0'}
+                      {row.leads > 0 ? fmtLeads(row.leads) : '0'}
                     </td>
                     <td className="px-4 py-3">
                       <MetricCell value={row.cpl} pct={row.pctCpl} loading={loadingMetrics && !apiMetricsByClient[row.client.id]} />

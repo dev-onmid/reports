@@ -30,9 +30,16 @@ export type CriativoReceita = {
   thumbnail: string | null;
 };
 
-export function CreativeRevenueStrip({ criativos, loading }: {
+export function CreativeRevenueStrip({ criativos, loading, totalAtribuido }: {
   criativos: CriativoReceita[];
   loading: boolean;
+  /**
+   * Faturamento atribuído a TODOS os criativos do período (não só aos exibidos).
+   * Quando vem, a barra de cada card é a fatia sobre esse total. Sem ele, a base
+   * é a soma dos cards exibidos — e a legenda diz isso, porque o caller costuma
+   * mandar só os 12 maiores e "% do total" sobre 12 exagera a fatia de cada um.
+   */
+  totalAtribuido?: number;
 }) {
   if (loading) {
     return (
@@ -44,8 +51,18 @@ export function CreativeRevenueStrip({ criativos, loading }: {
     );
   }
   if (!criativos.length) return null;
-  const total = criativos.reduce((s, c) => s + c.receita, 0);
+  const somaExibidos = criativos.reduce((s, c) => s + c.receita, 0);
+  const temTotalGeral = totalAtribuido !== undefined && totalAtribuido > 0;
+  const total = temTotalGeral ? totalAtribuido : somaExibidos;
+  const baseBarra = temTotalGeral
+    ? 'do faturamento atribuído a todos os criativos'
+    : `entre os ${criativos.length} principais criativos exibidos`;
   return (
+    <>
+    <p className="mb-2 text-[10px] text-[#7c868c]">
+      Barra de cada card = fatia do faturamento {baseBarra}
+      {!temTotalGeral && <> (soma {formatCurrencyBRL(somaExibidos)})</>}.
+    </p>
     <div className="flex gap-3 overflow-x-auto pb-2 [scrollbar-width:thin] [scrollbar-color:#2a2d3a_transparent]">
       {criativos.map((c, i) => {
         const fatia = total > 0 ? (c.receita / total) * 100 : 0;
@@ -79,8 +96,9 @@ export function CreativeRevenueStrip({ criativos, loading }: {
               <p className="mb-2 text-lg font-black leading-tight text-[#6cff2f]">
                 {formatCurrencyBRL(c.receita)}
               </p>
-              {/* Barra: quanto este criativo representa do faturamento atribuído. */}
-              <div className="mb-2 h-1 w-full overflow-hidden rounded bg-white/[0.08]">
+              {/* Barra: fatia deste criativo — base explicada na legenda acima. */}
+              <div className="mb-2 h-1 w-full overflow-hidden rounded bg-white/[0.08]"
+                title={`${fatia.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}% ${baseBarra}`}>
                 <div className="h-full rounded bg-[#6cff2f]/70" style={{ width: `${Math.min(100, fatia)}%` }} />
               </div>
               <div className="grid grid-cols-2 gap-1">
@@ -101,6 +119,7 @@ export function CreativeRevenueStrip({ criativos, loading }: {
         );
       })}
     </div>
+    </>
   );
 }
 

@@ -67,7 +67,6 @@ import { VendedoresCard, CategoriasCard, type LinhaVendedor, type LinhaCategoria
 import type { TopCreative } from '@/app/api/meta/top-creatives/route';
 import type { PageInsightsResult, InstagramPageData } from '@/app/api/meta/page-insights/route';
 import type { FaturamentoPorOrigem, LeadsPorCanal } from '@/app/api/crm/por-canal/route';
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip } from 'recharts';
 import { progressoVisual } from '@/lib/progresso-cor';
 import type { CampaignPerformance } from '@/app/api/campaigns/route';
 import type { GoogleKeyword } from '@/app/api/google/keywords/route';
@@ -96,6 +95,12 @@ import type { Ga4Consolidado } from '@/lib/ga4-landing';
 import {
   formatarMetrica, custoPorPedido, roas as roasFood,
 } from '@/lib/metricas-food';
+import {
+  faixaAtual, faixaAnterior, rotuloComparacao, metaParcialDoPeriodo, rotuloMetaParcial, diasNoMes, datasDaFaixa, fimDoMesIso,
+} from '@/lib/dashboard-periodo';
+import { statusCpl, statusCplComGasto, ROTULO_STATUS_CPL, CLASSE_STATUS_CPL, TEXTO_STATUS_CPL, type StatusCpl } from '@/lib/dashboard-metas';
+import { BulletMetaCard } from '@/components/dashboard/bullet-meta';
+import { RitmoMesChart, CplDiarioChart } from '@/components/dashboard/ritmo-chart';
 
 type Period = 'yesterday' | 'last_7d' | 'last_14d' | 'last_30d' | 'this_month' | 'last_month' | 'custom';
 type ClientSheetsSummary = { leads: number; funil: ContagemFunil; total: number };
@@ -255,31 +260,19 @@ function toInputDate(d: Date): string {
   return `${d.getFullYear()}-${mm}-${dd}`;
 }
 
+/**
+ * Faixa do período como Date LOCAL (meia-noite) — derivada de `faixaAtual`,
+ * que espelha a semântica do servidor (period-utils: fuso America/Sao_Paulo,
+ * "Este mês" = dia 1..hoje, últimos N dias terminando ONTEM). Antes o cliente
+ * montava a própria régua e "Este mês" ia até o fim do mês.
+ */
 function periodToDateRange(
   period: Period,
   customFrom?: string,
   customTo?: string,
 ): { from: Date; to: Date } {
-  const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const yesterday = new Date(today); yesterday.setDate(yesterday.getDate() - 1);
-
-  switch (period) {
-    case 'yesterday': return { from: yesterday, to: yesterday };
-    case 'last_7d': { const f = new Date(today); f.setDate(f.getDate() - 6); return { from: f, to: today }; }
-    case 'last_14d': { const f = new Date(today); f.setDate(f.getDate() - 13); return { from: f, to: today }; }
-    case 'last_30d': { const f = new Date(today); f.setDate(f.getDate() - 29); return { from: f, to: today }; }
-    case 'this_month': return { from: new Date(now.getFullYear(), now.getMonth(), 1), to: new Date(now.getFullYear(), now.getMonth() + 1, 0) };
-    case 'last_month': return { from: new Date(now.getFullYear(), now.getMonth() - 1, 1), to: new Date(now.getFullYear(), now.getMonth(), 0) };
-    case 'custom': {
-      const f = parseLocalDate(customFrom) ?? today;
-      const t = parseLocalDate(customTo) ?? today;
-      // Datas invertidas viram um intervalo válido em vez de um período vazio
-      // que faria a tela inteira zerar sem explicar por quê.
-      return f <= t ? { from: f, to: t } : { from: t, to: f };
-    }
-    default: return { from: today, to: today };
-  }
+  const f = faixaAtual(period, customFrom, customTo);
+  return { from: parseLocalDate(f.from)!, to: parseLocalDate(f.to)! };
 }
 
 function dateKey(date: Date) {
@@ -455,11 +448,14 @@ function PlatformTableIcon({ platform }: { platform: AdsPlatform }) {
   );
 }
 
-function autoPartial(target: number, period: Period): number {
-  if (period !== 'this_month') return 0;
-  const now = new Date();
-  const totalDays = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-  return Math.round((target * now.getDate()) / totalDays);
+/**
+ * Meta parcial da janela. Mês corrente = pró-rata até hoje; mês passado = meta
+ * inteira; 7/14/30 dias e personalizado = meta × dias da janela ÷ dias do mês.
+ * ⚠️ Antes devolvia 0 fora do mês corrente e o card comparava a meta MENSAL
+ * inteira com 7 dias de resultado.
+ */
+function autoPartial(target: number, period: Period, faixa: { from: string; to: string }): number {
+  return metaParcialDoPeriodo(target, period, faixa);
 }
 
 // ── KPI Card ────────────────────────────────────────────────────────────────
@@ -2035,14 +2031,21 @@ function CampaignPerformanceTable({
   period,
   dateFrom,
   dateTo,
+  metaCpl = 0,
 }: {
   campaigns: CampaignPerformance[];
   loading: boolean;
   period: string;
   dateFrom: string;
   dateTo: string;
+  /** Meta de CPL do planejamento — pinta a célula de CPL (0 = neutro). */
+  metaCpl?: number;
 }) {
   const [campaigns, setCampaigns] = useState(initialCampaigns);
+  // IS%/IS Orç./Topo Abs. só existem no Google Search: numa tabela só de Meta
+  // eram três colunas de "—" empurrando as ações para fora da tela.
+  const mostrarIS = campaigns.some(c => c.platform === 'google');
+  const totalColunas = mostrarIS ? 12 : 9;
   const [actionLoading, setActionLoading] = useState<Record<string, boolean>>({});
   const [actionError, setActionError] = useState<Record<string, string>>({});
   const [editingBudget, setEditingBudget] = useState<string | null>(null);
@@ -2230,7 +2233,7 @@ function CampaignPerformanceTable({
     if (row.kind === 'loading') {
       return (
         <tr key={row.key} className="border-t border-border/50">
-          <td colSpan={12} className={cn('px-4 py-2', INDENT[row.level])}>
+          <td colSpan={totalColunas} className={cn('px-4 py-2', INDENT[row.level])}>
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <RefreshCw className="h-3 w-3 animate-spin" /> Carregando...
             </div>
@@ -2402,7 +2405,7 @@ function CampaignPerformanceTable({
               onClick={row.kind === 'campaign' ? () => { setEditingBudget(row.data.id); setBudgetInput(String(dailyBudget ?? '')); } : undefined}
               className={cn('group flex items-center justify-end gap-1 text-xs font-semibold', row.kind === 'campaign' && 'hover:text-primary transition-colors')}
             >
-              {formatCurrencyBRL(dailyBudget)}
+              <span className="whitespace-nowrap">{formatCurrencyBRL(dailyBudget)}</span>
               {row.kind === 'campaign' && <Pencil className="h-3 w-3 opacity-0 group-hover:opacity-60 transition-opacity" />}
             </button>
           ) : (
@@ -2411,14 +2414,17 @@ function CampaignPerformanceTable({
         </td>
 
         {/* Metrics */}
-        <td className="px-3 py-2.5 text-right text-xs font-bold text-primary">{formatCurrencyBRL(spend)}</td>
-        <td className="px-3 py-2.5 text-right text-xs font-semibold">{leads > 0 ? leads.toLocaleString('pt-BR') : <span className="text-muted-foreground/40">—</span>}</td>
-        <td className="px-3 py-2.5 text-right text-xs font-semibold">{cpl > 0 ? formatCurrencyBRL(cpl) : <span className="text-muted-foreground/40">—</span>}</td>
+        <td className="whitespace-nowrap px-3 py-2.5 text-right text-xs font-bold text-primary">{formatCurrencyBRL(spend)}</td>
+        <td className="px-3 py-2.5 text-right text-xs font-semibold">{leads > 0 ? Math.round(leads).toLocaleString('pt-BR') : <span className="text-muted-foreground/40">—</span>}</td>
+        <td
+          className={cn('whitespace-nowrap px-3 py-2.5 text-right text-xs font-semibold', cpl > 0 && TEXTO_STATUS_CPL[statusCpl(cpl, metaCpl)])}
+          title={cpl > 0 && metaCpl > 0 ? `${(cpl / metaCpl).toFixed(2).replace('.', ',')}× a meta de CPL (${formatCurrencyBRL(metaCpl)})` : undefined}
+        >{cpl > 0 ? formatCurrencyBRL(cpl) : <span className="text-muted-foreground/40">—</span>}</td>
         <td className="px-3 py-2.5 text-right text-xs text-muted-foreground">{impressions > 0 ? impressions.toLocaleString('pt-BR') : <span className="opacity-40">—</span>}</td>
-        <td className="px-3 py-2.5 text-right text-xs text-muted-foreground">{ctr > 0 ? `${ctr.toFixed(2)}%` : <span className="opacity-40">—</span>}</td>
+        <td className="px-3 py-2.5 text-right text-xs text-muted-foreground">{ctr > 0 ? `${ctr.toFixed(2).replace('.', ',')}%` : <span className="opacity-40">—</span>}</td>
 
         {/* IS metrics — Google Search campaigns only */}
-        {(() => {
+        {mostrarIS && (() => {
           const isGoogleCampaign = row.kind === 'campaign' && row.data.platform === 'google';
           const imprShare = isGoogleCampaign ? (row.data as CampaignPerformance).searchImprShare : undefined;
           const budgetLostIS = isGoogleCampaign ? (row.data as CampaignPerformance).searchBudgetLostIS : undefined;
@@ -2426,13 +2432,13 @@ function CampaignPerformanceTable({
           return (
             <>
               <td className="px-3 py-2.5 text-right text-xs font-semibold">
-                {imprShare != null ? <span className="text-[#6cff2f]">{imprShare.toFixed(1)}%</span> : <span className="opacity-40">—</span>}
+                {imprShare != null ? <span className="text-[#6cff2f]">{imprShare.toFixed(1).replace('.', ',')}%</span> : <span className="opacity-40">—</span>}
               </td>
               <td className="px-3 py-2.5 text-right text-xs font-semibold">
-                {budgetLostIS != null ? <span className={budgetLostIS > 20 ? 'text-red-400' : 'text-muted-foreground'}>{budgetLostIS.toFixed(1)}%</span> : <span className="opacity-40">—</span>}
+                {budgetLostIS != null ? <span className={budgetLostIS > 20 ? 'text-red-400' : 'text-muted-foreground'}>{budgetLostIS.toFixed(1).replace('.', ',')}%</span> : <span className="opacity-40">—</span>}
               </td>
               <td className="px-3 py-2.5 text-right text-xs font-semibold">
-                {absTopIS != null ? <span className="text-[#6cff2f]">{absTopIS.toFixed(1)}%</span> : <span className="opacity-40">—</span>}
+                {absTopIS != null ? <span className="text-[#6cff2f]">{absTopIS.toFixed(1).replace('.', ',')}%</span> : <span className="opacity-40">—</span>}
               </td>
             </>
           );
@@ -2545,7 +2551,7 @@ function CampaignPerformanceTable({
           className="overflow-auto transition-all duration-300"
           style={{ maxHeight: tableExpanded ? '9999px' : '288px' }}
         >
-          <table className="w-full min-w-[1080px] text-left">
+          <table className={cn('w-full text-left', mostrarIS ? 'min-w-[1080px]' : 'min-w-[860px]')}>
             <thead className="border-b border-white/15 bg-white/[0.06] sticky top-0 z-10">
               <tr className="text-[10px] font-bold uppercase tracking-widest text-foreground/62">
                 <th className="px-4 py-3">Nome</th>
@@ -2556,9 +2562,13 @@ function CampaignPerformanceTable({
                 <th className="px-4 py-3 text-right">CPL</th>
                 <th className="px-4 py-3 text-right">Impressões</th>
                 <th className="px-4 py-3 text-right">CTR</th>
-                <th className="px-4 py-3 text-right">IS%</th>
-                <th className="px-4 py-3 text-right">IS Orç.</th>
-                <th className="px-4 py-3 text-right">Topo Abs.</th>
+                {mostrarIS && (
+                  <>
+                    <th className="px-4 py-3 text-right">IS%</th>
+                    <th className="px-4 py-3 text-right">IS Orç.</th>
+                    <th className="px-4 py-3 text-right">Topo Abs.</th>
+                  </>
+                )}
                 <th className="px-4 py-3 text-center">Ações</th>
               </tr>
             </thead>
@@ -3864,66 +3874,47 @@ function AiRecommendationsBox({
   ];
   const items = visibleInsights.length > 0 ? visibleInsights : placeholders;
   const icons = [BarChart3, Zap, Target, Briefcase];
-  const styles = [
-    {
-      wrap: 'border-violet-500/45 bg-violet-500/20 shadow-[0_0_30px_rgba(139,92,246,0.24)]',
-      icon: 'bg-violet-500/35 text-violet-300 shadow-[0_0_20px_rgba(139,92,246,0.54)]',
-      badge: 'bg-violet-500/30 text-violet-200',
-      label: 'Alto impacto',
-    },
-    {
-      wrap: 'border-emerald-500/45 bg-emerald-500/18 shadow-[0_0_30px_rgba(34,197,94,0.22)]',
-      icon: 'bg-emerald-500/35 text-emerald-300 shadow-[0_0_20px_rgba(34,197,94,0.50)]',
-      badge: 'bg-emerald-500/30 text-emerald-200',
-      label: 'Médio impacto',
-    },
-    {
-      wrap: 'border-blue-500/45 bg-blue-500/18 shadow-[0_0_30px_rgba(59,130,246,0.23)]',
-      icon: 'bg-blue-500/35 text-blue-300 shadow-[0_0_20px_rgba(59,130,246,0.52)]',
-      badge: 'bg-blue-500/30 text-blue-200',
-      label: 'Médio impacto',
-    },
-    {
-      wrap: 'border-amber-500/45 bg-amber-500/18 shadow-[0_0_30px_rgba(245,158,11,0.24)]',
-      icon: 'bg-amber-500/35 text-amber-300 shadow-[0_0_20px_rgba(245,158,11,0.54)]',
-      badge: 'bg-amber-500/30 text-amber-100',
-      label: 'Alto impacto',
-    },
-  ];
+  // Impacto vem do CONTEÚDO (severidade do insight), não da posição no grid —
+  // antes o 1º card era sempre "Alto impacto" violeta, fosse o que fosse.
+  const impacto = (sev: string) => sev === 'critical'
+    ? { label: 'Alto impacto', badge: 'border-[#e52020]/40 bg-[#e52020]/14 text-[#ff6b6b]' }
+    : sev === 'warn'
+    ? { label: 'Médio impacto', badge: 'border-amber-400/30 bg-amber-400/12 text-amber-300' }
+    : { label: 'Baixo impacto', badge: 'border-white/10 bg-white/[0.07] text-[#a7b0b6]' };
 
   return (
-    <aside className="relative overflow-hidden rounded-2xl border border-violet-500/45 bg-[#090716] p-3.5 shadow-[0_0_48px_rgba(139,92,246,0.22)]">
-      <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(135deg,rgba(139,92,246,0.20),transparent_42%),radial-gradient(circle_at_88%_0%,rgba(139,92,246,0.34),transparent_38%)]" />
-      <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,#A855F7,transparent)]" />
-      <div className="relative flex items-center justify-between gap-3">
-        <p className="text-[10px] font-bold uppercase tracking-widest text-foreground">Recomendações com IA</p>
+    <aside className="rounded-[14px] border border-white/[0.08] bg-[#0d1519]/92 p-4 shadow-[0_18px_60px_rgba(0,0,0,0.28)]">
+      <div className="flex items-center justify-between gap-3">
+        <p className="flex items-center gap-2 text-sm font-black uppercase tracking-[0.07em] text-[#f4f7f8]">
+          <Sparkles className="h-4 w-4 text-[#55f52f]" /> Recomendações com IA
+        </p>
         <button
           type="button"
           onClick={onAnalyze}
           disabled={loading}
-          className="rounded-md border border-violet-500/35 bg-violet-500/15 px-2 py-1 text-[9px] font-bold text-violet-200 transition-colors hover:bg-violet-500/25 disabled:opacity-60"
+          className="rounded-md border border-white/[0.10] bg-white/[0.04] px-2 py-1 text-[10px] font-bold text-[#dce4e8] transition-colors hover:border-[#55f52f]/35 disabled:opacity-60"
         >
-          {loading ? 'Gerando...' : 'Ver todas'}
+          {loading ? 'Gerando...' : 'Gerar de novo'}
         </button>
       </div>
-      <div className="relative mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
         {items.map((item, index) => {
           const Icon = icons[index % icons.length];
-          const style = styles[index % styles.length];
+          const imp = impacto(item.severity);
           return (
             <button
               key={item.id}
               type="button"
               onClick={visibleInsights.length > 0 ? undefined : onAnalyze}
-              className={cn('group flex min-h-[92px] w-full items-start gap-3 rounded-lg border p-3 text-left transition-colors hover:border-white/10', style.wrap)}
+              className="group flex min-h-[92px] w-full items-start gap-3 rounded-[10px] border border-white/[0.07] bg-[#111a20]/80 p-3 text-left transition-colors hover:border-white/[0.14]"
             >
-              <span className={cn('mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md', style.icon)}>
+              <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-white/[0.06] text-[#a7b0b6]">
                 <Icon className="h-4 w-4" />
               </span>
               <span className="min-w-0 flex-1">
-                <span className="block truncate text-[11px] font-bold leading-tight text-foreground">{item.title}</span>
-                <span className="mt-1 block text-[9.5px] leading-snug text-foreground/58 line-clamp-2">{item.suggestion}</span>
-                <span className={cn('mt-2 inline-flex rounded-full px-2 py-0.5 text-[8.5px] font-bold', style.badge)}>{style.label}</span>
+                <span className="block truncate text-[11px] font-bold leading-tight text-foreground" title={item.title}>{item.title}</span>
+                <span className="mt-1 block text-[10px] leading-snug text-foreground/58 line-clamp-2">{item.suggestion}</span>
+                <span className={cn('mt-2 inline-flex rounded-full border px-2 py-0.5 text-[9px] font-bold', imp.badge)}>{imp.label}</span>
               </span>
             </button>
           );
@@ -4450,7 +4441,7 @@ function HeroStatCard({ title, icon: Icon, value, change, sub, estilo = ESTILO_V
   className?: string;
 }) {
   const hasChange = change !== null && change !== undefined && Number.isFinite(change);
-  const positive = !hasChange || change >= 0;
+  const positive = hasChange && change >= 0;
   const iconSize = estilo.tamanhoIcone ?? 40;
   return (
     <PremiumPanel className={cn('relative overflow-hidden p-5', className)}>
@@ -4465,7 +4456,7 @@ function HeroStatCard({ title, icon: Icon, value, change, sub, estilo = ESTILO_V
         <div className="min-w-0 flex-1">
           <h2 className="text-sm font-black uppercase tracking-[0.07em] text-[#f4f7f8]" style={styleTexto(estilo)}>{estilo.texto ?? title}</h2>
           <p className="mt-5 font-heading text-4xl leading-none text-[#f4f7f8]" style={styleValor(estilo)}>{value}</p>
-          <p className={cn('mt-3 text-sm font-bold', positive ? 'text-[#6cff2f]' : 'text-red-400')}>
+          <p className={cn('mt-3 text-sm font-bold', !hasChange ? 'text-[#7c868c]' : positive ? 'text-[#6cff2f]' : 'text-red-400')}>
             {hasChange ? `${change >= 0 ? '+' : ''}${change.toFixed(1).replace('.', ',')}%` : '—'}{' '}
             <span className="font-medium text-[#a7b0b6]">vs período anterior</span>
           </p>
@@ -4476,7 +4467,18 @@ function HeroStatCard({ title, icon: Icon, value, change, sub, estilo = ESTILO_V
   );
 }
 
-function QuickMetricCard({ title, value, change, icon: Icon, inverseChange, estilo = ESTILO_VAZIO, className }: {
+/** Sparkline mínima (sem eixo) para os KPIs — só com série diária real. */
+function KpiSparkline({ values, color = '#55f52f' }: { values: number[]; color?: string }) {
+  const path = sparkPathFromValues(values, 120, 32);
+  if (!path) return null;
+  return (
+    <svg viewBox="0 0 120 32" preserveAspectRatio="none" className="mt-2 block h-6 w-full" aria-hidden="true">
+      <path d={path} fill="none" stroke={color} strokeOpacity={0.8} strokeWidth={1.5} strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+    </svg>
+  );
+}
+
+function QuickMetricCard({ title, value, change, icon: Icon, inverseChange, estilo = ESTILO_VAZIO, className, comparacao = 'vs período anterior', serie, dica }: {
   title: string;
   value: string;
   change?: number | null;
@@ -4484,9 +4486,16 @@ function QuickMetricCard({ title, value, change, icon: Icon, inverseChange, esti
   inverseChange?: boolean;
   estilo?: EstiloElemento;
   className?: string;
+  /** Rótulo do comparativo ("vs 1–22/ago", "vs 7 dias anteriores"). */
+  comparacao?: string;
+  /** Série diária para a sparkline (omitida = sem gráfico). */
+  serie?: number[];
+  /** Tooltip do título (ex.: como o número é calculado). */
+  dica?: string;
 }) {
   const hasChange = change !== null && change !== undefined && Number.isFinite(change);
-  const positive = !hasChange || (inverseChange ? change <= 0 : change >= 0);
+  // Sem variação = cinza neutro. Antes o "—" saía VERDE, como se fosse boa notícia.
+  const positive = hasChange && (inverseChange ? change <= 0 : change >= 0);
   const iconSize = estilo.tamanhoIcone ?? 32;
   return (
     <PremiumPanel className={cn('relative overflow-hidden p-4', className)} style={estilo.corFundo ? { backgroundColor: estilo.corFundo } : undefined}>
@@ -4497,12 +4506,13 @@ function QuickMetricCard({ title, value, change, icon: Icon, inverseChange, esti
         >
           <Icon style={{ width: iconSize * 0.5, height: iconSize * 0.5 }} />
         </span>
-        <div className="min-w-0">
-          <p className="text-[11px] font-black uppercase tracking-[0.06em] text-[#dce4e8]" style={styleTexto(estilo)}>{estilo.texto ?? title}</p>
-          <p className="mt-2 font-heading text-2xl leading-none text-[#f4f7f8]" style={styleValor(estilo)}>{value}</p>
-          <p className={cn('mt-1 text-xs font-bold', positive ? 'text-[#6cff2f]' : 'text-red-400')}>
-            {hasChange ? `${change >= 0 ? '+' : ''}${change.toFixed(1).replace('.', ',')}%` : '—'} <span className="font-medium text-[#a7b0b6]">vs mês passado</span>
+        <div className="min-w-0 flex-1">
+          <p className="text-[11px] font-black uppercase tracking-[0.06em] text-[#dce4e8]" style={styleTexto(estilo)} title={dica}>{estilo.texto ?? title}</p>
+          <p className="mt-2 font-heading text-2xl leading-none text-[#f4f7f8]" style={styleValor(estilo)} title={dica}>{value}</p>
+          <p className={cn('mt-1 text-xs font-bold', !hasChange ? 'text-[#7c868c]' : positive ? 'text-[#6cff2f]' : 'text-red-400')}>
+            {hasChange ? `${change >= 0 ? '+' : ''}${change.toFixed(1).replace('.', ',')}%` : '—'} <span className="font-medium text-[#a7b0b6]">{comparacao}</span>
           </p>
+          {serie && serie.length >= 2 && serie.some(v => v > 0) && <KpiSparkline values={serie} />}
         </div>
       </div>
     </PremiumPanel>
@@ -4631,18 +4641,19 @@ function CanalDonutCard({ titulo, fatiasBrutas, total, semCanal, formato, aviso 
   aviso: string;
 }) {
   const pctSemCanal = total > 0 ? (semCanal / total) * 100 : 0;
-  // Acima de 8 canais o donut vira confete e nenhuma fatia é comparável: a
-  // cauda vira "Outros".
+  // Lista de barras horizontais ORDENADA no lugar do donut: comparar ângulos de
+  // 8 fatias é chute; comparar comprimentos alinhados na mesma base é leitura.
+  // Top 7 + "Outros".
   //
   // ⚠️ E "Outros" ABSORVE a diferença para o total: o total vem de uma query
   // própria, sem LIMIT, enquanto a lista de canais é limitada. Sem esta
-  // reconciliação a soma das fatias não fechava com o número do miolo — medido
-  // na Sorrifácil Londrina: 350 nas fatias contra 355 no total.
+  // reconciliação a soma das linhas não fechava com o total do cabeçalho —
+  // medido na Sorrifácil Londrina: 350 nas fatias contra 355 no total.
   const fatias = (() => {
-    const cabem = fatiasBrutas.length <= CORES_CANAL.length;
-    const cabeca = cabem ? fatiasBrutas : fatiasBrutas.slice(0, MAX_FATIAS);
-    const cauda = cabem ? [] : fatiasBrutas.slice(MAX_FATIAS);
-    const somaCabeca = cabeca.reduce((s, o) => s + o.valor, 0);
+    const ordenadas = [...fatiasBrutas].sort((x, y) => y.valor - x.valor);
+    const cabeca = ordenadas.slice(0, MAX_FATIAS);
+    const cauda = ordenadas.slice(MAX_FATIAS);
+    const somaCabeca = cabeca.reduce((acc, o) => acc + o.valor, 0);
     const resto = Math.max(0, total - somaCabeca);
     if (resto <= 0) return cabeca;
     const nomes = cauda.length > 0 ? ` (${cauda.length}+)` : '';
@@ -4650,6 +4661,7 @@ function CanalDonutCard({ titulo, fatiasBrutas, total, semCanal, formato, aviso 
   })();
   const cores = coresPorCanal(fatias.map(f => f.label));
   const corDe = (label: string) => marcaDoCanal(label)?.cor ?? (canalNeutro(label) ? CINZA_CANAL : cores[label]);
+  const maior = Math.max(...fatias.map(f => f.valor), 0);
 
   return (
     <PremiumPanel className="p-4">
@@ -4658,71 +4670,45 @@ function CanalDonutCard({ titulo, fatiasBrutas, total, semCanal, formato, aviso 
           <DollarSign className="h-4 w-4 text-[#6cff2f]" /> {titulo}
         </h3>
         {total > 0 && (
-          <span className="text-xs font-semibold text-[#9aa4aa]">{fatias.length} {fatias.length === 1 ? 'canal' : 'canais'}</span>
+          <span className="text-xs font-semibold text-[#9aa4aa]">
+            Total <span className="font-heading text-lg leading-none text-[#f4f7f8]">{premiumValue(total, formato)}</span>
+            {' '}· {fatias.length} {fatias.length === 1 ? 'canal' : 'canais'}
+          </span>
         )}
       </div>
       {fatias.length === 0 ? (
         <p className="py-6 text-center text-xs text-[#9aa4aa]">Sem dado no período.</p>
       ) : (
-        <div className="grid gap-4 md:grid-cols-[180px_1fr]">
-          <div className="relative mx-auto h-[180px] w-[180px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={fatias}
-                  dataKey="valor"
-                  nameKey="label"
-                  innerRadius={50}
-                  outerRadius={82}
-                  paddingAngle={0}
-                  // Anel da própria superfície entre as fatias: sem ele, dois
-                  // tons vizinhos encostam e a fronteira some.
-                  stroke="#0d1519"
-                  strokeWidth={2}
-                  isAnimationActive={false}
-                >
-                  {fatias.map(f => <Cell key={f.label} fill={corDe(f.label)} />)}
-                </Pie>
-                <RechartsTooltip
-                  contentStyle={{ background: '#0b1216', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 10, fontSize: 12 }}
-                  labelStyle={{ color: '#f4f7f8' }}
-                  itemStyle={{ color: '#dce4e8' }}
-                  formatter={(v) => premiumValue(Number(v), formato)}
-                />
-              </PieChart>
-            </ResponsiveContainer>
-            {/* Número herói no miolo: o donut mostra a proporção, o total tem
-                de estar legível sem passar o mouse. */}
-            <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-              <span className="text-[10px] font-black uppercase tracking-[0.08em] text-[#9aa4aa]">Total</span>
-              <span className="font-heading text-lg leading-tight text-[#f4f7f8]">{premiumValue(total, formato)}</span>
-            </div>
-          </div>
-
-          {/* Lista com os valores exatos — o donut dá a proporção, ela dá o número. */}
-          <div className="min-w-0 space-y-1.5">
-            {fatias.map((o) => {
-              const marca = marcaDoCanal(o.label);
-              return (
-              <div key={o.label} className="flex items-baseline gap-2">
-                {marca ? (
-                  <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center">{marca.logo}</span>
-                ) : (
-                  <span className="mt-1 h-2.5 w-2.5 shrink-0 rounded-sm" style={{ backgroundColor: corDe(o.label) }} />
-                )}
-                <span className="min-w-0 flex-1 truncate text-xs font-semibold text-[#dce4e8]">{o.label}</span>
-                <span className="shrink-0 text-[10px] text-[#9aa4aa]">
-                  {(total > 0 ? (o.valor / total) * 100 : 0).toFixed(1).replace('.', ',')}%
-                  {o.nota ? ` · ${o.nota}` : ''}
-                </span>
-                <span className="shrink-0 text-xs font-bold text-[#f4f7f8]">{premiumValue(o.valor, formato)}</span>
+        <div className="space-y-2">
+          {fatias.map((o) => {
+            const marca = marcaDoCanal(o.label);
+            const cor = corDe(o.label);
+            const pctTotal = total > 0 ? (o.valor / total) * 100 : 0;
+            return (
+              <div key={o.label} className="min-w-0" title={o.nota ? `${o.label} · ${o.nota}` : o.label}>
+                <div className="flex items-baseline gap-2">
+                  {marca ? (
+                    <span className="flex h-4 w-4 shrink-0 items-center justify-center self-center">{marca.logo}</span>
+                  ) : (
+                    <span className="h-2.5 w-2.5 shrink-0 self-center rounded-sm" style={{ backgroundColor: cor }} />
+                  )}
+                  <span className="min-w-0 flex-1 truncate text-xs font-semibold text-[#dce4e8]">{o.label}</span>
+                  {o.nota && <span className="hidden shrink-0 text-[10px] text-[#7c868c] sm:inline">{o.nota}</span>}
+                  <span className="w-12 shrink-0 text-right text-[10px] text-[#9aa4aa]">{pctTotal.toFixed(1).replace('.', ',')}%</span>
+                  <span className="shrink-0 whitespace-nowrap text-right text-xs font-bold text-[#f4f7f8]">{premiumValue(o.valor, formato)}</span>
+                </div>
+                <div className="mt-1 h-1.5 w-full rounded-full bg-white/[0.04]">
+                  <div
+                    className="h-full rounded-full"
+                    style={{ width: `${maior > 0 ? Math.max(1, (o.valor / maior) * 100) : 0}%`, backgroundColor: cor }}
+                  />
+                </div>
               </div>
-              );
-            })}
-          </div>
+            );
+          })}
         </div>
       )}
-      {/* ⚠️ Sem este aviso a fatia cinza seria lida como um canal chamado
+      {/* ⚠️ Sem este aviso a linha cinza seria lida como um canal chamado
           "não informado". A verdade é que o CRM não registrou de onde veio —
           é lacuna de cadastro, não canal. */}
       {fatias.length > 0 && pctSemCanal >= 20 && (
@@ -4735,7 +4721,7 @@ function CanalDonutCard({ titulo, fatiasBrutas, total, semCanal, formato, aviso 
   );
 }
 
-function MiniPlatformMetric({ label, value, sub, subRuim, icon: Icon, logo, change, inverseChange }: {
+function MiniPlatformMetric({ label, value, sub, subRuim, icon: Icon, logo, change, inverseChange, comparacao }: {
   label: string;
   value: string;
   sub?: string;
@@ -4745,6 +4731,8 @@ function MiniPlatformMetric({ label, value, sub, subRuim, icon: Icon, logo, chan
   logo?: ReactNode;
   change?: number | null;
   inverseChange?: boolean;
+  /** Rótulo do comparativo, ao lado do %. */
+  comparacao?: string;
 }) {
   const isPositive = change != null && (inverseChange ? change <= 0 : change >= 0);
   return (
@@ -4757,7 +4745,8 @@ function MiniPlatformMetric({ label, value, sub, subRuim, icon: Icon, logo, chan
       {sub && <p className={cn('mt-1 text-xs font-semibold', subRuim ? 'text-red-400' : 'text-[#78d957]')}>{sub}</p>}
       {change != null && (
         <p className={cn('mt-1 text-[10px] font-bold', isPositive ? 'text-[#6cff2f]' : 'text-red-400')}>
-          {change >= 0 ? '+' : ''}{change.toFixed(1)}%
+          {change >= 0 ? '+' : ''}{change.toFixed(1).replace('.', ',')}%
+          {comparacao && <span className="ml-1 font-medium text-[#7c868c]">{comparacao}</span>}
         </p>
       )}
     </div>
@@ -4796,66 +4785,34 @@ function SimpleFunnel({ steps, totalRate, fonteLabel, onStageClick }: {
   onStageClick?: (index: number) => void;
 }) {
   if (!steps.length) return null;
-  const SVG_W = 1000;
-  const SVG_H = 140;
-  const centerY = SVG_H / 2;
-  const segW = SVG_W / steps.length;
-  const GAP = 4;
-  // Fixed funnel shape: starts at full height, ends at 30% — independent of data
-  const H_START = SVG_H;
-  const H_END = SVG_H * 0.30;
-  const getFixedH = (i: number, total: number) =>
-    H_START - (H_START - H_END) * (i / Math.max(total - 1, 1));
+  // Barras horizontais com LARGURA proporcional ao volume do degrau (relativo
+  // ao topo). O funil antigo tinha forma FIXA — um degrau com 2% do topo
+  // aparecia com 30% da altura, e a queda real ficava invisível.
+  const topo = Math.max(steps[0]?.actual ?? 0, ...steps.map(st => st.actual), 0);
 
   return (
     <PremiumPanel className="p-5">
-      <div className="mb-5 flex items-center justify-between">
+      <div className="mb-4 flex items-center justify-between">
         <div className="flex items-baseline gap-2">
           <h3 className="text-sm font-black uppercase tracking-[0.07em] text-[#f4f7f8]">Funil de Performance</h3>
           {fonteLabel && <span className="text-[10px] text-[#9aa4aa]">· {fonteLabel}</span>}
         </div>
-        <span className="text-xs text-[#9aa4aa]">
+        <span className="text-xs text-[#9aa4aa]" title="Fechamentos ÷ contatos do funil">
           Conversão geral: <span className="font-black text-[#6cff2f]">{totalRate}</span>
         </span>
       </div>
 
-      {/* SVG colored funnel — fixed shape, starts wide, ends narrow */}
-      <svg viewBox={`0 0 ${SVG_W} ${SVG_H}`} className="w-full" style={{ height: 110 }} preserveAspectRatio="none">
-        <defs>
-          {steps.map((step, i) => (
-            <linearGradient key={`g${i}`} id={`fg${i}`} x1="0" x2="1" y1="0" y2="0">
-              <stop offset="0%" stopColor={step.color} stopOpacity="0.9" />
-              <stop offset="100%" stopColor={step.color} stopOpacity="0.65" />
-            </linearGradient>
-          ))}
-        </defs>
-        {steps.map((step, i) => {
-          const x1 = i * segW + (i > 0 ? GAP / 2 : 0);
-          const x2 = (i + 1) * segW - (i < steps.length - 1 ? GAP / 2 : 0);
-          const h1 = getFixedH(i, steps.length);
-          const h2 = getFixedH(i + 1, steps.length);
-          const d = `M ${x1} ${centerY - h1 / 2} L ${x2} ${centerY - h2 / 2} L ${x2} ${centerY + h2 / 2} L ${x1} ${centerY + h1 / 2} Z`;
-          const clicavel = !!onStageClick && !!ETAPAS_FUNIL[i];
-          return (
-            <path
-              key={step.label}
-              d={d}
-              fill={`url(#fg${i})`}
-              onClick={clicavel ? () => onStageClick!(i) : undefined}
-              className={clicavel ? 'cursor-pointer hover:opacity-80' : undefined}
-            />
-          );
-        })}
-      </svg>
-
-      {/* Labels + actual vs planned per stage */}
-      <div className="mt-4 grid gap-1" style={{ gridTemplateColumns: `repeat(${steps.length}, 1fr)` }}>
+      <div className="space-y-2">
         {steps.map((step, i) => {
           const prev = steps[i - 1];
           const actualPct = i === 0 ? null : prev && prev.actual > 0 ? (step.actual / prev.actual) * 100 : 0;
           const plannedPct = i === 0 ? null : prev && prev.planned > 0 ? (step.planned / prev.planned) * 100 : 0;
-          const isBottleneck = actualPct !== null && plannedPct !== null && actualPct < plannedPct * 0.85;
+          const isBottleneck = actualPct !== null && plannedPct !== null && plannedPct > 0 && actualPct < plannedPct * 0.85;
           const clicavel = !!onStageClick && !!ETAPAS_FUNIL[i];
+          const largura = topo > 0 ? Math.max(2, (step.actual / topo) * 100) : 2;
+          // Um tom só, opacidade caindo a cada degrau: a cor não compete com a
+          // largura, que é quem carrega o dado.
+          const opacidade = Math.max(0.35, 0.95 - i * 0.14);
           return (
             <div
               key={step.label}
@@ -4867,47 +4824,56 @@ function SimpleFunnel({ steps, totalRate, fonteLabel, onStageClick }: {
               } : undefined}
               title={clicavel ? `Ver os leads de ${step.label.toLowerCase()}` : undefined}
               className={cn(
-                'rounded-lg px-1 py-1 text-center',
-                clicavel && 'cursor-pointer transition-colors hover:bg-white/[0.06] focus:outline-none focus-visible:ring-1 focus-visible:ring-[#6cff2f]',
+                'grid grid-cols-[92px_1fr_auto] items-center gap-3 rounded-lg px-2 py-1.5 sm:grid-cols-[120px_1fr_auto]',
+                clicavel && 'cursor-pointer transition-colors hover:bg-white/[0.05] focus:outline-none focus-visible:ring-1 focus-visible:ring-[#6cff2f]',
               )}
             >
-              <div className="mx-auto mb-2 h-0.5 w-6 rounded-full" style={{ backgroundColor: step.color }} />
-              <p className="truncate text-[9px] font-black uppercase tracking-wider text-[#9aa4aa]">{step.label}</p>
-              <p className={cn(
-                'mt-1 font-heading text-lg leading-none text-[#f4f7f8]',
-                clicavel && 'underline decoration-white/20 decoration-dotted underline-offset-4',
-              )}>{Math.round(step.actual).toLocaleString('pt-BR')}</p>
-              {actualPct !== null && (
-                <div className="mt-1">
-                  <span className={cn('text-[10px] font-black', isBottleneck ? 'text-red-400' : 'text-[#6cff2f]')}>
-                    {actualPct.toFixed(1)}%
-                  </span>
-                  {plannedPct !== null && plannedPct > 0 && (
-                    <span className="ml-1 text-[9px] text-[#9aa4aa]">/ {plannedPct.toFixed(0)}%p</span>
-                  )}
-                  {isBottleneck && <span className="ml-1 text-[8px] font-black text-red-400">⚠</span>}
+              <p className="truncate text-[10px] font-black uppercase tracking-wider text-[#9aa4aa]">{step.label}</p>
+              <div className="min-w-0">
+                <div className="h-5 w-full rounded-[4px] bg-white/[0.03]">
+                  <div
+                    className="h-full rounded-[4px]"
+                    style={{ width: `${largura}%`, backgroundColor: '#55f52f', opacity: opacidade, transition: 'width 500ms ease' }}
+                  />
                 </div>
-              )}
-              {/* Quebra explicativa: no degrau de agendamentos, separa quem
-                  ainda vai vir de quem furou — sem isso a queda até
-                  comparecimentos parecia toda falta. */}
-              {step.detalhes && step.detalhes.length > 0 && (
-                <div className="mt-1.5 flex flex-col items-center gap-0.5">
-                  {step.detalhes.map((d) => (
-                    <span
-                      key={d.texto}
-                      className={cn(
-                        'rounded px-1 py-px text-[9px] font-bold leading-tight',
-                        d.tom === 'bom' ? 'bg-[#6cff2f]/12 text-[#6cff2f]'
-                          : d.tom === 'ruim' ? 'bg-red-400/12 text-red-400'
-                          : 'bg-white/[0.06] text-[#9aa4aa]',
-                      )}
-                    >
-                      {d.texto}
+                {/* Quebra explicativa: no degrau de agendamentos, separa quem
+                    ainda vai vir de quem furou — sem isso a queda até
+                    comparecimentos parecia toda falta. */}
+                {step.detalhes && step.detalhes.length > 0 && (
+                  <div className="mt-1 flex flex-wrap gap-1">
+                    {step.detalhes.map((d) => (
+                      <span
+                        key={d.texto}
+                        className={cn(
+                          'rounded px-1 py-px text-[9px] font-bold leading-tight',
+                          d.tom === 'bom' ? 'bg-[#6cff2f]/12 text-[#6cff2f]'
+                            : d.tom === 'ruim' ? 'bg-red-400/12 text-red-400'
+                            : 'bg-white/[0.06] text-[#9aa4aa]',
+                        )}
+                      >
+                        {d.texto}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div className="flex min-w-[118px] items-baseline justify-end gap-2 whitespace-nowrap">
+                <span className={cn(
+                  'font-heading text-lg leading-none text-[#f4f7f8]',
+                  clicavel && 'underline decoration-white/20 decoration-dotted underline-offset-4',
+                )}>{Math.round(step.actual).toLocaleString('pt-BR')}</span>
+                {actualPct !== null && (
+                  <span className="text-[10px]">
+                    <span className={cn('font-black', isBottleneck ? 'text-red-400' : 'text-[#6cff2f]')} title="Conversão do degrau anterior para este">
+                      {actualPct.toFixed(1).replace('.', ',')}%
                     </span>
-                  ))}
-                </div>
-              )}
+                    {plannedPct !== null && plannedPct > 0 && (
+                      <span className="ml-1 text-[#9aa4aa]" title="Conversão planejada para este degrau">meta {plannedPct.toFixed(0)}%</span>
+                    )}
+                    {isBottleneck && <span className="ml-1 font-black text-red-400" title="Gargalo: abaixo de 85% da conversão planejada">⚠</span>}
+                  </span>
+                )}
+              </div>
             </div>
           );
         })}
@@ -4995,7 +4961,8 @@ function DeliveryResumoCard({ clientId, from, to }: { clientId: string; from: st
                 <p className="mt-1 font-heading text-lg leading-none text-[#f4f7f8]">{valor}</p>
                 {delta !== null && (
                   <p className={cn('mt-1 text-[10px] font-black', delta >= 0 ? 'text-[#6cff2f]' : 'text-red-400')}>
-                    {delta >= 0 ? '▲' : '▼'} {Math.abs(delta * 100).toFixed(1)}% vs anterior
+                    {/* `variacao` da rota já vem em PONTOS PERCENTUAIS (cardapioweb-recorrencia) — ×100 de novo mostrava +12% como 1200%. */}
+                    {delta >= 0 ? '▲' : '▼'} {Math.abs(delta).toFixed(1).replace('.', ',')}% vs anterior
                   </p>
                 )}
               </div>
@@ -5028,36 +4995,53 @@ function DeliveryResumoCard({ clientId, from, to }: { clientId: string; from: st
   );
 }
 
-function ChannelSummaryTable({ rows }: {
-  rows: Array<{ channel: string; investment: string; leads: string; cpl: string; conversion: string; status: 'Excelente' | 'Bom' | 'Neutro' | 'Alerta'; logo: ReactNode }>;
+/** Selo de CPL contra a meta (régua única: dashboard-metas.ts). */
+function StatusCplPill({ status, titulo }: { status: StatusCpl; titulo?: string }) {
+  return (
+    <span className={cn('whitespace-nowrap rounded-md border px-2 py-1 text-[10px] font-black uppercase tracking-[0.04em]', CLASSE_STATUS_CPL[status])} title={titulo}>
+      {ROTULO_STATUS_CPL[status]}
+    </span>
+  );
+}
+
+function ChannelSummaryTable({ rows, metaCpl }: {
+  rows: Array<{ channel: string; investment: string; leads: string; cpl: string; cplNum: number; status: StatusCpl; logo: ReactNode }>;
+  metaCpl: number;
 }) {
+  // ⚠️ A coluna "Conversão" saiu: dividia leads do Meta pelo ALCANCE e
+  // conversões do Google pelos CLIQUES — duas taxas sem relação lado a lado.
   return (
     <PremiumPanel className="p-4">
       <div className="mb-4 flex items-center gap-2">
         <h3 className="text-sm font-black uppercase tracking-[0.07em] text-[#f4f7f8]">Resumo por Canal</h3>
-        <Info className="h-3.5 w-3.5 text-[#a7b0b6]" />
+        <span title="Status compara o CPL de cada canal com a meta de CPL do planejamento: até a meta = Na meta; até 1,5× = Atenção; acima = Acima.">
+          <Info className="h-3.5 w-3.5 text-[#a7b0b6]" />
+        </span>
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[620px] text-left text-xs">
+        <table className="w-full min-w-[520px] text-left text-xs">
           <thead className="text-[10px] uppercase tracking-[0.08em] text-[#9aa4aa]">
             <tr>
               <th className="py-2">Canal</th>
-              <th>Investimento</th>
-              <th>Leads</th>
-              <th>CPL</th>
-              <th>Conversão</th>
-              <th className="text-right">Status</th>
+              <th className="text-right">Investimento</th>
+              <th className="text-right">Leads</th>
+              <th className="text-right">CPL</th>
+              <th className="text-right">vs meta de CPL{metaCpl > 0 ? ` (${premiumValue(metaCpl, 'currency')})` : ''}</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-white/[0.07]">
             {rows.map((row) => (
               <tr key={row.channel} className="text-[#f4f7f8]">
                 <td className="py-3"><span className="flex items-center gap-2">{row.logo}{row.channel}</span></td>
-                <td>{row.investment}</td>
-                <td>{row.leads}</td>
-                <td>{row.cpl}</td>
-                <td>{row.conversion}</td>
-                <td className="text-right"><StatusPill status={row.status} /></td>
+                <td className="whitespace-nowrap text-right">{row.investment}</td>
+                <td className="text-right">{row.leads}</td>
+                <td className={cn('whitespace-nowrap text-right font-bold', TEXTO_STATUS_CPL[row.status])}>{row.cpl}</td>
+                <td className="text-right">
+                  <StatusCplPill
+                    status={row.status}
+                    titulo={metaCpl > 0 && row.cplNum > 0 ? `${(row.cplNum / metaCpl).toFixed(2).replace('.', ',')}× a meta` : undefined}
+                  />
+                </td>
               </tr>
             ))}
           </tbody>
@@ -5108,34 +5092,53 @@ function CompactCampaignTable({ campaigns, loading, platform }: {
   );
 }
 
-function CompactKeywordTable({ keywords, loading }: { keywords: GoogleKeyword[]; loading: boolean }) {
-  const rows = keywords.slice(0, 5);
+function CompactKeywordTable({ keywords, loading, metaCpl }: { keywords: GoogleKeyword[]; loading: boolean; metaCpl: number }) {
+  // Ordena pelo que custa: a API devolve por impressões, e o top 5 por
+  // impressão escondia justamente a keyword que queima verba sem lead.
+  const temCusto = keywords.some(k => (k.spend ?? 0) > 0);
+  const rows = [...keywords]
+    .sort((a, b) => temCusto ? (b.spend ?? 0) - (a.spend ?? 0) : (b.conversions ?? 0) - (a.conversions ?? 0))
+    .slice(0, 5);
+  const temCtr = rows.some(k => (k.ctr ?? 0) > 0);
   if (loading) return <div className="py-8 text-center text-sm text-[#9aa4aa]">Carregando palavras-chave...</div>;
   if (!rows.length) return <div className="py-8 text-center text-sm text-[#9aa4aa]">Nenhuma palavra-chave encontrada.</div>;
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[560px] text-left text-xs">
+      <table className="w-full min-w-[620px] text-left text-xs">
         <thead className="text-[10px] uppercase tracking-[0.08em] text-[#9aa4aa]">
           <tr>
             <th className="py-2">Palavra-chave</th>
-            <th>Cliques</th>
-            <th>Leads</th>
-            <th>CPL</th>
-            <th>Conversão</th>
-            <th className="text-right">Status</th>
+            <th className="text-right">Investimento</th>
+            <th className="text-right">Cliques</th>
+            {temCtr && <th className="text-right">CTR</th>}
+            <th className="text-right">Leads</th>
+            <th className="text-right">CPL</th>
+            <th className="text-right">vs meta de CPL</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-white/[0.07]">
           {rows.map((keyword, index) => {
-            const rate = keyword.clicks > 0 ? (keyword.conversions / keyword.clicks) * 100 : 0;
+            const gasto = keyword.spend ?? 0;
+            const leads = keyword.conversions ?? 0;
+            const cpl = leads > 0 ? (keyword.cpl > 0 ? keyword.cpl : gasto / leads) : 0;
+            const status: StatusCpl = leads > 0
+              ? statusCpl(cpl, metaCpl)
+              : keyword.clicks > 0 ? statusCplComGasto(gasto, 0, metaCpl) : 'sem_dado';
             return (
               <tr key={`${keyword.text}-${index}`} className="text-[#f4f7f8]">
-                <td className="max-w-[220px] truncate py-3"><span className="mr-2 rounded bg-[#6cff2f]/18 px-1.5 py-0.5 text-[#6cff2f]">{index + 1}</span>{keyword.text}</td>
-                <td>{premiumValue(keyword.clicks)}</td>
-                <td>{premiumValue(keyword.conversions)}</td>
-                <td>{keyword.cpl > 0 ? premiumValue(keyword.cpl, 'currency') : '—'}</td>
-                <td>{premiumValue(rate, 'percent', 0)}</td>
-                <td className="text-right"><StatusPill status={rate > 20 ? 'Excelente' : rate > 0 ? 'Bom' : 'Neutro'} /></td>
+                <td className="max-w-[220px] truncate py-3" title={keyword.text}><span className="mr-2 rounded bg-[#6cff2f]/18 px-1.5 py-0.5 text-[#6cff2f]">{index + 1}</span>{keyword.text}</td>
+                <td className="whitespace-nowrap text-right">{gasto > 0 ? premiumValue(gasto, 'currency') : '—'}</td>
+                <td className="text-right">{premiumValue(keyword.clicks)}</td>
+                {temCtr && <td className="whitespace-nowrap text-right">{keyword.ctr > 0 ? premiumValue(keyword.ctr, 'percent') : '—'}</td>}
+                <td className="text-right">{premiumValue(leads)}</td>
+                <td className={cn('whitespace-nowrap text-right font-bold', TEXTO_STATUS_CPL[status])}>{cpl > 0 ? premiumValue(cpl, 'currency') : '—'}</td>
+                <td className="text-right">
+                  <StatusCplPill
+                    status={status}
+                    titulo={status === 'sem_lead' ? 'Cliques e nenhum lead, com gasto de 2× a meta de CPL ou mais'
+                      : status === 'sem_lead_baixo' ? 'Cliques e nenhum lead, mas o gasto ainda é pequeno para concluir' : undefined}
+                  />
+                </td>
               </tr>
             );
           })}
@@ -5256,14 +5259,80 @@ function CreativeHorizontalStrip({ creatives, loading, onPreview }: {
   if (!creatives.length) {
     return <div className="py-8 text-center text-sm text-[#9aa4aa]">Nenhum criativo encontrado.</div>;
   }
+  // "Melhores" = mais leads e, no empate, menor CPL. A API ordena por gasto —
+  // que mostra o que mais CUSTOU, não o que mais rendeu. Sem nenhum lead no
+  // período (campanha de tráfego/engajamento), fica a ordem por gasto.
+  const ordenados = creatives.some(c => c.leads > 0)
+    ? [...creatives].sort((a, b) =>
+      (b.leads - a.leads)
+      || ((a.cpl > 0 ? a.cpl : Infinity) - (b.cpl > 0 ? b.cpl : Infinity))
+      || (b.spend - a.spend))
+    : creatives;
   return (
     <div className="flex gap-3 overflow-x-auto pb-2 [scrollbar-width:thin] [scrollbar-color:#2a2d3a_transparent]">
-      {creatives.slice(0, 10).map((creative, index) => (
+      {ordenados.slice(0, 10).map((creative, index) => (
         <HorizontalCreativeCard key={creative.adId} creative={creative} index={index} onPreview={onPreview} />
       ))}
     </div>
   );
 }
+
+// ── Resumo de Tráfego: uma tabela, as MESMAS colunas nas duas plataformas ──
+// Antes eram dois blocos com métricas diferentes de cada lado (Meta mostrava
+// alcance/CTR, Google impressões/cliques/CPC) — nada era comparável.
+type CelulaTrafego = { valor: string; delta?: number | null; inverso?: boolean };
+type LinhaTrafego = { plataforma: string; logo: ReactNode; celulas: CelulaTrafego[] };
+
+function TrafegoResumoTable({ linhas, colunas, comparacao }: { linhas: LinhaTrafego[]; colunas: string[]; comparacao: string }) {
+  return (
+    <PremiumPanel className="p-4">
+      <div className="mb-3 flex flex-wrap items-baseline gap-2">
+        <h3 className="text-sm font-black uppercase tracking-[0.07em] text-[#f4f7f8]">Resumo de Tráfego</h3>
+        <span className="text-[10px] text-[#9aa4aa]">variação {comparacao}</span>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[820px] text-left text-xs">
+          <thead className="text-[10px] uppercase tracking-[0.08em] text-[#9aa4aa]">
+            <tr>
+              <th className="py-2">Plataforma</th>
+              {colunas.map(c => <th key={c} className="text-right">{c}</th>)}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-white/[0.07]">
+            {linhas.map(linha => (
+              <tr key={linha.plataforma} className="text-[#f4f7f8]">
+                <td className="py-3"><span className="flex items-center gap-2 font-bold">{linha.logo}{linha.plataforma}</span></td>
+                {linha.celulas.map((c, i) => {
+                  const tem = c.delta !== null && c.delta !== undefined && Number.isFinite(c.delta);
+                  const bom = tem && (c.inverso ? c.delta! <= 0 : c.delta! >= 0);
+                  return (
+                    <td key={colunas[i]} className="whitespace-nowrap py-3 text-right align-top">
+                      <span className="font-heading text-base leading-none">{c.valor}</span>
+                      {tem && (
+                        <span className={cn('block text-[10px] font-bold', bom ? 'text-[#6cff2f]' : 'text-red-400')}>
+                          {c.delta! >= 0 ? '+' : ''}{c.delta!.toFixed(1).replace('.', ',')}%
+                        </span>
+                      )}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </PremiumPanel>
+  );
+}
+
+type AbaDashboard = 'geral' | 'midia' | 'lp' | 'social' | 'comercial';
+const ABAS: { id: AbaDashboard; label: string }[] = [
+  { id: 'geral', label: 'Visão geral' },
+  { id: 'midia', label: 'Mídia paga' },
+  { id: 'lp', label: 'Landing page' },
+  { id: 'social', label: 'Social' },
+  { id: 'comercial', label: 'Comercial' },
+];
 
 // ── Main Dashboard ───────────────────────────────────────────────────────────
 export default function GeneralDashboard() {
@@ -5311,6 +5380,8 @@ export default function GeneralDashboard() {
   /** Faturamento por criativo no período — vem do CRM, não do Meta. */
   const [criativosReceita, setCriativosReceita] = useState<CriativoReceita[]>([]);
   const [criativosReceitaLoading, setCriativosReceitaLoading] = useState(false);
+  /** Receita atribuída a TODOS os criativos do período (a faixa mostra só os 12 maiores). */
+  const [criativosReceitaTotal, setCriativosReceitaTotal] = useState(0);
   /** Quem vendeu mais e o que mais se vendeu — CRM externo (Agendor). */
   const [vendedores, setVendedores] = useState<LinhaVendedor[]>([]);
   const [categorias, setCategorias] = useState<LinhaCategoria[]>([]);
@@ -5367,6 +5438,24 @@ export default function GeneralDashboard() {
   const creativesFetchStartedRef = useRef('');
   const keywordsFetchStartedRef = useRef('');
   const igPostsFetchStartedRef = useRef('');
+  // Aba ativa do lead-gen, espelhada em ?aba= (replaceState nativo — o App
+  // Router sincroniza; evita useSearchParams, que exigiria Suspense na página).
+  const [aba, setAbaState] = useState<AbaDashboard>('geral');
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search).get('aba');
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (q && ABAS.some(t => t.id === q)) setAbaState(q as AbaDashboard);
+  }, []);
+  function setAba(id: AbaDashboard) {
+    setAbaState(id);
+    try {
+      const params = new URLSearchParams(window.location.search);
+      if (id === 'geral') params.delete('aba'); else params.set('aba', id);
+      const qs = params.toString();
+      window.history.replaceState(null, '', `${window.location.pathname}${qs ? `?${qs}` : ''}`);
+    } catch { /* ignore */ }
+  }
+
   const [alertsCollapsed, setAlertsCollapsed] = useState(() => {
     if (typeof window === 'undefined') return false;
     return localStorage.getItem('dashboard:alerts:collapsed') === '1';
@@ -5580,6 +5669,11 @@ export default function GeneralDashboard() {
       .catch(() => {});
   }, [clients]);
 
+  // Janela atual e de comparação — mesma régua do servidor (dashboard-periodo.ts).
+  const faixaSel = faixaAtual(period, customDateFrom, customDateTo);
+  const faixaPrev = faixaAnterior(period, faixaSel);
+  const rotuloComp = rotuloComparacao(period, faixaPrev);
+
   // Skip fetching when custom period but dates not yet filled
   const customReady = period !== 'custom' || (customDateFrom.length === 10 && customDateTo.length === 10);
 
@@ -5651,11 +5745,9 @@ export default function GeneralDashboard() {
     let cancelled = false;
     setPrevMetricsByClient({});
     if (selectedIds.size === 0 || !customReady) return () => { cancelled = true; };
-    const { from, to } = periodToDateRange(period, customDateFrom, customDateTo);
-    const durationMs = to.getTime() - from.getTime() + 86400000;
-    const prevTo = new Date(from.getTime() - 86400000);
-    const prevFrom = new Date(prevTo.getTime() - durationMs + 86400000);
-    const prevParams = `period=custom&dateFrom=${prevFrom.toISOString().split('T')[0]}&dateTo=${prevTo.toISOString().split('T')[0]}`;
+    // Mês corrente compara com o MESMO trecho do mês anterior (1..dia de hoje);
+    // últimos N dias com os N dias imediatamente antes, sem sobreposição.
+    const prevParams = `period=custom&dateFrom=${faixaPrev.from}&dateTo=${faixaPrev.to}`;
     const ids = [...selectedIds];
     Promise.allSettled(
       ids.map(async (id) => {
@@ -5671,7 +5763,7 @@ export default function GeneralDashboard() {
       setPrevMetricsByClient(map);
     });
     return () => { cancelled = true; };
-  }, [selectedIds, period, customDateFrom, customDateTo, customReady]);
+  }, [selectedIds, period, customDateFrom, customDateTo, customReady, faixaPrev.from, faixaPrev.to]);
 
   // Fetch active campaigns with spend in selected period
   useEffect(() => {
@@ -5773,8 +5865,7 @@ export default function GeneralDashboard() {
   }, []);
 
   useEffect(() => {
-    const { from, to } = periodToDateRange(period, customDateFrom, customDateTo);
-    const params = new URLSearchParams({ from: from.toISOString().split('T')[0], to: to.toISOString().split('T')[0] });
+    const params = new URLSearchParams({ from: faixaSel.from, to: faixaSel.to });
     fetch(`/api/crm/summary?${params}`)
       .then(r => r.ok ? r.json() as Promise<{ clientId: string; leads: number; funil: ContagemFunil; total: number }[]> : [])
       .then(data => {
@@ -5783,7 +5874,7 @@ export default function GeneralDashboard() {
         setCrmSummary(map);
       })
       .catch(() => setCrmSummary({}));
-  }, [period, customDateFrom, customDateTo]);
+  }, [period, customDateFrom, customDateTo, faixaSel.from, faixaSel.to]);
 
   // Load saved AI insights when clients/period change
   useEffect(() => {
@@ -5803,11 +5894,10 @@ export default function GeneralDashboard() {
     let cancelado = false;
     const vazio = { origens: [], total: 0, semAtribuicao: 0, leads: [], leadsTotal: 0, leadsSemCanal: 0 };
     if (selectedIds.size === 0 || !customReady) { setPorCanal(vazio); return () => { cancelado = true; }; }
-    const { from, to } = periodToDateRange(period, customDateFrom, customDateTo);
     const params = new URLSearchParams({
       clientIds: [...selectedIds].join(','),
-      from: toInputDate(from),
-      to: toInputDate(to),
+      from: faixaSel.from,
+      to: faixaSel.to,
     });
     fetch(`/api/crm/por-canal?${params}`)
       .then(r => (r.ok ? r.json() as Promise<typeof vazio> : vazio))
@@ -5820,7 +5910,7 @@ export default function GeneralDashboard() {
       })
       .catch(() => { if (!cancelado) setPorCanal(vazio); });
     return () => { cancelado = true; };
-  }, [selectedIds, period, customDateFrom, customDateTo, customReady]);
+  }, [selectedIds, period, customDateFrom, customDateTo, customReady, faixaSel.from, faixaSel.to]);
 
   // Fetch page/profile insights (Facebook Page + Instagram organic)
   useEffect(() => {
@@ -5832,19 +5922,15 @@ export default function GeneralDashboard() {
       setPageInsightsLoading(false);
       return () => { cancelled = true; };
     }
-    const { from, to } = periodToDateRange(period, customDateFrom, customDateTo);
-    const durationMs = to.getTime() - from.getTime() + 86400000;
-    const prevTo = new Date(from.getTime() - 86400000);
-    const prevFrom = new Date(prevTo.getTime() - durationMs + 86400000);
     const params = new URLSearchParams({
       clientIds: [...selectedIds].join(','),
-      from: from.toISOString().split('T')[0],
-      to: to.toISOString().split('T')[0],
+      from: faixaSel.from,
+      to: faixaSel.to,
     });
     const prevParams = new URLSearchParams({
       clientIds: [...selectedIds].join(','),
-      from: prevFrom.toISOString().split('T')[0],
-      to: prevTo.toISOString().split('T')[0],
+      from: faixaPrev.from,
+      to: faixaPrev.to,
     });
     Promise.all([
       fetch(`/api/meta/page-insights?${params}`).then(r => r.ok ? r.json() as Promise<PageInsightsResult[]> : []),
@@ -5855,7 +5941,7 @@ export default function GeneralDashboard() {
       if (!cancelled) { setPageInsights([]); setPrevPageInsights([]); }
     }).finally(() => { if (!cancelled) setPageInsightsLoading(false); });
     return () => { cancelled = true; };
-  }, [selectedIds, period, customDateFrom, customDateTo, customReady]);
+  }, [selectedIds, period, customDateFrom, customDateTo, customReady, faixaSel.from, faixaSel.to, faixaPrev.from, faixaPrev.to]);
 
   // Fetch Instagram top posts
   useEffect(() => {
@@ -6080,11 +6166,11 @@ export default function GeneralDashboard() {
   const crmSales = [...selectedIds].reduce((s, id) => s + (metricsByClient[id]?.crm?.sales ?? 0), 0);
   const crmLeads = [...selectedIds].reduce((s, id) => s + (metricsByClient[id]?.crm?.leads ?? 0), 0);
   const avgCrmTicket = crmSales > 0 ? revenue / crmSales : 0;
-  const plannedSalesPartial = autoPartial(plannedSalesTotal, period);
+  const plannedSalesPartial = autoPartial(plannedSalesTotal, period, faixaSel);
   const effectiveSalesGoal = plannedSalesPartial > 0 ? plannedSalesPartial : plannedSalesTotal;
 
-  const revenuePartial = autoPartial(plannedRevenue, period);
-  const leadsPartial = autoPartial(leadsGoal, period);
+  const revenuePartial = autoPartial(plannedRevenue, period, faixaSel);
+  const leadsPartial = autoPartial(leadsGoal, period, faixaSel);
   const effectiveRevenueGoal = revenuePartial > 0 ? revenuePartial : plannedRevenue;
   const effectiveLeadsGoal = leadsPartial > 0 ? leadsPartial : leadsGoal;
   const cplGoal = leadsGoal > 0 ? plannedInvestment / leadsGoal : 0;
@@ -6168,17 +6254,21 @@ export default function GeneralDashboard() {
     const planning = planningsByClient[id] ?? readPlanningFromStorage(id);
     const clientPlannedLeads = plannedFunnelFromGoal(goal, planning)[0] ?? 0;
     const clientLeads = (m?.meta?.leads ?? 0) + (m?.google?.conversions ?? 0);
-    const clientLeadsPartial = autoPartial(clientPlannedLeads, period);
+    const clientLeadsPartial = autoPartial(clientPlannedLeads, period, faixaSel);
     const clientCpl = m?.meta?.cpl ?? 0;
     const clientCplGoal = planning.cplMeta;
 
+    // O texto do alerta é o que aparece na faixa — precisa dizer o QUÊ, não só
+    // que "há N alertas".
+    const esperadoTxt = period === 'this_month' ? 'esperado até hoje' : 'esperado no período';
+    const abaixoPct = clientLeadsPartial > 0 ? Math.round((1 - clientLeads / clientLeadsPartial) * 100) : 0;
     if (clientLeadsPartial > 0 && clientLeads < clientLeadsPartial * 0.5) {
-      alerts.push({ clientId: id, clientName: client.name, msg: `Leads muito abaixo do esperado (${clientLeads} / ${clientLeadsPartial} parcial)`, severity: 'critical' });
+      alerts.push({ clientId: id, clientName: client.name, msg: `Leads ${abaixoPct}% abaixo do ${esperadoTxt} (${premiumValue(clientLeads)} de ${premiumValue(clientLeadsPartial)})`, severity: 'critical' });
     } else if (clientLeadsPartial > 0 && clientLeads < clientLeadsPartial * 0.75) {
-      alerts.push({ clientId: id, clientName: client.name, msg: `Leads abaixo do ritmo (${clientLeads} / ${clientLeadsPartial} parcial)`, severity: 'warning' });
+      alerts.push({ clientId: id, clientName: client.name, msg: `Leads ${abaixoPct}% abaixo do ${esperadoTxt} (${premiumValue(clientLeads)} de ${premiumValue(clientLeadsPartial)})`, severity: 'warning' });
     }
     if (clientCplGoal > 0 && clientCpl > clientCplGoal * 1.5) {
-      alerts.push({ clientId: id, clientName: client.name, msg: `CPL acima da meta (${formatCurrencyBRL(clientCpl)} / meta ${formatCurrencyBRL(clientCplGoal)})`, severity: 'critical' });
+      alerts.push({ clientId: id, clientName: client.name, msg: `CPL Meta ${(clientCpl / clientCplGoal).toFixed(1).replace('.', ',')}× acima da meta (${formatCurrencyBRL(clientCpl)} / meta ${formatCurrencyBRL(clientCplGoal)})`, severity: 'critical' });
     }
   }
 
@@ -6267,24 +6357,6 @@ export default function GeneralDashboard() {
   const appointments = funilCrm.agendamentos;
   const showUps = funilCrm.comparecimentos;
   const conversions = funilCrm.fechamentos || crmSales || googleConv;
-  const funnelVisitors = Math.max(metaReach + googleImpressions, totalLeads, conversions);
-  const conversionRate = funnelVisitors > 0 ? (conversions / funnelVisitors) * 100 : 0;
-  // Mesma conta da taxa atual, com os números do período ANTERIOR — a versão
-  // antiga dividia conversões atuais por leads anteriores e dava variação absurda.
-  const prevConversions = prevCrmSales || prevGoogleConv;
-  const prevFunnelVisitors = Math.max(prevMetaReach + prevGoogleImpressions, prevTotalLeads, prevConversions);
-  const previousConversionRate = prevFunnelVisitors > 0 ? (prevConversions / prevFunnelVisitors) * 100 : null;
-  const quickMetrics = [
-    { title: 'Investimento Total', value: premiumValue(totalSpend, 'currency'), change: pctChange(totalSpend, prevTotalSpend), icon: CreditCard },
-    { title: 'CPL Médio', value: totalCostPerLead > 0 ? premiumValue(totalCostPerLead, 'currency') : '—', change: pctChange(totalCostPerLead, prevCpl), icon: Tag, inverseChange: true },
-    // Ticket médio = faturamento ÷ VENDAS do CRM (não ÷ conversions, que cai em
-    // fallback de funil/Google e daria um ticket calculado sobre um denominador
-    // que não é o mesmo que gerou a receita). 0 vendas → "—", nunca R$ 0,00.
-    { title: 'Ticket Médio', value: avgCrmTicket > 0 ? premiumValue(avgCrmTicket, 'currency') : '—', change: prevTicket > 0 && avgCrmTicket > 0 ? pctChange(avgCrmTicket, prevTicket) : null, icon: Receipt },
-    { title: 'Agendamentos', value: premiumValue(appointments), change: null, icon: Calendar },
-    { title: 'ROI', value: roi > 0 ? premiumValue(roi, 'times') : '—', change: pctChange(roi, prevRoi), icon: TrendingUp },
-    { title: 'Conversão Geral', value: conversionRate > 0 ? premiumValue(conversionRate, 'percent') : '—', change: previousConversionRate !== null ? pctChange(conversionRate, previousConversionRate) : null, icon: Target },
-  ];
   // Build dynamic funnel steps from first selected client's planning stages
   const firstClientIdForFunnel = [...selectedIds][0];
   const firstPlanningForFunnel = firstClientIdForFunnel
@@ -6325,10 +6397,7 @@ export default function GeneralDashboard() {
   // funil. ⚠️ O modal PRECISA usar exatamente esta janela: é a mesma que
   // alimenta /api/crm/summary (o número do card), então divergir aqui faria a
   // lista abrir com um total diferente do que foi clicado.
-  const periodoISO = (() => {
-    const { from, to } = periodToDateRange(period, customDateFrom, customDateTo);
-    return { from: from.toISOString().split('T')[0], to: to.toISOString().split('T')[0] };
-  })();
+  const periodoISO = { from: faixaSel.from, to: faixaSel.to };
   const deliveryRange = periodoISO;
 
   // ── Desempenho comercial: vendedores e categorias ─────────────────────────
@@ -6362,6 +6431,7 @@ export default function GeneralDashboard() {
     // Zera na troca de período/cliente: sem isso a faixa mostra o recorte
     // anterior enquanto o novo carrega.
     setCriativosReceita([]);
+    setCriativosReceitaTotal(0);
     const dias = Math.max(1, Math.round(
       (new Date(periodoISO.to).getTime() - new Date(periodoISO.from).getTime()) / 86400000) + 1);
 
@@ -6380,8 +6450,9 @@ export default function GeneralDashboard() {
       }));
       if (cancelado) return;
 
-      const linhas = lotes.flat()
-        .filter(l => Number(l.receita) > 0)
+      const comReceita = lotes.flat().filter(l => Number(l.receita) > 0);
+      setCriativosReceitaTotal(comReceita.reduce((s, l) => s + (Number(l.receita) || 0), 0));
+      const linhas = comReceita
         .sort((a, b) => Number(b.receita) - Number(a.receita))
         .slice(0, 12);
 
@@ -6495,10 +6566,48 @@ export default function GeneralDashboard() {
       { title: 'Recorrência', value: formatarMetrica(dadosFood.clientes.taxaRecorrencia, 'percentual'), change: null, icon: Repeat },
     ];
   })() : [];
-  // Taxa do FUNIL = fechamentos sobre o topo DELE. A `conversionRate` global usa
+  // Taxa do FUNIL = fechamentos sobre o topo DELE. A antiga `conversionRate` global usava
   // `funnelVisitors` (impressões + cliques), o que dava "0,13%" ao lado de um
   // funil que começa em contatos — dois números sem relação na mesma caixa.
   const funnelTaxa = funnelTopo > 0 ? (conversions / funnelTopo) * 100 : 0;
+
+  // ── Meta de CPL da seleção ────────────────────────────────────────────────
+  // Um cliente: o cplMeta dele. Vários: CPL planejado ponderado pelos leads
+  // planejados (investimento planejado ÷ leads planejados); sem meta de leads,
+  // média simples dos cplMeta.
+  const cplMetaSel = (() => {
+    const ids = [...selectedIds];
+    if (ids.length === 0) return 0;
+    if (ids.length === 1) return (planningsByClient[ids[0]] ?? readPlanningFromStorage(ids[0])).cplMeta || 0;
+    if (cplGoal > 0) return cplGoal;
+    const metas = ids.map(id => (planningsByClient[id] ?? readPlanningFromStorage(id)).cplMeta).filter(v => v > 0);
+    return metas.length > 0 ? metas.reduce((acc, v) => acc + v, 0) / metas.length : 0;
+  })();
+
+  // ── Séries diárias (por dia, não acumuladas) ──────────────────────────────
+  const dailyPorData = new Map(dailySeries.map(r => [r.date, r]));
+  const diasSel = datasDaFaixa(faixaSel);
+  const gastoDia = diasSel.map(d => (dailyPorData.get(d)?.meta?.spend ?? 0) + (dailyPorData.get(d)?.google?.cost ?? 0));
+  const leadsDia = diasSel.map(d => (dailyPorData.get(d)?.meta?.leads ?? 0) + (dailyPorData.get(d)?.google?.conversions ?? 0));
+  const receitaDia = diasSel.map(d => dailyPorData.get(d)?.crm?.revenue ?? 0);
+  const temSerieGasto = gastoDia.some(v => v > 0);
+
+  const quickMetrics = [
+    { title: 'Investimento Total', value: premiumValue(totalSpend, 'currency'), change: pctChange(totalSpend, prevTotalSpend), icon: CreditCard, serie: temSerieGasto ? gastoDia : undefined },
+    { title: 'CPL Médio', value: totalCostPerLead > 0 ? premiumValue(totalCostPerLead, 'currency') : '—', change: pctChange(totalCostPerLead, prevCpl), icon: Tag, inverseChange: true, serie: temSerieGasto && leadsDia.some(v => v > 0) ? cplSeries : undefined, dica: 'Investimento Meta + Google ÷ leads reportados pelas plataformas · linha = CPL acumulado dia a dia' },
+    // Ticket médio = faturamento ÷ VENDAS do CRM (não ÷ conversions, que cai em
+    // fallback de funil/Google e daria um ticket calculado sobre um denominador
+    // que não é o mesmo que gerou a receita). 0 vendas → "—", nunca R$ 0,00.
+    { title: 'Ticket Médio', value: avgCrmTicket > 0 ? premiumValue(avgCrmTicket, 'currency') : '—', change: prevTicket > 0 && avgCrmTicket > 0 ? pctChange(avgCrmTicket, prevTicket) : null, icon: Receipt },
+    { title: 'Agendamentos', value: premiumValue(appointments), change: null, icon: Calendar },
+    // ROAS, não ROI: é receita ÷ investimento (ROI descontaria o investimento).
+    { title: 'ROAS', value: roi > 0 ? premiumValue(roi, 'times') : '—', change: pctChange(roi, prevRoi), icon: TrendingUp, dica: 'Receita do CRM ÷ investimento em mídia (Meta + Google)', serie: temSerieGasto && receitaDia.some(v => v > 0) ? roiSeries : undefined },
+    // Mesma taxa que o funil mostra como "Conversão geral" (fechamentos ÷
+    // contatos). A antiga "Conversão Geral" dividia por alcance + impressões e
+    // dava 0,02% — número sem leitura possível. Sem funil do período anterior
+    // carregado, fica sem variação em vez de inventar uma.
+    { title: 'Conversão do funil', value: funnelTaxa > 0 ? premiumValue(funnelTaxa, 'percent') : '—', change: null, icon: Target, dica: 'Fechamentos ÷ contatos do Funil de Performance (CRM)' },
+  ];
   const actualFunnelVolumes = [funnelTopo, qualified, appointments, showUps, conversions];
   // Quebra do degrau de AGENDAMENTOS (índice 2): dos agendados que ainda não
   // compareceram, quantos têm data futura e quantos furaram de fato.
@@ -6532,8 +6641,8 @@ export default function GeneralDashboard() {
       investment: premiumValue(metaSpend, 'currency'),
       leads: premiumValue(metaLeads),
       cpl: avgCpl > 0 ? premiumValue(avgCpl, 'currency') : '—',
-      conversion: metaReach > 0 ? premiumValue((metaLeads / metaReach) * 100, 'percent') : '—',
-      status: metaLeads > 100 ? 'Excelente' as const : metaLeads > 0 ? 'Bom' as const : 'Neutro' as const,
+      cplNum: avgCpl,
+      status: cplMetaSel > 0 ? statusCplComGasto(metaSpend, metaLeads, cplMetaSel) : 'sem_meta' as StatusCpl,
       logo: <MetaAdsMark className="h-4 w-4 text-[#168BFF]" />,
     },
     {
@@ -6541,11 +6650,464 @@ export default function GeneralDashboard() {
       investment: premiumValue(googleCost, 'currency'),
       leads: premiumValue(googleConv),
       cpl: avgCpa > 0 ? premiumValue(avgCpa, 'currency') : '—',
-      conversion: googleClicks > 0 ? premiumValue((googleConv / googleClicks) * 100, 'percent') : '—',
-      status: googleConv > 50 ? 'Excelente' as const : googleConv > 0 ? 'Bom' as const : 'Neutro' as const,
+      cplNum: avgCpa,
+      status: cplMetaSel > 0 ? statusCplComGasto(googleCost, googleConv, cplMetaSel) : 'sem_meta' as StatusCpl,
       logo: <GoogleAdsMark className="h-4 w-4" />,
     },
   ];
+
+  // ── Resumo de Tráfego (tabela única) ──────────────────────────────────────
+  // Variação só com base anterior ≥ 10 em contagem/dinheiro: "+6900%" sobre
+  // uma base de 1 não diz nada. Taxas (CTR/CPL/CPC) exigem só base > 0.
+  const deltaBase = (cur: number, prev: number) => prev >= 10 ? pctChange(cur, prev) : null;
+  const deltaTaxa = (cur: number, prev: number) => cur > 0 && prev > 0 ? pctChange(cur, prev) : null;
+  const prevGoogleCtr = prevGoogleImpressions > 0 ? (prevGoogleClicks / prevGoogleImpressions) * 100 : 0;
+  const prevGoogleCpa = prevGoogleConv > 0 ? prevGoogleCost / prevGoogleConv : 0;
+  const colunasTrafego = ['Saldo', 'Investimento', 'Impressões', 'Cliques', 'CTR', 'Leads / Conv.', 'CPL / CPC'];
+  const linhasTrafego: LinhaTrafego[] = [
+    {
+      plataforma: 'Meta Ads',
+      logo: <MetaAdsMark className="h-4 w-4 text-[#168BFF]" />,
+      celulas: [
+        { valor: metaBalance > 0 ? premiumValue(metaBalance, 'currency') : '—' },
+        { valor: metaSpend > 0 ? premiumValue(metaSpend, 'currency') : '—', delta: deltaBase(metaSpend, prevMetaSpend) },
+        { valor: metaImpressions > 0 ? premiumValue(metaImpressions) : '—', delta: deltaBase(metaImpressions, prevMetaImpressions) },
+        { valor: metaClicks > 0 ? premiumValue(metaClicks) : '—', delta: deltaBase(metaClicks, prevMetaClicks) },
+        { valor: metaCtr > 0 ? premiumValue(metaCtr, 'percent') : '—', delta: deltaTaxa(metaCtr, prevMetaCtr) },
+        { valor: premiumValue(metaLeads), delta: deltaBase(metaLeads, prevMetaLeads) },
+        avgCpl > 0
+          ? { valor: `${premiumValue(avgCpl, 'currency')} CPL`, delta: deltaTaxa(avgCpl, prevAvgCpl), inverso: true }
+          : { valor: metaCpc > 0 ? `${premiumValue(metaCpc, 'currency')} CPC` : '—', inverso: true },
+      ],
+    },
+    {
+      plataforma: 'Google Ads',
+      logo: <GoogleAdsMark className="h-4 w-4" />,
+      celulas: [
+        { valor: googleBalance > 0 ? premiumValue(googleBalance, 'currency') : '—' },
+        { valor: hasGoogleData && googleCost > 0 ? premiumValue(googleCost, 'currency') : '—', delta: hasGoogleData ? deltaBase(googleCost, prevGoogleCost) : null },
+        { valor: hasGoogleData && googleImpressions > 0 ? premiumValue(googleImpressions) : '—', delta: hasGoogleData ? deltaBase(googleImpressions, prevGoogleImpressions) : null },
+        { valor: hasGoogleData && googleClicks > 0 ? premiumValue(googleClicks) : '—', delta: hasGoogleData ? deltaBase(googleClicks, prevGoogleClicks) : null },
+        { valor: googleCtrValue > 0 ? premiumValue(googleCtrValue, 'percent') : '—', delta: deltaTaxa(googleCtrValue, prevGoogleCtr) },
+        { valor: hasGoogleData ? premiumValue(googleConv) : '—', delta: hasGoogleData ? deltaBase(googleConv, prevGoogleConv) : null },
+        avgCpa > 0
+          ? { valor: `${premiumValue(avgCpa, 'currency')} CPL`, delta: deltaTaxa(avgCpa, prevGoogleCpa), inverso: true }
+          : { valor: googleCpc > 0 ? `${premiumValue(googleCpc, 'currency')} CPC` : '—', delta: deltaTaxa(googleCpc, prevGoogleCpc), inverso: true },
+      ],
+    },
+  ];
+
+  // ── Ritmo do mês ──────────────────────────────────────────────────────────
+  // No mês corrente o eixo vai até o FIM do mês (dias futuros = null) para a
+  // projeção ter onde ser desenhada; nos demais períodos, só a janela.
+  const ritmo = (() => {
+    const usaReceita = receitaDia.some(v => v > 0);
+    const usaLeads = !usaReceita && leadsDia.some(v => v > 0);
+    if (!usaReceita && !usaLeads) return null;
+    const mesCorrente = period === 'this_month';
+    const eixo = mesCorrente ? datasDaFaixa({ from: faixaSel.from, to: fimDoMesIso(faixaSel.from) }) : diasSel;
+    const base = usaReceita ? receitaDia : leadsDia;
+    const porDia = new Map(diasSel.map((d, i) => [d, base[i] ?? 0]));
+    const diario = eixo.map(d => (d <= faixaSel.to ? porDia.get(d) ?? 0 : null));
+    const metaMensal = usaReceita ? plannedRevenue : leadsGoal;
+    const metaParcial = usaReceita ? effectiveRevenueGoal : effectiveLeadsGoal;
+    return {
+      titulo: mesCorrente ? 'Ritmo do mês' : 'Ritmo do período',
+      sub: usaReceita ? 'faturamento acumulado (CRM, data do ganho) vs meta linear' : 'leads acumulados (Meta + Google) vs meta linear',
+      eixo, diario,
+      metaTotal: mesCorrente ? metaMensal : metaParcial,
+      formato: usaReceita ? 'currency' as const : 'number' as const,
+      projetar: mesCorrente,
+      rotuloSerie: usaReceita ? 'Faturamento acumulado' : 'Leads acumulados',
+    };
+  })();
+
+  // Projeção linear de fechamento (só no mês corrente).
+  const diaHoje = Number(faixaSel.to.slice(8, 10));
+  const diasMes = diasNoMes(faixaSel.to);
+  const projetar = (v: number) => (period === 'this_month' && diaHoje > 0 && v > 0 ? (v / diaHoje) * diasMes : null);
+  const rotuloEsperado = rotuloMetaParcial(period);
+  const fatorPlataformaCrm = crmLeads > 0 ? totalLeads / crmLeads : null;
+
+  // ── Blocos da página ──────────────────────────────────────────────────────
+  // Montados uma vez e posicionados conforme o modo: food mantém a página
+  // única de sempre; lead-gen distribui os mesmos blocos nas abas.
+  const blocoAi = (
+    <>
+      {aiInsights.length > 0 && (
+        <AiRecommendationsBox insights={aiInsights} loading={aiLoading} onAnalyze={analyzeWithAI} />
+      )}
+      {aiError && <div className="rounded-xl border border-red-400/30 bg-red-500/10 px-4 py-3 text-xs text-red-300">{aiError}</div>}
+      {/* A faixa lista O QUE está fora do padrão — antes só dizia "N alertas". */}
+      {!metricsLoading && alerts.length > 0 && (
+        <div className="rounded-[14px] border border-amber-400/20 bg-amber-400/[0.06] px-4 py-3">
+          <p className="mb-2 flex items-center gap-2 text-xs font-black uppercase tracking-[0.07em] text-amber-200">
+            <AlertTriangle className="h-3.5 w-3.5" />
+            {alerts.length} alerta{alerts.length > 1 ? 's' : ''} fora do padrão
+          </p>
+          <ul className="space-y-1">
+            {alerts.map((a, i) => (
+              <li key={`${a.clientId}-${i}`} className="flex items-start gap-2 text-xs text-[#dce4e8]">
+                <span className={cn('mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full', a.severity === 'critical' ? 'bg-[#e52020]' : 'bg-amber-400')} />
+                <span>
+                  {selectedIds.size > 1 && <span className="font-bold text-[#f4f7f8]">{a.clientName}: </span>}
+                  {a.msg}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </>
+  );
+  const blocoTrafegoAntigo = (
+    <>
+            <PremiumPanel className="p-4">
+              <h3 className="mb-4 text-sm font-black uppercase tracking-[0.07em] text-[#f4f7f8]">Resumo de Tráfego</h3>
+              <div className="grid gap-4 xl:grid-cols-2">
+                <div className="rounded-[12px] border border-white/[0.08] bg-[#071014] p-3">
+                  <div className="mb-3 flex items-center gap-2 text-sm font-black uppercase tracking-[0.06em] text-[#f4f7f8]"><MetaAdsMark className="h-5 w-5 text-[#168BFF]" /> Meta Ads</div>
+                  <div className="grid gap-2 sm:grid-cols-5">
+                    <MiniPlatformMetric label="Saldo Meta Ads" value={metaBalance > 0 ? premiumValue(metaBalance, 'currency') : '—'} logo={<MetaAdsMark className="h-4 w-4 text-[#168BFF]" />} sub="Saldo disponível" />
+                    <MiniPlatformMetric label="Alcance" value={metaReach > 0 ? premiumValue(metaReach) : '—'} icon={Users} change={pct(metaReach, prevMetaReach)} comparacao={rotuloComp} />
+                    <MiniPlatformMetric label="CTR" value={metaCtr > 0 ? premiumValue(metaCtr, 'percent') : '—'} icon={MousePointerClick} change={pct(metaCtr, prevMetaCtr)} comparacao={rotuloComp} />
+                    {/* Em food o Meta ainda reporta "resultado" (conversa/lead do
+                        anúncio), não pedido pago — atribuir pedido por plataforma
+                        exige a UTM do catálogo, que ainda não temos. Então o rótulo
+                        vira "Resultados", que é a verdade, em vez de "Pedidos". */}
+                    <MiniPlatformMetric label={modoFood ? 'Resultados' : 'Leads'} value={premiumValue(metaLeads)} icon={UserPlus} change={pct(metaLeads, prevMetaLeads)} comparacao={rotuloComp} />
+                    <MiniPlatformMetric label={modoFood ? 'Custo por resultado' : 'CPL'} value={avgCpl > 0 ? premiumValue(avgCpl, 'currency') : '—'} icon={Tag} change={avgCpl > 0 && prevAvgCpl > 0 ? pct(avgCpl, prevAvgCpl) : null} inverseChange comparacao={rotuloComp} />
+                  </div>
+                </div>
+                <div className="rounded-[12px] border border-white/[0.08] bg-[#071014] p-3">
+                  <div className="mb-3 flex items-center gap-2 text-sm font-black uppercase tracking-[0.06em] text-[#f4f7f8]"><GoogleAdsMark className="h-5 w-5" /> Google Ads</div>
+                  <div className="grid gap-2 sm:grid-cols-5">
+                    <MiniPlatformMetric label="Saldo Google Ads" value={googleBalance > 0 ? premiumValue(googleBalance, 'currency') : '—'} logo={<GoogleAdsMark className="h-4 w-4" />} sub="Saldo disponível" />
+                    <MiniPlatformMetric label="Impressões" value={hasGoogleData ? premiumValue(googleImpressions) : '—'} icon={BarChart3} change={hasGoogleData ? pct(googleImpressions, prevGoogleImpressions) : null} comparacao={rotuloComp} />
+                    <MiniPlatformMetric label="Cliques" value={hasGoogleData ? premiumValue(googleClicks) : '—'} icon={MousePointerClick} change={hasGoogleData ? pct(googleClicks, prevGoogleClicks) : null} comparacao={rotuloComp} />
+                    <MiniPlatformMetric label="CPC Médio" value={googleCpc > 0 ? premiumValue(googleCpc, 'currency') : '—'} icon={Tag} change={googleCpc > 0 && prevGoogleCpc > 0 ? pct(googleCpc, prevGoogleCpc) : null} inverseChange comparacao={rotuloComp} />
+                    <MiniPlatformMetric label="Conversões" value={hasGoogleData ? premiumValue(googleConv) : '—'} icon={CheckCircle2} change={hasGoogleData ? pct(googleConv, prevGoogleConv) : null} comparacao={rotuloComp} />
+                  </div>
+                </div>
+              </div>
+            </PremiumPanel>
+    </>
+  );
+  const blocoInstagram = (
+    <>
+            {/* ── Instagram — logo abaixo do Resumo de Tráfego ──
+                Posição pedida pelo Matheus: o orgânico fica colado no pago, e a
+                leitura de tráfego acontece toda junta antes de o funil começar.
+
+                ⚠️ Vale para food TAMBÉM. Este painel já sumiu no modo food uma
+                vez, sob o argumento de que o Instagram aparecia no capítulo
+                Tráfego da DeliveryView — mas aquele capítulo foi REMOVIDO a
+                pedido do Matheus, e a justificativa morreu junto: food ficou sem
+                Instagram nenhum. É o mesmo painel do modo lead-gen. */}
+            {(() => {
+              const allIg = pageInsights.filter(p => p.instagram).map(p => p.instagram!);
+              const prevIg = prevPageInsights.filter(p => p.instagram).map(p => p.instagram!);
+              if (allIg.length === 0 && !pageInsightsLoading) return null;
+              const sum = (arr: typeof allIg, key: keyof InstagramPageData & string) =>
+                arr.reduce((s, d) => s + (typeof d[key] === 'number' ? (d[key] as number) : 0), 0);
+              // Base anterior < 10 → sem %: "+6900%" sobre uma base de 1 não
+              // diz nada. O valor absoluto do período continua visível.
+              const chg = (cur: number, prev: number): number | null =>
+                prev >= 10 ? ((cur - prev) / prev) * 100 : null;
+              const igFollow   = sum(allIg, 'followers');
+              // Seguidores GANHOS no período (metric follower_count) — o total
+              // (followers_count) é snapshot e vem igual nas duas janelas.
+              const igFollowGain   = sum(allIg, 'followersGained');
+              const prevFollowGain = sum(prevIg, 'followersGained');
+              const igReach    = sum(allIg, 'reach');
+              const igClicks   = sum(allIg, 'websiteClicks');
+              const igEngaged  = sum(allIg, 'accountsEngaged');
+              const igViews    = sum(allIg, 'views');
+              const igInteract = sum(allIg, 'totalInteractions');
+              const igSaves    = sum(allIg, 'saves');
+              const igPViews   = sum(allIg, 'profileViews');
+              const prevReach    = sum(prevIg, 'reach');
+              const prevClicks   = sum(prevIg, 'websiteClicks');
+              const prevEngaged  = sum(prevIg, 'accountsEngaged');
+              const prevViews    = sum(prevIg, 'views');
+              const prevInteract = sum(prevIg, 'totalInteractions');
+              const prevSaves    = sum(prevIg, 'saves');
+              const prevPViews   = sum(prevIg, 'profileViews');
+              const igHandles = allIg.map(d => d.username).filter(Boolean);
+              return (
+                <PremiumPanel className="border-[#E1306C]/24 shadow-[0_0_40px_rgba(225,48,108,0.10)]">
+                  <div className="flex items-center justify-between px-4 pt-4 pb-3">
+                    <h3 className="flex items-center gap-2 text-sm font-black uppercase tracking-[0.07em] text-[#f4f7f8]">
+                      <IgMark className="h-5 w-5" /> Instagram
+                    </h3>
+                    {igHandles.length > 0 && (
+                      <span className="text-[10px] text-[#9aa4aa]">{igHandles.map(h => `@${h}`).join(', ')}</span>
+                    )}
+                  </div>
+                  <div className="px-4 pb-4">
+                    <div className="grid gap-2 sm:grid-cols-4 lg:grid-cols-8">
+                      {/* ⚠️ O valor grande é o TOTAL de seguidores (snapshot), mas a
+                          evolução é a do GANHO no período contra o ganho do período
+                          anterior — mesma semântica dos vizinhos desta linha. Comparar
+                          o total daria sempre 0%: `followers_count` ignora a janela de
+                          datas e volta igual nas duas. O `sub` diz a que o % se refere.
+                          Sem sinal do metric nas duas janelas, não inventa: fica sem
+                          linha de apoio e sem variação. */}
+                      <MiniPlatformMetric
+                        label="Seguidores"
+                        value={pageInsightsLoading ? '…' : igFollow > 0 ? premiumValue(igFollow) : '—'}
+                        icon={Users}
+                        sub={pageInsightsLoading || (igFollowGain === 0 && prevFollowGain === 0)
+                          ? undefined
+                          : `${igFollowGain >= 0 ? '+' : ''}${premiumValue(igFollowGain)} no período`
+                            // Base anterior ≤ 0 (a conta perdeu seguidores antes, ou
+                            // não tinha a métrica): a porcentagem seria indefinida ou
+                            // absurda, então o comparativo vira texto em vez de sumir.
+                            + (chg(igFollowGain, prevFollowGain) === null && prevFollowGain !== 0
+                              ? ` · antes ${prevFollowGain >= 0 ? '+' : ''}${premiumValue(prevFollowGain)}`
+                              : '')}
+                        subRuim={igFollowGain < 0}
+                        change={chg(igFollowGain, prevFollowGain)}
+                      />
+                      <MiniPlatformMetric label="Alcance" value={pageInsightsLoading ? '…' : igReach > 0 ? premiumValue(igReach) : '—'} icon={Eye} change={chg(igReach, prevReach)} comparacao={rotuloComp} />
+                      <MiniPlatformMetric label="Cliques Bio" value={pageInsightsLoading ? '…' : igClicks > 0 ? premiumValue(igClicks) : '—'} icon={ExternalLink} change={chg(igClicks, prevClicks)} comparacao={rotuloComp} />
+                      <MiniPlatformMetric label="Engajamento" value={pageInsightsLoading ? '…' : igEngaged > 0 ? premiumValue(igEngaged) : '—'} icon={Heart} change={chg(igEngaged, prevEngaged)} comparacao={rotuloComp} />
+                      <MiniPlatformMetric label="Visualizações" value={pageInsightsLoading ? '…' : igViews > 0 ? premiumValue(igViews) : '—'} icon={BarChart3} change={chg(igViews, prevViews)} comparacao={rotuloComp} />
+                      <MiniPlatformMetric label="Interações" value={pageInsightsLoading ? '…' : igInteract > 0 ? premiumValue(igInteract) : '—'} icon={Zap} change={chg(igInteract, prevInteract)} comparacao={rotuloComp} />
+                      <MiniPlatformMetric label="Salvamentos" value={pageInsightsLoading ? '…' : igSaves > 0 ? premiumValue(igSaves) : '—'} icon={Bookmark} change={chg(igSaves, prevSaves)} comparacao={rotuloComp} />
+                      <MiniPlatformMetric label="Visitas Perfil" value={pageInsightsLoading ? '…' : igPViews > 0 ? premiumValue(igPViews) : '—'} icon={Monitor} change={chg(igPViews, prevPViews)} comparacao={rotuloComp} />
+                    </div>
+                  </div>
+                </PremiumPanel>
+              );
+            })()}
+    </>
+  );
+  const blocoCanais = (
+    <>
+            {/* ── Faturamento por origem ──
+                Fica ao lado do Resumo por Canal de propósito: aquele mostra o
+                CUSTO por canal (investimento, leads, CPL) e este mostra o
+                RETORNO. Em food só aparece quando há venda com valor no CRM —
+                a receita de delivery já tem painel próprio na grade. */}
+            {(!modoFood || porCanal.origens.length > 0 || porCanal.leads.length > 0) && (
+              <div className="grid gap-4 xl:grid-cols-2">
+                <CanalDonutCard
+                  titulo="Faturamento por Canal"
+                  fatiasBrutas={porCanal.origens.map(o => ({
+                    label: o.label,
+                    valor: o.receita,
+                    nota: `${o.vendas} ${o.vendas === 1 ? 'venda' : 'vendas'}`
+                      + (o.ticket !== null ? ` · ${premiumValue(o.ticket, 'currency')}` : ''),
+                  }))}
+                  total={porCanal.total}
+                  semCanal={porCanal.semAtribuicao}
+                  formato="currency"
+                  aviso="Preencher a origem no cadastro do negócio (ou entrar por lead de anúncio, que já traz o canal) é o que move esse valor para uma fatia de verdade."
+                />
+                <CanalDonutCard
+                  titulo="Leads por Canal"
+                  fatiasBrutas={porCanal.leads.map(l => ({ label: l.label, valor: l.leads }))}
+                  total={porCanal.leadsTotal}
+                  semCanal={porCanal.leadsSemCanal}
+                  formato="number"
+                  aviso="São os leads do CRM contados pela data de criação — número diferente do card de Leads acima, que conta resultado de anúncio."
+                />
+              </div>
+            )}
+    </>
+  );
+  const blocoComercial = (
+    <>
+            {/* ── Desempenho comercial: quem vendeu e o que se vendeu ──
+                Espelha os dois painéis do CRM externo (Agendor). Só aparece
+                quando há responsável ou produto no período — sem isso seria
+                uma seção vazia num cliente que não usa CRM com vendedores. */}
+            {(desempenhoLoading || vendedores.length > 0 || categorias.length > 0) && (
+              <PremiumPanel className="p-4">
+                <div className="mb-4 flex items-center gap-2">
+                  <h3 className="text-sm font-bold uppercase tracking-[0.07em] text-[#F1F4F5]">
+                    Performance comercial
+                  </h3>
+                  <span
+                    className="rounded-[4px] bg-[#172027] px-1.5 py-0.5 text-[10px] font-semibold text-[#87929B]"
+                    title="Ganhos pela data do ganho · perdidos pela data da perda · novos pela data de criação"
+                  >
+                    CRM
+                  </span>
+                </div>
+                {/* Os dois cards têm chrome próprio (título + controle) e
+                    `items-stretch` garante a mesma altura visual. */}
+                <div className="grid items-stretch gap-4 lg:grid-cols-2">
+                  <VendedoresCard linhas={vendedores} loading={desempenhoLoading} />
+                  <CategoriasCard linhas={categorias} loading={desempenhoLoading} />
+                </div>
+              </PremiumPanel>
+            )}
+    </>
+  );
+  const blocoMeta = (
+    <>
+            {/* ── Meta Ads: campanhas expansíveis + criativos ── */}
+            <PremiumPanel className="border-[#168BFF]/28 shadow-[0_0_40px_rgba(22,139,255,0.12)]">
+              <div className="flex items-center px-4 pt-4 pb-3">
+                <h3 className="flex items-center gap-2 text-sm font-black uppercase tracking-[0.07em] text-[#f4f7f8]">
+                  <MetaAdsMark className="h-5 w-5 text-[#168BFF]" /> Meta Ads
+                </h3>
+              </div>
+
+              {/* Campanhas com Veiculação — expansível em cascata */}
+              <div className="border-b border-white/[0.06] px-4 pb-4">
+                <div className="mb-3 text-xs font-black uppercase tracking-[0.07em] text-[#dce4e8]">
+                  Campanhas com Veiculação
+                </div>
+                <CampaignPerformanceTable
+                  campaigns={metaCampaigns}
+                  loading={campaignsLoading}
+                  period={period}
+                  dateFrom={customDateFrom}
+                  dateTo={customDateTo}
+                  metaCpl={cplMetaSel}
+                />
+              </div>
+
+              {/* Faturamento por Criativo — o que o anúncio TROUXE (CRM), acima
+                  da faixa de desempenho de mídia. Some quando nenhuma venda do
+                  período tem criativo identificado: caixa vazia aqui seria pior
+                  que ausência, porque parece número zerado em vez de dado que
+                  ainda não existe. */}
+              {(criativosReceitaLoading || criativosReceita.length > 0) && (
+                <div className="border-b border-white/[0.06] px-4 pb-4">
+                  <div className="mb-1 flex items-center gap-2 text-xs font-black uppercase tracking-[0.07em] text-[#dce4e8]">
+                    Faturamento por Criativo
+                    <span
+                      className="rounded bg-[#6cff2f]/12 px-1.5 py-0.5 text-[9px] font-black text-[#6cff2f]"
+                      title="Receita das vendas cujo lead foi rastreado até este anúncio"
+                    >
+                      CRM
+                    </span>
+                  </div>
+                  <p className="mb-3 text-[10px] text-[#9aa4aa]">
+                    Vendas do período que dá para rastrear até o anúncio que trouxe o lead
+                    {criativosReceita.length > 0 && (
+                      <> · total atribuído {premiumValue(criativosReceitaTotal || criativosReceita.reduce((s, c) => s + c.receita, 0), 'currency')}</>
+                    )}
+                  </p>
+                  <CreativeRevenueStrip criativos={criativosReceita} loading={criativosReceitaLoading} totalAtribuido={criativosReceitaTotal || undefined} />
+                </div>
+              )}
+
+              {/* Melhores Criativos — scroll horizontal, abaixo das campanhas */}
+              <div className="px-4 py-4">
+                <div className="mb-3 flex items-center gap-2 text-xs font-black uppercase tracking-[0.07em] text-[#dce4e8]">
+                  Melhores Criativos
+                  <span title="Ordenados por leads (e menor CPL no empate); sem leads no período, por investimento.">
+                    <Info className="h-3.5 w-3.5 text-[#9aa4aa]" />
+                  </span>
+                </div>
+                <CreativeHorizontalStrip creatives={creatives} loading={creativesLoading} onPreview={setPreviewCreative} />
+              </div>
+            </PremiumPanel>
+    </>
+  );
+  const blocoGoogle = (
+    <>
+            {/* ── Google Ads: campanhas expansíveis + palavras-chave ──
+                Fora do modo food: cliente de delivery concentra verba em Meta e
+                WhatsApp, então esta lâmina vivia vazia ocupando uma seção
+                inteira (o print 09 do briefing). O investimento em Google, se
+                houver, aparece no capítulo Tráfego da DeliveryView. */}
+            {!modoFood && (
+            <PremiumPanel className="border-[#4285F4]/24 shadow-[0_0_40px_rgba(66,133,244,0.10)]">
+              <div className="flex items-center px-4 pt-4 pb-3">
+                <h3 className="flex items-center gap-2 text-sm font-black uppercase tracking-[0.07em] text-[#f4f7f8]">
+                  <GoogleAdsMark className="h-5 w-5" /> Google Ads
+                </h3>
+              </div>
+
+              {/* Campanhas com Veiculação — expansível em cascata */}
+              <div className="border-b border-white/[0.06] px-4 pb-4">
+                <div className="mb-3 text-xs font-black uppercase tracking-[0.07em] text-[#dce4e8]">
+                  Campanhas com Veiculação
+                </div>
+                <CampaignPerformanceTable
+                  campaigns={googleCampaigns}
+                  loading={campaignsLoading}
+                  period={period}
+                  dateFrom={customDateFrom}
+                  dateTo={customDateTo}
+                  metaCpl={cplMetaSel}
+                />
+              </div>
+
+              {/* Top Palavras-chave — abaixo das campanhas */}
+              <div className="px-4 py-4">
+                <div className="mb-3 text-xs font-black uppercase tracking-[0.07em] text-[#dce4e8]">
+                  Top Palavras-chave
+                </div>
+                <div className="overflow-x-auto pb-2 [scrollbar-width:thin] [scrollbar-color:#2a2d3a_transparent]">
+                  <CompactKeywordTable keywords={keywords} loading={keywordsLoading} metaCpl={cplMetaSel} />
+                </div>
+              </div>
+            </PremiumPanel>
+            )}
+    </>
+  );
+  const blocoGa4 = (
+    <>
+            {/* ── Landing page (GA4): o que acontece na LP entre o clique no
+                anúncio e o WhatsApp. Só aparece para cliente com propriedade
+                GA4 vinculada (Integrações → Google Analytics). Vários clientes
+                selecionados: um painel por cliente com vínculo. */}
+            {!modoFood && selectedClients.filter(c => ga4ByClient[c.id]?.ga4).map(client => (
+              <PremiumPanel key={`ga4-${client.id}`}>
+                <div className="flex items-center justify-between px-4 pt-4 pb-3">
+                  <h3 className="flex items-center gap-2 text-sm font-black uppercase tracking-[0.07em] text-[#f4f7f8]">
+                    <span className="inline-block h-2.5 w-2.5 rounded-sm bg-[#6cff2f]" /> Landing page
+                    {selectedClients.length > 1 && <span className="text-[#9aa4aa]">· {client.name}</span>}
+                  </h3>
+                  <span className="text-[10px] text-[#7c868c]">Google Analytics 4</span>
+                </div>
+                <Ga4LandingPanel dados={ga4ByClient[client.id]?.ga4 ?? null} loading={ga4Loading} aviso={ga4ByClient[client.id]?.aviso} />
+              </PremiumPanel>
+            ))}
+    </>
+  );
+  const blocoResumoCliente = (
+    <>
+            {selectedClients.length > 1 && (
+              <PremiumPanel className="p-4">
+                <p className="mb-3 text-[10px] font-black uppercase tracking-[0.08em] text-[#9aa4aa]">Resumo por cliente</p>
+                <div className="divide-y divide-white/[0.07]">
+                  {selectedClients.map(client => {
+                    const m = metricsByClient[client.id];
+                    const leads = (m?.meta?.leads ?? 0) + (m?.google?.conversions ?? 0);
+                    const spend = (m?.meta?.spend ?? 0) + (m?.google?.cost ?? 0);
+                    return (
+                      <div key={client.id} className="flex items-center justify-between gap-4 py-3 text-xs text-[#a7b0b6]">
+                        <Link href={`/clientes/${client.id}`} className="font-black text-[#f4f7f8] hover:text-[#6cff2f]">{client.name}</Link>
+                        <span>{premiumValue(leads)} leads</span>
+                        <span>{spend > 0 ? premiumValue(spend, 'currency') : '—'}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </PremiumPanel>
+            )}
+    </>
+  );
+
+  // ── Abas (só lead-gen) ────────────────────────────────────────────────────
+  // Aba sem conteúdo para a seleção some; se a aba ativa sumir, cai na Visão geral.
+  const abaVisivel: Record<AbaDashboard, boolean> = {
+    geral: true,
+    midia: campaignsLoading || metricsLoading || totalSpend > 0 || campaigns.length > 0 || creatives.length > 0 || metaBalance > 0 || googleBalance > 0,
+    lp: selectedClients.some(c => ga4ByClient[c.id]?.ga4),
+    social: pageInsightsLoading || pageInsights.some(pi => pi.instagram),
+    comercial: desempenhoLoading || vendedores.length > 0 || categorias.length > 0,
+  };
+  const abaAtiva: AbaDashboard = abaVisivel[aba] ? aba : 'geral';
+  const temGraficoCpl = diasSel.length >= 2 && gastoDia.some(v => v > 0) && leadsDia.some(v => v > 0);
 
   return (
     <div className="-m-3 min-h-full bg-[#05090B] text-[#f4f7f8] sm:-m-6">
@@ -6671,34 +7233,21 @@ export default function GeneralDashboard() {
               Modo {perfilAtivo.rotuloSegmento}
             </span>
           )}
-          {/* Badge honesto: "Ao vivo" só quando o dado veio fresco da API;
-              cache mostra a idade (o selo fixo mentia — auditoria 2026-08-22). */}
+          {/* ⚠️ O X-Cache-Age vem SÓ da rota de saldos do Google Ads — o selo
+              fala dos saldos, não da tela inteira (antes dizia "Cache", como se
+              todo número tivesse aquela idade). */}
           <span
             className="ml-auto inline-flex items-center gap-2 rounded-[10px] border border-white/[0.08] bg-[#0b1216] px-3 py-2 text-xs font-semibold text-[#dce4e8]"
-            title={dataCacheAge === null || dataCacheAge === 0 ? 'Dados recém-buscados da API' : `Dados em cache — buscados há ${Math.round(dataCacheAge / 60)} min. Atualizados a cada 15 min.`}
+            title={dataCacheAge === null || dataCacheAge === 0
+              ? 'Saldos das contas de anúncio recém-buscados da API'
+              : `Saldos das contas de anúncio (Meta/Google) em cache — buscados há ${Math.round(dataCacheAge / 60)} min, atualizados a cada 15 min. As métricas do período não usam este cache.`}
           >
             <span className={cn('h-2 w-2 rounded-full', dataCacheAge === null || dataCacheAge === 0 ? 'bg-[#6cff2f]' : 'bg-amber-400')} />
-            {dataCacheAge === null || dataCacheAge === 0 ? 'Ao vivo' : `Cache · ${Math.round(dataCacheAge / 60)} min`}
+            {dataCacheAge === null || dataCacheAge === 0 ? 'Saldos ao vivo' : `Saldos · cache ${Math.round(dataCacheAge / 60)} min`}
           </span>
-          {/* Botões REAIS no lugar da busca/Exportar/sino decorativos que não
-              faziam nada (auditoria 2026-08-22) — religa Métricas, Copiar
-              layout e Analisar com IA, que ficaram órfãos no bloco antigo. */}
-          <button
-            type="button"
-            onClick={() => setCustomizerOpen(true)}
-            className="rounded-[10px] border border-white/[0.08] bg-[#0b1216] px-4 py-2 text-xs font-bold text-[#f4f7f8] hover:border-[#6cff2f]/35"
-          >
-            Métricas
-          </button>
-          {selectedIds.size === 1 && (
-            <button
-              type="button"
-              onClick={openCopyLayout}
-              className="rounded-[10px] border border-white/[0.08] bg-[#0b1216] px-4 py-2 text-xs font-bold text-[#f4f7f8] hover:border-[#6cff2f]/35"
-            >
-              Copiar layout
-            </button>
-          )}
+          {/* "Métricas" e "Copiar layout" saíram: configuravam componentes que
+              não são mais renderizados (grades RGL antigas) — clicar não mudava
+              nada na tela. Os componentes continuam no arquivo, sem botão. */}
           <button
             type="button"
             onClick={analyzeWithAI}
@@ -6783,15 +7332,9 @@ export default function GeneralDashboard() {
           </div>
         ) : (
           <div className="space-y-5">
-            {aiInsights.length > 0 && (
-              <AiRecommendationsBox insights={aiInsights} loading={aiLoading} onAnalyze={analyzeWithAI} />
-            )}
-            {aiError && <div className="rounded-xl border border-red-400/30 bg-red-500/10 px-4 py-3 text-xs text-red-300">{aiError}</div>}
-            {!metricsLoading && alerts.length > 0 && (
-              <div className="rounded-xl border border-amber-400/20 bg-amber-400/8 px-4 py-3 text-xs text-amber-200">
-                {alerts.length} alerta{alerts.length > 1 ? 's' : ''} fora do padrão neste período.
-              </div>
-            )}
+            {modoFood ? (
+              <>
+                {blocoAi}
 
             {/* ── FOOD: um grid único, dirigido pelo MODELO ──
                 ⚠️ A grade é por ELEMENTO: cada métrica (não cada bloco) é um
@@ -6876,324 +7419,117 @@ export default function GeneralDashboard() {
               </>
             )}
 
-            <PremiumPanel className="p-4">
-              <h3 className="mb-4 text-sm font-black uppercase tracking-[0.07em] text-[#f4f7f8]">Resumo de Tráfego</h3>
-              <div className="grid gap-4 xl:grid-cols-2">
-                <div className="rounded-[12px] border border-white/[0.08] bg-[#071014] p-3">
-                  <div className="mb-3 flex items-center gap-2 text-sm font-black uppercase tracking-[0.06em] text-[#f4f7f8]"><MetaAdsMark className="h-5 w-5 text-[#168BFF]" /> Meta Ads</div>
-                  <div className="grid gap-2 sm:grid-cols-5">
-                    <MiniPlatformMetric label="Saldo Meta Ads" value={metaBalance > 0 ? premiumValue(metaBalance, 'currency') : '—'} logo={<MetaAdsMark className="h-4 w-4 text-[#168BFF]" />} sub="Saldo disponível" />
-                    <MiniPlatformMetric label="Alcance" value={metaReach > 0 ? premiumValue(metaReach) : '—'} icon={Users} change={pct(metaReach, prevMetaReach)} />
-                    <MiniPlatformMetric label="CTR" value={metaCtr > 0 ? premiumValue(metaCtr, 'percent') : '—'} icon={MousePointerClick} change={pct(metaCtr, prevMetaCtr)} />
-                    {/* Em food o Meta ainda reporta "resultado" (conversa/lead do
-                        anúncio), não pedido pago — atribuir pedido por plataforma
-                        exige a UTM do catálogo, que ainda não temos. Então o rótulo
-                        vira "Resultados", que é a verdade, em vez de "Pedidos". */}
-                    <MiniPlatformMetric label={modoFood ? 'Resultados' : 'Leads'} value={premiumValue(metaLeads)} icon={UserPlus} change={pct(metaLeads, prevMetaLeads)} />
-                    <MiniPlatformMetric label={modoFood ? 'Custo por resultado' : 'CPL'} value={avgCpl > 0 ? premiumValue(avgCpl, 'currency') : '—'} icon={Tag} change={avgCpl > 0 && prevAvgCpl > 0 ? pct(avgCpl, prevAvgCpl) : null} inverseChange />
-                  </div>
-                </div>
-                <div className="rounded-[12px] border border-white/[0.08] bg-[#071014] p-3">
-                  <div className="mb-3 flex items-center gap-2 text-sm font-black uppercase tracking-[0.06em] text-[#f4f7f8]"><GoogleAdsMark className="h-5 w-5" /> Google Ads</div>
-                  <div className="grid gap-2 sm:grid-cols-5">
-                    <MiniPlatformMetric label="Saldo Google Ads" value={googleBalance > 0 ? premiumValue(googleBalance, 'currency') : '—'} logo={<GoogleAdsMark className="h-4 w-4" />} sub="Saldo disponível" />
-                    <MiniPlatformMetric label="Impressões" value={hasGoogleData ? premiumValue(googleImpressions) : '—'} icon={BarChart3} change={hasGoogleData ? pct(googleImpressions, prevGoogleImpressions) : null} />
-                    <MiniPlatformMetric label="Cliques" value={hasGoogleData ? premiumValue(googleClicks) : '—'} icon={MousePointerClick} change={hasGoogleData ? pct(googleClicks, prevGoogleClicks) : null} />
-                    <MiniPlatformMetric label="CPC Médio" value={googleCpc > 0 ? premiumValue(googleCpc, 'currency') : '—'} icon={Tag} change={googleCpc > 0 && prevGoogleCpc > 0 ? pct(googleCpc, prevGoogleCpc) : null} inverseChange />
-                    <MiniPlatformMetric label="Conversões" value={hasGoogleData ? premiumValue(googleConv) : '—'} icon={CheckCircle2} change={hasGoogleData ? pct(googleConv, prevGoogleConv) : null} />
-                  </div>
-                </div>
-              </div>
-            </PremiumPanel>
-
-            {/* ── Instagram — logo abaixo do Resumo de Tráfego ──
-                Posição pedida pelo Matheus: o orgânico fica colado no pago, e a
-                leitura de tráfego acontece toda junta antes de o funil começar.
-
-                ⚠️ Vale para food TAMBÉM. Este painel já sumiu no modo food uma
-                vez, sob o argumento de que o Instagram aparecia no capítulo
-                Tráfego da DeliveryView — mas aquele capítulo foi REMOVIDO a
-                pedido do Matheus, e a justificativa morreu junto: food ficou sem
-                Instagram nenhum. É o mesmo painel do modo lead-gen. */}
-            {(() => {
-              const allIg = pageInsights.filter(p => p.instagram).map(p => p.instagram!);
-              const prevIg = prevPageInsights.filter(p => p.instagram).map(p => p.instagram!);
-              if (allIg.length === 0 && !pageInsightsLoading) return null;
-              const sum = (arr: typeof allIg, key: keyof InstagramPageData & string) =>
-                arr.reduce((s, d) => s + (typeof d[key] === 'number' ? (d[key] as number) : 0), 0);
-              const chg = (cur: number, prev: number): number | null =>
-                prev > 0 ? ((cur - prev) / prev) * 100 : null;
-              const igFollow   = sum(allIg, 'followers');
-              // Seguidores GANHOS no período (metric follower_count) — o total
-              // (followers_count) é snapshot e vem igual nas duas janelas.
-              const igFollowGain   = sum(allIg, 'followersGained');
-              const prevFollowGain = sum(prevIg, 'followersGained');
-              const igReach    = sum(allIg, 'reach');
-              const igClicks   = sum(allIg, 'websiteClicks');
-              const igEngaged  = sum(allIg, 'accountsEngaged');
-              const igViews    = sum(allIg, 'views');
-              const igInteract = sum(allIg, 'totalInteractions');
-              const igSaves    = sum(allIg, 'saves');
-              const igPViews   = sum(allIg, 'profileViews');
-              const prevReach    = sum(prevIg, 'reach');
-              const prevClicks   = sum(prevIg, 'websiteClicks');
-              const prevEngaged  = sum(prevIg, 'accountsEngaged');
-              const prevViews    = sum(prevIg, 'views');
-              const prevInteract = sum(prevIg, 'totalInteractions');
-              const prevSaves    = sum(prevIg, 'saves');
-              const prevPViews   = sum(prevIg, 'profileViews');
-              const igHandles = allIg.map(d => d.username).filter(Boolean);
-              return (
-                <PremiumPanel className="border-[#E1306C]/24 shadow-[0_0_40px_rgba(225,48,108,0.10)]">
-                  <div className="flex items-center justify-between px-4 pt-4 pb-3">
-                    <h3 className="flex items-center gap-2 text-sm font-black uppercase tracking-[0.07em] text-[#f4f7f8]">
-                      <IgMark className="h-5 w-5" /> Instagram
-                    </h3>
-                    {igHandles.length > 0 && (
-                      <span className="text-[10px] text-[#9aa4aa]">{igHandles.map(h => `@${h}`).join(', ')}</span>
-                    )}
-                  </div>
-                  <div className="px-4 pb-4">
-                    <div className="grid gap-2 sm:grid-cols-4 lg:grid-cols-8">
-                      {/* ⚠️ O valor grande é o TOTAL de seguidores (snapshot), mas a
-                          evolução é a do GANHO no período contra o ganho do período
-                          anterior — mesma semântica dos vizinhos desta linha. Comparar
-                          o total daria sempre 0%: `followers_count` ignora a janela de
-                          datas e volta igual nas duas. O `sub` diz a que o % se refere.
-                          Sem sinal do metric nas duas janelas, não inventa: fica sem
-                          linha de apoio e sem variação. */}
-                      <MiniPlatformMetric
-                        label="Seguidores"
-                        value={pageInsightsLoading ? '…' : igFollow > 0 ? premiumValue(igFollow) : '—'}
-                        icon={Users}
-                        sub={pageInsightsLoading || (igFollowGain === 0 && prevFollowGain === 0)
-                          ? undefined
-                          : `${igFollowGain >= 0 ? '+' : ''}${premiumValue(igFollowGain)} no período`
-                            // Base anterior ≤ 0 (a conta perdeu seguidores antes, ou
-                            // não tinha a métrica): a porcentagem seria indefinida ou
-                            // absurda, então o comparativo vira texto em vez de sumir.
-                            + (chg(igFollowGain, prevFollowGain) === null && prevFollowGain !== 0
-                              ? ` · antes ${prevFollowGain >= 0 ? '+' : ''}${premiumValue(prevFollowGain)}`
-                              : '')}
-                        subRuim={igFollowGain < 0}
-                        change={chg(igFollowGain, prevFollowGain)}
-                      />
-                      <MiniPlatformMetric label="Alcance" value={pageInsightsLoading ? '…' : igReach > 0 ? premiumValue(igReach) : '—'} icon={Eye} change={chg(igReach, prevReach)} />
-                      <MiniPlatformMetric label="Cliques Bio" value={pageInsightsLoading ? '…' : igClicks > 0 ? premiumValue(igClicks) : '—'} icon={ExternalLink} change={chg(igClicks, prevClicks)} />
-                      <MiniPlatformMetric label="Engajamento" value={pageInsightsLoading ? '…' : igEngaged > 0 ? premiumValue(igEngaged) : '—'} icon={Heart} change={chg(igEngaged, prevEngaged)} />
-                      <MiniPlatformMetric label="Visualizações" value={pageInsightsLoading ? '…' : igViews > 0 ? premiumValue(igViews) : '—'} icon={BarChart3} change={chg(igViews, prevViews)} />
-                      <MiniPlatformMetric label="Interações" value={pageInsightsLoading ? '…' : igInteract > 0 ? premiumValue(igInteract) : '—'} icon={Zap} change={chg(igInteract, prevInteract)} />
-                      <MiniPlatformMetric label="Salvamentos" value={pageInsightsLoading ? '…' : igSaves > 0 ? premiumValue(igSaves) : '—'} icon={Bookmark} change={chg(igSaves, prevSaves)} />
-                      <MiniPlatformMetric label="Visitas Perfil" value={pageInsightsLoading ? '…' : igPViews > 0 ? premiumValue(igPViews) : '—'} icon={Monitor} change={chg(igPViews, prevPViews)} />
-                    </div>
-                  </div>
-                </PremiumPanel>
-              );
-            })()}
-
-            {/* Em food os blocos já foram renderizados no grid editável acima —
-                aqui fica só o funil de leads, que não existe em delivery. */}
-            {!modoFood && (
-              <div className="grid gap-4 xl:grid-cols-[1.08fr_0.92fr]">
-                {deliverySoloId ? (
-                  <DeliveryResumoCard clientId={deliverySoloId} from={deliveryRange.from} to={deliveryRange.to} />
-                ) : (
-                  <SimpleFunnel steps={funnelStepsNew} totalRate={funnelTaxa > 0 ? premiumValue(funnelTaxa, 'percent') : '—'} fonteLabel={fonteTopoLabel} onStageClick={setFunilStageIdx} />
-                )}
-                <ChannelSummaryTable rows={channelRows} />
-              </div>
-            )}
-
-            {/* ── Faturamento por origem ──
-                Fica ao lado do Resumo por Canal de propósito: aquele mostra o
-                CUSTO por canal (investimento, leads, CPL) e este mostra o
-                RETORNO. Em food só aparece quando há venda com valor no CRM —
-                a receita de delivery já tem painel próprio na grade. */}
-            {(!modoFood || porCanal.origens.length > 0 || porCanal.leads.length > 0) && (
-              <div className="grid gap-4 xl:grid-cols-2">
-                <CanalDonutCard
-                  titulo="Faturamento por Canal"
-                  fatiasBrutas={porCanal.origens.map(o => ({
-                    label: o.label,
-                    valor: o.receita,
-                    nota: `${o.vendas} ${o.vendas === 1 ? 'venda' : 'vendas'}`
-                      + (o.ticket !== null ? ` · ${premiumValue(o.ticket, 'currency')}` : ''),
-                  }))}
-                  total={porCanal.total}
-                  semCanal={porCanal.semAtribuicao}
-                  formato="currency"
-                  aviso="Preencher a origem no cadastro do negócio (ou entrar por lead de anúncio, que já traz o canal) é o que move esse valor para uma fatia de verdade."
-                />
-                <CanalDonutCard
-                  titulo="Leads por Canal"
-                  fatiasBrutas={porCanal.leads.map(l => ({ label: l.label, valor: l.leads }))}
-                  total={porCanal.leadsTotal}
-                  semCanal={porCanal.leadsSemCanal}
-                  formato="number"
-                  aviso="São os leads do CRM contados pela data de criação — número diferente do card de Leads acima, que conta resultado de anúncio."
-                />
-              </div>
-            )}
-
-
-            {/* ── Desempenho comercial: quem vendeu e o que se vendeu ──
-                Espelha os dois painéis do CRM externo (Agendor). Só aparece
-                quando há responsável ou produto no período — sem isso seria
-                uma seção vazia num cliente que não usa CRM com vendedores. */}
-            {(desempenhoLoading || vendedores.length > 0 || categorias.length > 0) && (
-              <PremiumPanel className="p-4">
-                <div className="mb-4 flex items-center gap-2">
-                  <h3 className="text-sm font-bold uppercase tracking-[0.07em] text-[#F1F4F5]">
-                    Performance comercial
-                  </h3>
-                  <span
-                    className="rounded-[4px] bg-[#172027] px-1.5 py-0.5 text-[10px] font-semibold text-[#87929B]"
-                    title="Ganhos pela data do ganho · perdidos pela data da perda · novos pela data de criação"
-                  >
-                    CRM
-                  </span>
-                </div>
-                {/* Os dois cards têm chrome próprio (título + controle) e
-                    `items-stretch` garante a mesma altura visual. */}
-                <div className="grid items-stretch gap-4 lg:grid-cols-2">
-                  <VendedoresCard linhas={vendedores} loading={desempenhoLoading} />
-                  <CategoriasCard linhas={categorias} loading={desempenhoLoading} />
-                </div>
-              </PremiumPanel>
-            )}
-
-            {/* ── Meta Ads: campanhas expansíveis + criativos ── */}
-            <PremiumPanel className="border-[#168BFF]/28 shadow-[0_0_40px_rgba(22,139,255,0.12)]">
-              <div className="flex items-center px-4 pt-4 pb-3">
-                <h3 className="flex items-center gap-2 text-sm font-black uppercase tracking-[0.07em] text-[#f4f7f8]">
-                  <MetaAdsMark className="h-5 w-5 text-[#168BFF]" /> Meta Ads
-                </h3>
-              </div>
-
-              {/* Campanhas com Veiculação — expansível em cascata */}
-              <div className="border-b border-white/[0.06] px-4 pb-4">
-                <div className="mb-3 text-xs font-black uppercase tracking-[0.07em] text-[#dce4e8]">
-                  Campanhas com Veiculação
-                </div>
-                <CampaignPerformanceTable
-                  campaigns={metaCampaigns}
-                  loading={campaignsLoading}
-                  period={period}
-                  dateFrom={customDateFrom}
-                  dateTo={customDateTo}
-                />
-              </div>
-
-              {/* Faturamento por Criativo — o que o anúncio TROUXE (CRM), acima
-                  da faixa de desempenho de mídia. Some quando nenhuma venda do
-                  período tem criativo identificado: caixa vazia aqui seria pior
-                  que ausência, porque parece número zerado em vez de dado que
-                  ainda não existe. */}
-              {(criativosReceitaLoading || criativosReceita.length > 0) && (
-                <div className="border-b border-white/[0.06] px-4 pb-4">
-                  <div className="mb-1 flex items-center gap-2 text-xs font-black uppercase tracking-[0.07em] text-[#dce4e8]">
-                    Faturamento por Criativo
-                    <span
-                      className="rounded bg-[#6cff2f]/12 px-1.5 py-0.5 text-[9px] font-black text-[#6cff2f]"
-                      title="Receita das vendas cujo lead foi rastreado até este anúncio"
+                {blocoTrafegoAntigo}
+                {blocoInstagram}
+                {blocoCanais}
+                {blocoComercial}
+                {blocoMeta}
+                {blocoResumoCliente}
+              </>
+            ) : (
+              <>
+                {/* Abas do lead-gen — a aba ativa vive na URL (?aba=), então o
+                    link copiado abre na mesma aba. */}
+                <div role="tablist" aria-label="Seções do dashboard" className="flex gap-1 overflow-x-auto border-b border-white/[0.08]">
+                  {ABAS.filter(t => abaVisivel[t.id]).map(t => (
+                    <button
+                      key={t.id}
+                      type="button"
+                      role="tab"
+                      aria-selected={abaAtiva === t.id}
+                      onClick={() => setAba(t.id)}
+                      className={cn(
+                        '-mb-px whitespace-nowrap border-b-2 px-4 py-2.5 text-xs font-black uppercase tracking-[0.07em] transition-colors',
+                        abaAtiva === t.id ? 'border-[#55f52f] text-[#f4f7f8]' : 'border-transparent text-[#9aa4aa] hover:text-[#dce4e8]',
+                      )}
                     >
-                      CRM
-                    </span>
-                  </div>
-                  <p className="mb-3 text-[10px] text-[#9aa4aa]">
-                    Vendas do período que dá para rastrear até o anúncio que trouxe o lead
-                    {criativosReceita.length > 0 && (
-                      <> · total atribuído {premiumValue(criativosReceita.reduce((s, c) => s + c.receita, 0), 'currency')}</>
-                    )}
-                  </p>
-                  <CreativeRevenueStrip criativos={criativosReceita} loading={criativosReceitaLoading} />
+                      {t.label}
+                    </button>
+                  ))}
                 </div>
-              )}
 
-              {/* Melhores Criativos — scroll horizontal, abaixo das campanhas */}
-              <div className="px-4 py-4">
-                <div className="mb-3 flex items-center gap-2 text-xs font-black uppercase tracking-[0.07em] text-[#dce4e8]">
-                  Melhores Criativos <Info className="h-3.5 w-3.5 text-[#9aa4aa]" />
-                </div>
-                <CreativeHorizontalStrip creatives={creatives} loading={creativesLoading} onPreview={setPreviewCreative} />
-              </div>
-            </PremiumPanel>
-
-            {/* ── Google Ads: campanhas expansíveis + palavras-chave ──
-                Fora do modo food: cliente de delivery concentra verba em Meta e
-                WhatsApp, então esta lâmina vivia vazia ocupando uma seção
-                inteira (o print 09 do briefing). O investimento em Google, se
-                houver, aparece no capítulo Tráfego da DeliveryView. */}
-            {!modoFood && (
-            <PremiumPanel className="border-[#4285F4]/24 shadow-[0_0_40px_rgba(66,133,244,0.10)]">
-              <div className="flex items-center px-4 pt-4 pb-3">
-                <h3 className="flex items-center gap-2 text-sm font-black uppercase tracking-[0.07em] text-[#f4f7f8]">
-                  <GoogleAdsMark className="h-5 w-5" /> Google Ads
-                </h3>
-              </div>
-
-              {/* Campanhas com Veiculação — expansível em cascata */}
-              <div className="border-b border-white/[0.06] px-4 pb-4">
-                <div className="mb-3 text-xs font-black uppercase tracking-[0.07em] text-[#dce4e8]">
-                  Campanhas com Veiculação
-                </div>
-                <CampaignPerformanceTable
-                  campaigns={googleCampaigns}
-                  loading={campaignsLoading}
-                  period={period}
-                  dateFrom={customDateFrom}
-                  dateTo={customDateTo}
-                />
-              </div>
-
-              {/* Top Palavras-chave — abaixo das campanhas */}
-              <div className="px-4 py-4">
-                <div className="mb-3 text-xs font-black uppercase tracking-[0.07em] text-[#dce4e8]">
-                  Top Palavras-chave
-                </div>
-                <div className="overflow-x-auto pb-2 [scrollbar-width:thin] [scrollbar-color:#2a2d3a_transparent]">
-                  <CompactKeywordTable keywords={keywords} loading={keywordsLoading} />
-                </div>
-              </div>
-            </PremiumPanel>
-            )}
-
-
-            {/* ── Landing page (GA4): o que acontece na LP entre o clique no
-                anúncio e o WhatsApp. Só aparece para cliente com propriedade
-                GA4 vinculada (Integrações → Google Analytics). Vários clientes
-                selecionados: um painel por cliente com vínculo. */}
-            {!modoFood && selectedClients.filter(c => ga4ByClient[c.id]?.ga4).map(client => (
-              <PremiumPanel key={`ga4-${client.id}`}>
-                <div className="flex items-center justify-between px-4 pt-4 pb-3">
-                  <h3 className="flex items-center gap-2 text-sm font-black uppercase tracking-[0.07em] text-[#f4f7f8]">
-                    <span className="inline-block h-2.5 w-2.5 rounded-sm bg-[#6cff2f]" /> Landing page
-                    {selectedClients.length > 1 && <span className="text-[#9aa4aa]">· {client.name}</span>}
-                  </h3>
-                  <span className="text-[10px] text-[#7c868c]">Google Analytics 4</span>
-                </div>
-                <Ga4LandingPanel dados={ga4ByClient[client.id]?.ga4 ?? null} loading={ga4Loading} aviso={ga4ByClient[client.id]?.aviso} />
-              </PremiumPanel>
-            ))}
-
-            {selectedClients.length > 1 && (
-              <PremiumPanel className="p-4">
-                <p className="mb-3 text-[10px] font-black uppercase tracking-[0.08em] text-[#9aa4aa]">Resumo por cliente</p>
-                <div className="divide-y divide-white/[0.07]">
-                  {selectedClients.map(client => {
-                    const m = metricsByClient[client.id];
-                    const leads = (m?.meta?.leads ?? 0) + (m?.google?.conversions ?? 0);
-                    const spend = (m?.meta?.spend ?? 0) + (m?.google?.cost ?? 0);
-                    return (
-                      <div key={client.id} className="flex items-center justify-between gap-4 py-3 text-xs text-[#a7b0b6]">
-                        <Link href={`/clientes/${client.id}`} className="font-black text-[#f4f7f8] hover:text-[#6cff2f]">{client.name}</Link>
-                        <span>{premiumValue(leads)} leads</span>
-                        <span>{spend > 0 ? premiumValue(spend, 'currency') : '—'}</span>
+                {abaAtiva === 'geral' && (
+                  <>
+                    <div className="grid gap-4 xl:grid-cols-2">
+                      <BulletMetaCard
+                        titulo="Faturamento"
+                        icon={DollarSign}
+                        fonte="CRM"
+                        fonteTitulo="Receita das vendas do CRM, pela data do ganho"
+                        metaMes={plannedRevenue}
+                        esperado={effectiveRevenueGoal}
+                        realizado={revenue}
+                        formatar={(n) => premiumValue(n, 'currency')}
+                        rotuloEsperado={rotuloEsperado}
+                        projecao={projetar(revenue)}
+                      />
+                      <BulletMetaCard
+                        titulo="Leads"
+                        icon={Users}
+                        fonte="Meta + Google (plataformas)"
+                        fonteTitulo="Leads do Meta Ads + conversões do Google Ads, como as plataformas reportam"
+                        metaMes={leadsGoal}
+                        esperado={effectiveLeadsGoal}
+                        realizado={totalLeads}
+                        formatar={(n) => premiumValue(n)}
+                        rotuloEsperado={rotuloEsperado}
+                        projecao={projetar(totalLeads)}
+                        rodape={crmLeads > 0 ? (
+                          <span title="Leads criados no CRM na mesma janela (pela data de criação do lead), somados dos clientes selecionados — mesma consulta da rota de métricas.">
+                            CRM registrou <span className="font-bold text-[#f4f7f8]">{premiumValue(crmLeads)}</span>
+                            {fatorPlataformaCrm !== null && totalLeads > 0 && (
+                              <> (plataformas {fatorPlataformaCrm.toFixed(1).replace('.', ',')}× o CRM)</>
+                            )}
+                          </span>
+                        ) : undefined}
+                      />
+                    </div>
+                    <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
+                      {quickMetrics.map((metric) => <QuickMetricCard key={metric.title} {...metric} comparacao={rotuloComp} />)}
+                    </div>
+                    {(ritmo || temGraficoCpl) && (
+                      <div className="grid gap-4 xl:grid-cols-2">
+                        {ritmo && (
+                          <RitmoMesChart
+                            titulo={ritmo.titulo}
+                            sub={ritmo.sub}
+                            dias={ritmo.eixo}
+                            diario={ritmo.diario}
+                            metaTotal={ritmo.metaTotal}
+                            formato={ritmo.formato}
+                            projetar={ritmo.projetar}
+                            rotuloSerie={ritmo.rotuloSerie}
+                          />
+                        )}
+                        {temGraficoCpl && <CplDiarioChart dias={diasSel} gasto={gastoDia} leads={leadsDia} metaCpl={cplMetaSel} />}
                       </div>
-                    );
-                  })}
-                </div>
-              </PremiumPanel>
+                    )}
+                    {blocoAi}
+                    <div className="grid gap-4 xl:grid-cols-[1.08fr_0.92fr]">
+                      {deliverySoloId ? (
+                        <DeliveryResumoCard clientId={deliverySoloId} from={deliveryRange.from} to={deliveryRange.to} />
+                      ) : (
+                        <SimpleFunnel steps={funnelStepsNew} totalRate={funnelTaxa > 0 ? premiumValue(funnelTaxa, 'percent') : '—'} fonteLabel={fonteTopoLabel} onStageClick={setFunilStageIdx} />
+                      )}
+                      <ChannelSummaryTable rows={channelRows} metaCpl={cplMetaSel} />
+                    </div>
+                    {blocoCanais}
+                    {blocoResumoCliente}
+                  </>
+                )}
+
+                {abaAtiva === 'midia' && (
+                  <>
+                    <TrafegoResumoTable linhas={linhasTrafego} colunas={colunasTrafego} comparacao={rotuloComp} />
+                    {blocoMeta}
+                    {blocoGoogle}
+                  </>
+                )}
+
+                {abaAtiva === 'lp' && blocoGa4}
+                {abaAtiva === 'social' && blocoInstagram}
+                {abaAtiva === 'comercial' && blocoComercial}
+              </>
             )}
           </div>
         )}

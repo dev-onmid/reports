@@ -154,3 +154,107 @@ export function proximaOrdem(
   if (atual.direcao === padrao) return { coluna: clicada, direcao: padrao === 'desc' ? 'asc' : 'desc' };
   return { coluna: null, direcao: padrao };
 }
+
+// ── Conta de anúncio compartilhada ───────────────────────────────────────────
+//
+// ⚠️ Dois clientes podem estar ligados à MESMA conta de anúncio (ex.: duas
+// unidades da mesma rede). A rota de métricas é por cliente, então cada um
+// devolve o gasto/leads da conta inteira — e somar as linhas contava a mesma
+// conta duas vezes nos cards do topo (PicoLocos Guanabara + Prochet: 196 leads
+// e R$ 1.394,53 cada, somados em dobro).
+//
+// A rota não devolve de qual conta veio cada número, então o total é
+// deduplicado pela ASSINATURA por plataforma (gasto + leads idênticos, com gasto
+// > 0): mesma conta no mesmo período dá exatamente o mesmo par; contas
+// diferentes empatarem ao centavo e no lead é improvável. Os vínculos de conta
+// (quando conhecidos) só servem para apontar o compartilhamento na linha —
+// sobreposição PARCIAL (A = conta 1; B = contas 1+2) é detectada no selo mas não
+// dá para descontar do total sem o número por conta.
+
+export type FonteRadar = {
+  id: string;
+  nome: string;
+  meta: { gasto: number; leads: number } | null;
+  google: { gasto: number; leads: number } | null;
+  /** Gasto/leads que não vieram da API (fallback de demo) — somam sempre. */
+  extraGasto: number;
+  extraLeads: number;
+  /** Chaves `plataforma:conta` vinculadas ao cliente, quando conhecidas. */
+  contas: string[];
+};
+
+export function chaveConta(platform: string, accountId: string): string {
+  const id = platform === 'google_ads'
+    ? accountId.replace(/\D/g, '')
+    : accountId.replace(/^act_/, '');
+  return `${platform}:${id}`;
+}
+
+function assinatura(plataforma: string, v: { gasto: number; leads: number } | null): string | null {
+  if (!v || !(v.gasto > 0)) return null;
+  return `${plataforma}|${v.gasto.toFixed(2)}|${v.leads}`;
+}
+
+export function totaisSemDuplicar(fontes: FonteRadar[]): {
+  investimento: number;
+  leads: number;
+  /** Quantas contas apareciam em mais de um cliente e entraram uma vez só. */
+  contasCompartilhadas: number;
+} {
+  const vistas = new Map<string, number>();
+  let investimento = 0;
+  let leads = 0;
+  for (const f of fontes) {
+    investimento += f.extraGasto;
+    leads += f.extraLeads;
+    for (const [plat, v] of [['meta', f.meta], ['google', f.google]] as const) {
+      if (!v) continue;
+      const sig = assinatura(plat, v);
+      if (sig) {
+        const n = vistas.get(sig) ?? 0;
+        vistas.set(sig, n + 1);
+        if (n > 0) continue; // mesma conta já somada
+      }
+      investimento += v.gasto;
+      leads += v.leads;
+    }
+  }
+  let contasCompartilhadas = 0;
+  for (const n of vistas.values()) if (n > 1) contasCompartilhadas += 1;
+  return { investimento, leads, contasCompartilhadas };
+}
+
+/** Para cada cliente, os NOMES dos outros clientes com quem divide conta. */
+export function compartilhamentoDeConta(fontes: FonteRadar[]): Record<string, string[]> {
+  const porChave = new Map<string, Set<string>>();
+  const add = (chave: string, id: string) => {
+    const s = porChave.get(chave) ?? new Set<string>();
+    s.add(id);
+    porChave.set(chave, s);
+  };
+  for (const f of fontes) {
+    for (const c of f.contas) add(`conta|${c}`, f.id);
+    for (const [plat, v] of [['meta', f.meta], ['google', f.google]] as const) {
+      const sig = assinatura(plat, v);
+      if (sig) add(`sig|${sig}`, f.id);
+    }
+  }
+  const nomes = new Map(fontes.map((f) => [f.id, f.nome]));
+  const out: Record<string, Set<string>> = {};
+  for (const ids of porChave.values()) {
+    if (ids.size < 2) continue;
+    for (const id of ids) {
+      out[id] ??= new Set();
+      for (const outro of ids) if (outro !== id) out[id].add(nomes.get(outro) ?? outro);
+    }
+  }
+  return Object.fromEntries(Object.entries(out).map(([id, s]) => [id, [...s].sort((a, b) => a.localeCompare(b, 'pt-BR'))]));
+}
+
+/** Mediana simples; `null` para lista vazia. */
+export function mediana(valores: number[]): number | null {
+  const v = valores.filter((x) => Number.isFinite(x)).sort((a, b) => a - b);
+  if (v.length === 0) return null;
+  const m = Math.floor(v.length / 2);
+  return v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2;
+}
