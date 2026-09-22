@@ -1375,10 +1375,16 @@ function CreativePreviewOverlay({
               onError={() => setVideoFailed(true)}
             />
           ) : showEmbed ? (
-            // iframe embed — reliable playback via Meta/Instagram player when CDN URL fails
+            // iframe embed — reliable playback via Meta/Instagram player when CDN URL fails.
+            // ⚠️ O embed dimensiona a MÍDIA pela LARGURA do iframe e ainda põe
+            // cabeçalho (perfil) + rodapé (~120px) em cima e embaixo. Um reel 9:16 a
+            // 560px de largura precisa de ~1.100px de altura e a caixa tem 760px —
+            // era isso que cortava o vídeo. A largura é derivada da ALTURA
+            // disponível (altura da caixa − chrome) × 9/16, então o reel inteiro cabe.
             <iframe
               src={iframeEmbedUrl!}
-              className="h-full w-full border-0 bg-black"
+              className="h-full border-0 bg-black"
+              style={{ width: 'calc((min(78vh, 760px) - 120px) * 9 / 16)', maxWidth: '100%' }}
               allow="autoplay; clipboard-write; encrypted-media; picture-in-picture; web-share"
               allowFullScreen
             />
@@ -5191,7 +5197,7 @@ function HorizontalCreativeCard({ creative, index, onPreview }: {
     <button
       type="button"
       onClick={() => onPreview(creative)}
-      className="group w-[184px] shrink-0 overflow-hidden rounded-xl bg-white/[0.03] text-left ring-1 ring-white/[0.05] transition hover:ring-[#6cff2f]/40"
+      className="group w-[220px] shrink-0 overflow-hidden rounded-xl bg-white/[0.03] text-left ring-1 ring-white/[0.05] transition hover:ring-[#6cff2f]/40"
     >
       <div className="relative overflow-hidden bg-[#071014]" style={{ aspectRatio: '4/5' }}>
         {showImage ? (
@@ -5261,7 +5267,7 @@ function CreativeHorizontalStrip({ creatives, loading, onPreview }: {
     return (
       <div className="flex gap-3 overflow-x-auto pb-2">
         {Array.from({ length: 6 }).map((_, i) => (
-          <div key={i} className="w-[184px] shrink-0 animate-pulse rounded-xl bg-white/[0.06]" style={{ height: 300 }} />
+          <div key={i} className="w-[220px] shrink-0 animate-pulse rounded-xl bg-white/[0.06]" style={{ height: 345 }} />
         ))}
       </div>
     );
@@ -6858,6 +6864,8 @@ export default function GeneralDashboard() {
               titulo="Campanhas Meta Ads"
               icone={<MetaAdsMark className="h-5 w-5 text-[#168BFF]" />}
               sub="com veiculação no período · clique para abrir conjuntos e anúncios"
+              vazio={!campaignsLoading && metaCampaigns.length === 0}
+              avisoVazio="Nenhuma campanha Meta Ads com veiculação no período."
             >
               <CampaignPerformanceTable
                 campaigns={metaCampaigns}
@@ -6900,6 +6908,8 @@ export default function GeneralDashboard() {
               titulo="Melhores criativos"
               icone={<MetaAdsMark className="h-5 w-5 text-[#168BFF]" />}
               sub="ordenados por leads (e menor CPL no empate); sem leads no período, por investimento"
+              vazio={!creativesLoading && creatives.length === 0}
+              avisoVazio="Nenhum criativo com veiculação no período."
             >
               <CreativeHorizontalStrip creatives={creatives} loading={creativesLoading} onPreview={setPreviewCreative} />
             </Superficie>
@@ -6918,6 +6928,8 @@ export default function GeneralDashboard() {
                 titulo="Campanhas Google Ads"
                 icone={<GoogleAdsMark className="h-5 w-5" />}
                 sub="com veiculação no período · clique para abrir grupos e anúncios"
+                vazio={!campaignsLoading && googleCampaigns.length === 0}
+                avisoVazio="Nenhuma campanha Google Ads com veiculação no período."
               >
                 <CampaignPerformanceTable
                   campaigns={googleCampaigns}
@@ -6932,6 +6944,8 @@ export default function GeneralDashboard() {
                 titulo="Palavras-chave"
                 icone={<GoogleAdsMark className="h-5 w-5" />}
                 sub="top 5 por investimento"
+                vazio={!keywordsLoading && keywords.length === 0}
+                avisoVazio="Nenhuma palavra-chave com veiculação no período."
               >
                 <CompactKeywordTable keywords={keywords} loading={keywordsLoading} metaCpl={cplMetaSel} />
               </Superficie>

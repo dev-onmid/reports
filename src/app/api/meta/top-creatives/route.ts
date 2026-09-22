@@ -291,16 +291,21 @@ export async function GET(request: NextRequest) {
             // imageUrl priority:
             // 1. asset_feed direct URL (Advantage+ originals)
             // 2. Video ad's image_url (explicit thumbnail set at ad creation)
-            // 3. Video object's picture (stable CDN — preferred over creative.thumbnail_url)
-            // 4. Best-resolution frame from thumbnails API
+            // 3. Best-resolution frame from thumbnails API
+            // 4. Video object's picture (stable CDN, mas PEQUENA)
             // 5. Static ad image_url
             // 6. story spec photo / link picture
             // creative.thumbnail_url is intentionally LAST — it carries an oe= expiry param
+            //
+            // ⚠️ `picture` vinha ANTES do frame de maior resolução e as miniaturas
+            // saíam borradas (é uma thumb pequena esticada pro card). Agora o frame
+            // nítido vence; o `picture` estável fica como fallback em `thumbnailUrl`
+            // — se a URL do frame expirar, o card cai nele em vez de quebrar.
             const imageUrl: string | undefined =
               assetFeedImageUrl ??
               (videoData.image_url as string | undefined) ??
-              (videoInfo.picture as string | undefined) ??
               bestThumb ??
+              (videoInfo.picture as string | undefined) ??
               (creative.image_url as string | undefined) ??
               (storySpec.photo_data?.url as string | undefined) ??
               (linkData.picture as string | undefined) ??
@@ -335,7 +340,9 @@ export async function GET(request: NextRequest) {
               adSetId: insight.adset_id ?? undefined,
               adSetName: insight.adset_name ?? undefined,
               imageUrl,
-              thumbnailUrl: (creative.thumbnail_url as string | undefined) ?? undefined,
+              // Fallback ESTÁVEL: o `picture` do vídeo não expira (ao contrário do
+              // frame nítido e do creative.thumbnail_url, que carregam oe=).
+              thumbnailUrl: (videoInfo.picture as string | undefined) ?? (creative.thumbnail_url as string | undefined) ?? undefined,
               videoUrl: (videoInfo.source as string | undefined) ?? undefined,
               mediaType,
               permalink,

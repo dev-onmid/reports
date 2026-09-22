@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, type CSSProperties, type ReactNode } from 'react';
-import { ChevronDown, ChevronUp } from 'lucide-react';
+import { AlertTriangle, ChevronDown, ChevronUp } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { T } from '@/lib/dashboard-tipografia';
 
@@ -19,6 +19,7 @@ export const SUPERFICIE = 'min-w-0 rounded-[14px] border border-white/[0.08] bg-
 
 export function Superficie({
   titulo, sub, icone, direita, children, className, style, semPadding = false, as: Tag = 'section', title,
+  vazio = false, avisoVazio,
 }: {
   titulo?: ReactNode;
   /** Descrição curta ao lado/abaixo do título. */
@@ -34,7 +35,31 @@ export function Superficie({
   semPadding?: boolean;
   as?: 'section' | 'div';
   title?: string;
+  /**
+   * Canal SEM dado no período: o card sai MINIMIZADO — só um aviso em
+   * destaque no topo e o nome do canal embaixo, sem o corpo vazio (pedido do
+   * Matheus: um painel grande dizendo "nenhuma campanha" ocupava uma seção
+   * inteira pra não mostrar nada). Nunca passar `vazio` enquanto carrega.
+   */
+  vazio?: boolean;
+  avisoVazio?: ReactNode;
 }) {
+  if (vazio) {
+    return (
+      <Tag className={cn(SUPERFICIE, 'p-3', className)} style={style} title={title}>
+        <div className="flex items-center gap-2.5 rounded-lg border border-amber-400/35 bg-amber-400/[0.09] px-3 py-2.5">
+          <AlertTriangle className="h-4 w-4 shrink-0 text-amber-300" />
+          <p className="text-sm font-bold leading-snug text-amber-200">{avisoVazio ?? 'Sem dados no período.'}</p>
+        </div>
+        {titulo && (
+          <div className="mt-2 flex items-center gap-2 px-1 text-[10px] font-black uppercase tracking-[0.08em] text-[#6c767c]">
+            <span className="opacity-60">{icone}</span>
+            <span className="min-w-0 truncate">{titulo}</span>
+          </div>
+        )}
+      </Tag>
+    );
+  }
   return (
     <Tag className={cn(SUPERFICIE, !semPadding && 'p-5', className)} style={style} title={title}>
       {(titulo || direita) && (
