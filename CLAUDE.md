@@ -1,3 +1,23 @@
+## Mapa de Calor — criação automática pela rotina de rastreio das LPs (2026-09-21)
+
+Pedido do Matheus: o Mapa de Calor (Integrações → Mapa de Calor, `tag.js` do Radar
+de LP) passa a fazer parte do rastreio PADRÃO de toda LP, e a página é criada
+automaticamente — ninguém clica em "Nova página".
+
+- **`GET/POST /api/integrations/mapa-calor`** (nova; `x-onmid-secret` =
+  MAKE_INTEGRATION_SECRET, em `INTEGRATION_PREFIXES`): GET `?cliente=` lista as
+  páginas do cliente com `tracking_key` e snippet; POST `{cliente, url, nome?}`
+  cria — **idempotente pelo host** (www. ignorado): o `tag.js` já grava o path de
+  cada visita, então uma página por domínio cobre todas as rotas. Mesma tabela
+  `client_landing_pages` e o mesmo `generateLpTrackingKey()` da tela.
+- Consumidor: `~/Documents/lps/bin/gtag calor <cliente> <url>`; a tag entra pelo
+  GTM de cada LP (Custom HTML em All Pages carregando o `tag.js?k=`). ⚠️ O
+  `tag.js` se localiza por `document.currentScript` — funciona injetado pelo GTM
+  (script externo criado dinamicamente tem currentScript durante a execução).
+- ✅ Verificado: tsc. ⚠️ Só produção exercita o banco — validar com
+  `gtag calor condostore https://www.condostore.com.br` (deve devolver a página
+  criada à mão, `criada:false`, chave `4uazur859x`).
+
 @AGENTS.md
 
 ## Datalytics virou WEBHOOK genérico — N por cliente, com nome (2026-09-22)

@@ -122,6 +122,7 @@ const INTEGRATION_PREFIXES = [
   '/api/integrations/tldv-sync',
   '/api/integrations/tldv-backfill',
   '/api/integrations/google-conversoes', // lps/bin/gtag: ações de conversão do Google Ads
+  '/api/integrations/mapa-calor',        // lps/bin/gtag calor: página do Mapa de Calor por LP
 ];
 
 function matches(pathname: string, prefixes: string[]): boolean {
