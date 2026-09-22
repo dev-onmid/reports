@@ -6034,6 +6034,10 @@ export default function GeneralDashboard() {
   const avgCpl = metaLeads > 0 ? metaSpend / metaLeads : 0;
   const avgCpa = googleConv > 0 ? googleCost / googleConv : 0;
   const metaCtr = metaImpressions > 0 ? (metaClicks / metaImpressions) * 100 : 0;
+  // CPM = quanto pagamos para APARECER (custo por mil impressões). Pedido do
+  // Matheus: ler o preço do leilão do mercado, separado do CPL — CPL subindo com
+  // CPM estável é criativo/segmentação; CPL subindo com CPM subindo é o leilão.
+  const metaCpm = metaImpressions > 0 ? (metaSpend / metaImpressions) * 1000 : 0;
   const metaCpc = metaClicks > 0 ? metaSpend / metaClicks : 0;
   let googleImpressions = 0, googleClicks = 0;
   for (const id of selectedIds) {
@@ -6050,6 +6054,7 @@ export default function GeneralDashboard() {
   const hasGoogleData = [...selectedIds].some(id => metricsByClient[id]?.google != null) || (!campaignsLoading && googleCampaignsTotals.spend > 0);
   const hasGoogleLink = clientLinks.some(l => selectedIds.has(l.clientId) && l.platform === 'google_ads');
   const googleCpc = googleClicks > 0 ? googleCost / googleClicks : 0;
+  const googleCpm = googleImpressions > 0 ? (googleCost / googleImpressions) * 1000 : 0;
   const googleCtrValue = googleImpressions > 0 ? (googleClicks / googleImpressions) * 100 : 0;
   let googleSearchImprShare = 0, googleSearchBudgetLostIS = 0, googleSearchRankLostIS = 0, googleSearchAbsTopIS = 0, googleSearchTopIS = 0;
   let googleCompetitiveCount = 0;
@@ -6187,8 +6192,10 @@ export default function GeneralDashboard() {
   const prevRoi = prevTotalSpend > 0 ? prevRevenue / prevTotalSpend : 0;
   const prevTicket = prevCrmSales > 0 ? prevRevenue / prevCrmSales : 0;
   const prevMetaCtr = prevMetaImpressions > 0 ? (prevMetaClicks / prevMetaImpressions) * 100 : 0;
+  const prevMetaCpm = prevMetaImpressions > 0 ? (prevMetaSpend / prevMetaImpressions) * 1000 : 0;
   const prevAvgCpl = prevMetaLeads > 0 ? prevMetaSpend / prevMetaLeads : 0;
   const prevGoogleCpc = prevGoogleClicks > 0 ? prevGoogleCost / prevGoogleClicks : 0;
+  const prevGoogleCpm = prevGoogleImpressions > 0 ? (prevGoogleCost / prevGoogleImpressions) * 1000 : 0;
   const pct = (cur: number, prev: number): number | null => prev > 0 ? ((cur - prev) / prev) * 100 : null;
 
   // Receita efetiva: usa CRM se disponível, senão estima via fechamentos × TKM médio
@@ -6685,9 +6692,11 @@ export default function GeneralDashboard() {
               <div className="grid gap-4 xl:grid-cols-2">
                 <div className="rounded-[12px] border border-white/[0.08] bg-[#071014] p-3">
                   <div className="mb-3 flex items-center gap-2 text-sm font-black uppercase tracking-[0.06em] text-[#f4f7f8]"><MetaAdsMark className="h-5 w-5 text-[#168BFF]" /> Meta Ads</div>
-                  <div className="grid gap-2 sm:grid-cols-5">
+                  <div className="grid gap-2 sm:grid-cols-3">
                     <MiniPlatformMetric label="Saldo Meta Ads" value={metaBalance > 0 ? premiumValue(metaBalance, 'currency') : '—'} logo={<MetaAdsMark className="h-4 w-4 text-[#168BFF]" />} sub="Saldo disponível" />
                     <MiniPlatformMetric label="Alcance" value={metaReach > 0 ? premiumValue(metaReach) : '—'} icon={Users} change={pct(metaReach, prevMetaReach)} comparacao={rotuloComp} />
+                    {/* CPM: preço para aparecer. Queda é boa (inverseChange). */}
+                    <MiniPlatformMetric label="CPM" value={metaCpm > 0 ? premiumValue(metaCpm, 'currency') : '—'} icon={Eye} change={metaCpm > 0 && prevMetaCpm > 0 ? pct(metaCpm, prevMetaCpm) : null} inverseChange comparacao={rotuloComp} />
                     <MiniPlatformMetric label="CTR" value={metaCtr > 0 ? premiumValue(metaCtr, 'percent') : '—'} icon={MousePointerClick} change={pct(metaCtr, prevMetaCtr)} comparacao={rotuloComp} />
                     {/* Em food o Meta ainda reporta "resultado" (conversa/lead do
                         anúncio), não pedido pago — atribuir pedido por plataforma
@@ -6699,9 +6708,11 @@ export default function GeneralDashboard() {
                 </div>
                 <div className="rounded-[12px] border border-white/[0.08] bg-[#071014] p-3">
                   <div className="mb-3 flex items-center gap-2 text-sm font-black uppercase tracking-[0.06em] text-[#f4f7f8]"><GoogleAdsMark className="h-5 w-5" /> Google Ads</div>
-                  <div className="grid gap-2 sm:grid-cols-5">
+                  <div className="grid gap-2 sm:grid-cols-3">
                     <MiniPlatformMetric label="Saldo Google Ads" value={googleBalance > 0 ? premiumValue(googleBalance, 'currency') : '—'} logo={<GoogleAdsMark className="h-4 w-4" />} sub="Saldo disponível" />
                     <MiniPlatformMetric label="Impressões" value={hasGoogleData ? premiumValue(googleImpressions) : '—'} icon={BarChart3} change={hasGoogleData ? pct(googleImpressions, prevGoogleImpressions) : null} comparacao={rotuloComp} />
+                    {/* CPM: preço para aparecer. Queda é boa (inverseChange). */}
+                    <MiniPlatformMetric label="CPM" value={googleCpm > 0 ? premiumValue(googleCpm, 'currency') : '—'} icon={Eye} change={googleCpm > 0 && prevGoogleCpm > 0 ? pct(googleCpm, prevGoogleCpm) : null} inverseChange comparacao={rotuloComp} />
                     <MiniPlatformMetric label="Cliques" value={hasGoogleData ? premiumValue(googleClicks) : '—'} icon={MousePointerClick} change={hasGoogleData ? pct(googleClicks, prevGoogleClicks) : null} comparacao={rotuloComp} />
                     <MiniPlatformMetric label="CPC Médio" value={googleCpc > 0 ? premiumValue(googleCpc, 'currency') : '—'} icon={Tag} change={googleCpc > 0 && prevGoogleCpc > 0 ? pct(googleCpc, prevGoogleCpc) : null} inverseChange comparacao={rotuloComp} />
                     <MiniPlatformMetric label="Conversões" value={hasGoogleData ? premiumValue(googleConv) : '—'} icon={CheckCircle2} change={hasGoogleData ? pct(googleConv, prevGoogleConv) : null} comparacao={rotuloComp} />
