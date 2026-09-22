@@ -5307,7 +5307,7 @@ function TrafegoResumoTable({ linhas, colunas, comparacao }: { linhas: LinhaTraf
         <span className={T.cardSub}>variação {comparacao}</span>
       </div>
       <div className="overflow-x-auto">
-        <table className={cn('w-full min-w-[820px] text-left tabular-nums', T.tabelaCel)}>
+        <table className={cn('w-full min-w-[900px] text-left tabular-nums', T.tabelaCel)}>
           <thead className={T.tabelaCab}>
             <tr>
               <th className="py-2">Plataforma</th>
@@ -6592,7 +6592,10 @@ export default function GeneralDashboard() {
   const deltaTaxa = (cur: number, prev: number) => cur > 0 && prev > 0 ? pctChange(cur, prev) : null;
   const prevGoogleCtr = prevGoogleImpressions > 0 ? (prevGoogleClicks / prevGoogleImpressions) * 100 : 0;
   const prevGoogleCpa = prevGoogleConv > 0 ? prevGoogleCost / prevGoogleConv : 0;
-  const colunasTrafego = ['Saldo', 'Investimento', 'Impressões', 'Cliques', 'CTR', 'Leads / Conv.', 'CPL / CPC'];
+  // CPM logo após Impressões: é o mesmo fato ("quanto pagamos para aparecer"),
+  // lido junto. Pedido do Matheus pra separar leilão do mercado de problema de
+  // criativo: CPL subindo com CPM estável é criativo; com CPM subindo é leilão.
+  const colunasTrafego = ['Saldo', 'Investimento', 'Impressões', 'CPM', 'Cliques', 'CTR', 'Leads / Conv.', 'CPL / CPC'];
   const linhasTrafego: LinhaTrafego[] = [
     {
       plataforma: 'Meta Ads',
@@ -6601,6 +6604,7 @@ export default function GeneralDashboard() {
         { valor: metaBalance > 0 ? premiumValue(metaBalance, 'currency') : '—' },
         { valor: metaSpend > 0 ? premiumValue(metaSpend, 'currency') : '—', delta: deltaBase(metaSpend, prevMetaSpend), neutro: true },
         { valor: metaImpressions > 0 ? premiumValue(metaImpressions) : '—', delta: deltaBase(metaImpressions, prevMetaImpressions) },
+        { valor: metaCpm > 0 ? premiumValue(metaCpm, 'currency') : '—', delta: deltaTaxa(metaCpm, prevMetaCpm), inverso: true },
         { valor: metaClicks > 0 ? premiumValue(metaClicks) : '—', delta: deltaBase(metaClicks, prevMetaClicks) },
         { valor: metaCtr > 0 ? premiumValue(metaCtr, 'percent') : '—', delta: deltaTaxa(metaCtr, prevMetaCtr) },
         { valor: premiumValue(metaLeads), delta: deltaBase(metaLeads, prevMetaLeads) },
@@ -6616,6 +6620,7 @@ export default function GeneralDashboard() {
         { valor: googleBalance > 0 ? premiumValue(googleBalance, 'currency') : '—' },
         { valor: hasGoogleData && googleCost > 0 ? premiumValue(googleCost, 'currency') : '—', delta: hasGoogleData ? deltaBase(googleCost, prevGoogleCost) : null, neutro: true },
         { valor: hasGoogleData && googleImpressions > 0 ? premiumValue(googleImpressions) : '—', delta: hasGoogleData ? deltaBase(googleImpressions, prevGoogleImpressions) : null },
+        { valor: hasGoogleData && googleCpm > 0 ? premiumValue(googleCpm, 'currency') : '—', delta: hasGoogleData ? deltaTaxa(googleCpm, prevGoogleCpm) : null, inverso: true },
         { valor: hasGoogleData && googleClicks > 0 ? premiumValue(googleClicks) : '—', delta: hasGoogleData ? deltaBase(googleClicks, prevGoogleClicks) : null },
         { valor: googleCtrValue > 0 ? premiumValue(googleCtrValue, 'percent') : '—', delta: deltaTaxa(googleCtrValue, prevGoogleCtr) },
         { valor: hasGoogleData ? premiumValue(googleConv) : '—', delta: hasGoogleData ? deltaBase(googleConv, prevGoogleConv) : null },
