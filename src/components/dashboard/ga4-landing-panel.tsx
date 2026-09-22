@@ -25,6 +25,7 @@ import { useState, type ReactNode } from 'react';
 import { TrendingUp, TrendingDown, Info, ChevronDown } from 'lucide-react';
 import type { Ga4Celula, Ga4Consolidado, Ga4Linha, Ga4Seg, Ga4Totais } from '@/lib/ga4-landing';
 import { EvolucaoDiaria, Sparkline } from './ga4-landing-graficos';
+import { Donut } from './donut';
 
 const cx = (...a: Array<string | false | undefined>) => a.filter(Boolean).join(' ');
 
@@ -234,26 +235,30 @@ function barrasSeg(linhas: Ga4Seg[], opts: { limite?: number; engaj?: boolean } 
 
 /** Barra 100% empilhada (dispositivo, novos x recorrentes) com % e taxa de conversão de cada fatia. */
 function Empilhada({ linhas }: { linhas: Ga4Seg[] }) {
+  // Donut: parte do todo com 2–3 fatias (dispositivo, novos × recorrentes,
+  // gênero) é o caso ideal do gráfico de rosca.
   const total = linhas.reduce((t, s) => t + s.sessoes, 0);
   if (total <= 0) return null;
   const fatias = linhas.filter(s => s.sessoes > 0).sort((a, b) => b.sessoes - a.sessoes);
+  const cor = (i: number) => PALETA[Math.min(i, PALETA.length - 1)];
   return (
-    <div>
-      <div className="flex h-3.5 overflow-hidden rounded-full bg-white/[0.05]">
-        {fatias.map((s, i) => (
-          <div key={s.valor} title={`${s.valor}: ${fmtPct(s.sessoes / total)}`}
-            style={{ width: `${(s.sessoes / total) * 100}%`, background: PALETA[Math.min(i, PALETA.length - 1)] }}
-            className="h-full border-r border-[#0d1519] last:border-r-0" />
-        ))}
-      </div>
-      <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
+    <div className="flex flex-col items-center gap-4 sm:flex-row">
+      <Donut
+        tamanho={130}
+        espessura={22}
+        fatias={fatias.map((s, i) => ({ label: s.valor, valor: s.sessoes, cor: cor(i) }))}
+        centroTitulo="sessões"
+        centroValor={fmtN(total)}
+        formatar={(n) => `${fmtN(n)} sessões`}
+      />
+      <div className="grid w-full min-w-0 gap-2.5">
         {fatias.map((s, i) => (
           <div key={s.valor} className="min-w-0">
             <p className="flex items-center gap-1.5 truncate text-[11px] font-semibold text-[#dce4e8]">
-              <span className="h-2 w-2 shrink-0 rounded-sm" style={{ background: PALETA[Math.min(i, PALETA.length - 1)] }} />
+              <span className="h-2 w-2 shrink-0 rounded-sm" style={{ background: cor(i) }} />
               {s.valor}
+              <span className="ml-auto font-heading text-lg leading-none text-[#f4f7f8] tabular-nums">{fmtPct(s.sessoes / total, 0)}</span>
             </p>
-            <p className="mt-0.5 font-heading text-2xl leading-none text-[#f4f7f8] tabular-nums">{fmtPct(s.sessoes / total, 0)}</p>
             <p className="mt-0.5 text-[10px] text-[#7c868c]">{fmtN(s.sessoes)} sessões · converte <b className="text-[#c7d0d5]">{fmtPct(div(s.sessoesConv, s.sessoes))}</b></p>
           </div>
         ))}
@@ -772,7 +777,7 @@ export function Ga4LandingPanel({ dados, loading, aviso }: { dados: Ga4Consolida
               <Card><Titulo>Idade</Titulo><ListaBarras itens={barrasSeg(au.idades)} /></Card>
             )}
             {au.generos.length > 0 && (
-              <Card><Titulo>Gênero</Titulo><ListaBarras itens={barrasSeg(au.generos.map(traduz(GENEROS)))} /></Card>
+              <Card><Titulo>Gênero</Titulo><Empilhada linhas={au.generos.map(traduz(GENEROS))} /></Card>
             )}
             {au.cidades.length > 0 && (
               <Card><Titulo dica="As 6 cidades com mais sessões.">Cidades</Titulo><ListaBarras itens={barrasSeg(au.cidades, { limite: 6 })} /></Card>

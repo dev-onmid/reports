@@ -43,7 +43,6 @@ import {
   Eye, Heart, Monitor, ExternalLink, Bookmark, MessageCircle, Repeat,
 } from 'lucide-react';
 import { getAuthSession } from '@/lib/auth-store';
-import type { AiInsight } from '@/app/api/ai/insights/route';
 import type { AdSet, AdSetWithMetrics } from '@/app/api/meta/campaigns/[id]/adsets/route';
 import type { MetaAd } from '@/app/api/meta/campaigns/[id]/ads/route';
 import type { MetaAdWithMetrics } from '@/app/api/meta/adsets/[id]/ads/route';
@@ -99,6 +98,7 @@ import {
   faixaAtual, faixaAnterior, rotuloComparacao, metaParcialDoPeriodo, rotuloMetaParcial, diasNoMes, datasDaFaixa, fimDoMesIso,
 } from '@/lib/dashboard-periodo';
 import { statusCpl, statusCplComGasto, ROTULO_STATUS_CPL, CLASSE_STATUS_CPL, TEXTO_STATUS_CPL, type StatusCpl } from '@/lib/dashboard-metas';
+import { Donut } from '@/components/dashboard/donut';
 import { BulletMetaCard } from '@/components/dashboard/bullet-meta';
 import { RitmoMesChart, CplDiarioChart } from '@/components/dashboard/ritmo-chart';
 
@@ -3820,117 +3820,6 @@ function SortableSection({
   );
 }
 
-// ── Insight Card ────────────────────────────────────────────────────────────
-function InsightCard({ insight, onDismiss }: { insight: AiInsight; onDismiss: () => void }) {
-  const sev = insight.severity as string;
-  const cfg = sev === 'critical'
-    ? { badge: 'CRÍTICO', badgeCls: 'bg-red-500/15 text-red-400 border-red-500/30', cardCls: 'border-red-500/20 bg-red-500/5' }
-    : sev === 'warn'
-    ? { badge: 'ATENÇÃO', badgeCls: 'bg-amber-500/15 text-amber-400 border-amber-500/30', cardCls: 'border-amber-500/20 bg-amber-500/5' }
-    : sev === 'opportunity'
-    ? { badge: 'OPORTUNIDADE', badgeCls: 'bg-teal-500/15 text-teal-400 border-teal-500/30', cardCls: 'border-teal-500/20 bg-teal-500/5' }
-    : { badge: 'INFO', badgeCls: 'bg-blue-500/15 text-blue-400 border-blue-500/30', cardCls: 'border-blue-500/20 bg-blue-500/5' };
-  return (
-    <div className={cn('relative rounded-xl border p-4 space-y-2', cfg.cardCls)}>
-      <button type="button" onClick={onDismiss} className="absolute right-2.5 top-2.5 text-muted-foreground/40 hover:text-muted-foreground transition-colors">
-        <X className="h-3.5 w-3.5" />
-      </button>
-      <span className={cn('inline-block rounded-full border px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest', cfg.badgeCls)}>{cfg.badge}</span>
-      <p className="text-xs font-bold text-foreground leading-snug pr-5">{insight.title}</p>
-      <p className="text-[11px] text-muted-foreground leading-relaxed line-clamp-2">{insight.suggestion}</p>
-      <button type="button" className="text-[11px] font-semibold text-primary hover:underline transition-colors">Ver recomendação →</button>
-    </div>
-  );
-}
-
-function AiRecommendationsBox({
-  insights,
-  loading,
-  onAnalyze,
-}: {
-  insights: AiInsight[];
-  loading: boolean;
-  onAnalyze: () => void;
-}) {
-  const visibleInsights = insights.slice(0, 4);
-  const placeholders = [
-    {
-      id: 'rec-placeholder-1',
-      title: 'Aumentar investimento em CTR',
-      suggestion: 'CTR acima do benchmark para Feed. Investir mais nessa campanha pode reduzir CPL.',
-      severity: 'critical' as const,
-    },
-    {
-      id: 'rec-placeholder-2',
-      title: 'Consolidar criativos de baixo desempenho',
-      suggestion: 'Variações com desempenho baixo devem ser pausadas para liberar verba.',
-      severity: 'warn' as const,
-    },
-    {
-      id: 'rec-placeholder-3',
-      title: 'Reativar públicos quentes',
-      suggestion: 'Públicos engajados têm sinal de intenção e podem retomar conversas.',
-      severity: 'info' as const,
-    },
-    {
-      id: 'rec-placeholder-4',
-      title: 'Testar novos criativos para Reels',
-      suggestion: 'Realocar parte do orçamento para criativos verticais pode abrir nova escala.',
-      severity: 'warn' as const,
-    },
-  ];
-  const items = visibleInsights.length > 0 ? visibleInsights : placeholders;
-  const icons = [BarChart3, Zap, Target, Briefcase];
-  // Impacto vem do CONTEÚDO (severidade do insight), não da posição no grid —
-  // antes o 1º card era sempre "Alto impacto" violeta, fosse o que fosse.
-  const impacto = (sev: string) => sev === 'critical'
-    ? { label: 'Alto impacto', badge: 'border-[#e52020]/40 bg-[#e52020]/14 text-[#ff6b6b]' }
-    : sev === 'warn'
-    ? { label: 'Médio impacto', badge: 'border-amber-400/30 bg-amber-400/12 text-amber-300' }
-    : { label: 'Baixo impacto', badge: 'border-white/10 bg-white/[0.07] text-[#a7b0b6]' };
-
-  return (
-    <aside className="rounded-[14px] border border-white/[0.08] bg-[#0d1519]/92 p-4 shadow-[0_18px_60px_rgba(0,0,0,0.28)]">
-      <div className="flex items-center justify-between gap-3">
-        <p className="flex items-center gap-2 text-sm font-black uppercase tracking-[0.07em] text-[#f4f7f8]">
-          <Sparkles className="h-4 w-4 text-[#55f52f]" /> Recomendações com IA
-        </p>
-        <button
-          type="button"
-          onClick={onAnalyze}
-          disabled={loading}
-          className="rounded-md border border-white/[0.10] bg-white/[0.04] px-2 py-1 text-[10px] font-bold text-[#dce4e8] transition-colors hover:border-[#55f52f]/35 disabled:opacity-60"
-        >
-          {loading ? 'Gerando...' : 'Gerar de novo'}
-        </button>
-      </div>
-      <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-        {items.map((item, index) => {
-          const Icon = icons[index % icons.length];
-          const imp = impacto(item.severity);
-          return (
-            <button
-              key={item.id}
-              type="button"
-              onClick={visibleInsights.length > 0 ? undefined : onAnalyze}
-              className="group flex min-h-[92px] w-full items-start gap-3 rounded-[10px] border border-white/[0.07] bg-[#111a20]/80 p-3 text-left transition-colors hover:border-white/[0.14]"
-            >
-              <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-white/[0.06] text-[#a7b0b6]">
-                <Icon className="h-4 w-4" />
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-[11px] font-bold leading-tight text-foreground" title={item.title}>{item.title}</span>
-                <span className="mt-1 block text-[10px] leading-snug text-foreground/58 line-clamp-2">{item.suggestion}</span>
-                <span className={cn('mt-2 inline-flex rounded-full border px-2 py-0.5 text-[9px] font-bold', imp.badge)}>{imp.label}</span>
-              </span>
-            </button>
-          );
-        })}
-      </div>
-    </aside>
-  );
-}
-
 // ── Circular Quality ─────────────────────────────────────────────────────────
 function CircularQuality({ pct, color, size = 120 }: { pct: number; color: string; size?: number }) {
   const sw = Math.round(size * 0.085);
@@ -4670,7 +4559,15 @@ function CanalDonutCard({ titulo, fatiasBrutas, total, semCanal, formato, aviso 
   })();
   const cores = coresPorCanal(fatias.map(f => f.label));
   const corDe = (label: string) => marcaDoCanal(label)?.cor ?? (canalNeutro(label) ? CINZA_CANAL : cores[label]);
-  const maior = Math.max(...fatias.map(f => f.valor), 0);
+  // Donut: só as 5 maiores fatias + "Outros" (acima disso o ângulo vira chute);
+  // a lista ao lado continua com todos os canais e o valor exato.
+  const DONUT_MAX = 5;
+  const fatiasDonut = (() => {
+    const cab = fatias.slice(0, DONUT_MAX);
+    const resto = fatias.slice(DONUT_MAX).reduce((acc, f) => acc + f.valor, 0);
+    const lista = cab.map(f => ({ label: f.label, valor: f.valor, cor: corDe(f.label) }));
+    return resto > 0 ? [...lista, { label: 'Outros', valor: resto, cor: CINZA_CANAL }] : lista;
+  })();
 
   return (
     <PremiumPanel className="p-4">
@@ -4680,15 +4577,16 @@ function CanalDonutCard({ titulo, fatiasBrutas, total, semCanal, formato, aviso 
         </h3>
         {total > 0 && (
           <span className="text-xs font-semibold text-[#9aa4aa]">
-            Total <span className="font-heading text-lg leading-none text-[#f4f7f8]">{premiumValue(total, formato)}</span>
-            {' '}· {fatias.length} {fatias.length === 1 ? 'canal' : 'canais'}
+            {fatias.length} {fatias.length === 1 ? 'canal' : 'canais'}
           </span>
         )}
       </div>
       {fatias.length === 0 ? (
         <p className="py-6 text-center text-xs text-[#9aa4aa]">Sem dado no período.</p>
       ) : (
-        <div className="space-y-2">
+        <div className="grid items-center gap-4 md:grid-cols-[170px_1fr]">
+        <Donut fatias={fatiasDonut} centroValor={premiumValue(total, formato)} formatar={(n) => premiumValue(n, formato)} />
+        <div className="min-w-0 space-y-2">
           {fatias.map((o) => {
             const marca = marcaDoCanal(o.label);
             const cor = corDe(o.label);
@@ -4702,19 +4600,13 @@ function CanalDonutCard({ titulo, fatiasBrutas, total, semCanal, formato, aviso 
                     <span className="h-2.5 w-2.5 shrink-0 self-center rounded-sm" style={{ backgroundColor: cor }} />
                   )}
                   <span className="min-w-0 flex-1 truncate text-xs font-semibold text-[#dce4e8]">{o.label}</span>
-                  {o.nota && <span className="hidden shrink-0 text-[10px] text-[#7c868c] sm:inline">{o.nota}</span>}
                   <span className="w-12 shrink-0 text-right text-[10px] text-[#9aa4aa]">{pctTotal.toFixed(1).replace('.', ',')}%</span>
                   <span className="shrink-0 whitespace-nowrap text-right text-xs font-bold text-[#f4f7f8]">{premiumValue(o.valor, formato)}</span>
-                </div>
-                <div className="mt-1 h-1.5 w-full rounded-full bg-white/[0.04]">
-                  <div
-                    className="h-full rounded-full"
-                    style={{ width: `${maior > 0 ? Math.max(1, (o.valor / maior) * 100) : 0}%`, backgroundColor: cor }}
-                  />
                 </div>
               </div>
             );
           })}
+        </div>
         </div>
       )}
       {/* ⚠️ Sem este aviso a linha cinza seria lida como um canal chamado
@@ -4779,6 +4671,49 @@ function IgMark({ className }: { className?: string }) {
   );
 }
 
+// ── Instagram: card grande e mini-estatística (mesmo padrão da Landing page) ──
+function IgDelta({ v }: { v: number | null }) {
+  if (v === null || !Number.isFinite(v)) return <span className="text-[#7c868c]">—</span>;
+  const cor = Math.abs(v) < 0.05 ? 'text-[#a7b0b6]' : v > 0 ? 'text-[#6cff2f]' : 'text-red-400';
+  return <span className={cn('font-bold', cor)}>{v > 0 ? '+' : ''}{v.toFixed(1).replace('.', ',')}%</span>;
+}
+
+function IgKpi({ label, icon: Icon, valor, variacao, comparacao, sub, subRuim }: {
+  label: string; icon: React.ElementType; valor: string; variacao: number | null;
+  comparacao?: string; sub?: string; subRuim?: boolean;
+}) {
+  return (
+    <div className="rounded-[12px] border border-white/[0.07] bg-[#071014]/80 p-4">
+      <div className="flex items-center gap-2">
+        <span className="flex h-7 w-7 items-center justify-center rounded-lg border border-[#E1306C]/25 bg-[#E1306C]/10 text-[#ff5c93]">
+          <Icon className="h-3.5 w-3.5" />
+        </span>
+        <p className="text-[11px] font-black uppercase tracking-[0.06em] text-[#dce4e8]">{label}</p>
+      </div>
+      <p className="mt-3 font-heading text-3xl leading-none text-[#f4f7f8]">{valor}</p>
+      <p className="mt-1.5 text-xs"><IgDelta v={variacao} /> <span className="text-[#9aa4aa]">{comparacao}</span></p>
+      {sub && <p className={cn('mt-1 text-[11px]', subRuim ? 'text-red-400' : 'text-[#7c868c]')}>{sub}</p>}
+    </div>
+  );
+}
+
+function IgMini({ label, icon: Icon, valor, variacao }: {
+  label: string; icon: React.ElementType; valor: string; variacao: number | null;
+}) {
+  return (
+    <div className="flex items-center gap-3 bg-[#0b1317] px-4 py-3">
+      <Icon className="h-4 w-4 shrink-0 text-[#ff5c93]" />
+      <div className="min-w-0">
+        <p className="truncate text-[10px] font-black uppercase tracking-[0.06em] text-[#9aa4aa]">{label}</p>
+        <p className="flex items-baseline gap-2">
+          <span className="font-heading text-lg leading-none text-[#f4f7f8]">{valor}</span>
+          <span className="text-[10px]"><IgDelta v={variacao} /></span>
+        </p>
+      </div>
+    </div>
+  );
+}
+
 const FUNNEL_STEP_COLORS = ['#6cff2f', '#0ea5e9', '#7b2cff', '#f97316', '#ec4899', '#f59e0b', '#84cc16'];
 
 function SimpleFunnel({ steps, totalRate, fonteLabel, onStageClick }: {
@@ -4794,10 +4729,13 @@ function SimpleFunnel({ steps, totalRate, fonteLabel, onStageClick }: {
   onStageClick?: (index: number) => void;
 }) {
   if (!steps.length) return null;
-  // Barras horizontais com LARGURA proporcional ao volume do degrau (relativo
-  // ao topo). O funil antigo tinha forma FIXA — um degrau com 2% do topo
-  // aparecia com 30% da altura, e a queda real ficava invisível.
-  const topo = Math.max(steps[0]?.actual ?? 0, ...steps.map(st => st.actual), 0);
+  // Funil de verdade: faixas CENTRALIZADAS e empilhadas, cada uma um trapézio
+  // cuja borda de cima tem a largura do degrau e a de baixo a do próximo — o
+  // contorno é o funil, e a largura continua proporcional ao volume (com um
+  // piso visual para o rótulo caber; o número real está sempre escrito).
+  const topo = Math.max(...steps.map(st => st.actual), 0);
+  const PISO = 26;
+  const larguraDe = (v: number) => (topo > 0 ? Math.max(PISO, (v / topo) * 100) : PISO);
 
   return (
     <PremiumPanel className="p-5">
@@ -4811,17 +4749,18 @@ function SimpleFunnel({ steps, totalRate, fonteLabel, onStageClick }: {
         </span>
       </div>
 
-      <div className="space-y-2">
+      <div className="space-y-1">
         {steps.map((step, i) => {
           const prev = steps[i - 1];
+          const next = steps[i + 1];
           const actualPct = i === 0 ? null : prev && prev.actual > 0 ? (step.actual / prev.actual) * 100 : 0;
           const plannedPct = i === 0 ? null : prev && prev.planned > 0 ? (step.planned / prev.planned) * 100 : 0;
           const isBottleneck = actualPct !== null && plannedPct !== null && plannedPct > 0 && actualPct < plannedPct * 0.85;
           const clicavel = !!onStageClick && !!ETAPAS_FUNIL[i];
-          const largura = topo > 0 ? Math.max(2, (step.actual / topo) * 100) : 2;
-          // Um tom só, opacidade caindo a cada degrau: a cor não compete com a
-          // largura, que é quem carrega o dado.
-          const opacidade = Math.max(0.35, 0.95 - i * 0.14);
+          const cima = larguraDe(step.actual);
+          const baixo = next ? larguraDe(next.actual) : Math.max(PISO * 0.8, cima * 0.82);
+          const cor = step.color || FUNNEL_STEP_COLORS[i % FUNNEL_STEP_COLORS.length];
+          const clip = `polygon(${50 - cima / 2}% 0, ${50 + cima / 2}% 0, ${50 + baixo / 2}% 100%, ${50 - baixo / 2}% 100%)`;
           return (
             <div
               key={step.label}
@@ -4833,21 +4772,45 @@ function SimpleFunnel({ steps, totalRate, fonteLabel, onStageClick }: {
               } : undefined}
               title={clicavel ? `Ver os leads de ${step.label.toLowerCase()}` : undefined}
               className={cn(
-                'grid grid-cols-[92px_1fr_auto] items-center gap-3 rounded-lg px-2 py-1.5 sm:grid-cols-[120px_1fr_auto]',
-                clicavel && 'cursor-pointer transition-colors hover:bg-white/[0.05] focus:outline-none focus-visible:ring-1 focus-visible:ring-[#6cff2f]',
+                'group grid grid-cols-[1fr_150px] items-center gap-3 sm:grid-cols-[1fr_190px]',
+                clicavel && 'cursor-pointer focus:outline-none focus-visible:ring-1 focus-visible:ring-[#6cff2f]',
               )}
             >
-              <p className="truncate text-[10px] font-black uppercase tracking-wider text-[#9aa4aa]">{step.label}</p>
-              <div className="min-w-0">
-                <div className="h-5 w-full rounded-[4px] bg-white/[0.03]">
-                  <div
-                    className="h-full rounded-[4px]"
-                    style={{ width: `${largura}%`, backgroundColor: '#55f52f', opacity: opacidade, transition: 'width 500ms ease' }}
-                  />
+              {/* Faixa do funil */}
+              <div className="relative h-[54px]">
+                <div
+                  className={cn('absolute inset-0 transition-[filter] duration-200', clicavel && 'group-hover:brightness-125')}
+                  style={{
+                    clipPath: clip,
+                    background: `linear-gradient(180deg, ${cor}, ${cor}bf)`,
+                    boxShadow: `0 0 18px ${cor}55`,
+                  }}
+                />
+                <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center leading-none">
+                  <span className="font-heading text-xl text-white" style={{ textShadow: '0 1px 3px rgba(0,0,0,0.7)' }}>
+                    {Math.round(step.actual).toLocaleString('pt-BR')}
+                  </span>
+                  <span className="mt-0.5 text-[9px] font-black uppercase tracking-wider text-white/90" style={{ textShadow: '0 1px 2px rgba(0,0,0,0.7)' }}>
+                    {step.label}
+                  </span>
                 </div>
-                {/* Quebra explicativa: no degrau de agendamentos, separa quem
-                    ainda vai vir de quem furou — sem isso a queda até
-                    comparecimentos parecia toda falta. */}
+              </div>
+
+              {/* Conversão do degrau + meta + quebra */}
+              <div className="min-w-0">
+                {actualPct !== null ? (
+                  <p className="whitespace-nowrap text-xs">
+                    <span className={cn('font-heading text-lg leading-none', isBottleneck ? 'text-red-400' : 'text-[#6cff2f]')} title="Conversão do degrau anterior para este">
+                      {actualPct.toFixed(1).replace('.', ',')}%
+                    </span>
+                    {plannedPct !== null && plannedPct > 0 && (
+                      <span className="ml-1.5 text-[10px] text-[#9aa4aa]" title="Conversão planejada para este degrau">meta {plannedPct.toFixed(0)}%</span>
+                    )}
+                    {isBottleneck && <span className="ml-1 text-[10px] font-black text-red-400" title="Gargalo: abaixo de 85% da conversão planejada">⚠ gargalo</span>}
+                  </p>
+                ) : (
+                  <p className="text-[10px] uppercase tracking-wider text-[#7c868c]">topo do funil</p>
+                )}
                 {step.detalhes && step.detalhes.length > 0 && (
                   <div className="mt-1 flex flex-wrap gap-1">
                     {step.detalhes.map((d) => (
@@ -4864,23 +4827,6 @@ function SimpleFunnel({ steps, totalRate, fonteLabel, onStageClick }: {
                       </span>
                     ))}
                   </div>
-                )}
-              </div>
-              <div className="flex min-w-[118px] items-baseline justify-end gap-2 whitespace-nowrap">
-                <span className={cn(
-                  'font-heading text-lg leading-none text-[#f4f7f8]',
-                  clicavel && 'underline decoration-white/20 decoration-dotted underline-offset-4',
-                )}>{Math.round(step.actual).toLocaleString('pt-BR')}</span>
-                {actualPct !== null && (
-                  <span className="text-[10px]">
-                    <span className={cn('font-black', isBottleneck ? 'text-red-400' : 'text-[#6cff2f]')} title="Conversão do degrau anterior para este">
-                      {actualPct.toFixed(1).replace('.', ',')}%
-                    </span>
-                    {plannedPct !== null && plannedPct > 0 && (
-                      <span className="ml-1 text-[#9aa4aa]" title="Conversão planejada para este degrau">meta {plannedPct.toFixed(0)}%</span>
-                    )}
-                    {isBottleneck && <span className="ml-1 font-black text-red-400" title="Gargalo: abaixo de 85% da conversão planejada">⚠</span>}
-                  </span>
                 )}
               </div>
             </div>
@@ -5409,9 +5355,6 @@ export default function GeneralDashboard() {
   const [balancesLoading, setBalancesLoading] = useState(false);
   const [dataCacheAge, setDataCacheAge] = useState<number | null>(null);
   const editMode = true;
-  const [aiInsights, setAiInsights] = useState<AiInsight[]>([]);
-  const [aiLoading, setAiLoading] = useState(false);
-  const [aiError, setAiError] = useState('');
   const [customizerOpen, setCustomizerOpen] = useState(false);
   const [dashboardPrefs, setDashboardPrefs] = useState<DashboardPrefs>(DEFAULT_DASHBOARD_PREFS);
   const [metaKpiLayout, setMetaKpiLayout] = useState<RglLayout[]>(DEFAULT_META_KPI_LAYOUT);
@@ -5872,19 +5815,6 @@ export default function GeneralDashboard() {
       .catch(() => setCrmSummary({}));
   }, [period, customDateFrom, customDateTo, faixaSel.from, faixaSel.to]);
 
-  // Load saved AI insights when clients/period change
-  useEffect(() => {
-    if (selectedIds.size === 0 || !customReady) { setAiInsights([]); return; }
-    const params = new URLSearchParams({ clientIds: [...selectedIds].join(','), period });
-    if (period === 'custom' && customDateFrom && customDateTo) {
-      params.set('period', `custom:${customDateFrom}:${customDateTo}`);
-    }
-    fetch(`/api/ai/insights?${params}`)
-      .then(r => r.ok ? r.json() as Promise<AiInsight[]> : [])
-      .then(setAiInsights)
-      .catch(() => setAiInsights([]));
-  }, [selectedIds, period, customDateFrom, customDateTo, customReady]);
-
   // Faturamento e leads por canal — de onde vem o dinheiro e de onde vem o lead.
   useEffect(() => {
     let cancelado = false;
@@ -6284,71 +6214,6 @@ export default function GeneralDashboard() {
   const shouldRenderSocialSection = (pageInsightsLoading || pageInsights.some(p => p.facebook ?? p.instagram)) && hasVisibleSocialCards;
   const shouldRenderCrmSection = dashboardPrefs.showCrmPanel && selectedIds.size > 0 && hasVisibleCrmCards;
 
-  async function analyzeWithAI() {
-    if (selectedIds.size === 0) return;
-    setAiLoading(true);
-    setAiError('');
-    try {
-      const effectivePeriod = period === 'custom' && customDateFrom && customDateTo
-        ? `custom:${customDateFrom}:${customDateTo}`
-        : period;
-
-      const metaPayload = metaSpend > 0 ? {
-        spend: metaSpend, impressions: metaImpressions, clicks: metaClicks,
-        leads: metaLeads, ctr: metaCtr, cpc: metaCpc, cpl: avgCpl,
-      } : null;
-
-      const googlePayload = googleCost > 0 ? {
-        cost: googleCost, impressions: googleImpressions, clicks: googleClicks,
-        conversions: googleConv, ctr: googleCtrValue, cpc: googleCpc, cpa: avgCpa,
-      } : null;
-
-      const res = await fetch('/api/ai/insights', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          clientIds: [...selectedIds],
-          clientNames: selectedClients.map(c => c.name),
-          period: effectivePeriod,
-          meta: metaPayload,
-          google: googlePayload,
-          topCreatives: creatives.slice(0, 5).map(c => ({
-            name: c.adName ?? '',
-            spend: c.spend ?? 0,
-            leads: c.leads ?? 0,
-            cpl: c.cpl ?? 0,
-            impressions: c.impressions ?? 0,
-          })),
-        }),
-      });
-      const data = await res.json() as AiInsight[] | { error: string };
-      if (!res.ok) { setAiError((data as { error: string }).error); return; }
-      setAiInsights(data as AiInsight[]);
-    } catch (e) {
-      setAiError(String(e));
-    } finally {
-      setAiLoading(false);
-    }
-  }
-
-  async function dismissInsight(id: string) {
-    setAiInsights(prev => prev.filter(i => i.id !== id));
-    await fetch('/api/ai/insights', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id, status: 'dismissed' }),
-    });
-  }
-
-  async function acceptInsight(id: string) {
-    setAiInsights(prev => prev.map(i => i.id === id ? { ...i, status: 'accepted' } : i));
-    await fetch('/api/ai/insights', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id, status: 'accepted' }),
-    });
-  }
-
   const qualified = funilCrm.qualificados;
   const appointments = funilCrm.agendamentos;
   const showUps = funilCrm.comparecimentos;
@@ -6728,12 +6593,8 @@ export default function GeneralDashboard() {
   // ── Blocos da página ──────────────────────────────────────────────────────
   // Montados uma vez e posicionados conforme o modo: food mantém a página
   // única de sempre; lead-gen distribui os mesmos blocos nas abas.
-  const blocoAi = (
+  const blocoAlertas = (
     <>
-      {aiInsights.length > 0 && (
-        <AiRecommendationsBox insights={aiInsights} loading={aiLoading} onAnalyze={analyzeWithAI} />
-      )}
-      {aiError && <div className="rounded-xl border border-red-400/30 bg-red-500/10 px-4 py-3 text-xs text-red-300">{aiError}</div>}
       {/* A faixa lista O QUE está fora do padrão — antes só dizia "N alertas". */}
       {!metricsLoading && alerts.length > 0 && (
         <div className="rounded-[14px] border border-amber-400/20 bg-amber-400/[0.06] px-4 py-3">
@@ -6841,37 +6702,43 @@ export default function GeneralDashboard() {
                     )}
                   </div>
                   <div className="px-4 pb-4">
-                    <div className="grid gap-2 sm:grid-cols-4 lg:grid-cols-8">
-                      {/* ⚠️ O valor grande é o TOTAL de seguidores (snapshot), mas a
-                          evolução é a do GANHO no período contra o ganho do período
-                          anterior — mesma semântica dos vizinhos desta linha. Comparar
-                          o total daria sempre 0%: `followers_count` ignora a janela de
-                          datas e volta igual nas duas. O `sub` diz a que o % se refere.
-                          Sem sinal do metric nas duas janelas, não inventa: fica sem
-                          linha de apoio e sem variação. */}
-                      <MiniPlatformMetric
+                    {/* Mesmo padrão da Landing page: 4 números grandes + faixa
+                        compacta — 8 caixinhas numa linha ficavam espremidas e
+                        desproporcionais aos outros cards da página. */}
+                    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                      {/* ⚠️ Seguidores: o valor grande é o TOTAL (snapshot); a
+                          variação é a do GANHO no período contra o ganho anterior
+                          — `followers_count` ignora a janela e volta igual nas duas. */}
+                      <IgKpi
                         label="Seguidores"
-                        value={pageInsightsLoading ? '…' : igFollow > 0 ? premiumValue(igFollow) : '—'}
                         icon={Users}
+                        valor={pageInsightsLoading ? '…' : igFollow > 0 ? premiumValue(igFollow) : '—'}
                         sub={pageInsightsLoading || (igFollowGain === 0 && prevFollowGain === 0)
                           ? undefined
                           : `${igFollowGain >= 0 ? '+' : ''}${premiumValue(igFollowGain)} no período`
-                            // Base anterior ≤ 0 (a conta perdeu seguidores antes, ou
-                            // não tinha a métrica): a porcentagem seria indefinida ou
-                            // absurda, então o comparativo vira texto em vez de sumir.
                             + (chg(igFollowGain, prevFollowGain) === null && prevFollowGain !== 0
                               ? ` · antes ${prevFollowGain >= 0 ? '+' : ''}${premiumValue(prevFollowGain)}`
                               : '')}
                         subRuim={igFollowGain < 0}
-                        change={chg(igFollowGain, prevFollowGain)}
+                        variacao={chg(igFollowGain, prevFollowGain)}
+                        comparacao="ganho vs período anterior"
                       />
-                      <MiniPlatformMetric label="Alcance" value={pageInsightsLoading ? '…' : igReach > 0 ? premiumValue(igReach) : '—'} icon={Eye} change={chg(igReach, prevReach)} comparacao={rotuloComp} />
-                      <MiniPlatformMetric label="Cliques Bio" value={pageInsightsLoading ? '…' : igClicks > 0 ? premiumValue(igClicks) : '—'} icon={ExternalLink} change={chg(igClicks, prevClicks)} comparacao={rotuloComp} />
-                      <MiniPlatformMetric label="Engajamento" value={pageInsightsLoading ? '…' : igEngaged > 0 ? premiumValue(igEngaged) : '—'} icon={Heart} change={chg(igEngaged, prevEngaged)} comparacao={rotuloComp} />
-                      <MiniPlatformMetric label="Visualizações" value={pageInsightsLoading ? '…' : igViews > 0 ? premiumValue(igViews) : '—'} icon={BarChart3} change={chg(igViews, prevViews)} comparacao={rotuloComp} />
-                      <MiniPlatformMetric label="Interações" value={pageInsightsLoading ? '…' : igInteract > 0 ? premiumValue(igInteract) : '—'} icon={Zap} change={chg(igInteract, prevInteract)} comparacao={rotuloComp} />
-                      <MiniPlatformMetric label="Salvamentos" value={pageInsightsLoading ? '…' : igSaves > 0 ? premiumValue(igSaves) : '—'} icon={Bookmark} change={chg(igSaves, prevSaves)} comparacao={rotuloComp} />
-                      <MiniPlatformMetric label="Visitas Perfil" value={pageInsightsLoading ? '…' : igPViews > 0 ? premiumValue(igPViews) : '—'} icon={Monitor} change={chg(igPViews, prevPViews)} comparacao={rotuloComp} />
+                      <IgKpi label="Alcance" icon={Eye} valor={pageInsightsLoading ? '…' : igReach > 0 ? premiumValue(igReach) : '—'} variacao={chg(igReach, prevReach)} comparacao={rotuloComp} sub="contas alcançadas" />
+                      <IgKpi
+                        label="Engajamento"
+                        icon={Heart}
+                        valor={pageInsightsLoading ? '…' : igEngaged > 0 ? premiumValue(igEngaged) : '—'}
+                        variacao={chg(igEngaged, prevEngaged)}
+                        comparacao={rotuloComp}
+                        sub={igReach > 0 && igEngaged > 0 ? `${((igEngaged / igReach) * 100).toFixed(1).replace('.', ',')}% do alcance engajou` : 'contas engajadas'}
+                      />
+                      <IgKpi label="Visualizações" icon={BarChart3} valor={pageInsightsLoading ? '…' : igViews > 0 ? premiumValue(igViews) : '—'} variacao={chg(igViews, prevViews)} comparacao={rotuloComp} sub="vezes que o conteúdo foi visto" />
+                    </div>
+                    <div className="mt-3 grid grid-cols-2 gap-px overflow-hidden rounded-[12px] border border-white/[0.07] bg-white/[0.07] md:grid-cols-4">
+                      <IgMini label="Cliques na bio" icon={ExternalLink} valor={pageInsightsLoading ? '…' : igClicks > 0 ? premiumValue(igClicks) : '—'} variacao={chg(igClicks, prevClicks)} />
+                      <IgMini label="Interações" icon={Zap} valor={pageInsightsLoading ? '…' : igInteract > 0 ? premiumValue(igInteract) : '—'} variacao={chg(igInteract, prevInteract)} />
+                      <IgMini label="Salvamentos" icon={Bookmark} valor={pageInsightsLoading ? '…' : igSaves > 0 ? premiumValue(igSaves) : '—'} variacao={chg(igSaves, prevSaves)} />
+                      <IgMini label="Visitas ao perfil" icon={Monitor} valor={pageInsightsLoading ? '…' : igPViews > 0 ? premiumValue(igPViews) : '—'} variacao={chg(igPViews, prevPViews)} />
                     </div>
                   </div>
                 </PremiumPanel>
@@ -7242,15 +7109,6 @@ export default function GeneralDashboard() {
           {/* "Métricas" e "Copiar layout" saíram: configuravam componentes que
               não são mais renderizados (grades RGL antigas) — clicar não mudava
               nada na tela. Os componentes continuam no arquivo, sem botão. */}
-          <button
-            type="button"
-            onClick={analyzeWithAI}
-            disabled={aiLoading || selectedIds.size === 0 || metricsLoading}
-            className="inline-flex items-center gap-1.5 rounded-[10px] border border-[#6cff2f]/35 bg-[#6cff2f]/10 px-4 py-2 text-xs font-bold text-[#6cff2f] hover:bg-[#6cff2f]/20 disabled:opacity-40"
-          >
-            {aiLoading ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
-            {aiLoading ? 'Analisando...' : 'Analisar com IA'}
-          </button>
           <Avatar className="h-9 w-9 border border-white/[0.08]">
             <AvatarFallback className="bg-[#78d957] text-sm font-black text-black">
               {(session?.name ?? 'M').slice(0, 1).toUpperCase()}
@@ -7328,7 +7186,7 @@ export default function GeneralDashboard() {
           <div className="space-y-5">
             {modoFood ? (
               <>
-                {blocoAi}
+                {blocoAlertas}
 
             {/* ── FOOD: um grid único, dirigido pelo MODELO ──
                 ⚠️ A grade é por ELEMENTO: cada métrica (não cada bloco) é um
@@ -7478,7 +7336,7 @@ export default function GeneralDashboard() {
                         {temGraficoCpl && <CplDiarioChart dias={diasSel} gasto={gastoDia} leads={leadsDia} metaCpl={cplMetaSel} />}
                       </div>
                     )}
-                    {blocoAi}
+                    {blocoAlertas}
                     <div className="grid gap-4 xl:grid-cols-[1.08fr_0.92fr]">
                       {deliverySoloId ? (
                         <DeliveryResumoCard clientId={deliverySoloId} from={deliveryRange.from} to={deliveryRange.to} />
