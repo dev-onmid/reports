@@ -870,7 +870,7 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
             steps={[
               {
                 label: 'Ativar',
-                guide: 'Ligue o interruptor abaixo (sem ele, NADA é enviado — mesmo com tudo preenchido).\n1. business.facebook.com → "Gerenciador de Eventos" → "Conjuntos de dados"\n2. Selecione o conjunto do cliente\n3. Na Visão geral, coluna da direita: copie a "Identificação do conjunto de dados" (ex: 221663293188760) — esse é o Pixel ID',
+                guide: 'Ligue o interruptor abaixo (sem ele, NADA é enviado — mesmo com tudo preenchido).\n1. business.facebook.com → "Gerenciador de Eventos" → "Conjuntos de dados"\n2. Selecione o conjunto do cliente — se ainda não existe, clique em "Conectar fonte de dados"\n3. Na tela "Conectar uma nova fonte de dados", escolha "Mensagens" (conversas no WhatsApp, Messenger e Instagram) e conecte a MESMA Página que roda os anúncios de WhatsApp\n4. Na Visão geral, coluna da direita: copie a "Identificação do conjunto de dados" (ex: 221663293188760) — esse é o Pixel ID\n⚠️ Não escolha "Web", "App", "Offline" nem "CRM": só o tipo "Mensagens" recebe conversão de conversa. Nos outros, a Meta responde 200 OK e o evento não aparece na campanha.',
                 body: (
                   <div className="space-y-4">
                     <Toggle value={convConfig.meta_ativo} onChange={v => setConvConfig(p => ({ ...p, meta_ativo: v }))} label="Ativar Meta CAPI" />
