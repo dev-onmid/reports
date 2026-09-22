@@ -16,6 +16,7 @@ import SultsCard from './sults-card';
 import LpOrigensCard from './lp-origens-card';
 import { ClientDeliveryTab } from './delivery-tab';
 import { LandingPagesTab } from './landing-pages-tab';
+import { EVENTOS_MENSAGEM_META, eventoMensagemMeta } from '@/lib/meta-eventos-mensagem';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -1005,7 +1006,7 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
             onFinish={() => setGuia(null)}
             steps={[{
               label: 'Eventos',
-              guide: 'Receita: quando o lead for arrastado pra etapa X no CRM, o sistema avisa a Meta/Google sozinho.\n1. Escolha a etapa do funil (a lista já mostra as etapas reais deste cliente)\n2. Evento Meta: use "LeadSubmitted" pra lead e "Purchase" pra venda\n3. Label Google: só se também quiser contar no Google Ads (nome da ação de conversão) — senão deixe vazio\n4. Clique em Adicionar — a linha já fica valendo na hora\nExemplos prontos: etapa "Agendou" → LeadSubmitted · etapa "Fechou" → Purchase.\n⚠️ No WhatsApp o evento de lead é "LeadSubmitted" — não "Lead", que é do pixel de site.',
+              guide: 'Receita: quando o lead for arrastado pra etapa X no CRM, o sistema avisa a Meta/Google sozinho.\n1. Escolha a etapa do funil (a lista já mostra as etapas reais deste cliente)\n2. Evento Meta: escolha na lista — "LeadSubmitted" pra lead, "QualifiedLead" pra lead qualificado, "Purchase" pra venda\n3. Label Google: só se também quiser contar no Google Ads (nome da ação de conversão) — senão deixe vazio\n4. Clique em Adicionar — a linha já fica valendo na hora\nExemplos prontos: etapa "Agendou" → LeadSubmitted · etapa "Fechou" → Purchase.\n⚠️ No WhatsApp o evento de lead é "LeadSubmitted" — não "Lead", que é do pixel de site.',
               body: (
                 <div className="space-y-4">
             {eventosCustom.length > 0 && (
@@ -1022,7 +1023,12 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
                     {eventosCustom.map(ev => (
                       <tr key={ev.id} className="border-b border-border/40 last:border-0 hover:bg-muted/10">
                         <td className="px-3 py-2 font-mono font-medium">{ev.status_gatilho}</td>
-                        <td className="px-3 py-2 text-muted-foreground">{ev.meta_event_name || '—'}</td>
+                        <td className="px-3 py-2 text-muted-foreground">
+                          {ev.meta_event_name || '—'}
+                          {ev.meta_event_name && !eventoMensagemMeta(ev.meta_event_name) && (
+                            <span title="A Meta não aceita este nome em eventos de WhatsApp — ele não é enviado. Recrie a linha com um evento da lista." className="ml-1.5 rounded bg-red-500/10 px-1 py-0.5 text-[9px] font-bold uppercase text-red-400">inválido</span>
+                          )}
+                        </td>
                         <td className="px-3 py-2 font-mono text-muted-foreground text-[11px]">{ev.google_conversion_label || '—'}</td>
                         <td className="px-3 py-2">
                           <div onClick={() => toggleEvento(ev)} className={cn('relative h-4 w-7 rounded-full cursor-pointer transition-colors', ev.ativo ? 'bg-primary' : 'bg-muted')}>
@@ -1058,11 +1064,11 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
               </div>
               <div>
                 <label className="mb-1 block text-[10px] font-semibold text-muted-foreground uppercase">Evento Meta</label>
-                <input list="meta-event-sugestoes" value={newEvento.meta_event_name} onChange={e => setNewEvento(p => ({ ...p, meta_event_name: e.target.value }))} placeholder="Ex: LeadSubmitted" className="w-full rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-mono outline-none focus:border-primary" />
-                <datalist id="meta-event-sugestoes">
-                  <option value="LeadSubmitted">Lead (WhatsApp — use este, não &quot;Lead&quot;)</option>
-                  <option value="Purchase">Compra</option>
-                </datalist>
+                {/* Lista FECHADA: evento de WhatsApp só aceita estes nomes — qualquer outro volta 400 da Meta. */}
+                <select value={newEvento.meta_event_name} onChange={e => setNewEvento(p => ({ ...p, meta_event_name: e.target.value }))} className="w-full rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-mono outline-none focus:border-primary">
+                  <option value="">Nenhum</option>
+                  {EVENTOS_MENSAGEM_META.map(ev => <option key={ev} value={ev}>{ev}</option>)}
+                </select>
               </div>
               <div>
                 <label className="mb-1 block text-[10px] font-semibold text-muted-foreground uppercase">Label Google</label>

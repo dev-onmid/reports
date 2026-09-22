@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'crypto';
 import type { Pool } from 'pg';
+import { eventoMensagemMeta } from '@/lib/meta-eventos-mensagem';
 import {
   resolveGoogleAdsAccess, resolveConversionAction, uploadClickConversion,
   type ClickIds,
@@ -175,6 +176,16 @@ export async function enviarEventoMeta(
   valor?: number | null,
 ): Promise<void> {
   try {
+    // business_messaging só aceita a lista fechada de eventos da Meta — 'Lead',
+    // 'Contact' etc. voltam 400 (subcode 2804066). Traduz o nome interno para o
+    // oficial; sem equivalente, não envia (e não polui o log com erro previsível).
+    // O log segue com o nome INTERNO: é por ele que hasSuccessfulConversion deduplica.
+    const eventoOficial = eventoMensagemMeta(eventName);
+    if (!eventoOficial) {
+      console.warn(`[enviarEventoMeta] '${eventName}' não é evento de mensagem aceito pela Meta — não enviado`);
+      return;
+    }
+
     await ensureConversionSchema(pool);
     let cfg = await loadConfig(pool, clientId);
     if (!cfg?.meta_ativo || !cfg.meta_pixel_id || !cfg.meta_access_token) {
@@ -203,7 +214,7 @@ export async function enviarEventoMeta(
     const phoneHash = hashPhone(normalizedPhone);
 
     // Purchase: valor é obrigatório e não pode ser zero
-    if (eventName === 'Purchase') {
+    if (eventoOficial === 'Purchase') {
       if (!valor || valor <= 0) {
         await logConversion(pool, {
           clientId, leadId: leadData.id, plataforma: 'meta', eventName, eventId,
@@ -226,7 +237,7 @@ export async function enviarEventoMeta(
     if (leadData.ctwaClid) userData.ctwa_clid = leadData.ctwaClid;
 
     const eventData: Record<string, unknown> = {
-      event_name: eventName,
+      event_name: eventoOficial,
       event_time: Math.floor(Date.now() / 1000),
       event_id: eventId,
       action_source: 'business_messaging',
@@ -234,7 +245,7 @@ export async function enviarEventoMeta(
       user_data: userData,
       custom_data: {
         currency: 'BRL',
-        value: eventName === 'Purchase' ? Number(valor!.toFixed(2)) : 0,
+        value: eventoOficial === 'Purchase' ? Number(valor!.toFixed(2)) : 0,
       },
     };
 
