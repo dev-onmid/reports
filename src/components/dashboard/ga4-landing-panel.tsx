@@ -374,16 +374,25 @@ export function resumoTotais(t: Ga4Totais) {
   return `${fmtN(t.sessoes)} sessões · ${fmtN(t.contatos)} contatos · ${fmtPct(t.taxaContato)}`;
 }
 
-type Aba = 'geral' | 'pago' | 'audiencia' | 'comportamento';
-const ABAS: Array<{ id: Aba; rotulo: string }> = [
-  { id: 'geral', rotulo: 'Visão geral' },
-  { id: 'pago', rotulo: 'Tráfego pago' },
-  { id: 'audiencia', rotulo: 'Audiência' },
-  { id: 'comportamento', rotulo: 'Comportamento' },
-];
+/**
+ * Divisor de seção — não há abas: as quatro seções ficam SOLTAS na dashboard,
+ * uma sob a outra (pedido do Matheus: "não quero nada escondido para ficar
+ * clicando"). O rótulo verde discreto separa as lâminas sem competir com o
+ * título "Landing page" do painel; seção sem dado nenhum nem aparece.
+ */
+function Secao({ titulo, children }: { titulo: string; children: ReactNode }) {
+  return (
+    <section className="space-y-4">
+      <div className="flex items-center gap-2 pt-1">
+        <span className="h-3.5 w-1 rounded-full bg-[#6cff2f]" />
+        <h4 className="text-xs font-black uppercase tracking-[0.12em] text-[#9aa4aa]">{titulo}</h4>
+      </div>
+      {children}
+    </section>
+  );
+}
 
 export function Ga4LandingPanel({ dados, loading, aviso }: { dados: Ga4Consolidado | null; loading: boolean; aviso?: string }) {
-  const [aba, setAba] = useState<Aba>('geral');
   if (loading) return <p className="px-4 pb-4 text-xs text-[#9aa4aa]">Carregando Google Analytics…</p>;
   if (!dados) return <p className="px-4 pb-4 text-xs text-[#9aa4aa]">{aviso ?? 'Sem propriedade GA4 vinculada a este cliente.'}</p>;
   const { atual: a, anterior: b } = dados;
@@ -401,19 +410,14 @@ export function Ga4LandingPanel({ dados, loading, aviso }: { dados: Ga4Consolida
   const temContato = origContato.some(f => f.valor > 0);
   const origSessao = dados.origens.map(o => ({ label: `${o.origem} / ${o.midia}`, valor: o.sessoes }));
 
-  return (
-    <div className="px-4 pb-4 space-y-4">
-      <div className="flex gap-1 overflow-x-auto border-b border-white/[0.07]">
-        {ABAS.map(t => (
-          <button key={t.id} type="button" onClick={() => setAba(t.id)}
-            className={`-mb-px whitespace-nowrap border-b-2 px-3 py-2 text-[11px] font-black uppercase tracking-[0.07em] transition-colors ${aba === t.id ? 'border-[#6cff2f] text-[#f4f7f8]' : 'border-transparent text-[#7c868c] hover:text-[#dce4e8]'}`}>
-            {t.rotulo}
-          </button>
-        ))}
-      </div>
+  // Seção sem dado nenhum não aparece — nada de lâmina vazia.
+  const temPago = pago.canais.length + pago.googleAds.length + pago.campanhas.length + pago.palavras.length + pago.termos.length > 0;
+  const temAudiencia = au.dispositivos.length + au.cidades.length + au.novosRecorrentes.length + au.idades.length + au.generos.length + au.semanaHora.length > 0;
+  const temComportamento = co.rolagem.length + co.secoes.length + co.paginasEntrada.length + co.videos.length + (co.funil.formInicio + co.funil.leadForm + co.funil.leadConfirmado) > 0;
 
-      {aba === 'geral' && (
-        <>
+  return (
+    <div className="px-4 pb-4 space-y-6">
+      <Secao titulo="Visão geral">
           <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 xl:grid-cols-6">
             <Kpi rotulo="Sessões" valor={fmtN(a.sessoes)} atual={a.sessoes} anterior={b.sessoes} sub={`${fmtN(a.usuarios)} usuários`} icon={MousePointerClick} />
             <Kpi rotulo="Contatos" valor={fmtN(a.contatos)} atual={a.contatos} anterior={b.contatos} sub="WhatsApp + telefone + formulário" icon={MessagesSquare} />
@@ -449,10 +453,10 @@ export function Ga4LandingPanel({ dados, loading, aviso }: { dados: Ga4Consolida
               <Barras key={d.param} titulo={d.rotulo} linhas={d.linhas} total={d.param === 'cta_id' ? a.cta : a.whatsapp} />
             ))}
           </div>
-        </>
-      )}
+      </Secao>
 
-      {aba === 'pago' && (
+      {temPago && (
+        <Secao titulo="Tráfego pago">
         <div className="grid gap-4 xl:grid-cols-2">
           {semVinculoAds && (
             <p className="rounded-lg border border-amber-300/30 bg-amber-300/[0.06] px-3 py-2 text-[11px] text-amber-200 xl:col-span-2">
@@ -470,11 +474,12 @@ export function Ga4LandingPanel({ dados, loading, aviso }: { dados: Ga4Consolida
           <ListaBusca titulo="Palavras-chave" rotulo="Palavra-chave" linhas={pago.palavras} />
           <ListaBusca titulo="Termos pesquisados" rotulo="O que a pessoa digitou" linhas={pago.termos}
             dica="O Google esconde termos de pouco volume e da Performance Max — a soma fica abaixo do total." />
-          {pago.canais.length + pago.googleAds.length + pago.campanhas.length === 0 && <p className="text-xs text-[#7c868c]">Sem dado no período.</p>}
         </div>
+        </Secao>
       )}
 
-      {aba === 'audiencia' && (
+      {temAudiencia && (
+        <Secao titulo="Audiência">
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           <TabelaSeg titulo="Dispositivo" rotulo="Aparelho" linhas={au.dispositivos.map(traduz(DISPOSITIVOS))} colunas={['sessoes', 'engaj', 'wa', 'form', 'tel', 'taxa']} />
           <TabelaSeg titulo="Novos x recorrentes" rotulo="Visitante" linhas={au.novosRecorrentes.map(traduz(NOVOS))} colunas={['sessoes', 'engaj', 'wa', 'form', 'tel', 'taxa']}
@@ -487,17 +492,19 @@ export function Ga4LandingPanel({ dados, loading, aviso }: { dados: Ga4Consolida
           )}
           <MapaSemanaHora celulas={au.semanaHora} />
         </div>
+        </Secao>
       )}
 
-      {aba === 'comportamento' && (
+      {temComportamento && (
+        <Secao titulo="Comportamento">
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           <Barras titulo="Até onde rolam" dica="% dos visitantes que chegaram a cada ponto da página." linhas={co.rolagem} total={visitantes} rotuloValor={v => `${v}% da página`} />
           <Barras titulo="Seções vistas" dica="% dos visitantes que viram cada seção." linhas={co.secoes} total={visitantes} />
           <Funil f={co.funil} />
           <TabelaSeg titulo="Página de entrada" rotulo="Página" linhas={co.paginasEntrada} colunas={['sessoes', 'engaj', 'tempo', 'wa', 'form', 'tel', 'taxa']} />
           {co.videos.length > 0 && <Barras titulo="Vídeos assistidos" linhas={co.videos} total={a.video} />}
-          <Barras titulo="Onde clicam para falar" linhas={dados.posicoes} total={totalContatos} />
         </div>
+        </Secao>
       )}
     </div>
   );
