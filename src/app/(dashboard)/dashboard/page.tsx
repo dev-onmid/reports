@@ -5379,7 +5379,8 @@ function TabelaRegioes({ linhas, semRegiao, total }: { linhas: LinhaTabelaRegiao
     investimento: a.investimento + l.investimento, campanhas: a.campanhas + l.campanhas, leadsPlataforma: a.leadsPlataforma + l.leadsPlataforma,
     leads: a.leads + (l.crm?.leads ?? 0), agendamentos: a.agendamentos + (l.crm?.agendamentos ?? 0),
     comparecimentos: a.comparecimentos + (l.crm?.comparecimentos ?? 0), fechamentos: a.fechamentos + (l.crm?.fechamentos ?? 0),
-  }), { investimento: 0, campanhas: 0, leadsPlataforma: 0, leads: 0, agendamentos: 0, comparecimentos: 0, fechamentos: 0 });
+    receita: a.receita + (l.crm?.receita ?? 0),
+  }), { investimento: 0, campanhas: 0, leadsPlataforma: 0, leads: 0, agendamentos: 0, comparecimentos: 0, fechamentos: 0, receita: 0 });
   const razao = (inv: number, den: number) => (inv > 0 && den > 0 ? premiumValue(inv / den, 'currency') : '—');
   const n = (v: number | undefined | null, zeroTraco = false) => (v === null || v === undefined ? '—' : v === 0 && zeroTraco ? '—' : premiumValue(v));
   const Cel = ({ children, forte, className }: { children: ReactNode; forte?: boolean; className?: string }) => (
@@ -5388,10 +5389,13 @@ function TabelaRegioes({ linhas, semRegiao, total }: { linhas: LinhaTabelaRegiao
   const Linha = ({ l }: { l: LinhaTabelaRegiao }) => {
     const c = l.crm;
     const nacional = l.tipo === 'nacional';
+    // Linha VERDE quando a região vendeu (pedido do Matheus): o olho acha na
+    // hora onde o dinheiro voltou.
+    const temVenda = !nacional && (c?.fechamentos ?? 0) > 0;
     return (
-      <tr className={cn(nacional && 'text-[#9aa4aa]')}>
-        <td className="py-2.5 pr-3">
-          <span className={cn('font-bold', nacional ? 'text-[#9aa4aa]' : 'text-[#f4f7f8]')}>{l.rotulo}</span>
+      <tr className={cn(nacional && 'text-[#9aa4aa]', temVenda && 'bg-[#6cff2f]/[0.08]')}>
+        <td className="py-2.5 pl-2 pr-3">
+          <span className={cn('font-bold', nacional ? 'text-[#9aa4aa]' : temVenda ? 'text-[#6cff2f]' : 'text-[#f4f7f8]')}>{l.rotulo}</span>
           {l.campanhas > 0 && <span className="ml-1.5 text-[10px] text-[#6c767c]">{l.campanhas} camp.</span>}
         </td>
         <Cel forte>{l.investimento > 0 ? premiumValue(l.investimento, 'currency') : '—'}</Cel>
@@ -5403,6 +5407,7 @@ function TabelaRegioes({ linhas, semRegiao, total }: { linhas: LinhaTabelaRegiao
         <Cel>{nacional ? '—' : razao(l.investimento, c?.comparecimentos ?? 0)}</Cel>
         <Cel forte>{nacional ? '—' : n(c?.fechamentos ?? 0)}</Cel>
         <Cel forte>{nacional ? '—' : razao(l.investimento, c?.fechamentos ?? 0)}</Cel>
+        <Cel forte className={cn(temVenda && 'text-[#6cff2f]')}>{nacional || !(c?.receita) ? '—' : premiumValue(c.receita, 'currency')}</Cel>
       </tr>
     );
   };
@@ -5414,10 +5419,10 @@ function TabelaRegioes({ linhas, semRegiao, total }: { linhas: LinhaTabelaRegiao
         <span className={T.cardSub}>campanha com a região no nome × leads com DDD/cidade da região</span>
       </div>
       <div className="overflow-x-auto">
-        <table className={cn('w-full min-w-[980px] text-left tabular-nums', T.tabelaCel)}>
+        <table className={cn('w-full min-w-[1080px] text-left tabular-nums', T.tabelaCel)}>
           <thead className={T.tabelaCab}>
             <tr>
-              <th className="py-2">Região</th>
+              <th className="py-2 pl-2">Região</th>
               {cab('Investimento', 'Gasto das campanhas com a região no nome')}
               {cab('Leads camp.', 'Leads/conversões que a plataforma reportou para essas campanhas')}
               {cab('Leads CRM', 'Leads no CRM com DDD/cidade da região')}
@@ -5427,13 +5432,14 @@ function TabelaRegioes({ linhas, semRegiao, total }: { linhas: LinhaTabelaRegiao
               {cab('Custo/reunião', 'Investimento ÷ reuniões feitas')}
               {cab('Vendas', 'Fechamentos no CRM')}
               {cab('CAC', 'Investimento ÷ vendas')}
+              {cab('Faturamento', 'Receita das vendas no CRM da região')}
             </tr>
           </thead>
           <tbody className="divide-y divide-white/[0.07]">
             {linhas.map(l => <Linha key={l.key} l={l} />)}
             {regionais.length > 1 && (
               <tr className="border-t border-white/[0.12] text-[#f4f7f8]">
-                <td className="py-2.5 pr-3 font-black">Total regional</td>
+                <td className="py-2.5 pl-2 pr-3 font-black">Total regional</td>
                 <Cel forte>{soma.investimento > 0 ? premiumValue(soma.investimento, 'currency') : '—'}</Cel>
                 <Cel forte>{soma.campanhas > 0 ? n(soma.leadsPlataforma) : '—'}</Cel>
                 <Cel forte>{n(soma.leads)}</Cel>
@@ -5443,6 +5449,7 @@ function TabelaRegioes({ linhas, semRegiao, total }: { linhas: LinhaTabelaRegiao
                 <Cel forte>{razao(soma.investimento, soma.comparecimentos)}</Cel>
                 <Cel forte>{n(soma.fechamentos)}</Cel>
                 <Cel forte>{razao(soma.investimento, soma.fechamentos)}</Cel>
+                <Cel forte className={cn(soma.receita > 0 && 'text-[#6cff2f]')}>{soma.receita > 0 ? premiumValue(soma.receita, 'currency') : '—'}</Cel>
               </tr>
             )}
           </tbody>
