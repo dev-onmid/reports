@@ -68,7 +68,8 @@ import type { TopCreative } from '@/app/api/meta/top-creatives/route';
 import type { PageInsightsResult, InstagramPageData } from '@/app/api/meta/page-insights/route';
 import type { FaturamentoPorOrigem, LeadsPorCanal } from '@/app/api/crm/por-canal/route';
 import { progressoVisual } from '@/lib/progresso-cor';
-import { montarTabelaRegioes, type LinhaTabelaRegiao } from '@/lib/regiao-recorte';
+import { montarTabelaRegioes, regiaoDaCampanha, type LinhaTabelaRegiao, type FunilRegiao } from '@/lib/regiao-recorte';
+import type { RegiaoCampanhas, RegiaoCampanhasResposta } from '@/app/api/meta/regiao-campanhas/route';
 import type { PorRegiaoResposta } from '@/app/api/crm/por-regiao/route';
 import type { CampaignPerformance } from '@/app/api/campaigns/route';
 import type { GoogleKeyword } from '@/app/api/google/keywords/route';
@@ -5371,10 +5372,53 @@ function TrafegoResumoTable({ linhas, colunas, comparacao }: { linhas: LinhaTraf
 // Uma linha por região: o que a campanha da região custou/trouxe (mídia, pelo
 // NOME da campanha) × o funil dos leads com DDD/cidade daquela região (CRM).
 // Pedido do Matheus (CondoStore): "medir o que veio da campanha da região
-// comparado com os leads que chegaram" — com reuniões, vendas e CAC.
-function TabelaRegioes({ linhas, semRegiao, total }: { linhas: LinhaTabelaRegiao[]; semRegiao: number; total: number }) {
+// comparado com os leads que chegaram" — com reuniões, vendas, CAC e faturamento.
+// A campanha NACIONAL (sem região no nome) não fica opaca: a Meta sabe em que
+// estado cada resultado foi gerado (breakdowns=region), então ela abre em
+// sub-linhas por UF.
+type ChaveOrdem = 'investimento' | 'leadsPlataforma' | 'leads' | 'cpl' | 'agendamentos' | 'comparecimentos' | 'custoReuniao' | 'fechamentos' | 'cac' | 'receita';
+
+function TabelaRegioes({ linhas, semRegiao, total, nacionalPorUf, ufs }: {
+  linhas: LinhaTabelaRegiao[];
+  semRegiao: number;
+  total: number;
+  /** Breakdown por UF das campanhas nacionais/sem região (Meta). null = não carregou. */
+  nacionalPorUf: RegiaoCampanhas[] | null;
+  /** Funil do CRM por UF — CRM das sub-linhas nacionais. */
+  ufs: FunilRegiao[];
+}) {
+  const [ordem, setOrdem] = useState<{ chave: ChaveOrdem; desc: boolean }>({ chave: 'investimento', desc: true });
+  const [expandido, setExpandido] = useState(false);
+  const LIMITE = 6;
+
   const regionais = linhas.filter(l => l.tipo !== 'nacional');
+  const nacional = linhas.find(l => l.tipo === 'nacional') ?? null;
   const temUfECidade = regionais.some(l => l.tipo === 'uf') && regionais.some(l => l.tipo === 'cidade');
+  const razaoNum = (inv: number, den: number) => (inv > 0 && den > 0 ? inv / den : 0);
+  const valorDe = (l: LinhaTabelaRegiao, k: ChaveOrdem): number => {
+    const c = l.crm;
+    switch (k) {
+      case 'investimento': return l.investimento;
+      case 'leadsPlataforma': return l.leadsPlataforma;
+      case 'leads': return c?.leads ?? 0;
+      case 'cpl': return razaoNum(l.investimento, c?.leads ?? 0);
+      case 'agendamentos': return c?.agendamentos ?? 0;
+      case 'comparecimentos': return c?.comparecimentos ?? 0;
+      case 'custoReuniao': return razaoNum(l.investimento, c?.comparecimentos ?? 0);
+      case 'fechamentos': return c?.fechamentos ?? 0;
+      case 'cac': return razaoNum(l.investimento, c?.fechamentos ?? 0);
+      case 'receita': return c?.receita ?? 0;
+    }
+  };
+  // Ordenação pela coluna escolhida; "—" (zero) vai sempre pro fim, nas duas
+  // direções — senão ordenar por CAC crescente listaria quem não vendeu primeiro.
+  const ordenadas = [...regionais].sort((a, b) => {
+    const va = valorDe(a, ordem.chave), vb = valorDe(b, ordem.chave);
+    if (va === 0 && vb !== 0) return 1;
+    if (vb === 0 && va !== 0) return -1;
+    return ordem.desc ? vb - va : va - vb;
+  });
+  const visiveis = expandido ? ordenadas : ordenadas.slice(0, LIMITE);
   const soma = regionais.reduce((a, l) => ({
     investimento: a.investimento + l.investimento, campanhas: a.campanhas + l.campanhas, leadsPlataforma: a.leadsPlataforma + l.leadsPlataforma,
     leads: a.leads + (l.crm?.leads ?? 0), agendamentos: a.agendamentos + (l.crm?.agendamentos ?? 0),
@@ -5382,82 +5426,126 @@ function TabelaRegioes({ linhas, semRegiao, total }: { linhas: LinhaTabelaRegiao
     receita: a.receita + (l.crm?.receita ?? 0),
   }), { investimento: 0, campanhas: 0, leadsPlataforma: 0, leads: 0, agendamentos: 0, comparecimentos: 0, fechamentos: 0, receita: 0 });
   const razao = (inv: number, den: number) => (inv > 0 && den > 0 ? premiumValue(inv / den, 'currency') : '—');
-  const n = (v: number | undefined | null, zeroTraco = false) => (v === null || v === undefined ? '—' : v === 0 && zeroTraco ? '—' : premiumValue(v));
+  const n = (v: number | undefined | null) => (v === null || v === undefined ? '—' : premiumValue(v));
+  const moeda = (v: number) => (v > 0 ? premiumValue(v, 'currency') : '—');
+  const ufPorSigla = new Map(ufs.map(u => [u.regiao.toUpperCase(), u]));
+
   const Cel = ({ children, forte, className }: { children: ReactNode; forte?: boolean; className?: string }) => (
-    <td className={cn('whitespace-nowrap py-2.5 text-right', forte ? 'font-bold text-[#f4f7f8]' : 'text-[#c3ccd1]', className)}>{children}</td>
+    <td className={cn('whitespace-nowrap py-2.5 pr-2 text-right', forte ? 'font-bold text-[#f4f7f8]' : 'text-[#c3ccd1]', className)}>{children}</td>
   );
-  const Linha = ({ l }: { l: LinhaTabelaRegiao }) => {
-    const c = l.crm;
-    const nacional = l.tipo === 'nacional';
-    // Linha VERDE quando a região vendeu (pedido do Matheus): o olho acha na
-    // hora onde o dinheiro voltou.
-    const temVenda = !nacional && (c?.fechamentos ?? 0) > 0;
+  /** Uma linha completa (regional ou sub-linha de UF do nacional). */
+  const LinhaCompleta = ({ rotulo, sub, investimento, campanhas, leadsPlataforma, crm, indent, tom }: {
+    rotulo: string; sub?: string; investimento: number; campanhas?: number; leadsPlataforma: number | null;
+    crm: FunilRegiao | null; indent?: boolean; tom?: 'nacional';
+  }) => {
+    const temVenda = (crm?.fechamentos ?? 0) > 0;
+    const nac = tom === 'nacional';
     return (
-      <tr className={cn(nacional && 'text-[#9aa4aa]', temVenda && 'bg-[#6cff2f]/[0.08]')}>
-        <td className="py-2.5 pl-2 pr-3">
-          <span className={cn('font-bold', nacional ? 'text-[#9aa4aa]' : temVenda ? 'text-[#6cff2f]' : 'text-[#f4f7f8]')}>{l.rotulo}</span>
-          {l.campanhas > 0 && <span className="ml-1.5 text-[10px] text-[#6c767c]">{l.campanhas} camp.</span>}
+      <tr className={cn(nac && 'text-[#9aa4aa]', temVenda && !nac && 'bg-[#6cff2f]/[0.08]')}>
+        <td className={cn('py-2.5 pr-3', indent ? 'pl-6' : 'pl-2')}>
+          {indent && <span className="mr-1 text-[#6c767c]">↳</span>}
+          <span className={cn('font-bold', nac ? 'text-[#9aa4aa]' : temVenda ? 'text-[#6cff2f]' : indent ? 'text-[#dce4e8]' : 'text-[#f4f7f8]')}>{rotulo}</span>
+          {sub && <span className="ml-1.5 text-[10px] text-[#6c767c]">{sub}</span>}
         </td>
-        <Cel forte>{l.investimento > 0 ? premiumValue(l.investimento, 'currency') : '—'}</Cel>
-        <Cel>{l.campanhas > 0 ? n(l.leadsPlataforma) : '—'}</Cel>
-        <Cel forte>{nacional ? '—' : n(c?.leads ?? 0)}</Cel>
-        <Cel>{nacional ? '—' : razao(l.investimento, c?.leads ?? 0)}</Cel>
-        <Cel>{nacional ? '—' : n(c?.agendamentos ?? 0)}</Cel>
-        <Cel>{nacional ? '—' : n(c?.comparecimentos ?? 0)}</Cel>
-        <Cel>{nacional ? '—' : razao(l.investimento, c?.comparecimentos ?? 0)}</Cel>
-        <Cel forte>{nacional ? '—' : n(c?.fechamentos ?? 0)}</Cel>
-        <Cel forte>{nacional ? '—' : razao(l.investimento, c?.fechamentos ?? 0)}</Cel>
-        <Cel forte className={cn(temVenda && 'text-[#6cff2f]')}>{nacional || !(c?.receita) ? '—' : premiumValue(c.receita, 'currency')}</Cel>
+        <Cel forte>{moeda(investimento)}</Cel>
+        <Cel>{leadsPlataforma === null ? '—' : n(leadsPlataforma)}</Cel>
+        <Cel forte>{crm ? n(crm.leads) : '—'}</Cel>
+        <Cel>{crm ? razao(investimento, crm.leads) : '—'}</Cel>
+        <Cel>{crm ? n(crm.agendamentos) : '—'}</Cel>
+        <Cel>{crm ? n(crm.comparecimentos) : '—'}</Cel>
+        <Cel>{crm ? razao(investimento, crm.comparecimentos) : '—'}</Cel>
+        <Cel forte>{crm ? n(crm.fechamentos) : '—'}</Cel>
+        <Cel forte>{crm ? razao(investimento, crm.fechamentos) : '—'}</Cel>
+        <Cel forte className={cn(temVenda && 'text-[#6cff2f]')}>{crm && crm.receita > 0 ? premiumValue(crm.receita, 'currency') : '—'}</Cel>
       </tr>
     );
   };
-  const cab = (t: string, dica?: string) => <th key={t} className="text-right" title={dica}>{t}</th>;
+  const Cab = ({ chave, rotulo, dica }: { chave: ChaveOrdem; rotulo: string; dica: string }) => {
+    const ativa = ordem.chave === chave;
+    return (
+      <th className="pr-2 text-right">
+        <button type="button" title={`${dica} — clique para ordenar`}
+          onClick={() => setOrdem(o => ({ chave, desc: o.chave === chave ? !o.desc : true }))}
+          className={cn('inline-flex items-center gap-1 whitespace-nowrap transition-colors hover:text-[#dce4e8]', ativa && 'text-[#6cff2f]')}>
+          {rotulo}
+          <span className={cn('text-[9px]', !ativa && 'opacity-30')}>{ativa ? (ordem.desc ? '▼' : '▲') : '▼'}</span>
+        </button>
+      </th>
+    );
+  };
+  // Sub-linhas do nacional: só UFs com gasto; CRM = funil da UF inteira.
+  const subNacional = (nacionalPorUf ?? []).filter(u => u.spend > 0).sort((a, b) => b.spend - a.spend);
+  const nacionalCoberto = subNacional.reduce((s, u) => s + u.spend, 0);
+
   return (
     <PremiumPanel className="p-5">
       <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
         <h3 className={T.cardTitulo}>Desempenho por região</h3>
-        <span className={T.cardSub}>campanha com a região no nome × leads com DDD/cidade da região</span>
+        <span className={T.cardSub}>campanha com a região no nome × leads com DDD/cidade da região · clique no cabeçalho para ordenar</span>
       </div>
-      <div className="overflow-x-auto">
-        <table className={cn('w-full min-w-[1080px] text-left tabular-nums', T.tabelaCel)}>
-          <thead className={T.tabelaCab}>
-            <tr>
-              <th className="py-2 pl-2">Região</th>
-              {cab('Investimento', 'Gasto das campanhas com a região no nome')}
-              {cab('Leads camp.', 'Leads/conversões que a plataforma reportou para essas campanhas')}
-              {cab('Leads CRM', 'Leads no CRM com DDD/cidade da região')}
-              {cab('CPL real', 'Investimento ÷ leads do CRM da região')}
-              {cab('Reuniões agend.', 'Agendamento / proposta (posto 2 do funil)')}
-              {cab('Reuniões feitas', 'Comparecimento / reunião realizada (posto 3)')}
-              {cab('Custo/reunião', 'Investimento ÷ reuniões feitas')}
-              {cab('Vendas', 'Fechamentos no CRM')}
-              {cab('CAC', 'Investimento ÷ vendas')}
-              {cab('Faturamento', 'Receita das vendas no CRM da região')}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-white/[0.07]">
-            {linhas.map(l => <Linha key={l.key} l={l} />)}
-            {regionais.length > 1 && (
-              <tr className="border-t border-white/[0.12] text-[#f4f7f8]">
-                <td className="py-2.5 pl-2 pr-3 font-black">Total regional</td>
-                <Cel forte>{soma.investimento > 0 ? premiumValue(soma.investimento, 'currency') : '—'}</Cel>
-                <Cel forte>{soma.campanhas > 0 ? n(soma.leadsPlataforma) : '—'}</Cel>
-                <Cel forte>{n(soma.leads)}</Cel>
-                <Cel forte>{razao(soma.investimento, soma.leads)}</Cel>
-                <Cel forte>{n(soma.agendamentos)}</Cel>
-                <Cel forte>{n(soma.comparecimentos)}</Cel>
-                <Cel forte>{razao(soma.investimento, soma.comparecimentos)}</Cel>
-                <Cel forte>{n(soma.fechamentos)}</Cel>
-                <Cel forte>{razao(soma.investimento, soma.fechamentos)}</Cel>
-                <Cel forte className={cn(soma.receita > 0 && 'text-[#6cff2f]')}>{soma.receita > 0 ? premiumValue(soma.receita, 'currency') : '—'}</Cel>
+      <div className="-mx-2">
+        {/* Rolagem interna (roda do mouse) + "Ver todas", igual à tabela de campanhas. */}
+        <div className="overflow-auto transition-all duration-300" style={{ maxHeight: expandido ? '9999px' : '330px' }}>
+          <table className={cn('w-full min-w-[1080px] text-left tabular-nums', T.tabelaCel)}>
+            <thead className={cn('sticky top-0 z-10 bg-[#0d1519]', T.tabelaCab)}>
+              <tr>
+                <th className="py-2 pl-2">Região</th>
+                <Cab chave="investimento" rotulo="Investimento" dica="Gasto das campanhas com a região no nome" />
+                <Cab chave="leadsPlataforma" rotulo="Leads camp." dica="Leads/conversões que a plataforma reportou para essas campanhas" />
+                <Cab chave="leads" rotulo="Leads CRM" dica="Leads no CRM com DDD/cidade da região" />
+                <Cab chave="cpl" rotulo="CPL real" dica="Investimento ÷ leads do CRM da região" />
+                <Cab chave="agendamentos" rotulo="Reuniões agend." dica="Agendamento / proposta (posto 2 do funil)" />
+                <Cab chave="comparecimentos" rotulo="Reuniões feitas" dica="Comparecimento / reunião realizada (posto 3)" />
+                <Cab chave="custoReuniao" rotulo="Custo/reunião" dica="Investimento ÷ reuniões feitas" />
+                <Cab chave="fechamentos" rotulo="Vendas" dica="Fechamentos no CRM" />
+                <Cab chave="cac" rotulo="CAC" dica="Investimento ÷ vendas" />
+                <Cab chave="receita" rotulo="Faturamento" dica="Receita das vendas no CRM da região" />
               </tr>
-            )}
-          </tbody>
-        </table>
+            </thead>
+            <tbody className="divide-y divide-white/[0.07]">
+              {visiveis.map(l => (
+                <LinhaCompleta key={l.key} rotulo={l.rotulo} sub={l.campanhas > 0 ? `${l.campanhas} camp.` : undefined}
+                  investimento={l.investimento} leadsPlataforma={l.campanhas > 0 ? l.leadsPlataforma : null} crm={l.crm} />
+              ))}
+              {regionais.length > 1 && (expandido || regionais.length <= LIMITE) && (
+                <tr className="border-t border-white/[0.12] text-[#f4f7f8]">
+                  <td className="py-2.5 pl-2 pr-3 font-black">Total regional</td>
+                  <Cel forte>{moeda(soma.investimento)}</Cel>
+                  <Cel forte>{soma.campanhas > 0 ? n(soma.leadsPlataforma) : '—'}</Cel>
+                  <Cel forte>{n(soma.leads)}</Cel>
+                  <Cel forte>{razao(soma.investimento, soma.leads)}</Cel>
+                  <Cel forte>{n(soma.agendamentos)}</Cel>
+                  <Cel forte>{n(soma.comparecimentos)}</Cel>
+                  <Cel forte>{razao(soma.investimento, soma.comparecimentos)}</Cel>
+                  <Cel forte>{n(soma.fechamentos)}</Cel>
+                  <Cel forte>{razao(soma.investimento, soma.fechamentos)}</Cel>
+                  <Cel forte className={cn(soma.receita > 0 && 'text-[#6cff2f]')}>{moeda(soma.receita)}</Cel>
+                </tr>
+              )}
+              {nacional && (expandido || regionais.length <= LIMITE) && (
+                <>
+                  <LinhaCompleta rotulo={nacional.rotulo} sub={`${nacional.campanhas} camp.`} investimento={nacional.investimento}
+                    leadsPlataforma={nacional.leadsPlataforma} crm={null} tom="nacional" />
+                  {subNacional.map(u => (
+                    <LinhaCompleta key={`nac-${u.uf}`} rotulo={u.uf} sub="onde a Meta gerou o resultado" indent
+                      investimento={u.spend} leadsPlataforma={u.leads} crm={ufPorSigla.get(u.uf) ?? null} />
+                  ))}
+                </>
+              )}
+            </tbody>
+          </table>
+        </div>
+        {(regionais.length > LIMITE) && (
+          <button type="button" onClick={() => setExpandido(v => !v)}
+            className="flex w-full items-center justify-center gap-1.5 border-t border-white/[0.06] py-2 text-[11px] font-semibold text-foreground/50 transition-colors hover:bg-white/[0.04] hover:text-foreground/80">
+            {expandido ? <><ChevronUp className="h-3.5 w-3.5" /> Recolher</> : <><ChevronDown className="h-3.5 w-3.5" /> Ver todas as {regionais.length} regiões{nacional ? ' + nacional' : ''}</>}
+          </button>
+        )}
       </div>
       <p className="mt-3 text-[10px] leading-snug text-[#7c868c]">
         Região do lead vem do DDD do telefone (ou da cidade do formulário) — é de onde a pessoa é, não onde o anúncio rodou.
         {temUfECidade && ' Linha de UF inclui as cidades dela — não somar as duas.'}
+        {nacional && subNacional.length > 0 && ` As sub-linhas do nacional mostram em que estado a Meta gerou cada resultado (${premiumValue(nacionalCoberto, 'currency')} dos ${premiumValue(nacional.investimento, 'currency')}; o resto é Google ou sem estado informado) e o CRM da UF inteira, que inclui as cidades acima.`}
         {semRegiao > 0 && ` ${premiumValue(semRegiao)} de ${premiumValue(total)} leads do período não têm região e ficam fora da tabela.`}
       </p>
     </PremiumPanel>
@@ -5555,6 +5643,8 @@ export default function GeneralDashboard() {
   const [socialKpiLayout, setSocialKpiLayout] = useState<RglLayout[]>(DEFAULT_SOCIAL_KPI_LAYOUT);
   /** Funil do CRM por região (cidade/UF) — tabela "Desempenho por região". */
   const [porRegiao, setPorRegiao] = useState<PorRegiaoResposta | null>(null);
+  /** Campanhas nacionais/sem região da Meta abertas por UF (breakdowns=region). */
+  const [nacionalPorUf, setNacionalPorUf] = useState<RegiaoCampanhas[] | null>(null);
   const [porCanal, setPorCanal] = useState<{
     origens: FaturamentoPorOrigem[]; total: number; semAtribuicao: number;
     leads: LeadsPorCanal[]; leadsTotal: number; leadsSemCanal: number;
@@ -6063,6 +6153,24 @@ export default function GeneralDashboard() {
       .catch(() => { if (!cancelado) setPorRegiao(null); });
     return () => { cancelado = true; };
   }, [selectedIds, period, customDateFrom, customDateTo, customReady, faixaSel.from, faixaSel.to]);
+
+  // Campanhas NACIONAIS/sem região da Meta abertas por estado. Só depois das
+  // campanhas carregarem (precisa dos ids); sem nacional, nem chama.
+  useEffect(() => {
+    let cancelado = false;
+    const ids = campaigns
+      .filter(c => c.platform === 'meta' && (() => { const r = regiaoDaCampanha(c.name); return !r || r.tipo === 'nacional'; })())
+      .map(c => c.id);
+    if (selectedIds.size === 0 || !customReady || campaignsLoading || ids.length === 0) { setNacionalPorUf(null); return () => { cancelado = true; }; }
+    const params = new URLSearchParams({ clientIds: [...selectedIds].join(','), campaignIds: ids.join(','), period });
+    if (period === 'custom' && customDateFrom && customDateTo) { params.set('dateFrom', customDateFrom); params.set('dateTo', customDateTo); }
+    fetch(`/api/meta/regiao-campanhas?${params}`)
+      .then(r => (r.ok ? r.json() as Promise<RegiaoCampanhasResposta> : null))
+      .then(j => { if (!cancelado) setNacionalPorUf(j?.ok ? j.porUf : null); })
+      .catch(() => { if (!cancelado) setNacionalPorUf(null); });
+    return () => { cancelado = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- `campaigns` entra pelo join de ids (evita refetch a cada render)
+  }, [selectedIds, period, customDateFrom, customDateTo, customReady, campaignsLoading, campaigns.map(c => c.id).join(',')]);
 
   // Fetch page/profile insights (Facebook Page + Instagram organic)
   useEffect(() => {
@@ -7633,7 +7741,7 @@ export default function GeneralDashboard() {
                     {/* Só aparece quando há região em algum lugar (campanha com região
                         no nome ou leads com DDD/cidade). Cliente sem isso não vê nada. */}
                     {!modoFood && linhasRegiao.length > 0 && (
-                      <TabelaRegioes linhas={linhasRegiao} semRegiao={porRegiao?.semRegiao ?? 0} total={porRegiao?.total ?? 0} />
+                      <TabelaRegioes linhas={linhasRegiao} semRegiao={porRegiao?.semRegiao ?? 0} total={porRegiao?.total ?? 0} nacionalPorUf={nacionalPorUf} ufs={porRegiao?.ufs ?? []} />
                     )}
                     {blocoCanais}
                   </>

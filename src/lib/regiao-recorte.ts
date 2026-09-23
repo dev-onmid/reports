@@ -284,3 +284,22 @@ export function montarTabelaRegioes(campanhas: CampanhaParaRegiao[], cidades: Fu
   if (linhas.length === 0) return [];
   return nacional ? [...linhas, nacional] : linhas;
 }
+
+// ── Estado (nome) → UF ───────────────────────────────────────────────────────
+// A Meta devolve o breakdown `region` com o NOME do estado, sem acento
+// ("Parana", "Sao Paulo", "Ceara"). Chave normalizada.
+const ESTADOS: Array<[string, string]> = [
+  ['Acre', 'AC'], ['Alagoas', 'AL'], ['Amapá', 'AP'], ['Amazonas', 'AM'], ['Bahia', 'BA'], ['Ceará', 'CE'],
+  ['Distrito Federal', 'DF'], ['Espírito Santo', 'ES'], ['Goiás', 'GO'], ['Maranhão', 'MA'], ['Mato Grosso', 'MT'],
+  ['Mato Grosso do Sul', 'MS'], ['Minas Gerais', 'MG'], ['Pará', 'PA'], ['Paraíba', 'PB'], ['Paraná', 'PR'],
+  ['Pernambuco', 'PE'], ['Piauí', 'PI'], ['Rio de Janeiro', 'RJ'], ['Rio Grande do Norte', 'RN'], ['Rio Grande do Sul', 'RS'],
+  ['Rondônia', 'RO'], ['Roraima', 'RR'], ['Santa Catarina', 'SC'], ['São Paulo', 'SP'], ['Sergipe', 'SE'], ['Tocantins', 'TO'],
+];
+const UF_POR_ESTADO = new Map(ESTADOS.map(([n, uf]) => [normalizarNome(n), uf]));
+
+/** "Parana" → "PR"; "PR" → "PR"; desconhecido → null. */
+export function ufDoEstado(nome: string): string | null {
+  const n = normalizarNome(nome);
+  if (UFS.has(n)) return n;
+  return UF_POR_ESTADO.get(n) ?? null;
+}
