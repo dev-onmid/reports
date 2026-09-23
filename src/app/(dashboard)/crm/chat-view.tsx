@@ -37,7 +37,7 @@ type InboxLead = {
   created_at: string;
 };
 
-type CrmMessage = {
+export type CrmMessage = {
   id: string;
   direction: 'in' | 'out';
   text: string;
@@ -98,7 +98,7 @@ function msgTimeFmt(iso: string) {
 }
 
 // +55 (43) 99177-9645 — como o WhatsApp exibe números sem nome salvo.
-function formatPhoneBR(raw: string | null | undefined): string {
+export function formatPhoneBR(raw: string | null | undefined): string {
   const d = (raw ?? '').replace(/\D/g, '');
   if (!d) return '';
   const local = d.startsWith('55') && d.length >= 12 ? d.slice(2) : d;
@@ -144,7 +144,7 @@ function normalizeNumber(raw: string | null | undefined) {
   return (raw ?? '').replace(/\D/g, '');
 }
 
-function dateSeparatorLabel(iso: string): string {
+export function dateSeparatorLabel(iso: string): string {
   const d = new Date(iso);
   const today = new Date();
   const yesterday = new Date(today);
@@ -224,7 +224,7 @@ function ContactAvatar({
   );
 }
 
-function DateSeparator({ label }: { label: string }) {
+export function DateSeparator({ label }: { label: string }) {
   return (
     <div className="flex items-center justify-center my-3">
       <span className="rounded-[var(--radius)] border border-border bg-card px-3 py-1 text-[11px] font-medium text-muted-foreground">
@@ -234,7 +234,7 @@ function DateSeparator({ label }: { label: string }) {
   );
 }
 
-function MessageBubble({ msg, onImageClick }: { msg: CrmMessage; onImageClick?: (src: string) => void }) {
+export function MessageBubble({ msg, onImageClick }: { msg: CrmMessage; onImageClick?: (src: string) => void }) {
   const isOut = msg.direction === 'out';
   const t = msg.tipo ?? 'texto';
   const text = msg.text;

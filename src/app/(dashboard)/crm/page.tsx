@@ -17,6 +17,7 @@ import {
   BarChart3, UserRound, MessageCircle, X, Send, GripVertical, Layers, WifiOff, Link2,
   Globe2, Clapperboard, Info, MapPin, ClipboardList, BadgeCheck } from 'lucide-react';
 import { ChatView } from './chat-view';
+import { LeadChatPanel } from './lead-chat-panel';
 import { PortalLinkModal } from './portal-link-modal';
 import { FollowupTab, useActiveFollowups, FollowupBadge } from './followup-tab';
 import Link from 'next/link';
@@ -744,7 +745,7 @@ function ChatPreviewPanel({ leadId, onOpenChat }: { leadId: string; onOpenChat: 
 }
 
 function QuickEditModal({
-  lead, onSave, onClose, onDelete, statusOptions, onOpenChat,
+  lead, onSave, onClose, onDelete, statusOptions, onOpenChat, clientId,
 }: {
   lead: CrmLead;
   onSave: (data: Draft) => Promise<void>;
@@ -752,7 +753,11 @@ function QuickEditModal({
   onDelete: () => void;
   statusOptions: string[];
   onOpenChat: (leadId: string) => void;
+  clientId?: string;
 }) {
+  // Conversa ao lado do formulário — some em telas estreitas (aí vale o preview
+  // + "ver conversa completa", que continua levando pro inbox).
+  const [showChat, setShowChat] = useState(true);
   const [draft, setDraft] = useState<Draft>({ ...lead });
   const [saving, setSaving] = useState(false);
   const [aiInfo, setAiInfo] = useState<{ motivo?: string; created_at?: string; confianca?: number } | null>(null);
@@ -805,12 +810,32 @@ function QuickEditModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={onClose}>
-      <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+      <div className={cn(
+        'bg-card border border-border rounded-2xl shadow-2xl w-full max-h-[90vh] flex flex-col overflow-hidden',
+        showChat ? 'max-w-lg lg:max-w-5xl lg:h-[88vh]' : 'max-w-lg',
+      )} onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
           <h2 className="text-sm font-bold">Editar Lead</h2>
-          <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><X className="h-4 w-4" /></button>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => setShowChat(v => !v)}
+              title={showChat ? 'Esconder conversa' : 'Mostrar conversa'}
+              className={cn(
+                'hidden lg:flex items-center gap-1.5 rounded-lg border px-2 py-1 text-[11px] font-semibold transition-colors',
+                showChat ? 'border-primary/40 bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:text-foreground',
+              )}
+            >
+              <MessageCircle className="h-3.5 w-3.5" /> Conversa
+            </button>
+            <button onClick={onClose} className="ml-1 text-muted-foreground hover:text-foreground"><X className="h-4 w-4" /></button>
+          </div>
         </div>
-        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
+        <div className="flex flex-1 min-h-0">
+        <div className={cn(
+          'flex-1 min-w-0 overflow-y-auto px-5 py-4 space-y-3',
+          showChat && 'lg:max-w-[460px] lg:shrink-0 lg:border-r lg:border-border',
+        )}>
           <div className="grid grid-cols-2 gap-3">
             <label className="space-y-1">
               <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Nome</span>
@@ -842,7 +867,9 @@ function QuickEditModal({
           </div>
           <TrackingSourcePanel lead={lead} />
           <RespostasFormulario leadId={lead.id} />
-          <ChatPreviewPanel leadId={lead.id} onOpenChat={() => { onOpenChat(lead.id); onClose(); }} />
+          <div className={cn(showChat && 'lg:hidden')}>
+            <ChatPreviewPanel leadId={lead.id} onOpenChat={() => { onOpenChat(lead.id); onClose(); }} />
+          </div>
           <div className="grid grid-cols-2 gap-3">
             <label className="space-y-1">
               <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Valor (R$)</span>
@@ -944,6 +971,18 @@ function QuickEditModal({
               <DictateButton className="absolute bottom-2 right-2" onTranscript={(text) => set('observacao', draft.observacao ? `${draft.observacao} ${text}` : text)} />
             </div>
           </label>
+        </div>
+        {showChat && (
+          <div className="hidden lg:flex flex-1 min-w-0">
+            <LeadChatPanel
+              leadId={lead.id}
+              nome={lead.nome}
+              numero={lead.numero}
+              clientId={clientId}
+              onOpenFullChat={() => { onOpenChat(lead.id); onClose(); }}
+            />
+          </div>
+        )}
         </div>
         <div className="flex items-center justify-between gap-3 px-5 py-4 border-t border-border shrink-0">
           <button onClick={onDelete} className="flex items-center gap-1.5 rounded-lg border border-red-500/30 px-3 py-2 text-xs font-semibold text-red-400 hover:bg-red-500/10 transition-colors">
@@ -3974,6 +4013,7 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
           onDelete={() => { void deleteRow(kanbanEditLead.id); setKanbanEditLead(null); }}
           statusOptions={statusOptions}
           onOpenChat={openLeadChat}
+          clientId={clientId}
         />
       )}
 
