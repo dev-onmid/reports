@@ -1,4 +1,5 @@
 import type { NextRequest } from 'next/server';
+import { parseRecorte, filtroRegiaoSql, type ContagemRegioes } from '@/lib/regiao-recorte';
 import { makeServerPool } from '@/lib/server-db';
 import {
   contarFunil,
@@ -28,6 +29,10 @@ export async function GET(req: NextRequest) {
   const url = new URL(req.url);
   const from = url.searchParams.get('from');
   const to = url.searchParams.get('to');
+  // Recorte por região ("uf:PR" | "cidade:Curitiba"): filtra o funil pela
+  // região do LEAD. As contagens de região (`regioes`) saem SEM o filtro —
+  // são as opções da tela, e sumir as outras ao escolher uma travaria o chip.
+  const recorte = parseRecorte(url.searchParams.get('regiao'));
 
   const pool = makeServerPool();
   try {
@@ -68,6 +73,7 @@ export async function GET(req: NextRequest) {
       dateFilter = `AND (COALESCE(data_fechamento, lead_date, data) IS NULL OR (COALESCE(data_fechamento, lead_date, data) >= $1 AND COALESCE(data_fechamento, lead_date, data) <= $2))`;
     }
 
+    const regiaoSql = filtroRegiaoSql(recorte, params.length + 1);
     const { rows } = await pool.query(
       `SELECT client_id,
               status,
@@ -80,9 +86,32 @@ export async function GET(req: NextRequest) {
               (fechou OR COALESCE(NULLIF(revenue, 0), valor_rs, 0) > 0) AS fechou,
               COALESCE(NULLIF(revenue, 0), valor_rs, 0) AS valor_rs
          FROM public.crm_leads
-        WHERE TRUE ${dateFilter}`,
-      params
+        WHERE TRUE ${dateFilter}${regiaoSql.sql}`,
+      [...params, ...regiaoSql.params]
     );
+
+    // Contagem de região por cliente NA JANELA, sem o recorte: alimenta os
+    // chips. Registro de venda (ledger) fica fora — não é pessoa.
+    const regioesPorCliente = new Map<string, ContagemRegioes>();
+    try {
+      const { rows: reg } = await pool.query(
+        `SELECT client_id, UPPER(regiao_uf) AS uf, regiao_cidade AS cidade, COUNT(*)::int AS n
+           FROM public.crm_leads
+          WHERE COALESCE(registro_tipo, 'hibrido') <> 'venda' ${dateFilter}
+          GROUP BY 1, 2, 3`,
+        params
+      );
+      for (const r of reg) {
+        const cid = String(r.client_id);
+        const c = regioesPorCliente.get(cid) ?? { total: 0, uf: {}, cidade: {} };
+        c.total += r.n;
+        if (r.uf) c.uf[r.uf] = (c.uf[r.uf] ?? 0) + r.n;
+        if (r.cidade) c.cidade[r.cidade] = (c.cidade[r.cidade] ?? 0) + r.n;
+        regioesPorCliente.set(cid, c);
+      }
+    } catch {
+      // sem as colunas de região → sem chips
+    }
 
     // Mapeamento etapa→semântica de todos os clientes numa query só (tabela
     // pequena). Instalação sem a tabela/coluna degrada pra lista vazia — o
@@ -143,8 +172,13 @@ export async function GET(req: NextRequest) {
       });
     }
 
+    // União: cliente com ZERO leads no recorte continua na resposta (funil
+    // zerado + suas `regioes`), senão os chips sumiriam junto e não daria
+    // para desfazer o filtro.
+    const clientes = new Set<string>([...leadsPorCliente.keys(), ...regioesPorCliente.keys()]);
     return Response.json(
-      [...leadsPorCliente.entries()].map(([clientId, leads]) => {
+      [...clientes].map((clientId) => {
+        const leads = leadsPorCliente.get(clientId) ?? [];
         const funil: ContagemFunil = contarFunil(leads, stagesPorCliente.get(clientId) ?? []);
         // Funil pelas ETAPAS REAIS do Kanban do cliente. `null` quando o cliente
         // não tem etapas cadastradas → a dashboard cai no funil semântico.
@@ -160,6 +194,8 @@ export async function GET(req: NextRequest) {
           total: funil.receita,
           /** ISO da última entrada/atualização de lead deste cliente (selo de frescor). */
           ultimaAtualizacao: ultimaPorCliente.get(clientId) ?? null,
+          /** Leads por UF/cidade na janela (sem o recorte) — opções do filtro de região. */
+          regioes: regioesPorCliente.get(clientId) ?? null,
         };
       })
     );

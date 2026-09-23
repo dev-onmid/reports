@@ -48,6 +48,8 @@ type Props = {
   to: string;
   /** Quando o topo não vem do CRM não há lead para listar (é número de anúncio). */
   topoDeAnuncios?: boolean;
+  /** Recorte por região ("uf:PR" | "cidade:Curitiba") — o mesmo do card, senão a lista não bate. */
+  regiao?: string | null;
   onClose: () => void;
 };
 
@@ -65,7 +67,7 @@ function fmtData(iso: string | null): string | null {
 }
 
 export function FunilLeadsModal({
-  etapa, stageIndex, tituloEtapa, totalNoCard, clientIds, from, to, topoDeAnuncios, onClose,
+  etapa, stageIndex, tituloEtapa, totalNoCard, clientIds, from, to, topoDeAnuncios, regiao, onClose,
 }: Props) {
   const stageMode = stageIndex !== undefined;
   const [modo, setModo] = useState<'alcancou' | 'atual'>('alcancou');
@@ -101,6 +103,7 @@ export function FunilLeadsModal({
     if (stageMode) params.set('stageIndex', String(stageIndex));
     else if (etapa) params.set('etapa', etapa);
     if (clientKey) params.set('clientIds', clientKey);
+    if (regiao) params.set('regiao', regiao);
     fetch(`/api/crm/funil-leads?${params}`)
       .then(r => r.json())
       .then((j: { leads?: FunilLeadRow[]; total?: number; error?: string }) => {
@@ -111,7 +114,7 @@ export function FunilLeadsModal({
       })
       .catch(() => { if (alive) { setRows([]); setErro(true); } });
     return () => { alive = false; };
-  }, [etapa, stageIndex, stageMode, modo, from, to, clientKey, semLista]);
+  }, [etapa, stageIndex, stageMode, modo, from, to, clientKey, semLista, regiao]);
 
   /** Canais presentes na lista, para o filtro só oferecer o que existe. */
   const canais = useMemo(() => {

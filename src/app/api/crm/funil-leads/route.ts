@@ -1,4 +1,5 @@
 import type { NextRequest } from 'next/server';
+import { parseRecorte, filtroRegiaoSql } from '@/lib/regiao-recorte';
 import { makeServerPool } from '@/lib/server-db';
 import { canalSql, rotularCanal } from '@/lib/canal-lead';
 import {
@@ -83,6 +84,10 @@ export async function GET(req: NextRequest) {
       params.push(clientIds);
       clientFilter = `AND l.client_id = ANY($${params.length})`;
     }
+    // Recorte por região: o modal precisa listar EXATAMENTE o que o degrau
+    // clicado contou — mesmo filtro do summary.
+    const regiao = filtroRegiaoSql(parseRecorte(req.nextUrl.searchParams.get('regiao')), params.length + 1, 'l');
+    params.push(...regiao.params);
 
     const { rows } = await pool.query(
       `SELECT l.id,
@@ -107,7 +112,7 @@ export async function GET(req: NextRequest) {
         -- Registro de VENDA é ledger de faturamento, não lead: fica fora da
         -- listagem por etapa (senão apareceria como "contato" fantasma e o modal
         -- divergiria do card, que também o exclui).
-        WHERE COALESCE(l.registro_tipo, 'hibrido') <> 'venda' ${dateFilter} ${clientFilter}
+        WHERE COALESCE(l.registro_tipo, 'hibrido') <> 'venda' ${dateFilter} ${clientFilter}${regiao.sql}
         ORDER BY COALESCE(l.lead_date, l.data, l.created_at::date) DESC NULLS LAST`,
       params,
     );
