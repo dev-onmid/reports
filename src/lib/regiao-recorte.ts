@@ -219,3 +219,68 @@ export function opcoesDeRecorte(contagens: ContagemRegioes[], maxCidades = 8): O
     .map(([k, n]) => ({ key: `cidade:${k}`, rotulo: k, leads: n }));
   return [...ufs, ...cidades];
 }
+
+// ── Tabela "Desempenho por região" ───────────────────────────────────────────
+
+export type CampanhaParaRegiao = { name: string; platform: string; spend: number; leads: number };
+export type FunilRegiao = { regiao: string; uf: string | null; leads: number; agendamentos: number; comparecimentos: number; fechamentos: number; receita: number };
+
+export type LinhaTabelaRegiao = {
+  key: string;
+  rotulo: string;
+  tipo: 'cidade' | 'uf' | 'nacional';
+  investimento: number;
+  campanhas: number;
+  /** Leads/conversões reportados pela plataforma para as campanhas da região. */
+  leadsPlataforma: number;
+  /** Funil do CRM da região (null na linha nacional — não há como atribuir). */
+  crm: FunilRegiao | null;
+};
+
+/**
+ * Uma linha por região: campanhas com a região no NOME + funil do CRM dos
+ * leads com DDD/cidade da região. Regras:
+ *  - cidade e UF são linhas SEPARADAS (Curitiba e PR podem coexistir se há
+ *    campanha dos dois tipos) — a tela avisa que UF contém as cidades;
+ *  - região só com leads (sem campanha) entra se tiver ≥ LEADS_MINIMOS_OPCAO —
+ *    é demanda que chegou sem mídia regional, informação e não ruído;
+ *  - campanha nacional/sem região vira UMA linha no fim, com investimento e
+ *    leads da plataforma, sem CRM (não dá para atribuir região) — nunca some.
+ * Vazio quando não há região em lugar nenhum (a tabela nem aparece).
+ */
+export function montarTabelaRegioes(campanhas: CampanhaParaRegiao[], cidades: FunilRegiao[], ufs: FunilRegiao[]): LinhaTabelaRegiao[] {
+  const porKey = new Map<string, LinhaTabelaRegiao>();
+  const cidadePorNome = new Map(cidades.map(c => [normalizarNome(c.regiao), c]));
+  const ufPorSigla = new Map(ufs.map(u => [u.regiao.toUpperCase(), u]));
+  let nacional: LinhaTabelaRegiao | null = null;
+
+  for (const c of campanhas) {
+    const r = regiaoDaCampanha(c.name);
+    if (!r || r.tipo === 'nacional') {
+      nacional ??= { key: 'nacional', rotulo: 'Nacional / sem região no nome', tipo: 'nacional', investimento: 0, campanhas: 0, leadsPlataforma: 0, crm: null };
+      nacional.investimento += c.spend; nacional.campanhas++; nacional.leadsPlataforma += c.leads;
+      continue;
+    }
+    const key = r.tipo === 'cidade' ? `cidade:${normalizarNome(r.cidade)}` : `uf:${r.uf}`;
+    const linha = porKey.get(key) ?? {
+      key,
+      rotulo: r.tipo === 'cidade' ? `${r.cidade}/${r.uf}` : r.uf,
+      tipo: r.tipo,
+      investimento: 0, campanhas: 0, leadsPlataforma: 0,
+      crm: r.tipo === 'cidade' ? (cidadePorNome.get(normalizarNome(r.cidade)) ?? null) : (ufPorSigla.get(r.uf) ?? null),
+    };
+    linha.investimento += c.spend; linha.campanhas++; linha.leadsPlataforma += c.leads;
+    porKey.set(key, linha);
+  }
+
+  // Cidades com leads mas sem campanha regional.
+  for (const c of cidades) {
+    const key = `cidade:${normalizarNome(c.regiao)}`;
+    if (porKey.has(key) || c.leads < LEADS_MINIMOS_OPCAO) continue;
+    porKey.set(key, { key, rotulo: c.uf ? `${c.regiao}/${c.uf}` : c.regiao, tipo: 'cidade', investimento: 0, campanhas: 0, leadsPlataforma: 0, crm: c });
+  }
+
+  const linhas = [...porKey.values()].sort((a, b) => (b.investimento - a.investimento) || ((b.crm?.leads ?? 0) - (a.crm?.leads ?? 0)));
+  if (linhas.length === 0) return [];
+  return nacional ? [...linhas, nacional] : linhas;
+}

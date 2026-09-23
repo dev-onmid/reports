@@ -68,7 +68,8 @@ import type { TopCreative } from '@/app/api/meta/top-creatives/route';
 import type { PageInsightsResult, InstagramPageData } from '@/app/api/meta/page-insights/route';
 import type { FaturamentoPorOrigem, LeadsPorCanal } from '@/app/api/crm/por-canal/route';
 import { progressoVisual } from '@/lib/progresso-cor';
-import { parseRecorte, campanhaCasaRecorte, opcoesDeRecorte, regiaoDaCampanha, rotuloRegiaoCampanha, type ContagemRegioes } from '@/lib/regiao-recorte';
+import { montarTabelaRegioes, type LinhaTabelaRegiao } from '@/lib/regiao-recorte';
+import type { PorRegiaoResposta } from '@/app/api/crm/por-regiao/route';
 import type { CampaignPerformance } from '@/app/api/campaigns/route';
 import type { GoogleKeyword } from '@/app/api/google/keywords/route';
 import type { AudienceBreakdowns, AudienceResponse, AudienceSlice } from '@/app/api/audience/route';
@@ -107,7 +108,7 @@ import { SUPERFICIE, Superficie } from '@/components/dashboard/superficie';
 import { IndicadorCard, IndicadorMini, FaixaIndicadores } from '@/components/dashboard/indicador-card';
 
 type Period = 'yesterday' | 'last_7d' | 'last_14d' | 'last_30d' | 'this_month' | 'last_month' | 'last_3m' | 'last_6m' | 'this_year' | 'all_time' | 'custom';
-type ClientSheetsSummary = { leads: number; funil: ContagemFunil; total: number; funilStages: FunilPorStage | null; regioes: ContagemRegioes | null };
+type ClientSheetsSummary = { leads: number; funil: ContagemFunil; total: number; funilStages: FunilPorStage | null };
 type ApiMetrics = {
   meta: { spend: number; reach?: number; impressions: number; clicks: number; leads: number; formLeads?: number; siteLeads?: number; conversations?: number; cpl: number } | null;
   google: { cost: number; impressions: number; clicks: number; cpc: number; conversions: number; cpa: number;
@@ -5365,6 +5366,97 @@ function TrafegoResumoTable({ linhas, colunas, comparacao }: { linhas: LinhaTraf
   );
 }
 
+
+// ── Desempenho por região ─────────────────────────────────────────────────────
+// Uma linha por região: o que a campanha da região custou/trouxe (mídia, pelo
+// NOME da campanha) × o funil dos leads com DDD/cidade daquela região (CRM).
+// Pedido do Matheus (CondoStore): "medir o que veio da campanha da região
+// comparado com os leads que chegaram" — com reuniões, vendas e CAC.
+function TabelaRegioes({ linhas, semRegiao, total }: { linhas: LinhaTabelaRegiao[]; semRegiao: number; total: number }) {
+  const regionais = linhas.filter(l => l.tipo !== 'nacional');
+  const temUfECidade = regionais.some(l => l.tipo === 'uf') && regionais.some(l => l.tipo === 'cidade');
+  const soma = regionais.reduce((a, l) => ({
+    investimento: a.investimento + l.investimento, campanhas: a.campanhas + l.campanhas, leadsPlataforma: a.leadsPlataforma + l.leadsPlataforma,
+    leads: a.leads + (l.crm?.leads ?? 0), agendamentos: a.agendamentos + (l.crm?.agendamentos ?? 0),
+    comparecimentos: a.comparecimentos + (l.crm?.comparecimentos ?? 0), fechamentos: a.fechamentos + (l.crm?.fechamentos ?? 0),
+  }), { investimento: 0, campanhas: 0, leadsPlataforma: 0, leads: 0, agendamentos: 0, comparecimentos: 0, fechamentos: 0 });
+  const razao = (inv: number, den: number) => (inv > 0 && den > 0 ? premiumValue(inv / den, 'currency') : '—');
+  const n = (v: number | undefined | null, zeroTraco = false) => (v === null || v === undefined ? '—' : v === 0 && zeroTraco ? '—' : premiumValue(v));
+  const Cel = ({ children, forte, className }: { children: ReactNode; forte?: boolean; className?: string }) => (
+    <td className={cn('whitespace-nowrap py-2.5 text-right', forte ? 'font-bold text-[#f4f7f8]' : 'text-[#c3ccd1]', className)}>{children}</td>
+  );
+  const Linha = ({ l }: { l: LinhaTabelaRegiao }) => {
+    const c = l.crm;
+    const nacional = l.tipo === 'nacional';
+    return (
+      <tr className={cn(nacional && 'text-[#9aa4aa]')}>
+        <td className="py-2.5 pr-3">
+          <span className={cn('font-bold', nacional ? 'text-[#9aa4aa]' : 'text-[#f4f7f8]')}>{l.rotulo}</span>
+          {l.campanhas > 0 && <span className="ml-1.5 text-[10px] text-[#6c767c]">{l.campanhas} camp.</span>}
+        </td>
+        <Cel forte>{l.investimento > 0 ? premiumValue(l.investimento, 'currency') : '—'}</Cel>
+        <Cel>{l.campanhas > 0 ? n(l.leadsPlataforma) : '—'}</Cel>
+        <Cel forte>{nacional ? '—' : n(c?.leads ?? 0)}</Cel>
+        <Cel>{nacional ? '—' : razao(l.investimento, c?.leads ?? 0)}</Cel>
+        <Cel>{nacional ? '—' : n(c?.agendamentos ?? 0)}</Cel>
+        <Cel>{nacional ? '—' : n(c?.comparecimentos ?? 0)}</Cel>
+        <Cel>{nacional ? '—' : razao(l.investimento, c?.comparecimentos ?? 0)}</Cel>
+        <Cel forte>{nacional ? '—' : n(c?.fechamentos ?? 0)}</Cel>
+        <Cel forte>{nacional ? '—' : razao(l.investimento, c?.fechamentos ?? 0)}</Cel>
+      </tr>
+    );
+  };
+  const cab = (t: string, dica?: string) => <th key={t} className="text-right" title={dica}>{t}</th>;
+  return (
+    <PremiumPanel className="p-5">
+      <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+        <h3 className={T.cardTitulo}>Desempenho por região</h3>
+        <span className={T.cardSub}>campanha com a região no nome × leads com DDD/cidade da região</span>
+      </div>
+      <div className="overflow-x-auto">
+        <table className={cn('w-full min-w-[980px] text-left tabular-nums', T.tabelaCel)}>
+          <thead className={T.tabelaCab}>
+            <tr>
+              <th className="py-2">Região</th>
+              {cab('Investimento', 'Gasto das campanhas com a região no nome')}
+              {cab('Leads camp.', 'Leads/conversões que a plataforma reportou para essas campanhas')}
+              {cab('Leads CRM', 'Leads no CRM com DDD/cidade da região')}
+              {cab('CPL real', 'Investimento ÷ leads do CRM da região')}
+              {cab('Reuniões agend.', 'Agendamento / proposta (posto 2 do funil)')}
+              {cab('Reuniões feitas', 'Comparecimento / reunião realizada (posto 3)')}
+              {cab('Custo/reunião', 'Investimento ÷ reuniões feitas')}
+              {cab('Vendas', 'Fechamentos no CRM')}
+              {cab('CAC', 'Investimento ÷ vendas')}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-white/[0.07]">
+            {linhas.map(l => <Linha key={l.key} l={l} />)}
+            {regionais.length > 1 && (
+              <tr className="border-t border-white/[0.12] text-[#f4f7f8]">
+                <td className="py-2.5 pr-3 font-black">Total regional</td>
+                <Cel forte>{soma.investimento > 0 ? premiumValue(soma.investimento, 'currency') : '—'}</Cel>
+                <Cel forte>{soma.campanhas > 0 ? n(soma.leadsPlataforma) : '—'}</Cel>
+                <Cel forte>{n(soma.leads)}</Cel>
+                <Cel forte>{razao(soma.investimento, soma.leads)}</Cel>
+                <Cel forte>{n(soma.agendamentos)}</Cel>
+                <Cel forte>{n(soma.comparecimentos)}</Cel>
+                <Cel forte>{razao(soma.investimento, soma.comparecimentos)}</Cel>
+                <Cel forte>{n(soma.fechamentos)}</Cel>
+                <Cel forte>{razao(soma.investimento, soma.fechamentos)}</Cel>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+      <p className="mt-3 text-[10px] leading-snug text-[#7c868c]">
+        Região do lead vem do DDD do telefone (ou da cidade do formulário) — é de onde a pessoa é, não onde o anúncio rodou.
+        {temUfECidade && ' Linha de UF inclui as cidades dela — não somar as duas.'}
+        {semRegiao > 0 && ` ${premiumValue(semRegiao)} de ${premiumValue(total)} leads do período não têm região e ficam fora da tabela.`}
+      </p>
+    </PremiumPanel>
+  );
+}
+
 /** Título de seção da página única (substitui as abas). */
 function TituloSecao({ titulo, sub }: { titulo: string; sub?: string }) {
   return (
@@ -5402,10 +5494,6 @@ export default function GeneralDashboard() {
   const [goalsByClient, setGoalsByClient] = useState<Record<string, GoalConfig | null>>({});
   const [planningsByClient, setPlanningsByClient] = useState<Record<string, PlanningConfig>>({});
   const [crmSummary, setCrmSummary] = useState<Record<string, ClientSheetsSummary>>({});
-  /** Recorte por região ("uf:PR" | "cidade:Curitiba") — null = tudo. Zera ao trocar de cliente. */
-  const [recorte, setRecorte] = useState<string | null>(null);
-  const recorteAtivo = parseRecorte(recorte);
-  const regiaoQs = recorte ? `&regiao=${encodeURIComponent(recorte)}` : '';
   // Clientes com loja de delivery conectada (Cardápio Web/Anota AI) — quando o
   // cliente selecionado é um deles, o Funil de Performance dá lugar ao resumo
   // de delivery (decisão do Matheus; o funil de CRM não descreve esse negócio).
@@ -5458,6 +5546,8 @@ export default function GeneralDashboard() {
   const [metaPanelsLayout, setMetaPanelsLayout] = useState<RglLayout[]>(DEFAULT_META_PANELS_LAYOUT);
   const [googlePanelsLayout, setGooglePanelsLayout] = useState<RglLayout[]>(DEFAULT_GOOGLE_PANELS_LAYOUT);
   const [socialKpiLayout, setSocialKpiLayout] = useState<RglLayout[]>(DEFAULT_SOCIAL_KPI_LAYOUT);
+  /** Funil do CRM por região (cidade/UF) — tabela "Desempenho por região". */
+  const [porRegiao, setPorRegiao] = useState<PorRegiaoResposta | null>(null);
   const [porCanal, setPorCanal] = useState<{
     origens: FaturamentoPorOrigem[]; total: number; semAtribuicao: number;
     leads: LeadsPorCanal[]; leadsTotal: number; leadsSemCanal: number;
@@ -5477,9 +5567,6 @@ export default function GeneralDashboard() {
 
   // Stable string key derived from selectedIds — used as useEffect dependency
   const selectedKey = [...selectedIds].sort().join(',');
-  // Recorte é de UM conjunto de clientes: trocar a seleção zera (a região de
-  // um cliente não faz sentido no outro).
-  useEffect(() => { setRecorte(null); }, [selectedKey]);
   // Ref always points to the suffix currently in use (updated synchronously in load effect)
   const currentLsSuffixRef = useRef('');
   // Track last auto-resize key per panel group to avoid fighting user manual resizes within a session
@@ -5733,9 +5820,9 @@ export default function GeneralDashboard() {
       return () => { cancelled = true; };
     }
     const ids = [...selectedIds];
-    const periodParams = (period === 'custom' && customDateFrom && customDateTo
+    const periodParams = period === 'custom' && customDateFrom && customDateTo
       ? `period=${period}&dateFrom=${customDateFrom}&dateTo=${customDateTo}`
-      : `period=${period}`) + regiaoQs;
+      : `period=${period}`;
     Promise.allSettled(
       ids.map(async (id) => {
         const res = await fetch(`/api/clients/${id}/metrics?${periodParams}`);
@@ -5759,7 +5846,7 @@ export default function GeneralDashboard() {
       setMetricsCacheAge(maisVelho);
     }).finally(() => { if (!cancelled) setMetricsLoading(false); });
     return () => { cancelled = true; };
-  }, [selectedIds, period, customDateFrom, customDateTo, customReady, regiaoQs]);
+  }, [selectedIds, period, customDateFrom, customDateTo, customReady]);
 
   // Landing page (GA4): mesma régua de período do metrics; cliente sem vínculo devolve ga4:null
   useEffect(() => {
@@ -5795,7 +5882,7 @@ export default function GeneralDashboard() {
     if (selectedIds.size === 0 || !customReady || !faixaPrev) return () => { cancelled = true; };
     // Mês corrente compara com o MESMO trecho do mês anterior (1..dia de hoje);
     // últimos N dias com os N dias imediatamente antes, sem sobreposição.
-    const prevParams = `period=custom&dateFrom=${faixaPrev.from}&dateTo=${faixaPrev.to}${regiaoQs}`;
+    const prevParams = `period=custom&dateFrom=${faixaPrev.from}&dateTo=${faixaPrev.to}`;
     const ids = [...selectedIds];
     Promise.allSettled(
       ids.map(async (id) => {
@@ -5811,7 +5898,7 @@ export default function GeneralDashboard() {
       setPrevMetricsByClient(map);
     });
     return () => { cancelled = true; };
-  }, [selectedIds, period, customDateFrom, customDateTo, customReady, faixaPrev?.from, faixaPrev?.to, regiaoQs]);
+  }, [selectedIds, period, customDateFrom, customDateTo, customReady, faixaPrev?.from, faixaPrev?.to]);
 
   // Fetch active campaigns with spend in selected period
   useEffect(() => {
@@ -5914,9 +6001,8 @@ export default function GeneralDashboard() {
 
   useEffect(() => {
     const params = new URLSearchParams({ from: faixaSel.from, to: faixaSel.to });
-    if (recorte) params.set('regiao', recorte);
     fetch(`/api/crm/summary?${params}`)
-      .then(r => r.ok ? r.json() as Promise<{ clientId: string; leads: number; funil: ContagemFunil; total: number; funilStages: FunilPorStage | null; ultimaAtualizacao?: string | null; regioes?: ContagemRegioes | null }[]> : [])
+      .then(r => r.ok ? r.json() as Promise<{ clientId: string; leads: number; funil: ContagemFunil; total: number; funilStages: FunilPorStage | null; ultimaAtualizacao?: string | null }[]> : [])
       .then(data => {
         const map: Record<string, ClientSheetsSummary> = {};
         // Guarda a última entrada de lead POR cliente: o selo de frescor deriva
@@ -5924,7 +6010,7 @@ export default function GeneralDashboard() {
         // refazer este fetch (que já é da carteira inteira) ao trocar de cliente.
         const ultimas: Record<string, string> = {};
         for (const item of data) {
-          map[item.clientId] = { leads: item.leads, funil: item.funil, total: item.total, funilStages: item.funilStages ?? null, regioes: item.regioes ?? null };
+          map[item.clientId] = { leads: item.leads, funil: item.funil, total: item.total, funilStages: item.funilStages ?? null };
           if (item.ultimaAtualizacao) ultimas[item.clientId] = item.ultimaAtualizacao;
         }
         setCrmSummary(map);
@@ -5933,7 +6019,7 @@ export default function GeneralDashboard() {
         setCrmUltimaPorCliente({ porCliente: ultimas, em: Date.now() });
       })
       .catch(() => { setCrmSummary({}); setCrmUltimaPorCliente({ porCliente: {}, em: 0 }); });
-  }, [period, customDateFrom, customDateTo, faixaSel.from, faixaSel.to, recorte]);
+  }, [period, customDateFrom, customDateTo, faixaSel.from, faixaSel.to]);
 
   // Faturamento e leads por canal — de onde vem o dinheiro e de onde vem o lead.
   useEffect(() => {
@@ -5945,7 +6031,6 @@ export default function GeneralDashboard() {
       from: faixaSel.from,
       to: faixaSel.to,
     });
-    if (recorte) params.set('regiao', recorte);
     fetch(`/api/crm/por-canal?${params}`)
       .then(r => (r.ok ? r.json() as Promise<typeof vazio> : vazio))
       .then(j => {
@@ -5957,7 +6042,20 @@ export default function GeneralDashboard() {
       })
       .catch(() => { if (!cancelado) setPorCanal(vazio); });
     return () => { cancelado = true; };
-  }, [selectedIds, period, customDateFrom, customDateTo, customReady, faixaSel.from, faixaSel.to, recorte]);
+  }, [selectedIds, period, customDateFrom, customDateTo, customReady, faixaSel.from, faixaSel.to]);
+
+  // Funil por região do lead — irmã do summary (mesma régua). Cliente sem
+  // região nos leads devolve listas vazias e a tabela nem aparece.
+  useEffect(() => {
+    let cancelado = false;
+    if (selectedIds.size === 0 || !customReady) { setPorRegiao(null); return () => { cancelado = true; }; }
+    const params = new URLSearchParams({ clientIds: [...selectedIds].join(','), from: faixaSel.from, to: faixaSel.to });
+    fetch(`/api/crm/por-regiao?${params}`)
+      .then(r => (r.ok ? r.json() as Promise<PorRegiaoResposta> : null))
+      .then(j => { if (!cancelado) setPorRegiao(j); })
+      .catch(() => { if (!cancelado) setPorRegiao(null); });
+    return () => { cancelado = true; };
+  }, [selectedIds, period, customDateFrom, customDateTo, customReady, faixaSel.from, faixaSel.to]);
 
   // Fetch page/profile insights (Facebook Page + Instagram organic)
   useEffect(() => {
@@ -6059,18 +6157,8 @@ export default function GeneralDashboard() {
   }, [igPostsLoading]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Aggregate metrics ────────────────────────────────────────────────────
-  // Recorte por região na MÍDIA: não existe região na conta de anúncio, então
-  // o recorte é pelo NOME da campanha ([CWB], [JOINVILLE], MARINGÁ…). Campanha
-  // nacional/sem região fica FORA do recorte e é mostrada à parte (nunca some
-  // em silêncio). Sem recorte, `campanhasRecorte` = todas.
-  const campanhasRecorte = recorteAtivo ? campaigns.filter(c => campanhaCasaRecorte(c.name, recorteAtivo)) : campaigns;
-  const campanhasForaDoRecorte = recorteAtivo ? campaigns.filter(c => !campanhaCasaRecorte(c.name, recorteAtivo)) : [];
-  const somaCamp = (lista: CampaignPerformance[], plataforma: 'meta' | 'google') => lista
-    .filter(c => c.platform === plataforma)
-    .reduce((a, c) => ({ spend: a.spend + c.spend, leads: a.leads + c.leads, impressions: a.impressions + c.impressions, clicks: a.clicks + c.clicks }),
-      { spend: 0, leads: 0, impressions: 0, clicks: 0 });
   // Pre-compute Google campaign totals for use as fallback when metrics API returns no data
-  const googleCampaignsTotals = campanhasRecorte
+  const googleCampaignsTotals = campaigns
     .filter(c => c.platform === 'google')
     .reduce((a, c) => ({ spend: a.spend + c.spend, leads: a.leads + c.leads, impressions: a.impressions + c.impressions, clicks: a.clicks + c.clicks }),
       { spend: 0, leads: 0, impressions: 0, clicks: 0 });
@@ -6091,17 +6179,6 @@ export default function GeneralDashboard() {
       metaClicks += m.meta.clicks;
     }
     if (m?.google) { googleConv += m.google.conversions; googleCost += m.google.cost; }
-  }
-  // Sob recorte, os totais de CONTA (Meta/Google) não servem — a região é um
-  // subconjunto. Tudo passa a vir das campanhas que casam com o recorte
-  // (mesma fonte da tabela de campanhas). Alcance/formulário/conversa não
-  // existem por campanha nesta rota: zeram e a tela mostra "—".
-  if (recorteAtivo) {
-    const m = somaCamp(campanhasRecorte, 'meta');
-    metaSpend = m.spend; metaLeads = m.leads; metaImpressions = m.impressions; metaClicks = m.clicks;
-    metaReach = 0; metaFormLeads = 0; metaSiteLeads = 0; metaConversations = 0;
-    const g = somaCamp(campanhasRecorte, 'google');
-    googleCost = g.spend; googleConv = g.leads;
   }
   // Fallback: metrics API returned no Google data — use campaign totals (same source as the campaign table)
   const hasGoogleMetrics = googleCost > 0 || googleConv > 0;
@@ -6129,7 +6206,7 @@ export default function GeneralDashboard() {
       googleClicks += m.google.clicks;
     }
   }
-  if (recorteAtivo || (!hasGoogleMetrics && !campaignsLoading && googleCampaignsTotals.spend > 0)) {
+  if (!hasGoogleMetrics && !campaignsLoading && googleCampaignsTotals.spend > 0) {
     googleImpressions = googleCampaignsTotals.impressions;
     googleClicks = googleCampaignsTotals.clicks;
   }
@@ -6268,13 +6345,6 @@ export default function GeneralDashboard() {
     }
     if (m?.crm) { prevRevenue += m.crm.revenue ?? 0; prevCrmSales += m.crm.sales ?? 0; }
   }
-  // Sob recorte não há campanhas do período anterior carregadas: zerar a mídia
-  // anterior faz cada delta "vs anterior" de mídia sumir em vez de comparar a
-  // região com a conta inteira do mês passado.
-  if (recorteAtivo) {
-    prevMetaLeads = 0; prevMetaSpend = 0; prevMetaReach = 0; prevMetaImpressions = 0; prevMetaClicks = 0;
-    prevGoogleConv = 0; prevGoogleCost = 0; prevGoogleImpressions = 0; prevGoogleClicks = 0;
-  }
   const prevTotalLeads = prevMetaLeads + prevGoogleConv;
   const prevTotalSpend = prevMetaSpend + prevGoogleCost;
   const prevCpl = prevTotalLeads > 0 ? prevTotalSpend / prevTotalLeads : 0;
@@ -6356,10 +6426,12 @@ export default function GeneralDashboard() {
   }
 
   const selectedClients = clients.filter(c => selectedIds.has(c.id));
-  const metaCampaigns = campanhasRecorte.filter((campaign) => campaign.platform === 'meta');
-  const googleCampaigns = campanhasRecorte.filter((campaign) => campaign.platform === 'google');
-  // Criativos: pelo nome da campanha do anúncio (mesma regra).
-  const creativesRecorte = recorteAtivo ? creatives.filter(c => !!c.campaignName && campanhaCasaRecorte(c.campaignName, recorteAtivo)) : creatives;
+  const linhasRegiao = montarTabelaRegioes(
+    campaigns.map(c => ({ name: c.name, platform: c.platform, spend: c.spend, leads: c.leads })),
+    porRegiao?.cidades ?? [], porRegiao?.ufs ?? [],
+  );
+  const metaCampaigns = campaigns.filter((campaign) => campaign.platform === 'meta');
+  const googleCampaigns = campaigns.filter((campaign) => campaign.platform === 'google');
   const metaCampaignSpend = metaCampaigns.reduce((sum, campaign) => sum + campaign.spend, 0);
   const googleCampaignSpend = googleCampaigns.reduce((sum, campaign) => sum + campaign.spend, 0);
   const activeMetaCampaigns = metaCampaigns.filter((campaign) => campaign.status === 'ACTIVE' || campaign.status === 'ENABLED').length;
@@ -7046,10 +7118,10 @@ export default function GeneralDashboard() {
               titulo="Melhores criativos"
               icone={<MetaAdsMark className="h-5 w-5 text-[#168BFF]" />}
               sub="ordenados por leads (e menor CPL no empate); sem leads no período, por investimento"
-              vazio={!creativesLoading && creativesRecorte.length === 0}
-              avisoVazio={recorteAtivo ? 'Nenhum criativo de campanha desta região no período.' : 'Nenhum criativo com veiculação no período.'}
+              vazio={!creativesLoading && creatives.length === 0}
+              avisoVazio="Nenhum criativo com veiculação no período."
             >
-              <CreativeHorizontalStrip creatives={creativesRecorte} loading={creativesLoading} onPreview={setPreviewCreative} />
+              <CreativeHorizontalStrip creatives={creatives} loading={creativesLoading} onPreview={setPreviewCreative} />
             </Superficie>
     </>
   );
@@ -7144,9 +7216,7 @@ export default function GeneralDashboard() {
     social: pageInsightsLoading || pageInsights.some(pi => pi.instagram),
     comercial: desempenhoLoading || vendedores.length > 0 || categorias.length > 0,
   };
-  // Sob recorte a série diária de gasto/leads é da CONTA inteira (não há
-  // diário por campanha nesta rota) — o gráfico mentiria; some.
-  const temGraficoCpl = !recorteAtivo && diasSel.length >= 2 && gastoDia.some(v => v > 0) && leadsDia.some(v => v > 0);
+  const temGraficoCpl = diasSel.length >= 2 && gastoDia.some(v => v > 0) && leadsDia.some(v => v > 0);
 
   return (
     <div className="-m-3 min-h-full bg-[#05090B] text-[#f4f7f8] sm:-m-6">
@@ -7362,72 +7432,9 @@ export default function GeneralDashboard() {
             </div>
           );
         })()}
-        {/* ── Recorte por região ──
-            Só aparece quando os clientes selecionados têm região nos leads
-            (≥50% com UF). Chips = UFs e cidades com volume; "Todas" desfaz. */}
-        {(() => {
-          const contagens = [...selectedIds].map(id => crmSummary[id]?.regioes).filter((r): r is ContagemRegioes => !!r);
-          const opcoes = opcoesDeRecorte(contagens);
-          if (opcoes.length === 0 && !recorte) return null;
-          return (
-            <div className="mt-3 flex flex-wrap items-center gap-2">
-              <span className="text-[10px] font-black uppercase tracking-[0.08em] text-[#9aa4aa]">Recorte por região</span>
-              <div className="flex flex-wrap items-center gap-1 rounded-[10px] border border-white/[0.08] bg-[#0b1216] p-1">
-                <button type="button" onClick={() => setRecorte(null)}
-                  className={cn('rounded-[7px] px-2.5 py-1 text-[11px] font-bold transition-colors', !recorte ? 'bg-[#6cff2f] text-black' : 'text-[#9aa4aa] hover:text-[#dce4e8]')}>
-                  Todas
-                </button>
-                {opcoes.map(o => (
-                  <button key={o.key} type="button" onClick={() => setRecorte(recorte === o.key ? null : o.key)}
-                    title={`${o.leads} leads no período`}
-                    className={cn('rounded-[7px] px-2.5 py-1 text-[11px] font-bold transition-colors', recorte === o.key ? 'bg-[#6cff2f] text-black' : 'text-[#9aa4aa] hover:text-[#dce4e8]')}>
-                    {o.rotulo} <span className={cn('font-medium', recorte === o.key ? 'text-black/60' : 'text-[#6c767c]')}>{o.leads}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          );
-        })()}
       </div>
 
       <div className="px-5 py-6 xl:px-8">
-        {/* ── Card do recorte: o que a campanha da região trouxe × o que chegou
-            daquela região. É a leitura que motivou o filtro (CondoStore):
-            a diferença entre os dois é informação, não erro. */}
-        {recorteAtivo && selectedIds.size > 0 && (() => {
-          const rotulo = recorteAtivo.tipo === 'uf' ? recorteAtivo.valor : `${recorteAtivo.valor}`;
-          const invest = metaSpend + googleCost;
-          const leadsPlat = metaLeads + googleConv;
-          const cplReal = crmLeads > 0 ? invest / crmLeads : 0;
-          const fora = campanhasForaDoRecorte.reduce((a, c) => ({ spend: a.spend + c.spend, n: a.n + 1 }), { spend: 0, n: 0 });
-          const nomesFora = [...new Set(campanhasForaDoRecorte.map(c => rotuloRegiaoCampanha(regiaoDaCampanha(c.name))))].slice(0, 4).join(', ');
-          const kpi = (label: string, valor: string, sub?: string) => (
-            <div className="rounded-[10px] border border-white/[0.07] bg-[#111a20]/80 p-3">
-              <p className="text-[10px] font-black uppercase tracking-[0.08em] text-[#9aa4aa]">{label}</p>
-              <p className="mt-1.5 font-heading text-2xl leading-none text-[#f4f7f8]">{valor}</p>
-              {sub && <p className="mt-1 text-[10px] text-[#7c868c]">{sub}</p>}
-            </div>
-          );
-          return (
-            <PremiumPanel className="mb-4 p-5">
-              <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
-                <h3 className={T.cardTitulo}>Região: {rotulo}</h3>
-                <span className={T.cardSub}>campanhas com a região no nome × leads com DDD/cidade da região</span>
-              </div>
-              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                {kpi('Investimento na região', invest > 0 ? premiumValue(invest, 'currency') : '—', `${campanhasRecorte.length} ${campanhasRecorte.length === 1 ? 'campanha' : 'campanhas'} com a região no nome`)}
-                {kpi('Leads das campanhas', campanhasRecorte.length ? premiumValue(leadsPlat) : '—', 'resultado reportado por Meta/Google')}
-                {kpi('Leads no CRM da região', premiumValue(crmLeads), 'pessoas com DDD/cidade da região')}
-                {kpi('CPL real', cplReal > 0 ? premiumValue(cplReal, 'currency') : '—', 'investimento ÷ leads do CRM da região')}
-              </div>
-              {fora.n > 0 && (
-                <p className="mt-3 text-[11px] text-[#9aa4aa]">
-                  Fora do recorte: <strong className="text-[#dce4e8]">{premiumValue(fora.spend, 'currency')}</strong> em {fora.n} {fora.n === 1 ? 'campanha' : 'campanhas'} sem esta região no nome{nomesFora ? ` (${nomesFora})` : ''} — o investimento acima não as inclui.
-                </p>
-              )}
-            </PremiumPanel>
-          );
-        })()}
         {selectedIds.size === 0 && clients.length > 0 ? (
           <div className="mx-auto flex max-w-4xl flex-col items-center justify-center gap-8 py-16">
             <div className="text-center">
@@ -7616,6 +7623,11 @@ export default function GeneralDashboard() {
                       )}
                       <ChannelSummaryTable rows={channelRows} total={channelTotal} metaCpl={cplMetaSel} />
                     </div>
+                    {/* Só aparece quando há região em algum lugar (campanha com região
+                        no nome ou leads com DDD/cidade). Cliente sem isso não vê nada. */}
+                    {!modoFood && linhasRegiao.length > 0 && (
+                      <TabelaRegioes linhas={linhasRegiao} semRegiao={porRegiao?.semRegiao ?? 0} total={porRegiao?.total ?? 0} />
+                    )}
                     {blocoCanais}
                   </>
 
@@ -7664,7 +7676,6 @@ export default function GeneralDashboard() {
           clientIds={[...selectedIds]}
           from={periodoISO.from}
           to={periodoISO.to}
-          regiao={recorte}
           onClose={() => setFunilStageIdx(null)}
         />
       )}
@@ -7680,7 +7691,6 @@ export default function GeneralDashboard() {
           // Sem NENHUM cliente com topo vindo do CRM, o número de contatos é
           // estimativa de anúncio — não existe lista de leads por trás dele.
           topoDeAnuncios={fontesTopo.length > 0 && !fontesTopo.includes('crm')}
-          regiao={recorte}
           onClose={() => setFunilStageIdx(null)}
         />
       )}

@@ -50,3 +50,35 @@ eq(opcoesDeRecorte([{ total: 100, uf: { PR: 10 }, cidade: {} }]), [], 'cobertura
 eq(opcoesDeRecorte([{ total: 0, uf: {}, cidade: {} }]), [], 'sem leads');
 eq(opcoesDeRecorte([{ total: 10, uf: { PR: 6 }, cidade: {} }, { total: 10, uf: { PR: 6 }, cidade: {} }])[0].leads, 12, 'soma clientes');
 console.log(`OK — ${n} asserts`);
+
+// ── tabela por região (CondoStore, 3 meses — nomes e números reais) ──
+import { montarTabelaRegioes } from './build-regiao/regiao-recorte.js';
+{
+  const camps = [
+    { name: '[ON] [FRANQUEADO] [CONDO_STORE] [CWB]', platform: 'meta', spend: 225.14, leads: 59 },
+    { name: '[ON] [SEARCH] [FRANQUIA] [MARINGÁ] - 09/09', platform: 'meta', spend: 410.13, leads: 13 },
+    { name: '[ON] [FORMS] [JOINVILLE] - 01/09', platform: 'meta', spend: 319.40, leads: 9 },
+    { name: '[ON] [FORMS] [NACIONAL] - 01/09', platform: 'meta', spend: 716.49, leads: 54 },
+    { name: '🟥  [ON] [FORMS] [DIRETO] [JUNH] [VENDA] #3', platform: 'meta', spend: 5308.54, leads: 181 },
+  ];
+  const cidades = [
+    { regiao: 'Curitiba', uf: 'PR', leads: 45, agendamentos: 6, comparecimentos: 3, fechamentos: 1, receita: 15000 },
+    { regiao: 'Londrina', uf: 'PR', leads: 20, agendamentos: 2, comparecimentos: 1, fechamentos: 0, receita: 0 },
+    { regiao: 'Maringá', uf: 'PR', leads: 4, agendamentos: 1, comparecimentos: 0, fechamentos: 0, receita: 0 },
+    { regiao: 'Bauru', uf: 'SP', leads: 1, agendamentos: 0, comparecimentos: 0, fechamentos: 0, receita: 0 },
+  ];
+  const t = montarTabelaRegioes(camps, cidades, [{ regiao: 'PR', uf: 'PR', leads: 121, agendamentos: 10, comparecimentos: 5, fechamentos: 1, receita: 15000 }]);
+  eq(t.map(l => l.rotulo), ['Maringá/PR', 'Joinville/SC', 'Curitiba/PR', 'Londrina/PR', 'Nacional / sem região no nome'], 'ordem: investimento desc, depois leads; nacional por último');
+  eq(t[2].crm?.leads, 45, 'Curitiba casa o funil do CRM');
+  eq(t[2].leadsPlataforma, 59, 'Curitiba leads da plataforma');
+  eq(t[1].crm, null, 'Joinville tem campanha mas nenhum lead → crm null (tela mostra 0)');
+  eq(t[3].investimento, 0, 'Londrina: só leads, sem campanha');
+  assert.ok(!t.some(l => l.rotulo.startsWith('Bauru')), 'Bauru 1 lead e sem campanha fica fora'); n++;
+  const nac = t.at(-1);
+  eq([nac.campanhas, Math.round(nac.investimento), nac.leadsPlataforma, nac.crm], [2, 6025, 235, null], 'nacional + sem região juntos, sem CRM');
+  eq(montarTabelaRegioes([], [], []), [], 'nada → tabela some');
+  eq(montarTabelaRegioes([{ name: '[VENDA]', platform: 'meta', spend: 10, leads: 1 }], [], []), [], 'só campanha sem região → some (nacional sozinho não é tabela)');
+  const comUf = montarTabelaRegioes([{ name: '[ON] [TDW] [SP]', platform: 'meta', spend: 100, leads: 5 }], [], [{ regiao: 'SP', uf: 'SP', leads: 42, agendamentos: 3, comparecimentos: 1, fechamentos: 0, receita: 0 }]);
+  eq([comUf[0].rotulo, comUf[0].tipo, comUf[0].crm?.leads], ['SP', 'uf', 42], 'campanha por UF casa o funil da UF');
+  console.log(`OK — tabela por região`);
+}
