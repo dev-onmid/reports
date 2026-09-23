@@ -1,5 +1,6 @@
 import type { NextRequest } from 'next/server';
 import { parseRecorte, filtroRegiaoSql } from '@/lib/regiao-recorte';
+import { leadContaSql } from '@/lib/lead-contagem';
 import { makeServerPool } from '@/lib/server-db';
 import { canalSql, rotularCanal } from '@/lib/canal-lead';
 import {
@@ -112,7 +113,7 @@ export async function GET(req: NextRequest) {
         -- Registro de VENDA é ledger de faturamento, não lead: fica fora da
         -- listagem por etapa (senão apareceria como "contato" fantasma e o modal
         -- divergiria do card, que também o exclui).
-        WHERE COALESCE(l.registro_tipo, 'hibrido') <> 'venda' ${dateFilter} ${clientFilter}${regiao.sql}
+        WHERE COALESCE(l.registro_tipo, 'hibrido') <> 'venda' AND ${leadContaSql('l')} ${dateFilter} ${clientFilter}${regiao.sql}
         ORDER BY COALESCE(l.lead_date, l.data, l.created_at::date) DESC NULLS LAST`,
       params,
     );

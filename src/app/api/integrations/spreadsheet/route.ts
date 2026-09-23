@@ -358,6 +358,7 @@ async function ensureTables(pool: ReturnType<typeof makeServerPool>) {
   await pool.query(`
     ALTER TABLE public.crm_leads
       ADD COLUMN IF NOT EXISTS upload_id UUID,
+      ADD COLUMN IF NOT EXISTS porta TEXT,
       ADD COLUMN IF NOT EXISTS lead_date DATE,
       ADD COLUMN IF NOT EXISTS lead_name TEXT,
       ADD COLUMN IF NOT EXISTS phone TEXT,
@@ -1209,6 +1210,15 @@ export async function POST(req: NextRequest) {
         // chegar primeiro pelo ledger e só depois pela planilha de Leads (ou o
         // contrário). Idempotente e barata — reconcilia os dois lados na ordem
         // que vierem.
+        // Porta de entrada (lead-contagem.ts): tudo que a planilha tocou é
+        // 'planilha' — inclusive o lead que nasceu no chat e foi validado aqui.
+        // Não rebaixa CRM externo/formulário.
+        await pool.query(
+          `UPDATE public.crm_leads SET porta = 'planilha'
+            WHERE client_id = $1 AND (raw IS NOT NULL OR upload_id IS NOT NULL)
+              AND COALESCE(porta, '') NOT IN ('planilha', 'crm_externo', 'formulario')`,
+          [clientId],
+        ).catch(() => {});
         vendasLigadas += await ligarVendasAosLeads(pool, clientId).catch(err => {
           console.error('[spreadsheet ligarVendas]', err?.message ?? err);
           return 0;

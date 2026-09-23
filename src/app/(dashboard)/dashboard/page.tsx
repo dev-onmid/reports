@@ -109,7 +109,8 @@ import { SUPERFICIE, Superficie } from '@/components/dashboard/superficie';
 import { IndicadorCard, IndicadorMini, FaixaIndicadores } from '@/components/dashboard/indicador-card';
 
 type Period = 'yesterday' | 'last_7d' | 'last_14d' | 'last_30d' | 'this_month' | 'last_month' | 'last_3m' | 'last_6m' | 'this_year' | 'all_time' | 'custom';
-type ClientSheetsSummary = { leads: number; funil: ContagemFunil; total: number; funilStages: FunilPorStage | null };
+type VendasCohort = { periodo: number; anteriores: number; semData: number };
+type ClientSheetsSummary = { leads: number; funil: ContagemFunil; total: number; funilStages: FunilPorStage | null; conversasFora: number; leadsValidados: number; vendasCohort: VendasCohort | null };
 type ApiMetrics = {
   meta: { spend: number; reach?: number; impressions: number; clicks: number; leads: number; formLeads?: number; siteLeads?: number; conversations?: number; cpl: number } | null;
   google: { cost: number; impressions: number; clicks: number; cpc: number; conversions: number; cpa: number;
@@ -6099,7 +6100,7 @@ export default function GeneralDashboard() {
   useEffect(() => {
     const params = new URLSearchParams({ from: faixaSel.from, to: faixaSel.to });
     fetch(`/api/crm/summary?${params}`)
-      .then(r => r.ok ? r.json() as Promise<{ clientId: string; leads: number; funil: ContagemFunil; total: number; funilStages: FunilPorStage | null; ultimaAtualizacao?: string | null }[]> : [])
+      .then(r => r.ok ? r.json() as Promise<{ clientId: string; leads: number; funil: ContagemFunil; total: number; funilStages: FunilPorStage | null; ultimaAtualizacao?: string | null; conversasFora?: number; leadsValidados?: number; vendasCohort?: VendasCohort | null }[]> : [])
       .then(data => {
         const map: Record<string, ClientSheetsSummary> = {};
         // Guarda a última entrada de lead POR cliente: o selo de frescor deriva
@@ -6107,7 +6108,7 @@ export default function GeneralDashboard() {
         // refazer este fetch (que já é da carteira inteira) ao trocar de cliente.
         const ultimas: Record<string, string> = {};
         for (const item of data) {
-          map[item.clientId] = { leads: item.leads, funil: item.funil, total: item.total, funilStages: item.funilStages ?? null };
+          map[item.clientId] = { leads: item.leads, funil: item.funil, total: item.total, funilStages: item.funilStages ?? null, conversasFora: item.conversasFora ?? 0, leadsValidados: item.leadsValidados ?? 0, vendasCohort: item.vendasCohort ?? null };
           if (item.ultimaAtualizacao) ultimas[item.clientId] = item.ultimaAtualizacao;
         }
         setCrmSummary(map);
@@ -6585,7 +6586,12 @@ export default function GeneralDashboard() {
   const fontesTopo: ('crm' | 'anuncios')[] = [];
   let funnelTopo = 0;
   for (const id of selectedIds) {
-    const crmLeads = crmSummary[id]?.leads ?? 0;
+    // Lei 3 (lead-contagem.ts): sem NENHUM lead de porta validada (planilha/
+    // CRM externo/formulário) na janela, o CRM não manda no topo — só chat com
+    // rastro não sustenta contagem (WhatsApp desconecta, form não chega). Cai
+    // nas plataformas.
+    const validados = crmSummary[id]?.leadsValidados ?? 0;
+    const crmLeads = validados > 0 ? (crmSummary[id]?.leads ?? 0) : 0;
     const m = metricsByClient[id];
     const adsLeads = (m?.meta?.leads ?? 0) + (m?.google?.conversions ?? 0);
     const fonte = normalizarFonteTopo(clients.find(c => c.id === id)?.funil_fonte_topo);
@@ -6593,7 +6599,21 @@ export default function GeneralDashboard() {
     funnelTopo += r.topo;
     if (crmLeads > 0 || adsLeads > 0) fontesTopo.push(r.fonte);
   }
-  const fonteTopoLabel = rotuloFonteTopo(fontesTopo);
+  // O que a lei deixou fora (chat sem rastro + manuais) e a quebra de vendas
+  // por coorte (Lei 5), somados dos clientes selecionados.
+  const conversasFora = [...selectedIds].reduce((s, id) => s + (crmSummary[id]?.conversasFora ?? 0), 0);
+  const vendasCohort = [...selectedIds].reduce<VendasCohort>((a, id) => {
+    const v = crmSummary[id]?.vendasCohort; if (!v) return a;
+    return { periodo: a.periodo + v.periodo, anteriores: a.anteriores + v.anteriores, semData: a.semData + v.semData };
+  }, { periodo: 0, anteriores: 0, semData: 0 });
+  const detalhesVendas: Array<{ texto: string; tom: 'bom' | 'ruim' | 'neutro' }> = [];
+  if (vendasCohort.periodo + vendasCohort.anteriores + vendasCohort.semData > 0) {
+    detalhesVendas.push({ texto: `${vendasCohort.periodo} de leads do período`, tom: 'bom' });
+    if (vendasCohort.anteriores > 0) detalhesVendas.push({ texto: `${vendasCohort.anteriores} de leads anteriores`, tom: 'neutro' });
+    if (vendasCohort.semData > 0) detalhesVendas.push({ texto: `${vendasCohort.semData} sem data de fechamento`, tom: 'neutro' });
+  }
+  const fonteTopoLabel = rotuloFonteTopo(fontesTopo) + (conversasFora > 0 ? ` · ${premiumValue(conversasFora)} conversas do WhatsApp sem rastro de anúncio ficaram fora` : '');
+  const topoEhCrm = fontesTopo.length > 0 && fontesTopo.every(f => f === 'crm');
   // Cliente ÚNICO de delivery selecionado → swap do funil pelo resumo de
   // delivery. Seleção múltipla mantém o funil normal (misturar recorrência de
   // pedidos com funil de leads num agregado não faz sentido).
@@ -6850,12 +6870,13 @@ export default function GeneralDashboard() {
         const ehUltimoAgendamento = d.etapa === 'agendamento'
           && !restante.some(x => x.etapa === 'agendamento')
           && restante.some(x => x.etapa === 'comparecimento');
+        const ehFechamento = d.etapa === 'fechamento' && !restante.some(x => x.etapa === 'fechamento');
         return {
           label: d.label,
           actual: d.alcancaram,
           planned: 0,
           color: d.color,
-          detalhes: ehUltimoAgendamento ? detalhesAgendamento : undefined,
+          detalhes: ehUltimoAgendamento ? detalhesAgendamento : ehFechamento && detalhesVendas.length ? detalhesVendas : undefined,
         };
       })
     : firstPlanningForFunnel.stages.map((stage, i) => ({
@@ -6866,7 +6887,8 @@ export default function GeneralDashboard() {
         // Só no degrau de agendamentos. Vale mesmo com topo estimado por anúncio:
         // agendamentos e comparecimentos vêm do CRM nos dois casos (só o TOPO muda
         // de fonte), então a quebra sempre fecha com os números exibidos.
-        detalhes: i === 2 ? detalhesAgendamento : undefined,
+        // Lei 5 no degrau de vendas (4): de leads do período × de leads anteriores.
+        detalhes: i === 2 ? detalhesAgendamento : i === 4 && detalhesVendas.length ? detalhesVendas : undefined,
       }));
   // Conversão geral do funil real = fechamento (último degrau) sobre o topo dele.
   const funnelTaxaFinal = usaStageFunil && stageFunilSolo!.degraus.length > 1
@@ -7691,16 +7713,23 @@ export default function GeneralDashboard() {
                       <BulletMetaCard
                         titulo="Leads"
                         icon={Users}
-                        fonte="Meta + Google (plataformas)"
-                        fonteTitulo="Leads do Meta Ads + conversões do Google Ads, como as plataformas reportam"
+                        // Lei 1/3 (lead-contagem.ts): com planilha/CRM externo, o número
+                        // é o do CRM validado — as plataformas viram nota de rodapé.
+                        fonte={topoEhCrm ? 'CRM (planilha / integração)' : 'Meta + Google (plataformas)'}
+                        fonteTitulo={topoEhCrm ? 'Leads validados: planilha, CRM externo, formulário e chat com rastro de anúncio — unidos por telefone' : 'Leads do Meta Ads + conversões do Google Ads, como as plataformas reportam'}
                         metaMes={leadsGoal}
                         esperado={effectiveLeadsGoal}
-                        realizado={totalLeads}
+                        realizado={topoEhCrm ? funnelTopo : totalLeads}
                         formatar={(n) => premiumValue(n)}
                         rotuloEsperado={rotuloEsperado}
-                        projecao={projetar(totalLeads)}
-                        rodape={crmLeads > 0 ? (
-                          <span title="Leads criados no CRM na mesma janela (pela data de criação do lead), somados dos clientes selecionados — mesma consulta da rota de métricas.">
+                        projecao={projetar(topoEhCrm ? funnelTopo : totalLeads)}
+                        rodape={topoEhCrm ? (
+                          <span title="O que Meta Ads + Google Ads reportaram na mesma janela.">
+                            plataformas reportaram <span className="font-bold text-[#f4f7f8]">{premiumValue(totalLeads)}</span>
+                            {conversasFora > 0 && <> · {premiumValue(conversasFora)} conversas sem rastro fora</>}
+                          </span>
+                        ) : crmLeads > 0 ? (
+                          <span title="Leads que contam pela lei (planilha/CRM externo/formulário + chat com rastro), na mesma janela.">
                             CRM registrou <span className="font-bold text-[#f4f7f8]">{premiumValue(crmLeads)}</span>
                             {fatorPlataformaCrm !== null && totalLeads > 0 && (
                               <> (plataformas {fatorPlataformaCrm.toFixed(1).replace('.', ',')}× o CRM)</>

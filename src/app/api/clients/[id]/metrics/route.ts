@@ -3,6 +3,7 @@ import { google } from 'googleapis';
 import { makeServerPool } from '@/lib/server-db';
 import { resolveMetaPeriod, resolveGaqlPeriod, applyMetaDateToUrl } from '@/lib/period-utils';
 import { parseRecorte, filtroRegiaoSql } from '@/lib/regiao-recorte';
+import { ENSURE_COLUNAS_CONTAGEM, leadContaSql } from '@/lib/lead-contagem';
 import { getFreshMetaToken } from '@/lib/meta-token';
 import { getCached, setCached, cachedJson, TTL_4H } from '@/lib/api-cache';
 
@@ -317,7 +318,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const regiao = filtroRegiaoSql(recorte, 4);
   const crmParams = [clientId, crmPeriod.from, crmPeriod.to, ...regiao.params];
 
-  const cacheKey = `metrics:v6:${clientId}:${period}:${dateFrom}:${dateTo}:${recorte ? `${recorte.tipo}:${recorte.valor}` : ''}`;
+  const cacheKey = `metrics:v7:${clientId}:${period}:${dateFrom}:${dateTo}:${recorte ? `${recorte.tipo}:${recorte.valor}` : ''}`;
   const cached = getCached(cacheKey);
   if (cached) return cachedJson(cached.data, true, cached.cachedAt);
 
@@ -328,6 +329,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   let crmDailyRows: CrmDailyRow[] = [];
   try {
     await ensureCrmMetricsColumns(pool);
+    await pool.query(ENSURE_COLUNAS_CONTAGEM).catch(() => {});
     const [newLinks, g, m, legacyMetaLinks, legacyMetaIntegration] = await Promise.all([
       safeRows(pool, 'SELECT * FROM public.client_account_links WHERE client_id = $1', [clientId]),
       safeRows(pool, "SELECT * FROM public.google_connections WHERE status = 'connected'"),
@@ -365,7 +367,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
             OR COALESCE(lead_date, data) BETWEEN $2 AND $3
           )::int AS leads
          FROM public.crm_leads
-        WHERE client_id = $1${regiao.sql}`,
+        -- A LEI (lead-contagem.ts): só lead que conta na dashboard.
+        WHERE client_id = $1 AND ${leadContaSql()}${regiao.sql}`,
       crmParams,
     );
     const crm = crmRows[0];
@@ -386,7 +389,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         pool,
         `SELECT COALESCE(lead_date, data)::text AS date, COUNT(*)::int AS leads
            FROM public.crm_leads
-          WHERE client_id = $1 AND COALESCE(lead_date, data) BETWEEN $2 AND $3${regiao.sql}
+          WHERE client_id = $1 AND ${leadContaSql()} AND COALESCE(lead_date, data) BETWEEN $2 AND $3${regiao.sql}
           GROUP BY 1`,
         crmParams,
       ) as Promise<Array<{ date: string; leads: number }>>,
@@ -396,7 +399,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
                 COALESCE(SUM(COALESCE(NULLIF(revenue, 0), valor_rs, 0)), 0)::float AS revenue,
                 COUNT(*) FILTER (WHERE COALESCE(NULLIF(revenue, 0), valor_rs, 0) > 0 OR fechou = TRUE)::int AS sales
            FROM public.crm_leads
-          WHERE client_id = $1 AND COALESCE(fechado_em, lead_date, data) BETWEEN $2 AND $3${regiao.sql}
+          WHERE client_id = $1 AND ${leadContaSql()} AND COALESCE(fechado_em, lead_date, data) BETWEEN $2 AND $3${regiao.sql}
           GROUP BY 1`,
         crmParams,
       ) as Promise<Array<{ date: string; revenue: number; sales: number }>>,

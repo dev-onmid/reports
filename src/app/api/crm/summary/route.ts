@@ -1,5 +1,6 @@
 import type { NextRequest } from 'next/server';
 import { parseRecorte, filtroRegiaoSql, type ContagemRegioes } from '@/lib/regiao-recorte';
+import { ENSURE_COLUNAS_CONTAGEM, leadContaSql, portaValidadaSql } from '@/lib/lead-contagem';
 import { makeServerPool } from '@/lib/server-db';
 import {
   contarFunil,
@@ -56,8 +57,10 @@ export async function GET(req: NextRequest) {
         ADD COLUMN IF NOT EXISTS valor_rs NUMERIC,
         ADD COLUMN IF NOT EXISTS revenue NUMERIC DEFAULT 0,
         ADD COLUMN IF NOT EXISTS registro_tipo TEXT DEFAULT 'hibrido',
-        ADD COLUMN IF NOT EXISTS data_fechamento DATE
+        ADD COLUMN IF NOT EXISTS data_fechamento DATE,
+        ADD COLUMN IF NOT EXISTS fechado_em DATE
     `);
+    await pool.query(ENSURE_COLUNAS_CONTAGEM);
 
     const params: (string | null)[] = [];
     let dateFilter = '';
@@ -86,9 +89,55 @@ export async function GET(req: NextRequest) {
               (fechou OR COALESCE(NULLIF(revenue, 0), valor_rs, 0) > 0) AS fechou,
               COALESCE(NULLIF(revenue, 0), valor_rs, 0) AS valor_rs
          FROM public.crm_leads
-        WHERE TRUE ${dateFilter}${regiaoSql.sql}`,
+        -- A LEI (lead-contagem.ts): planilha/CRM externo/formulário contam sempre;
+        -- chat só com rastro pago; manual não conta.
+        WHERE ${leadContaSql()} ${dateFilter}${regiaoSql.sql}`,
       [...params, ...regiaoSql.params]
     );
+
+    // O que a lei DEIXOU DE FORA (conversas do chat sem rastro + manuais) e
+    // quantos leads têm porta validada — a tela mostra o primeiro e usa o
+    // segundo para decidir o topo do funil (Lei 3: sem porta validada, topo
+    // vem das plataformas). Ambos na janela, sem o recorte de região.
+    const contagemPorCliente = new Map<string, { fora: number; validados: number }>();
+    try {
+      const { rows: cont } = await pool.query(
+        `SELECT client_id,
+                COUNT(*) FILTER (WHERE NOT ${leadContaSql()})::int AS fora,
+                COUNT(*) FILTER (WHERE ${portaValidadaSql()})::int AS validados
+           FROM public.crm_leads
+          WHERE COALESCE(registro_tipo, 'hibrido') <> 'venda' ${dateFilter}
+          GROUP BY client_id`,
+        params
+      );
+      for (const r of cont) contagemPorCliente.set(String(r.client_id), { fora: r.fora, validados: r.validados });
+    } catch (e) { console.error('[crm summary] contagem fora/validados', e); }
+
+    // Lei 5: vendas fechadas NA JANELA, separadas por quando o lead COMEÇOU
+    // (dentro do período × antes dele). Só entra quem tem data de fechamento;
+    // o resto vai em `semData` — não dá pra colocar no tempo.
+    const cohortPorCliente = new Map<string, { periodo: number; anteriores: number; semData: number }>();
+    if (from && to) {
+      try {
+        const { rows: coh } = await pool.query(
+          `SELECT client_id,
+                  COUNT(*) FILTER (WHERE fechou_em IS NOT NULL AND ini >= $1 AND ini <= $2)::int AS periodo,
+                  COUNT(*) FILTER (WHERE fechou_em IS NOT NULL AND ini < $1)::int AS anteriores,
+                  COUNT(*) FILTER (WHERE fechou_em IS NULL AND ini >= $1 AND ini <= $2)::int AS sem_data
+             FROM (SELECT client_id,
+                          COALESCE(lead_date, data, created_at::date) AS ini,
+                          COALESCE(fechado_em, data_fechamento) AS fechou_em
+                     FROM public.crm_leads
+                    WHERE COALESCE(registro_tipo, 'hibrido') <> 'venda'
+                      AND (fechou = TRUE OR COALESCE(NULLIF(revenue, 0), valor_rs, 0) > 0)
+                      AND ${leadContaSql()}) x
+            WHERE fechou_em IS NULL OR (fechou_em >= $1 AND fechou_em <= $2)
+            GROUP BY client_id`,
+          [from, to]
+        );
+        for (const r of coh) cohortPorCliente.set(String(r.client_id), { periodo: r.periodo, anteriores: r.anteriores, semData: r.sem_data });
+      } catch (e) { console.error('[crm summary] cohort de vendas', e); }
+    }
 
     // Contagem de região por cliente NA JANELA, sem o recorte: alimenta os
     // chips. Registro de venda (ledger) fica fora — não é pessoa.
@@ -97,7 +146,7 @@ export async function GET(req: NextRequest) {
       const { rows: reg } = await pool.query(
         `SELECT client_id, UPPER(regiao_uf) AS uf, regiao_cidade AS cidade, COUNT(*)::int AS n
            FROM public.crm_leads
-          WHERE COALESCE(registro_tipo, 'hibrido') <> 'venda' ${dateFilter}
+          WHERE COALESCE(registro_tipo, 'hibrido') <> 'venda' AND ${leadContaSql()} ${dateFilter}
           GROUP BY 1, 2, 3`,
         params
       );
@@ -175,7 +224,7 @@ export async function GET(req: NextRequest) {
     // União: cliente com ZERO leads no recorte continua na resposta (funil
     // zerado + suas `regioes`), senão os chips sumiriam junto e não daria
     // para desfazer o filtro.
-    const clientes = new Set<string>([...leadsPorCliente.keys(), ...regioesPorCliente.keys()]);
+    const clientes = new Set<string>([...leadsPorCliente.keys(), ...regioesPorCliente.keys(), ...contagemPorCliente.keys()]);
     return Response.json(
       [...clientes].map((clientId) => {
         const leads = leadsPorCliente.get(clientId) ?? [];
@@ -196,6 +245,12 @@ export async function GET(req: NextRequest) {
           ultimaAtualizacao: ultimaPorCliente.get(clientId) ?? null,
           /** Leads por UF/cidade na janela (sem o recorte) — opções do filtro de região. */
           regioes: regioesPorCliente.get(clientId) ?? null,
+          /** Conversas do chat sem rastro pago (+ manuais) que a lei deixou fora, na janela. */
+          conversasFora: contagemPorCliente.get(clientId)?.fora ?? 0,
+          /** Leads com porta validada (planilha/CRM externo/formulário) na janela — 0 ⇒ topo vem das plataformas. */
+          leadsValidados: contagemPorCliente.get(clientId)?.validados ?? 0,
+          /** Lei 5: vendas fechadas na janela por quando o lead começou. */
+          vendasCohort: cohortPorCliente.get(clientId) ?? null,
         };
       })
     );

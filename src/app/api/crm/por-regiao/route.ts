@@ -17,6 +17,7 @@ import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { contarFunil, type ContagemFunil, type EtapaDeStage, type EtapaFunil, type LeadParaFunil } from '@/lib/funil-etapas';
 import { normalizarNome } from '@/lib/regiao-recorte';
+import { leadContaSql } from '@/lib/lead-contagem';
 
 export type LinhaRegiao = {
   /** Cidade ("Curitiba") ou UF ("PR"). */
@@ -75,7 +76,8 @@ export async function GET(req: NextRequest) {
               UPPER(NULLIF(TRIM(regiao_uf), '')) AS uf,
               NULLIF(TRIM(regiao_cidade), '') AS cidade
          FROM public.crm_leads
-        WHERE client_id = ANY($1) ${dateFilter}`,
+        -- A LEI (lead-contagem.ts): irmã do summary, mesma contagem.
+        WHERE client_id = ANY($1) AND ${leadContaSql()} ${dateFilter}`,
       params,
     );
 

@@ -1,5 +1,6 @@
 import type { NextRequest } from 'next/server';
 import { parseRecorte, filtroRegiaoSql } from '@/lib/regiao-recorte';
+import { leadContaSql } from '@/lib/lead-contagem';
 import { makeServerPool } from '@/lib/server-db';
 import { parseIsoDateRange } from '@/lib/optimizer-period-range';
 import { CANAL_SQL, ROTULO_CANAL } from '@/lib/canal-lead';
@@ -104,15 +105,16 @@ export async function GET(req: NextRequest) {
                      OR COALESCE(fechado_em, lead_date, data) BETWEEN $2 AND $3)`;
     // Recorte por região do lead (opcional): mesmo $4 nas duas bases.
     const regiao = filtroRegiaoSql(parseRecorte(req.nextUrl.searchParams.get('regiao')), 4);
+    // A LEI (lead-contagem.ts) nas duas bases.
     const BASE = `FROM public.crm_leads
-                  WHERE client_id = ANY($1) AND ${JANELA}${regiao.sql}`;
+                  WHERE client_id = ANY($1) AND ${leadContaSql()} AND ${JANELA}${regiao.sql}`;
     const params = [clientIds, range.from, range.to, ...regiao.params];
 
     // ⚠️ Régua PRÓPRIA dos leads: data de criação, não a do ganho.
     const JANELA_LEAD = `(COALESCE(lead_date, data) IS NULL
                           OR COALESCE(lead_date, data) BETWEEN $2 AND $3)`;
     const BASE_LEAD = `FROM public.crm_leads
-                       WHERE client_id = ANY($1) AND ${JANELA_LEAD}${regiao.sql}`;
+                       WHERE client_id = ANY($1) AND ${leadContaSql()} AND ${JANELA_LEAD}${regiao.sql}`;
 
     const [origens, campanhas, totalRows, leadsRows, leadsTotalRows] = await Promise.all([
       pool.query<LinhaBruta>(

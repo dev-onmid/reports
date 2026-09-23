@@ -66,6 +66,7 @@ export async function ensureCrmConversationSchema(pool: Pool) {
       ADD COLUMN IF NOT EXISTS creative_name TEXT,
       ADD COLUMN IF NOT EXISTS first_origin_at TIMESTAMPTZ,
       ADD COLUMN IF NOT EXISTS instance_id TEXT,
+      ADD COLUMN IF NOT EXISTS porta TEXT,
       ADD COLUMN IF NOT EXISTS chat_read_at TIMESTAMPTZ;
     CREATE INDEX IF NOT EXISTS crm_leads_client_id_idx ON public.crm_leads(client_id);
     CREATE INDEX IF NOT EXISTS crm_leads_funnel_id_idx ON public.crm_leads(funnel_id);
@@ -360,6 +361,8 @@ export async function upsertLeadFromConversation(pool: Pool, input: Conversation
                 whatsapp_lid = COALESCE(NULLIF($4, ''), whatsapp_lid),
                 canal = COALESCE(NULLIF(canal, ''), $5),
                 origin = COALESCE(NULLIF(origin, ''), $6),
+                -- Porta só preenche vazio: planilha/CRM externo já gravada nunca vira 'chat'.
+                porta = COALESCE(NULLIF(porta, ''), 'chat'),
                 status = COALESCE(NULLIF(status, ''), $7),
                 funnel_id = COALESCE(funnel_id, $8::uuid),
                 profile_picture_url = COALESCE($9, profile_picture_url),
@@ -421,13 +424,15 @@ export async function upsertLeadFromConversation(pool: Pool, input: Conversation
            whatsapp_last_message_at, whatsapp_last_message_text, whatsapp_last_direction,
            whatsapp_lid, observacao, ctwa_clid, source_id, source_url, utm_source, utm_medium,
            utm_campaign, utm_content, utm_term, campaign_name, adset_name, ad_name, creative_name,
-           instance_id, first_origin_at)
+           instance_id, first_origin_at, porta)
          VALUES ($1, $2, NULLIF($3, ''), $4, $5, CURRENT_DATE, $6, $7, $8,
                  $9::timestamptz, NULLIF($10, ''), NULLIF($11, ''), NULLIF($12, ''), NULLIF($13, ''),
                  NULLIF($14, ''), NULLIF($15, ''), NULLIF($16, ''), NULLIF($17, ''), NULLIF($18, ''),
                  NULLIF($19, ''), NULLIF($20, ''), NULLIF($21, ''), NULLIF($22, ''), NULLIF($23, ''),
                  NULLIF($24, ''), NULLIF($25, ''), NULLIF($26, ''),
-                 CASE WHEN NULLIF($14, '') IS NOT NULL OR NULLIF($15, '') IS NOT NULL OR NULLIF($17, '') IS NOT NULL THEN NOW() ELSE NULL END)
+                 CASE WHEN NULLIF($14, '') IS NOT NULL OR NULLIF($15, '') IS NOT NULL OR NULLIF($17, '') IS NOT NULL THEN NOW() ELSE NULL END,
+                 -- Porta de entrada (lead-contagem.ts): nasceu no chat.
+                 'chat')
          RETURNING id`,
         [
           input.clientId,
