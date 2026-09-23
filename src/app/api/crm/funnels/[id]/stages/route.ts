@@ -31,8 +31,8 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id: funnelId } = await params;
-  const { label, color = '#71717a', clientId, etapa_funil } = await req.json().catch(() => ({})) as {
-    label?: string; color?: string; clientId?: string; etapa_funil?: string;
+  const { label, color = '#71717a', clientId, etapa_funil, position } = await req.json().catch(() => ({})) as {
+    label?: string; color?: string; clientId?: string; etapa_funil?: string; position?: number;
   };
   if (!label?.trim() || !clientId) return Response.json({ error: 'label and clientId required' }, { status: 400 });
   // Etapa nova nasce classificada: explícita se o editor mandou, senão pela
@@ -44,6 +44,14 @@ export async function POST(
 
   const pool = makeServerPool();
   try {
+    // ⚠️ Posição vem do editor quando ele manda: etapa criada JÁ ARRASTADA pro
+    // meio do funil precisa nascer ali. Sem isto o INSERT jogava em MAX+1 e a
+    // coluna voltava pro fim no primeiro refresh — o gestor arrastava, salvava,
+    // recarregava e via a ordem antiga. Sem posição (outros chamadores), segue
+    // o comportamento antigo de acrescentar no fim.
+    const posExplicita = Number.isInteger(position) && (position as number) >= 0
+      ? (position as number)
+      : null;
     const { rows: [{ max_pos }] } = await pool.query(
       `SELECT COALESCE(MAX(position), -1)::int AS max_pos FROM public.crm_stages WHERE funnel_id = $1`,
       [funnelId],
@@ -52,7 +60,7 @@ export async function POST(
       `INSERT INTO public.crm_stages (funnel_id, client_id, label, color, position, etapa_funil)
        VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING id, label, color, position, etapa_funil`,
-      [funnelId, clientId, label.trim(), color, (max_pos as number) + 1, etapa],
+      [funnelId, clientId, label.trim(), color, posExplicita ?? (max_pos as number) + 1, etapa],
     );
     return Response.json(stage, { status: 201 });
   } finally {

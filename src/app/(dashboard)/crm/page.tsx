@@ -1928,7 +1928,9 @@ function FunnelEditorModal({
           const res = await fetch(`/api/crm/funnels/${funnel.id}/stages`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ label: s.label, color: s.color, clientId, etapa_funil: etapaFunil }),
+            // `position: i` é o que faz a etapa nova nascer ONDE foi arrastada —
+            // sem ele a rota grava MAX+1 e ela volta pro fim no refresh.
+            body: JSON.stringify({ label: s.label, color: s.color, clientId, etapa_funil: etapaFunil, position: i }),
           });
           if (res.ok) savedStages.push(await res.json() as CrmStage);
         } else {
