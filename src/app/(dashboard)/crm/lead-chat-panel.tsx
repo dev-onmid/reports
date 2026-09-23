@@ -222,7 +222,10 @@ export function LeadChatPanel({
   const busy = sending || uploading;
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-background/40">
+    // ⚠️ `w-full` não é enfeite: o wrapper no modal é flex em LINHA, e sem
+    // largura declarada esta raiz encolhe até o conteúdo — sobrava uma faixa
+    // morta à direita do chat dentro do próprio modal.
+    <div className="flex h-full w-full min-h-0 flex-col bg-background/40">
       {/* Cabeçalho */}
       <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-4 py-2.5">
         <div className="flex min-w-0 items-center gap-2.5">
