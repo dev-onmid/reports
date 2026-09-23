@@ -45,7 +45,9 @@ export function portaSql(alias = ''): string {
     ELSE 'manual' END)`;
 }
 
-/** Lead do chat com prova de tráfego pago. */
+/** Lead do chat com prova de tráfego pago.
+ *  ⚠️ Null-safe de propósito: `NULL IN (...)` é NULL, e `NOT (... OR NULL)` vira NULL —
+ *  o contador de "conversas fora" (que usa NOT) zerava para todo lead sem UTM. */
 export function rastroPagoSql(alias = ''): string {
   const c = (n: string) => col(alias, n);
   return `(NULLIF(${c('ctwa_clid')}, '') IS NOT NULL
@@ -54,8 +56,8 @@ export function rastroPagoSql(alias = ''): string {
     OR NULLIF(${c('gclid')}, '') IS NOT NULL OR NULLIF(${c('fbclid')}, '') IS NOT NULL
     OR NULLIF(${c('wbraid')}, '') IS NOT NULL OR NULLIF(${c('gbraid')}, '') IS NOT NULL
     OR NULLIF(${c('campaign_name')}, '') IS NOT NULL
-    OR lower(${c('utm_medium')}) IN ('cpc', 'paid', 'paid_social', 'ppc')
-    OR lower(${c('utm_source')}) IN ('fb', 'ig', 'facebook', 'instagram', 'google', 'meta'))`;
+    OR COALESCE(lower(${c('utm_medium')}) IN ('cpc', 'paid', 'paid_social', 'ppc'), FALSE)
+    OR COALESCE(lower(${c('utm_source')}) IN ('fb', 'ig', 'facebook', 'instagram', 'google', 'meta'), FALSE))`;
 }
 
 /** Predicado: o lead CONTA na dashboard. */
