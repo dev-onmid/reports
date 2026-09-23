@@ -16,6 +16,7 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { contarFunil, type ContagemFunil, type EtapaDeStage, type EtapaFunil, type LeadParaFunil } from '@/lib/funil-etapas';
+import { normalizarNome } from '@/lib/regiao-recorte';
 
 export type LinhaRegiao = {
   /** Cidade ("Curitiba") ou UF ("PR"). */
@@ -96,7 +97,11 @@ export async function GET(req: NextRequest) {
     // Grupo → leads POR CLIENTE (o contarFunil precisa das etapas do cliente
     // dono do lead; somar depois é o que o summary também faz com somarFunis).
     type Grupo = Map<string, LeadParaFunil[]>; // clientId → leads
-    const porCidade = new Map<string, { uf: string | null; porCliente: Grupo }>();
+    // ⚠️ Chave da cidade SEM acento e SEM caixa: a base tem "Curitiba" (296),
+    // "curitiba" (2) e "Goiania"/"Goiânia" — agrupar pela grafia crua espalha a
+    // mesma cidade em linhas separadas (medido em produção). O rótulo exibido é
+    // a grafia mais frequente; a UF, a mais frequente entre as não-nulas.
+    const porCidade = new Map<string, { grafias: Map<string, number>; ufs: Map<string, number>; porCliente: Grupo }>();
     const porUf = new Map<string, Grupo>();
     let semRegiao = 0;
     let total = 0;
@@ -119,11 +124,13 @@ export async function GET(req: NextRequest) {
       const cidade: string | null = row.cidade ?? null;
       if (!uf && !cidade) { semRegiao++; continue; }
       if (cidade) {
-        const g = porCidade.get(cidade) ?? { uf, porCliente: new Map() };
-        if (!g.uf && uf) g.uf = uf;
+        const k = normalizarNome(cidade);
+        const g = porCidade.get(k) ?? { grafias: new Map(), ufs: new Map(), porCliente: new Map() };
+        g.grafias.set(cidade, (g.grafias.get(cidade) ?? 0) + 1);
+        if (uf) g.ufs.set(uf, (g.ufs.get(uf) ?? 0) + 1);
         if (!g.porCliente.has(cid)) g.porCliente.set(cid, []);
         g.porCliente.get(cid)!.push(lead);
-        porCidade.set(cidade, g);
+        porCidade.set(k, g);
       }
       if (uf) {
         const g = porUf.get(uf) ?? new Map();
@@ -143,7 +150,8 @@ export async function GET(req: NextRequest) {
       return acc as ContagemFunil;
     };
 
-    const cidades = [...porCidade.entries()].map(([c, g]) => linha(c, g.uf, somar(g.porCliente))).sort((a, b) => b.leads - a.leads);
+    const maisFrequente = (m: Map<string, number>): string | null => [...m.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+    const cidades = [...porCidade.values()].map(g => linha(maisFrequente(g.grafias) ?? '', maisFrequente(g.ufs), somar(g.porCliente))).sort((a, b) => b.leads - a.leads);
     const ufs = [...porUf.entries()].map(([u, g]) => linha(u, u, somar(g))).sort((a, b) => b.leads - a.leads);
 
     return Response.json({ ok: true, cidades, ufs, semRegiao, total } satisfies PorRegiaoResposta);
