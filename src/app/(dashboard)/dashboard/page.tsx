@@ -105,7 +105,7 @@ import { RitmoMesChart, CplDiarioChart } from '@/components/dashboard/ritmo-char
 import { SUPERFICIE, Superficie } from '@/components/dashboard/superficie';
 import { IndicadorCard, IndicadorMini, FaixaIndicadores } from '@/components/dashboard/indicador-card';
 
-type Period = 'yesterday' | 'last_7d' | 'last_14d' | 'last_30d' | 'this_month' | 'last_month' | 'custom';
+type Period = 'yesterday' | 'last_7d' | 'last_14d' | 'last_30d' | 'this_month' | 'last_month' | 'last_3m' | 'last_6m' | 'this_year' | 'all_time' | 'custom';
 type ClientSheetsSummary = { leads: number; funil: ContagemFunil; total: number; funilStages: FunilPorStage | null };
 type ApiMetrics = {
   meta: { spend: number; reach?: number; impressions: number; clicks: number; leads: number; formLeads?: number; siteLeads?: number; conversations?: number; cpl: number } | null;
@@ -147,6 +147,12 @@ const PERIODS: { value: Period; label: string }[] = [
   { value: 'last_30d', label: '30 dias' },
   { value: 'this_month', label: 'Este mês' },
   { value: 'last_month', label: 'Mês passado' },
+  // Janelas longas (pedido do Matheus, 2026-09-23). "Todo período" = 36 meses,
+  // limite de retroatividade da API da Meta — ver MESES_TODO_PERIODO.
+  { value: 'last_3m', label: '3 meses' },
+  { value: 'last_6m', label: '6 meses' },
+  { value: 'this_year', label: 'Este ano' },
+  { value: 'all_time', label: 'Todo período' },
   { value: 'custom', label: 'Personalizado' },
 ];
 
@@ -5776,7 +5782,9 @@ export default function GeneralDashboard() {
   useEffect(() => {
     let cancelled = false;
     setPrevMetricsByClient({});
-    if (selectedIds.size === 0 || !customReady) return () => { cancelled = true; };
+    // "Todo período" não tem antes (faixaPrev null): sem busca, prev fica vazio
+    // e todo delta "vs anterior" some sozinho em vez de comparar com uma base inventada.
+    if (selectedIds.size === 0 || !customReady || !faixaPrev) return () => { cancelled = true; };
     // Mês corrente compara com o MESMO trecho do mês anterior (1..dia de hoje);
     // últimos N dias com os N dias imediatamente antes, sem sobreposição.
     const prevParams = `period=custom&dateFrom=${faixaPrev.from}&dateTo=${faixaPrev.to}`;
@@ -5795,7 +5803,7 @@ export default function GeneralDashboard() {
       setPrevMetricsByClient(map);
     });
     return () => { cancelled = true; };
-  }, [selectedIds, period, customDateFrom, customDateTo, customReady, faixaPrev.from, faixaPrev.to]);
+  }, [selectedIds, period, customDateFrom, customDateTo, customReady, faixaPrev?.from, faixaPrev?.to]);
 
   // Fetch active campaigns with spend in selected period
   useEffect(() => {
@@ -5956,21 +5964,22 @@ export default function GeneralDashboard() {
       from: faixaSel.from,
       to: faixaSel.to,
     });
-    const prevParams = new URLSearchParams({
+    const prevParams = faixaPrev ? new URLSearchParams({
       clientIds: [...selectedIds].join(','),
       from: faixaPrev.from,
       to: faixaPrev.to,
-    });
+    }) : null;
     Promise.all([
       fetch(`/api/meta/page-insights?${params}`).then(r => r.ok ? r.json() as Promise<PageInsightsResult[]> : []),
-      fetch(`/api/meta/page-insights?${prevParams}`).then(r => r.ok ? r.json() as Promise<PageInsightsResult[]> : []),
+      // Sem faixa anterior (todo período) não há o que comparar.
+      prevParams ? fetch(`/api/meta/page-insights?${prevParams}`).then(r => r.ok ? r.json() as Promise<PageInsightsResult[]> : []) : Promise.resolve([] as PageInsightsResult[]),
     ]).then(([cur, prev]) => {
       if (!cancelled) { setPageInsights(cur); setPrevPageInsights(prev); }
     }).catch(() => {
       if (!cancelled) { setPageInsights([]); setPrevPageInsights([]); }
     }).finally(() => { if (!cancelled) setPageInsightsLoading(false); });
     return () => { cancelled = true; };
-  }, [selectedIds, period, customDateFrom, customDateTo, customReady, faixaSel.from, faixaSel.to, faixaPrev.from, faixaPrev.to]);
+  }, [selectedIds, period, customDateFrom, customDateTo, customReady, faixaSel.from, faixaSel.to, faixaPrev?.from, faixaPrev?.to]);
 
   // Fetch Instagram top posts
   useEffect(() => {

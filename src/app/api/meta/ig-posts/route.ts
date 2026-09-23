@@ -2,6 +2,7 @@ import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { getFreshMetaToken } from '@/lib/meta-token';
 import { getIgAccount, type ConnRow } from '@/lib/instagram-monitor';
+import { resolveMetaPeriod } from '@/lib/period-utils';
 
 export type IgPost = {
   id: string;
@@ -22,27 +23,14 @@ export type IgPost = {
   publishedInPeriod: boolean;
 };
 
-// Resolves any period key to explicit { since, until } YYYY-MM-DD strings.
+// Janela do período pela lib compartilhada (period-utils): a mesma de
+// metrics/campaigns/CRM. ⚠️ Esta rota tinha um switch próprio que só conhecia
+// 6 presets e mandava qualquer outro (3 meses, ano, todo período…) para 30
+// dias em silêncio — o Instagram mostrava 30 dias ao lado de 6 meses de Meta.
+// Também usava o relógio UTC do servidor; a lib usa America/Sao_Paulo.
 function resolveDateRange(period: string, dateFrom: string, dateTo: string): { since: string; until: string } {
-  const isValidDate = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s) && !isNaN(Date.parse(s));
-  if (period === 'custom' && isValidDate(dateFrom) && isValidDate(dateTo)) {
-    return { since: dateFrom, until: dateTo };
-  }
-  const now = new Date();
-  const fmt = (d: Date) => d.toISOString().split('T')[0];
-  const daysAgo = (n: number) => { const d = new Date(now); d.setDate(d.getDate() - n); return fmt(d); };
-  switch (period) {
-    case 'yesterday':   return { since: daysAgo(1), until: daysAgo(1) };
-    case 'last_7d':     return { since: daysAgo(7), until: daysAgo(1) };
-    case 'last_14d':    return { since: daysAgo(14), until: daysAgo(1) };
-    case 'last_30d':    return { since: daysAgo(30), until: daysAgo(1) };
-    case 'this_month':  return { since: fmt(new Date(now.getFullYear(), now.getMonth(), 1)), until: fmt(now) };
-    case 'last_month':  return {
-      since: fmt(new Date(now.getFullYear(), now.getMonth() - 1, 1)),
-      until: fmt(new Date(now.getFullYear(), now.getMonth(), 0)),
-    };
-    default:            return { since: daysAgo(30), until: daysAgo(1) };
-  }
+  const [, since, until] = resolveMetaPeriod(period, dateFrom, dateTo).split(':');
+  return { since, until };
 }
 
 async function fetchInsightsBatch(

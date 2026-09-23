@@ -12,9 +12,14 @@
  * então não há deslocamento de fuso. Puro e client-safe.
  */
 import { addDaysToIsoDate, todayInOptimizerTimeZone } from '@/lib/optimizer-period-range';
+import { inicioDoMesMenos, MESES_TODO_PERIODO } from '@/lib/period-utils';
 
 export type PeriodoDashboard =
-  | 'yesterday' | 'last_7d' | 'last_14d' | 'last_30d' | 'this_month' | 'last_month' | 'custom';
+  | 'yesterday' | 'last_7d' | 'last_14d' | 'last_30d' | 'this_month' | 'last_month'
+  | 'last_3m' | 'last_6m' | 'this_year' | 'all_time' | 'custom';
+
+/** Presets ancorados em mês-calendário (dia 1 → hoje): as regras de meta/comparação são por MÊS, não por dias corridos. */
+export const PERIODOS_MENSAIS: ReadonlySet<PeriodoDashboard> = new Set(['this_month', 'last_month', 'last_3m', 'last_6m', 'this_year', 'all_time']);
 
 export type Faixa = { from: string; to: string };
 
@@ -68,6 +73,11 @@ export function faixaAtual(period: PeriodoDashboard, customFrom?: string, custom
       const fimAnterior = addDaysToIsoDate(inicioDoMes(hoje), -1);
       return { from: inicioDoMes(fimAnterior), to: fimAnterior };
     }
+    // Mês-calendário terminando hoje — espelho exato de resolveMetaDateRange.
+    case 'last_3m': return { from: inicioDoMesMenos(hoje, 2), to: hoje };
+    case 'last_6m': return { from: inicioDoMesMenos(hoje, 5), to: hoje };
+    case 'this_year': return { from: `${hoje.slice(0, 4)}-01-01`, to: hoje };
+    case 'all_time': return { from: inicioDoMesMenos(hoje, MESES_TODO_PERIODO - 1), to: hoje };
     case 'custom': {
       const f = customFrom && ISO.test(customFrom) ? customFrom : hoje;
       const t = customTo && ISO.test(customTo) ? customTo : hoje;
@@ -84,7 +94,30 @@ export function faixaAtual(period: PeriodoDashboard, customFrom?: string, custom
  *  - last_month → o mês antes dele, inteiro;
  *  - last_Nd / custom / yesterday → mesma duração imediatamente antes do início, sem sobreposição.
  */
-export function faixaAnterior(period: PeriodoDashboard, atual: Faixa): Faixa {
+/** Nº de meses-calendário cobertos pela faixa (dia 1 do from → to). */
+export function mesesNaFaixa(f: Faixa): number {
+  const a = partes(f.from); const b = partes(f.to);
+  return (b.y - a.y) * 12 + (b.m - a.m) + 1;
+}
+
+/** Mesma janela deslocada `n` meses para trás, com o dia final clampado ao mês de destino. */
+function deslocarMeses(f: Faixa, n: number): Faixa {
+  const from = inicioDoMesMenos(f.from, n);
+  const fimBase = inicioDoMesMenos(f.to, n);
+  const dia = Math.min(partes(f.to).d, diasNoMes(fimBase));
+  return { from, to: `${fimBase.slice(0, 8)}${String(dia).padStart(2, '0')}` };
+}
+
+export function faixaAnterior(period: PeriodoDashboard, atual: Faixa): Faixa | null {
+  // Todo período não tem "antes" — o delta some em vez de inventar uma base.
+  if (period === 'all_time') return null;
+  // 3/6 meses: a MESMA janela deslocada pela própria largura (→ os 3/6 meses
+  // imediatamente anteriores, sem sobreposição).
+  if (period === 'last_3m' || period === 'last_6m') return deslocarMeses(atual, mesesNaFaixa(atual));
+  // Este ano: o mesmo trecho UM ANO antes (1/jan→23/set de 2025), não "os 9
+  // meses anteriores" — ano se compara com ano. ⚠️ Pego por assert: deslocar
+  // pela largura dava abr→dez do ano passado.
+  if (period === 'this_year') return deslocarMeses(atual, 12);
   if (period === 'this_month') {
     const fimMesAnterior = addDaysToIsoDate(inicioDoMes(atual.from), -1);
     const dia = Math.min(partes(atual.to).d, diasNoMes(fimMesAnterior));
@@ -105,10 +138,17 @@ function ddmm(iso: string): string {
 }
 
 /** Texto curto do comparativo, ex.: "vs 1–22/ago", "vs julho", "vs 7 dias anteriores". */
-export function rotuloComparacao(period: PeriodoDashboard, anterior: Faixa): string {
+export function rotuloComparacao(period: PeriodoDashboard, anterior: Faixa | null): string {
+  if (!anterior) return '';
   const a = partes(anterior.from);
   const b = partes(anterior.to);
   switch (period) {
+    case 'last_3m':
+    case 'last_6m':
+      // "vs abr–jun" / "vs out/25–mar/26" quando cruza o ano
+      return a.y === b.y ? `vs ${MESES[a.m - 1]}–${MESES[b.m - 1]}` : `vs ${MESES[a.m - 1]}/${String(a.y).slice(2)}–${MESES[b.m - 1]}/${String(b.y).slice(2)}`;
+    case 'this_year':
+      return `vs mesmo período de ${a.y}`;
     case 'this_month':
       return `vs ${a.d}–${b.d}/${MESES[b.m - 1]}`;
     case 'last_month':
@@ -134,6 +174,9 @@ export function rotuloComparacao(period: PeriodoDashboard, anterior: Faixa): str
 export function fracaoMetaMensal(period: PeriodoDashboard, faixa: Faixa): number {
   if (period === 'last_month') return 1;
   if (period === 'this_month') return partes(faixa.to).d / diasNoMes(faixa.to);
+  // Multi-mês: meses INTEIROS + a fração do mês corrente (3 meses em 23/set =
+  // 2 + 23/30). Dias corridos ÷ 30 erraria em meses de 28/31 dias.
+  if (PERIODOS_MENSAIS.has(period)) return (mesesNaFaixa(faixa) - 1) + partes(faixa.to).d / diasNoMes(faixa.to);
   return diasNaFaixa(faixa) / diasNoMes(faixa.to);
 }
 
@@ -147,6 +190,8 @@ export function metaParcialDoPeriodo(metaMensal: number, period: PeriodoDashboar
 export function rotuloMetaParcial(period: PeriodoDashboard): string {
   if (period === 'this_month') return 'Esperado até hoje';
   if (period === 'last_month') return 'Meta do mês';
+  if (period === 'this_year') return 'Esperado no ano até hoje';
+  if (period === 'all_time') return `Esperado em ${MESES_TODO_PERIODO} meses`;
   return 'Esperado no período';
 }
 
