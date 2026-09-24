@@ -71,6 +71,7 @@ import { progressoVisual } from '@/lib/progresso-cor';
 import { montarTabelaRegioes, regiaoDaCampanha, type LinhaTabelaRegiao, type FunilRegiao } from '@/lib/regiao-recorte';
 import type { RegiaoCampanhas, RegiaoCampanhasResposta } from '@/app/api/meta/regiao-campanhas/route';
 import type { PorRegiaoResposta } from '@/app/api/crm/por-regiao/route';
+import type { FunilPorCanalResposta, LinhaCanal as LinhaFunilCanal } from '@/app/api/crm/por-canal-funil/route';
 import type { CampaignPerformance } from '@/app/api/campaigns/route';
 import type { GoogleKeyword } from '@/app/api/google/keywords/route';
 import type { AudienceBreakdowns, AudienceResponse, AudienceSlice } from '@/app/api/audience/route';
@@ -4439,7 +4440,7 @@ function HeroStatCard({ title, icon: Icon, value, change, sub, estilo = ESTILO_V
   );
 }
 
-function QuickMetricCard({ title, value, change, icon: Icon, inverseChange, neutralChange, estilo = ESTILO_VAZIO, className, comparacao = 'vs período anterior', serie, dica }: {
+function QuickMetricCard({ title, value, change, icon: Icon, inverseChange, neutralChange, estilo = ESTILO_VAZIO, className, comparacao = 'vs período anterior', serie, dica, nota, notaRuim }: {
   title: string;
   /** Métrica sem direção boa/ruim (ex.: investimento): variação em cinza. */
   neutralChange?: boolean;
@@ -4455,6 +4456,10 @@ function QuickMetricCard({ title, value, change, icon: Icon, inverseChange, neut
   serie?: number[];
   /** Tooltip do título (ex.: como o número é calculado). */
   dica?: string;
+  /** Linha sob o valor — usada para a META do planejamento ("meta R$ 30,00"). */
+  nota?: ReactNode;
+  /** Pinta a nota de vermelho (estourou a meta). */
+  notaRuim?: boolean;
 }) {
   // Delegado ao IndicadorCard — o MESMO card de KPI da Landing page e do
   // Instagram. O `estilo` (modelo por segmento, food) vira overrides dele.
@@ -4471,6 +4476,8 @@ function QuickMetricCard({ title, value, change, icon: Icon, inverseChange, neut
       comparacao={comparacao}
       serie={serie}
       dica={dica}
+      nota={nota}
+      notaRuim={notaRuim}
       estiloRotulo={styleTexto(estilo)}
       estiloValor={styleValor(estilo)}
       className={className}
@@ -5381,6 +5388,165 @@ function TrafegoResumoTable({ linhas, colunas, comparacao }: { linhas: LinhaTraf
 // sub-linhas por UF.
 type ChaveOrdem = 'investimento' | 'leadsPlataforma' | 'leads' | 'cpl' | 'agendamentos' | 'comparecimentos' | 'custoReuniao' | 'fechamentos' | 'cac' | 'receita';
 
+// ── Funil por canal ─────────────────────────────────────────────────────────
+// A tabela "funil por canal" da planilha do Matheus (2026-09-24): por canal de
+// origem do lead, Leads → Engajados → Agendamentos → Comparecimentos → Vendas,
+// % de conversão e faturamento. Investimento só existe para os canais pagos
+// (Meta Ads / Google Ads — o gasto das plataformas no período); os demais
+// mostram "—" em CPL/CAC em vez de um zero que pareceria "de graça".
+type ChaveOrdemCanal = 'investimento' | 'leads' | 'engajados' | 'agendamentos' | 'comparecimentos' | 'fechamentos' | 'conversao' | 'cpl' | 'cac' | 'receita';
+
+/** Célula numérica das tabelas de funil (módulo, não dentro do render — a regra do compiler). */
+const CelFunil = ({ children, forte, className }: { children: ReactNode; forte?: boolean; className?: string }) => (
+  <td className={cn('whitespace-nowrap py-2.5 pr-2 text-right', forte ? 'font-bold text-[#f4f7f8]' : 'text-[#c3ccd1]', className)}>{children}</td>
+);
+/** Cabeçalho ordenável da tabela "Funil por canal". */
+function CabFunil({ chave, rotulo, dica, ordem, onOrdenar }: {
+  chave: ChaveOrdemCanal; rotulo: string; dica: string;
+  ordem: { chave: ChaveOrdemCanal; desc: boolean };
+  onOrdenar: React.Dispatch<React.SetStateAction<{ chave: ChaveOrdemCanal; desc: boolean }>>;
+}) {
+  const ativa = ordem.chave === chave;
+  return (
+    <th className="pr-2 text-right">
+      <button type="button" title={`${dica} — clique para ordenar`}
+        onClick={() => onOrdenar(o => ({ chave, desc: o.chave === chave ? !o.desc : true }))}
+        className={cn('inline-flex items-center gap-1 whitespace-nowrap transition-colors hover:text-[#dce4e8]', ativa && 'text-[#6cff2f]')}>
+        {rotulo}
+        <span className={cn('text-[9px]', !ativa && 'opacity-30')}>{ativa ? (ordem.desc ? '▼' : '▲') : '▼'}</span>
+      </button>
+    </th>
+  );
+}
+
+function TabelaFunilCanal({ linhas, total, investimento }: {
+  linhas: LinhaFunilCanal[];
+  total: number;
+  /** Gasto do período por canal pago (chave = rótulo do canal como o CRM devolve). */
+  investimento: Record<string, number>;
+}) {
+  const [ordem, setOrdem] = useState<{ chave: ChaveOrdemCanal; desc: boolean }>({ chave: 'leads', desc: true });
+  const [expandido, setExpandido] = useState(false);
+  const LIMITE = 6;
+
+  const invDe = (l: LinhaFunilCanal): number | null => (l.semCanal ? null : investimento[l.canal] ?? null);
+  const razaoNum = (inv: number | null, den: number) => (inv !== null && inv > 0 && den > 0 ? inv / den : 0);
+  const valorDe = (l: LinhaFunilCanal, k: ChaveOrdemCanal): number => {
+    switch (k) {
+      case 'investimento': return invDe(l) ?? 0;
+      case 'leads': return l.leads;
+      case 'engajados': return l.engajados;
+      case 'agendamentos': return l.agendamentos;
+      case 'comparecimentos': return l.comparecimentos;
+      case 'fechamentos': return l.fechamentos;
+      case 'conversao': return l.leads > 0 ? l.fechamentos / l.leads : 0;
+      case 'cpl': return razaoNum(invDe(l), l.leads);
+      case 'cac': return razaoNum(invDe(l), l.fechamentos);
+      case 'receita': return l.receita;
+    }
+  };
+  // Mesma régua da tabela de regiões: "—" (zero) vai sempre pro fim, e a linha
+  // "Canal não informado" também — é lacuna, não canal, não disputa ranking.
+  const ordenadas = [...linhas].sort((a, b) => {
+    if (a.semCanal !== b.semCanal) return a.semCanal ? 1 : -1;
+    const va = valorDe(a, ordem.chave), vb = valorDe(b, ordem.chave);
+    if (va === 0 && vb !== 0) return 1;
+    if (vb === 0 && va !== 0) return -1;
+    return ordem.desc ? vb - va : va - vb;
+  });
+  const visiveis = expandido ? ordenadas : ordenadas.slice(0, LIMITE);
+  const soma = linhas.reduce((a, l) => ({
+    investimento: a.investimento + (invDe(l) ?? 0), leads: a.leads + l.leads, engajados: a.engajados + l.engajados,
+    agendamentos: a.agendamentos + l.agendamentos, comparecimentos: a.comparecimentos + l.comparecimentos,
+    fechamentos: a.fechamentos + l.fechamentos, receita: a.receita + l.receita,
+  }), { investimento: 0, leads: 0, engajados: 0, agendamentos: 0, comparecimentos: 0, fechamentos: 0, receita: 0 });
+  const semCanal = linhas.find(l => l.semCanal)?.leads ?? 0;
+
+  const n = (v: number) => premiumValue(v);
+  const moeda = (v: number | null) => (v !== null && v > 0 ? premiumValue(v, 'currency') : '—');
+  const razao = (inv: number | null, den: number) => (inv !== null && inv > 0 && den > 0 ? premiumValue(inv / den, 'currency') : '—');
+  const pct = (num: number, den: number) => (den > 0 ? premiumValue((num / den) * 100, 'percent') : '—');
+
+  return (
+    <PremiumPanel className="p-5">
+      <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+        <h3 className={T.cardTitulo}>Funil por canal</h3>
+        <span className={T.cardSub}>canal de origem do lead no CRM · investimento só nos canais pagos · clique no cabeçalho para ordenar</span>
+      </div>
+      <div className="-mx-2">
+        <div className="overflow-auto transition-all duration-300" style={{ maxHeight: expandido ? '9999px' : '330px' }}>
+          <table className={cn('w-full min-w-[980px] text-left tabular-nums', T.tabelaCel)}>
+            <thead className={cn('sticky top-0 z-10 bg-[#0d1519]', T.tabelaCab)}>
+              <tr>
+                <th className="py-2 pl-2">Canal</th>
+                <CabFunil ordem={ordem} onOrdenar={setOrdem} chave="investimento" rotulo="Investimento" dica="Gasto do período na plataforma (só Meta Ads e Google Ads)" />
+                <CabFunil ordem={ordem} onOrdenar={setOrdem} chave="leads" rotulo="Leads" dica="Leads que contam na dashboard, por canal de origem" />
+                <CabFunil ordem={ordem} onOrdenar={setOrdem} chave="engajados" rotulo="Engajados" dica="Responderam ou interagiram (posto 1 do funil)" />
+                <CabFunil ordem={ordem} onOrdenar={setOrdem} chave="agendamentos" rotulo="Agendamentos" dica="Agendamento / proposta (posto 2)" />
+                <CabFunil ordem={ordem} onOrdenar={setOrdem} chave="comparecimentos" rotulo="Comparecimentos" dica="Comparecimento / reunião realizada (posto 3)" />
+                <CabFunil ordem={ordem} onOrdenar={setOrdem} chave="fechamentos" rotulo="Vendas" dica="Fechamentos no CRM" />
+                <CabFunil ordem={ordem} onOrdenar={setOrdem} chave="conversao" rotulo="% Conv." dica="Vendas ÷ leads do canal" />
+                <CabFunil ordem={ordem} onOrdenar={setOrdem} chave="cpl" rotulo="CPL" dica="Investimento ÷ leads (canais pagos)" />
+                <CabFunil ordem={ordem} onOrdenar={setOrdem} chave="cac" rotulo="CAC" dica="Investimento ÷ vendas (canais pagos)" />
+                <CabFunil ordem={ordem} onOrdenar={setOrdem} chave="receita" rotulo="Faturamento" dica="Receita das vendas do canal" />
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-white/[0.07]">
+              {visiveis.map(l => {
+                const temVenda = l.fechamentos > 0;
+                const inv = invDe(l);
+                return (
+                  <tr key={l.canal} className={cn(l.semCanal && 'text-[#9aa4aa]', temVenda && !l.semCanal && 'bg-[#6cff2f]/[0.08]')}>
+                    <td className="py-2.5 pl-2 pr-3">
+                      <span className={cn('font-bold', l.semCanal ? 'text-[#9aa4aa]' : temVenda ? 'text-[#6cff2f]' : 'text-[#f4f7f8]')}>{l.canal}</span>
+                    </td>
+                    <CelFunil forte>{moeda(inv)}</CelFunil>
+                    <CelFunil forte>{n(l.leads)}</CelFunil>
+                    <CelFunil>{n(l.engajados)}</CelFunil>
+                    <CelFunil>{n(l.agendamentos)}</CelFunil>
+                    <CelFunil>{n(l.comparecimentos)}</CelFunil>
+                    <CelFunil forte>{n(l.fechamentos)}</CelFunil>
+                    <CelFunil>{pct(l.fechamentos, l.leads)}</CelFunil>
+                    <CelFunil>{razao(inv, l.leads)}</CelFunil>
+                    <CelFunil forte>{razao(inv, l.fechamentos)}</CelFunil>
+                    <CelFunil forte className={cn(temVenda && 'text-[#6cff2f]')}>{moeda(l.receita)}</CelFunil>
+                  </tr>
+                );
+              })}
+              {linhas.length > 1 && (expandido || linhas.length <= LIMITE) && (
+                <tr className="border-t border-white/[0.12] text-[#f4f7f8]">
+                  <td className="py-2.5 pl-2 pr-3 font-black">Total</td>
+                  <CelFunil forte>{moeda(soma.investimento)}</CelFunil>
+                  <CelFunil forte>{n(soma.leads)}</CelFunil>
+                  <CelFunil forte>{n(soma.engajados)}</CelFunil>
+                  <CelFunil forte>{n(soma.agendamentos)}</CelFunil>
+                  <CelFunil forte>{n(soma.comparecimentos)}</CelFunil>
+                  <CelFunil forte>{n(soma.fechamentos)}</CelFunil>
+                  <CelFunil forte>{pct(soma.fechamentos, soma.leads)}</CelFunil>
+                  <CelFunil forte>{razao(soma.investimento, soma.leads)}</CelFunil>
+                  <CelFunil forte>{razao(soma.investimento, soma.fechamentos)}</CelFunil>
+                  <CelFunil forte className={cn(soma.receita > 0 && 'text-[#6cff2f]')}>{moeda(soma.receita)}</CelFunil>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-2 px-2">
+          <span className={T.cardSub}>
+            {n(total)} leads no período
+            {semCanal > 0 && <> · <span className="text-[#9aa4aa]">{n(semCanal)} sem canal registrado</span></>}
+          </span>
+          {linhas.length > LIMITE && (
+            <button type="button" onClick={() => setExpandido(v => !v)} className="text-[11px] font-bold uppercase tracking-wider text-[#6cff2f] hover:underline">
+              {expandido ? 'Ver menos' : `Ver todos (${linhas.length})`}
+            </button>
+          )}
+        </div>
+      </div>
+    </PremiumPanel>
+  );
+}
+
 function TabelaRegioes({ linhas, semRegiao, total, nacionalPorUf, ufs }: {
   linhas: LinhaTabelaRegiao[];
   semRegiao: number;
@@ -5654,6 +5820,8 @@ export default function GeneralDashboard() {
   const [socialKpiLayout, setSocialKpiLayout] = useState<RglLayout[]>(DEFAULT_SOCIAL_KPI_LAYOUT);
   /** Funil do CRM por região (cidade/UF) — tabela "Desempenho por região". */
   const [porRegiao, setPorRegiao] = useState<PorRegiaoResposta | null>(null);
+  /** Funil do CRM por canal do lead — tabela "Funil por canal" (a planilha do Matheus). */
+  const [funilCanal, setFunilCanal] = useState<FunilPorCanalResposta | null>(null);
   /** Campanhas nacionais/sem região da Meta abertas por UF (breakdowns=region). */
   const [nacionalPorUf, setNacionalPorUf] = useState<RegiaoCampanhas[] | null>(null);
   const [porCanal, setPorCanal] = useState<{
@@ -6166,6 +6334,20 @@ export default function GeneralDashboard() {
       .catch(() => { if (!cancelado) setPorRegiao(null); });
     return () => { cancelado = true; };
   }, [selectedIds, period, customDateFrom, customDateTo, customReady, faixaSel.from, faixaSel.to, sultsFlags]);
+
+  // Funil por CANAL do lead — irmã do summary (mesma régua e mesma lei). Vale
+  // para qualquer cliente com CRM: sem lead no período, a lista vem vazia e a
+  // tabela não aparece.
+  useEffect(() => {
+    let cancelado = false;
+    if (selectedIds.size === 0 || !customReady) { setFunilCanal(null); return () => { cancelado = true; }; }
+    const params = new URLSearchParams({ clientIds: [...selectedIds].join(','), from: faixaSel.from, to: faixaSel.to });
+    fetch(`/api/crm/por-canal-funil?${params}`)
+      .then(r => (r.ok ? r.json() as Promise<FunilPorCanalResposta> : null))
+      .then(j => { if (!cancelado) setFunilCanal(j); })
+      .catch(() => { if (!cancelado) setFunilCanal(null); });
+    return () => { cancelado = true; };
+  }, [selectedIds, period, customDateFrom, customDateTo, customReady, faixaSel.from, faixaSel.to]);
 
   // Campanhas NACIONAIS/sem região da Meta abertas por estado. Só depois das
   // campanhas carregarem (precisa dos ids); sem nacional, nem chama.
@@ -6832,9 +7014,25 @@ export default function GeneralDashboard() {
   const receitaDia = diasSel.map(d => dailyPorData.get(d)?.crm?.revenue ?? 0);
   const temSerieGasto = gastoDia.some(v => v > 0);
 
+  // CPL / CAC / %FAT com a META do planejamento embaixo — as três colunas de
+  // custo da planilha do Matheus. Meta de CAC = investimento planejado ÷ vendas
+  // planejadas; meta de %FAT = investimento planejado ÷ faturamento planejado
+  // (ambos saem do CPL-meta × funil planejado do cliente). Sem planejamento,
+  // sem nota — nunca "meta R$ 0".
+  const cac = totalSpend > 0 && crmSales > 0 ? totalSpend / crmSales : 0;
+  const prevCac = prevTotalSpend > 0 && prevCrmSales > 0 ? prevTotalSpend / prevCrmSales : 0;
+  const metaCac = plannedInvestment > 0 && plannedSalesTotal > 0 ? plannedInvestment / plannedSalesTotal : 0;
+  const fatPct = totalSpend > 0 && revenue > 0 ? (totalSpend / revenue) * 100 : 0;
+  const prevFatPct = prevTotalSpend > 0 && prevRevenue > 0 ? (prevTotalSpend / prevRevenue) * 100 : 0;
+  const metaFatPct = plannedInvestment > 0 && plannedRevenue > 0 ? (plannedInvestment / plannedRevenue) * 100 : 0;
+  const notaMeta = (meta: number, formato: 'currency' | 'percent') => (meta > 0 ? `meta ${premiumValue(meta, formato)}` : undefined);
+  const estourou = (real: number, meta: number) => real > 0 && meta > 0 && real > meta;
+
   const quickMetrics = [
     { title: 'Investimento Total', value: premiumValue(totalSpend, 'currency'), change: pctChange(totalSpend, prevTotalSpend), icon: CreditCard, neutralChange: true, serie: temSerieGasto ? gastoDia : undefined },
-    { title: 'CPL Médio', value: totalCostPerLead > 0 ? premiumValue(totalCostPerLead, 'currency') : '—', change: pctChange(totalCostPerLead, prevCpl), icon: Tag, inverseChange: true, serie: temSerieGasto && leadsDia.some(v => v > 0) ? cplSeries : undefined, dica: 'Investimento Meta + Google ÷ leads reportados pelas plataformas · linha = CPL acumulado dia a dia' },
+    { title: 'CPL Médio', value: totalCostPerLead > 0 ? premiumValue(totalCostPerLead, 'currency') : '—', change: pctChange(totalCostPerLead, prevCpl), icon: Tag, inverseChange: true, serie: temSerieGasto && leadsDia.some(v => v > 0) ? cplSeries : undefined, dica: 'Investimento Meta + Google ÷ leads reportados pelas plataformas · linha = CPL acumulado dia a dia', nota: notaMeta(cplMetaSel, 'currency'), notaRuim: estourou(totalCostPerLead, cplMetaSel) },
+    { title: 'CAC', value: cac > 0 ? premiumValue(cac, 'currency') : '—', change: cac > 0 && prevCac > 0 ? pctChange(cac, prevCac) : null, icon: Wallet, inverseChange: true, dica: 'Investimento Meta + Google ÷ vendas do CRM no período', nota: notaMeta(metaCac, 'currency'), notaRuim: estourou(cac, metaCac) },
+    { title: '% FAT', value: fatPct > 0 ? premiumValue(fatPct, 'percent') : '—', change: fatPct > 0 && prevFatPct > 0 ? pctChange(fatPct, prevFatPct) : null, icon: PiggyBank, inverseChange: true, dica: 'Investimento em mídia ÷ faturamento do CRM — quanto do que entrou foi gasto em anúncio', nota: notaMeta(metaFatPct, 'percent'), notaRuim: estourou(fatPct, metaFatPct) },
     // Ticket médio = faturamento ÷ VENDAS do CRM (não ÷ conversions, que cai em
     // fallback de funil/Google e daria um ticket calculado sobre um denominador
     // que não é o mesmo que gerou a receita). 0 vendas → "—", nunca R$ 0,00.
@@ -7711,7 +7909,7 @@ export default function GeneralDashboard() {
                   <GoalProgressCard title="Faturamento" icon={DollarSign} target={plannedRevenue} partial={effectiveRevenueGoal} value={revenue} format="currency" />
                   <GoalProgressCard title="Leads" icon={Users} target={leadsGoal} partial={effectiveLeadsGoal} value={totalLeads} />
                 </div>
-                <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
+                <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-4">
                   {quickMetrics.map((metric) => <QuickMetricCard key={metric.title} {...metric} />)}
                 </div>
               </>
@@ -7772,7 +7970,7 @@ export default function GeneralDashboard() {
                         ) : undefined}
                       />
                     </div>
-                    <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-6">
+                    <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4">
                       {quickMetrics.map((metric) => <QuickMetricCard key={metric.title} {...metric} comparacao={rotuloComp} />)}
                     </div>
                     {(ritmo || temGraficoCpl) && (
@@ -7807,6 +8005,11 @@ export default function GeneralDashboard() {
                         misturaria leads sem origem. E só se há região em algum lugar. */}
                     {!modoFood && selectedIds.size > 0 && [...selectedIds].every(id => sultsFlags[id]) && linhasRegiao.length > 0 && (
                       <TabelaRegioes linhas={linhasRegiao} semRegiao={porRegiao?.semRegiao ?? 0} total={porRegiao?.total ?? 0} nacionalPorUf={nacionalPorUf} ufs={porRegiao?.ufs ?? []} />
+                    )}
+                    {/* A "funil por canal" da planilha: só quando há lead no CRM
+                        do período — sem CRM, a tabela seria toda "—". */}
+                    {!modoFood && !deliverySoloId && funilCanal && funilCanal.canais.length > 0 && (
+                      <TabelaFunilCanal linhas={funilCanal.canais} total={funilCanal.total} investimento={{ 'Meta Ads': metaSpend, 'Google Ads': googleCost }} />
                     )}
                     {blocoCanais}
                   </>
