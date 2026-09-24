@@ -94,8 +94,9 @@ function statusConnect(r: number) {
 // ⚠️ Card em COLUNA flexível: em grade, o card estica até a altura do vizinho; o corpo
 // (rosca, lista, barras) usa `flex-1` para ocupar essa sobra em vez de deixar um vão
 // embaixo (pedido do Matheus, 24/09 — card de Gênero com metade vazia).
-function Card({ children, className }: { children: ReactNode; className?: string }) {
-  return <section className={cx(SUPERFICIE, 'flex flex-col p-5', className)}>{children}</section>;
+// `linha`: card que é uma FAIXA horizontal (rolagem) — fica fora da regra da coluna.
+function Card({ children, className, linha = false }: { children: ReactNode; className?: string; linha?: boolean }) {
+  return <section className={cx(SUPERFICIE, linha ? 'p-5' : 'flex flex-col p-5', className)}>{children}</section>;
 }
 
 /** Lista que se espalha na altura disponível do card (gap mínimo de 12px). */
@@ -770,7 +771,7 @@ function Rolagem({ linhas, visitantes }: { linhas: Ga4Linha[]; visitantes: numbe
   if (soNoventa) {
     const pct = div(linhas.reduce((t, l) => t + l.n, 0), visitantes);
     return (
-      <Card className="flex flex-wrap items-center gap-x-6 gap-y-3">
+      <Card linha className="flex flex-wrap items-center gap-x-6 gap-y-3">
         <div className="min-w-[150px]">
           <h3 className={T.cardTitulo}>Rolagem da página</h3>
           <p className={cx('mt-1', T.cardSub)}>chegaram a 90% da página</p>
@@ -783,7 +784,7 @@ function Rolagem({ linhas, visitantes }: { linhas: Ga4Linha[]; visitantes: numbe
   }
   const passos = [...linhas].sort((a, b) => Number(a.valor) - Number(b.valor));
   return (
-    <Card className="flex flex-wrap items-center gap-x-6 gap-y-3">
+    <Card linha className="flex flex-wrap items-center gap-x-6 gap-y-3">
       <div className="min-w-[150px]">
         <h3 className={T.cardTitulo}>Até onde rolam</h3>
         <p className={cx('mt-1', T.cardSub)}>% dos visitantes em cada ponto</p>

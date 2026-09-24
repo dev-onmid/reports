@@ -7,6 +7,7 @@ Print do Matheus: card de Gênero com metade vazia ("olha o tanto de espaço oci
 - **`BarrasVerticais` estica com o card** (mín. 230px): cada coluna é uma grade `[1fr auto]` e a barra tem altura em % da área útil (até 80%, para o valor caber em cima). Aceita `sub` por barra.
 - **Idade virou barras verticais** (faixas etárias são rótulos curtos, ordenadas 18-24 → 65+, com "converte X%" embaixo) — além de ler melhor, iguala a altura com o card de Gênero. `barrasSeg` saiu (sem uso).
 - Também ajustados: Cidades, Página de entrada e ranking de eventos (lista espalhada), Ranking comercial (espalhado) e Categorias (corpo centralizado).
+- ⚠️ **Exceção: a faixa de rolagem** ("Rolagem da página" / "Até onde rolam") é uma linha horizontal — com o `Card` em coluna ela ficou empilhada e centralizada, e o Matheus pediu de volta o desenho anterior. `Card` ganhou `linha` (sem `flex-col`); qualquer card que seja FAIXA horizontal usa `linha`.
 - ✅ Verificado: tsc limpo; eslint 0 no painel GA4 e no comercial, 164 = 164 no `page.tsx`; harness com Sorrifácil ingleses (Idade × Gênero lado a lado, mesma altura, sem vão) e Cinfel (Veículos espalhado, barras de Materiais/Espessuras/Botões preenchendo). ⚠️ `CanalDonutCard` e os dois cards comerciais não foram vistos renderizados (vivem no `page.tsx`/precisam de dado de CRM) — mudança só de classes de layout.
 
 ## Dashboard — TRÊS níveis de título, e só três (2026-09-24, noite)
