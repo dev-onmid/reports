@@ -5419,9 +5419,8 @@ function CabFunil({ chave, rotulo, dica, ordem, onOrdenar }: {
   );
 }
 
-function TabelaFunilCanal({ linhas, total, investimento }: {
+function TabelaFunilCanal({ linhas, investimento }: {
   linhas: LinhaFunilCanal[];
-  total: number;
   /** Gasto do período por canal pago (chave = rótulo do canal como o CRM devolve). */
   investimento: Record<string, number>;
 }) {
@@ -5532,8 +5531,10 @@ function TabelaFunilCanal({ linhas, total, investimento }: {
           </table>
         </div>
         <div className="mt-2 flex flex-wrap items-center justify-between gap-2 px-2">
+          {/* Soma das linhas, não o `total` da rota — aquele inclui os lançamentos
+              de faturamento (tipo 'venda'), que não são lead. */}
           <span className={T.cardSub}>
-            {n(total)} leads no período
+            {n(soma.leads)} leads no período
             {semCanal > 0 && <> · <span className="text-[#9aa4aa]">{n(semCanal)} sem canal registrado</span></>}
           </span>
           {linhas.length > LIMITE && (
@@ -8009,7 +8010,7 @@ export default function GeneralDashboard() {
                     {/* A "funil por canal" da planilha: só quando há lead no CRM
                         do período — sem CRM, a tabela seria toda "—". */}
                     {!modoFood && !deliverySoloId && funilCanal && funilCanal.canais.length > 0 && (
-                      <TabelaFunilCanal linhas={funilCanal.canais} total={funilCanal.total} investimento={{ 'Meta Ads': metaSpend, 'Google Ads': googleCost }} />
+                      <TabelaFunilCanal linhas={funilCanal.canais} investimento={{ 'Meta Ads': metaSpend, 'Google Ads': googleCost }} />
                     )}
                     {blocoCanais}
                   </>
