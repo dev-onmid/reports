@@ -490,7 +490,7 @@ export async function relatorioLanding(propertyId: string, nome: string, token: 
   const CORTES: Array<[string, string[], number]> = [
     ['canais', ['sessionDefaultChannelGroup'], 12], ['campanhas', ['sessionCampaignName', 'sessionSourceMedium'], 20],
     ['googleAds', ['sessionGoogleAdsCampaignName'], 20], ['palavras', ['sessionGoogleAdsKeyword'], 1000], ['termos', ['sessionGoogleAdsQuery'], 1000],
-    ['dispositivos', ['deviceCategory'], 12], ['cidades', ['city'], 15], ['novosRecorrentes', ['newVsReturning'], 12],
+    ['dispositivos', ['deviceCategory'], 12], ['cidades', ['city', 'region'], 15], ['novosRecorrentes', ['newVsReturning'], 12],
     ['idades', ['userAgeBracket'], 12], ['generos', ['userGender'], 12], ['paginasEntrada', ['landingPage'], 12],
   ];
 

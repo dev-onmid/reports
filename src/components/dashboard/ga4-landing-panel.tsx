@@ -30,7 +30,7 @@
 import { useMemo, useState, type ElementType, type ReactNode } from 'react';
 import {
   ArrowDown, ArrowUp, BarChart3, ChevronDown, ChevronRight, ChevronsUpDown, Clock, FileText, Info, MessageCircle, MessageSquare,
-  MousePointerClick, Percent, Phone, Search, UserPlus, Users, Activity, Ban, Smartphone, MapPin, User, CalendarDays, ArrowRight, BarChart2, CircleDollarSign, DollarSign, Link2, Calculator, Trophy,
+  MousePointerClick, Percent, Phone, Search, UserPlus, Users, Activity, Ban, Smartphone, User, CalendarDays, ArrowRight, CircleDollarSign, DollarSign, Link2, Calculator, Trophy, Package,
 } from 'lucide-react';
 import type { Ga4Celula, Ga4Consolidado, Ga4Linha, Ga4Seg, Ga4Totais } from '@/lib/ga4-landing';
 import { EvolucaoDiaria, type Granularidade } from './ga4-landing-graficos';
@@ -39,6 +39,7 @@ import { SUPERFICIE, CabecalhoCard, GrupoTitulo, useVerMais } from './superficie
 import { Sparkline } from './indicador-card';
 import { COR_SECUNDARIA } from './grafico-estilo';
 import { T } from '@/lib/dashboard-tipografia';
+import { ESTADOS_BR } from '@/lib/estados-br';
 
 const cx = (...a: Array<string | false | undefined>) => a.filter(Boolean).join(' ');
 
@@ -504,95 +505,237 @@ function PalavrasChave({ palavras, termos }: { palavras: Ga4Seg[]; termos: Ga4Se
   );
 }
 
-type LinhaRankingItem = {
-  chave: string; rotulo: string; sessoes: number;
-  /** % das sessões que converteram (0–1) */ taxa: number; contatos: number;
-  /** engajamento (0–1); Cidades não tem */ engajamento?: number;
-};
+// ───────── 5º mock (2026-09-24): Cidades com mapa, canal em rosca, páginas, barras verticais ─────────
 
-/**
- * Card ranqueado do 2º mock (Cidades / Qualidade por canal / Página de entrada):
- * cabeçalho com caixa de ícone, título grande, sub e "Ver todas"; divisor; linhas
- * com círculo da posição, nome + sessões, barra, e a linha de indicadores. Em
- * `modo="cidade"` a taxa vai com seta ao lado da barra; nos demais, engajamento
- * entra na linha de indicadores.
- */
-function CardRanking({ icone, titulo, sub, itens, modo = 'canal', limite = 5 }: {
-  icone: ElementType; titulo: string; sub: string; itens: LinhaRankingItem[]; modo?: 'cidade' | 'canal'; limite?: number;
-}) {
-  const [todas, setTodas] = useState(false);
-  if (itens.length === 0) return null;
-  const visiveis = todas ? itens : itens.slice(0, limite);
-  const max = Math.max(1, ...itens.map(i => i.sessoes));
-  const Icone = icone;
+/** `region` do GA4 vem em inglês ("State of Sao Paulo", "Federal District") → UF. */
+const UF_POR_REGIAO: Record<string, string> = {
+  acre: 'AC', alagoas: 'AL', amapa: 'AP', amazonas: 'AM', bahia: 'BA', ceara: 'CE', 'federal district': 'DF', 'distrito federal': 'DF',
+  'espirito santo': 'ES', goias: 'GO', maranhao: 'MA', 'mato grosso': 'MT', 'mato grosso do sul': 'MS', 'minas gerais': 'MG', para: 'PA',
+  paraiba: 'PB', parana: 'PR', pernambuco: 'PE', piaui: 'PI', 'rio de janeiro': 'RJ', 'rio grande do norte': 'RN', 'rio grande do sul': 'RS',
+  rondonia: 'RO', roraima: 'RR', 'santa catarina': 'SC', 'sao paulo': 'SP', sergipe: 'SE', tocantins: 'TO',
+};
+export function ufDaRegiao(regiao: string | undefined): string | null {
+  if (!regiao) return null;
+  const n = regiao.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/^state of\s+/, '').trim();
+  return UF_POR_REGIAO[n] ?? null;
+}
+
+/** Mapa do Brasil por estado: verde mais forte onde há mais sessões; sem dado fica apagado. */
+function MapaBrasil({ pesos, titulo }: { pesos: Record<string, number>; titulo: (uf: string, nome: string) => string }) {
+  const max = Math.max(1, ...Object.values(pesos));
   return (
-    <section className={cx(SUPERFICIE, 'flex flex-col')}>
-      <div className="flex items-center justify-between gap-3 px-5 py-5">
-        <div className="flex min-w-0 items-center gap-4">
-          <span className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-xl 2xl:h-14 2xl:w-14" style={{ background: `${VERDE}14`, color: VERDE, boxShadow: `inset 0 0 0 1px ${VERDE}66, 0 0 18px ${VERDE}22` }}>
-            <Icone className="h-6 w-6" />
-          </span>
-          <div className="min-w-0">
-            <h4 className="text-lg font-bold leading-tight text-[#f4f7f8] 2xl:text-xl">{titulo}</h4>
-            <p className="mt-1 text-xs leading-snug text-[#a7b0b6] 2xl:text-[13px]">{sub}</p>
-          </div>
-        </div>
-        {itens.length > limite && (
-          <button
-            type="button"
-            onClick={() => setTodas(v => !v)}
-            className="inline-flex h-9 shrink-0 items-center gap-1 whitespace-nowrap rounded-lg border px-3 text-xs font-semibold transition-colors hover:bg-white/[0.06] 2xl:h-10 2xl:text-[13px]"
-            style={{ color: VERDE, borderColor: `${VERDE}66` }}
+    <svg viewBox="0 0 1000 912" className="block h-auto w-full" aria-hidden>
+      {ESTADOS_BR.map(e => {
+        const w = (pesos[e.uf] ?? 0) / max;
+        return (
+          <path
+            key={e.uf} d={e.d}
+            fill={w > 0 ? `rgba(108,255,47,${(0.28 + 0.72 * w).toFixed(2)})` : '#1c2730'}
+            stroke="#0b1114" strokeWidth={2} strokeLinejoin="round"
           >
-            {todas ? 'Ver menos' : 'Ver todas'} <ChevronRight className={cx('h-4 w-4 transition-transform', todas && 'rotate-90')} />
-          </button>
-        )}
-      </div>
-      <ul className="divide-y divide-white/[0.06] border-t border-white/[0.06]">
-        {visiveis.map((i, idx) => (
-          <li key={i.chave} className="flex items-start gap-4 px-5 py-4">
-            <span className="mt-1 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-white/[0.12] bg-[#0b1114] text-base font-bold text-[#f4f7f8] tabular-nums">{idx + 1}</span>
-            <div className="min-w-0 flex-1">
-              <div className="flex items-baseline justify-between gap-3">
-                <span className="min-w-0 break-words text-[15px] font-semibold leading-snug text-[#f4f7f8]" title={i.rotulo}>{i.rotulo}</span>
-                <span className="shrink-0 whitespace-nowrap"><b className="text-[15px] font-bold text-[#f4f7f8] tabular-nums">{fmtN(i.sessoes)}</b> <span className="text-[13px] text-[#a7b0b6]">sessões</span></span>
-              </div>
-              <div className="mt-2 flex items-center gap-3">
-                <BarraFina pct={i.sessoes / max} cor={VERDE} />
-                {modo === 'cidade' && (
-                  <span className="inline-flex shrink-0 items-center gap-1 text-[13px] font-bold tabular-nums" style={{ color: i.taxa > 0 ? VERDE : '#a7b0b6' }}>
-                    {i.taxa > 0 ? <ArrowUp className="h-3.5 w-3.5" /> : <ArrowRight className="h-3.5 w-3.5" />}{fmtPct(i.taxa)}
-                  </span>
-                )}
-              </div>
-              <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[13px] text-[#a7b0b6]">
-                {modo === 'canal' && i.engajamento !== undefined && (
-                  <>
-                    <span className="inline-flex items-center gap-1.5"><BarChart2 className="h-3.5 w-3.5" /> Engajamento <b className="font-bold" style={{ color: VERDE }}>{fmtPct(i.engajamento)}</b></span>
-                    <span className="text-[#5c666c]">•</span>
-                  </>
-                )}
-                <span className="inline-flex items-center gap-1.5"><Users className="h-3.5 w-3.5" /> {fmtN(i.contatos)} contato(s)</span>
-                <span className="text-[#5c666c]">•</span>
-                <span>Converteu <b className={cx('font-bold', modo === 'canal' ? '' : 'text-[#f4f7f8]')} style={modo === 'canal' ? { color: VERDE } : undefined}>{fmtPct(i.taxa)}</b></span>
-              </p>
-            </div>
-          </li>
-        ))}
-      </ul>
-    </section>
+            <title>{titulo(e.uf, e.nome)}</title>
+          </path>
+        );
+      })}
+    </svg>
   );
 }
 
-/** Converte segmentos do GA4 (cidade, canal, página) na linha do CardRanking. */
-function linhasRanking(linhas: Ga4Seg[], comEngajamento: boolean): LinhaRankingItem[] {
-  const cont = contador(linhas);
-  return linhas.map(s => ({
-    chave: `${s.valor}|${s.sub ?? ''}`, rotulo: s.valor || '(sem nome)', sessoes: s.sessoes,
-    taxa: div(s.sessoesConv, s.sessoes), contatos: cont(s),
-    engajamento: comEngajamento ? div(s.engajadas, s.sessoes) : undefined,
-  }));
+/** Cabeçalho compacto do mock: título em caixa alta, sub e "Ver todas →" (só quando há mais que o limite). */
+function CabecalhoMini({ titulo, sub, verTodas }: { titulo: ReactNode; sub?: ReactNode; verTodas?: { aberto: boolean; onClick: () => void } }) {
+  return (
+    <div className="mb-4 flex items-start justify-between gap-3">
+      <div className="min-w-0">
+        <h4 className="text-lg font-black uppercase leading-tight tracking-[0.04em] text-[#f4f7f8]">{titulo}</h4>
+        {sub && <p className="mt-1 text-xs text-[#a7b0b6]">{sub}</p>}
+      </div>
+      {verTodas && (
+        <button type="button" onClick={verTodas.onClick} className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-xs font-semibold text-[#dce4e8] underline decoration-white/40 underline-offset-4 transition-colors hover:text-[#6cff2f]">
+          {verTodas.aberto ? 'Ver menos' : 'Ver todas'} <ArrowRight className="h-3.5 w-3.5" />
+        </button>
+      )}
+    </div>
+  );
 }
+
+/** Linha compacta do mock: [posição ou tile] rótulo + barra | número + %. */
+function LinhaCompacta({ esquerda, rotulo, n, pct, barra }: { esquerda: ReactNode; rotulo: string; n: number; pct: number; barra: number }) {
+  return (
+    <li className="flex items-center gap-3">
+      {esquerda}
+      <div className="min-w-0 flex-1">
+        <div className="flex items-baseline justify-between gap-3">
+          <span className="truncate text-sm font-semibold text-[#f4f7f8]" title={rotulo}>{rotulo}</span>
+          <span className="shrink-0 whitespace-nowrap tabular-nums"><b className="text-sm font-bold text-[#f4f7f8]">{fmtN(n)}</b> <span className="ml-1.5 text-xs text-[#a7b0b6]">{fmtPct(pct)}</span></span>
+        </div>
+        <div className="mt-1.5 h-1.5 w-full rounded-full bg-white/[0.06]">
+          <div className="h-1.5 rounded-full" style={{ width: `${Math.max(2, Math.min(100, barra * 100))}%`, background: VERDE }} />
+        </div>
+      </div>
+    </li>
+  );
+}
+
+const Posicao = ({ n }: { n: number }) => (
+  <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/[0.12] bg-[#0b1114] text-sm font-bold text-[#f4f7f8] tabular-nums">{n}</span>
+);
+/** Tile no lugar da foto do mock — não há screenshot/foto no sistema; mostra as iniciais (ou ícone). */
+const Tile = ({ texto, icone: Icone }: { texto?: string; icone?: ElementType }) => (
+  <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white/[0.06] text-[11px] font-black uppercase tracking-wide text-[#a7b0b6] ring-1 ring-white/[0.08]">
+    {texto ? texto : Icone ? <Icone className="h-4 w-4" /> : null}
+  </span>
+);
+const iniciais = (s: string) => {
+  const limpo = s.replace(/^\/+|\/+$/g, '').replace(/[-_]+/g, ' ').trim();
+  if (!limpo) return '/';
+  const partes = limpo.split(/[\s/]+/).filter(Boolean);
+  return (partes.length > 1 ? partes[0][0] + partes[1][0] : partes[0].slice(0, 2)).toUpperCase();
+};
+
+/** Cidades (mock): mapa do país à esquerda, ranking à direita; % = participação nas sessões do período. */
+function CardCidades({ cidades, totalSessoes }: { cidades: Ga4Seg[]; totalSessoes: number }) {
+  const [todas, setTodas] = useState(false);
+  if (cidades.length === 0) return null;
+  const ord = [...cidades].sort((a, b) => b.sessoes - a.sessoes);
+  const pesos: Record<string, number> = {};
+  for (const c of ord) { const uf = ufDaRegiao(c.sub); if (uf) pesos[uf] = (pesos[uf] ?? 0) + c.sessoes; }
+  const temMapa = Object.keys(pesos).length > 0;
+  const max = Math.max(1, ...ord.map(c => c.sessoes));
+  const total = Math.max(totalSessoes, ord.reduce((t, c) => t + c.sessoes, 0));
+  const vis = todas ? ord : ord.slice(0, 5);
+  return (
+    <Card>
+      <CabecalhoMini titulo="Cidades" sub="Cidades com mais sessões." verTodas={ord.length > 5 ? { aberto: todas, onClick: () => setTodas(v => !v) } : undefined} />
+      {/* Container query: mapa ao lado da lista só quando o card tem largura (≥ 30rem); estreito, mapa em cima. */}
+      <div className={cx('@container grid items-center gap-4', temMapa && '@[30rem]:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]')}>
+        {temMapa && (
+          <div className="mx-auto w-full max-w-[200px] @[30rem]:max-w-[260px]">
+            <MapaBrasil pesos={pesos} titulo={(uf, nome) => `${nome}: ${fmtN(pesos[uf] ?? 0)} sessões`} />
+          </div>
+        )}
+        <ul className="space-y-3">
+          {vis.map((c, i) => (
+            <LinhaCompacta key={`${c.valor}|${c.sub ?? ''}`} esquerda={<Posicao n={i + 1} />} rotulo={c.valor || '(sem nome)'} n={c.sessoes} pct={div(c.sessoes, total)} barra={c.sessoes / max} />
+          ))}
+        </ul>
+      </div>
+      {!temMapa && <p className="mt-3 text-[11px] text-[#7c868c]">O mapa aparece quando o GA4 devolve o estado de cada cidade (próxima atualização do painel).</p>}
+    </Card>
+  );
+}
+
+const CORES_ROSCA = [VERDE, COR_SECUNDARIA, '#a78bfa', '#ff7a45'];
+/** Qualidade por canal (mock): rosca de sessões por canal + legenda com sessões e %. Top 4 + Outros. */
+function CardCanalRosca({ canais, totalSessoes }: { canais: Ga4Seg[]; totalSessoes: number }) {
+  if (canais.length === 0) return null;
+  const ord = [...canais].sort((a, b) => b.sessoes - a.sessoes);
+  const top = ord.slice(0, 4);
+  const resto = ord.slice(4).reduce((t, c) => t + c.sessoes, 0);
+  const total = Math.max(totalSessoes, ord.reduce((t, c) => t + c.sessoes, 0));
+  const fatias = [
+    ...top.map((c, i) => ({ label: c.valor, valor: c.sessoes, cor: CORES_ROSCA[i] })),
+    ...(resto > 0 ? [{ label: 'Outros', valor: resto, cor: '#8a959b' }] : []),
+  ];
+  return (
+    <Card>
+      <CabecalhoMini titulo="Qualidade por canal" sub="Engajamento e conversão por canal de origem." />
+      <div className="@container flex flex-col items-center gap-5 @[26rem]:flex-row">
+        <Donut tamanho={176} espessura={34} fatias={fatias} centroTitulo="sessões" centroValor={fmtN(total)} formatar={(n) => `${fmtN(n)} sessões`} />
+        <ul className="w-full min-w-0 space-y-3">
+          {fatias.map(f => (
+            <li key={f.label} className="flex items-center gap-3">
+              <span className="h-3 w-3 shrink-0 rounded-full" style={{ background: f.cor }} />
+              <span className="min-w-0 flex-1 truncate text-sm text-[#dce4e8]" title={f.label}>{f.label}</span>
+              <span className="shrink-0 whitespace-nowrap tabular-nums"><b className="text-sm font-bold text-[#f4f7f8]">{fmtN(f.valor)}</b> <span className="ml-1.5 text-xs text-[#a7b0b6]">{fmtPct(div(f.valor, total))}</span></span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </Card>
+  );
+}
+
+/** Página de entrada (mock): tile + caminho + sessões + %, com barra. */
+function CardPaginasEntrada({ paginas, totalSessoes }: { paginas: Ga4Seg[]; totalSessoes: number }) {
+  const [todas, setTodas] = useState(false);
+  if (paginas.length === 0) return null;
+  const ord = [...paginas].sort((a, b) => b.sessoes - a.sessoes);
+  const max = Math.max(1, ...ord.map(p => p.sessoes));
+  const total = Math.max(totalSessoes, ord.reduce((t, p) => t + p.sessoes, 0));
+  const vis = todas ? ord : ord.slice(0, 5);
+  return (
+    <Card>
+      <CabecalhoMini titulo="Página de entrada" sub="Páginas por onde mais gente entrou." verTodas={ord.length > 5 ? { aberto: todas, onClick: () => setTodas(v => !v) } : undefined} />
+      <ul className="space-y-3">
+        {vis.map(p => (
+          <LinhaCompacta key={`${p.valor}|${p.sub ?? ''}`} esquerda={<Tile texto={iniciais(p.valor)} />} rotulo={p.valor || '/'} n={p.sessoes} pct={div(p.sessoes, total)} barra={p.sessoes / max} />
+        ))}
+      </ul>
+    </Card>
+  );
+}
+
+/** Barras verticais do mock (Onde clicam para falar, Materiais): valor em cima, rótulo embaixo. */
+function BarrasVerticais({ linhas, total, modo }: { linhas: Ga4Linha[]; total: number; modo: 'contagem' | 'pct' }) {
+  const max = Math.max(1, ...linhas.map(l => l.n));
+  return (
+    <div className="flex items-end justify-around gap-2 pt-2" style={{ height: 230 }}>
+      {linhas.map(l => (
+        <div key={l.valor} className="flex h-full min-w-0 flex-1 flex-col items-center justify-end" title={`${l.valor}: ${fmtN(l.n)}${total > 0 ? ` · ${fmtPct(l.n / total)}` : ''}`}>
+          <span className="mb-1.5 text-sm font-bold text-[#f4f7f8] tabular-nums">{modo === 'pct' && total > 0 ? fmtPct(l.n / total) : fmtN(l.n)}</span>
+          <div className="w-full max-w-[52px] rounded-t-md" style={{ height: `${Math.max(4, (l.n / max) * 140)}px`, background: 'linear-gradient(180deg, #8dff5c 0%, #4fcf1f 100%)' }} />
+          <span className="mt-2 w-full break-words text-center text-[11px] leading-tight text-[#dce4e8]" style={{ overflowWrap: 'anywhere' }}>{l.valor}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** Barras (top 6) quando os rótulos são curtos, como no mock; rótulo comprido (peças) vira ranking com tile. */
+const MAX_BARRAS = 6;
+const usaBarras = (linhas: Ga4Linha[]) => linhas.slice(0, MAX_BARRAS).every(l => l.valor.length <= 22);
+
+/**
+ * Bloco de evento do mock ("Onde clicam para falar", "Peças mais pedidas", "Materiais"…):
+ * o título/existência muda por cliente (dimensões personalizadas do GA4), o desenho não.
+ */
+function BlocoEventos({ titulo, sub, linhas, total, modo, tile = false, rotulo }: {
+  titulo: string; sub: string; linhas: Ga4Linha[]; total: number; modo: 'contagem' | 'pct'; tile?: boolean; rotulo?: (v: string) => string;
+}) {
+  const [todas, setTodas] = useState(false);
+  if (linhas.length === 0) return null;
+  const ord = [...linhas].sort((a, b) => b.n - a.n).map(l => ({ ...l, valor: rotulo ? rotulo(l.valor) : l.valor }));
+  if (usaBarras(ord)) {
+    const sobra = ord.length - MAX_BARRAS;
+    return (
+      <Card>
+        <CabecalhoMini titulo={titulo} sub={sobra > 0 ? `${sub} Top ${MAX_BARRAS} de ${fmtN(ord.length)}.` : sub} />
+        <BarrasVerticais linhas={ord.slice(0, MAX_BARRAS)} total={total} modo={modo} />
+      </Card>
+    );
+  }
+  const max = Math.max(1, ...ord.map(l => l.n));
+  const vis = todas ? ord : ord.slice(0, 5);
+  return (
+    <Card>
+      <CabecalhoMini titulo={titulo} sub={sub} verTodas={ord.length > 5 ? { aberto: todas, onClick: () => setTodas(v => !v) } : undefined} />
+      <ul className="space-y-3">
+        {vis.map((l, i) => (
+          <LinhaCompacta
+            key={l.valor}
+            esquerda={<span className="flex shrink-0 items-center gap-2"><Posicao n={i + 1} />{tile && <Tile icone={Package} />}</span>}
+            rotulo={l.valor} n={l.n} pct={total > 0 ? l.n / total : 0} barra={l.n / max}
+          />
+        ))}
+      </ul>
+    </Card>
+  );
+}
+
+const SUB_DETALHE: Record<string, string> = {
+  peca: 'Itens mais visualizados/solicitados.', veiculo: 'Veículos mais pedidos.', material: 'Materiais mais acessados.',
+  espessura: 'Espessuras mais pedidas.', palestra: 'Palestras mais pedidas.', cta_id: 'Botões mais clicados.',
+};
 
 /** Grade dia da semana × hora: cor = sessões ou conversões. */
 function MapaSemanaHora({ celulas }: { celulas: Ga4Celula[] }) {
@@ -715,19 +858,6 @@ function FunilForm({ f }: { f: Ga4Consolidado['comportamento']['funil'] }) {
 }
 
 /** Lista simples de contagens (onde clicam, seções, vídeos) com % sobre um total. */
-function BlocoContagem({ titulo, dica, linhas, total, rotulo }: { titulo: string; dica?: string; linhas: Ga4Linha[]; total: number; rotulo?: (v: string) => string }) {
-  if (linhas.length === 0) return null;
-  return (
-    <Card>
-      <Titulo dica={dica}>{titulo}</Titulo>
-      <ListaBarras itens={linhas.map(l => ({
-        chave: l.valor, rotulo: rotulo ? rotulo(l.valor) : l.valor, valor: l.n,
-        direita: <><span className="font-bold text-[#f4f7f8]">{fmtN(l.n)}</span>{total > 0 && <span className="ml-1 text-[11px] text-[#7c868c]">{fmtPct(l.n / total)}</span>}</>,
-      }))} />
-    </Card>
-  );
-}
-
 
 // ───────────────────── layout do mock (2026-09-24) ─────────────────────
 // Reprodução do mockup do Matheus para a seção Landing page: 4 KPIs com ícone
@@ -1309,18 +1439,24 @@ export function Ga4LandingPanel({ dados, loading, aviso }: { dados: Ga4Consolida
               )}
             </div>
           )}
-          {/* 2º mock: Cidades · Qualidade por canal · Página de entrada numa linha só */}
+          {/* 5º mock: Cidades (com mapa) · Qualidade por canal (rosca) · Página de entrada */}
           {(au.cidades.length > 0 || canais.length > 0 || temEntrada) && (
             <div className="grid items-stretch gap-4 md:grid-cols-2 xl:grid-cols-3">
-              {au.cidades.length > 0 && (
-                <CardRanking icone={MapPin} titulo="Cidades" sub="Cidades com mais sessões do seu site." modo="cidade" itens={linhasRanking(au.cidades, false)} />
-              )}
-              {canais.length > 0 && (
-                <CardRanking icone={BarChart3} titulo="Qualidade por canal" sub="Engajamento e conversão por canal de aquisição." itens={linhasRanking(canais, true)} />
-              )}
-              {temEntrada && (
-                <CardRanking icone={FileText} titulo="Página de entrada" sub="Páginas por onde mais gente entrou no seu site." itens={linhasRanking(co.paginasEntrada, true)} />
-              )}
+              <CardCidades cidades={au.cidades} totalSessoes={a.sessoes} />
+              <CardCanalRosca canais={canais} totalSessoes={a.sessoes} />
+              <CardPaginasEntrada paginas={co.paginasEntrada} totalSessoes={a.sessoes} />
+            </div>
+          )}
+          {/* 5º mock, 2ª linha: blocos de evento (variam por cliente) no mesmo desenho */}
+          {temExtras && (
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              <BlocoEventos titulo="Onde clicam para falar" sub="Principais cliques em botões/links." linhas={dados.posicoes} total={a.contatos} modo="contagem" />
+              {dados.detalhes.map(d => (
+                <BlocoEventos key={d.param} titulo={d.rotulo} sub={SUB_DETALHE[d.param] ?? 'Mais pedidos no período.'} linhas={d.linhas} total={d.param === 'cta_id' ? a.cta : a.whatsapp} modo="pct" tile={d.param === 'peca'} />
+              ))}
+              <BlocoEventos titulo="Seções vistas" sub="% dos visitantes que viram cada seção." linhas={co.secoes} total={a.usuarios} modo="pct" />
+              <BlocoEventos titulo="Vídeos assistidos" sub="Vídeos mais assistidos na página." linhas={co.videos} total={a.video} modo="pct" />
+              <FunilForm f={co.funil} />
             </div>
           )}
           {/* 3º mock: mapa de dia da semana × hora logo abaixo */}
@@ -1363,17 +1499,6 @@ export function Ga4LandingPanel({ dados, loading, aviso }: { dados: Ga4Consolida
             </div>
           )}
           <Rolagem linhas={co.rolagem} visitantes={a.usuarios} />
-          {temExtras && (
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-              <FunilForm f={co.funil} />
-              <BlocoContagem titulo="Onde clicam para falar" linhas={dados.posicoes} total={a.contatos} />
-              {dados.detalhes.map(d => (
-                <BlocoContagem key={d.param} titulo={d.rotulo} linhas={d.linhas} total={d.param === 'cta_id' ? a.cta : a.whatsapp} />
-              ))}
-              <BlocoContagem titulo="Seções vistas" dica="% dos visitantes que viram cada seção." linhas={co.secoes} total={a.usuarios} />
-              <BlocoContagem titulo="Vídeos assistidos" linhas={co.videos} total={a.video} />
-            </div>
-          )}
         </>
       )}
 
