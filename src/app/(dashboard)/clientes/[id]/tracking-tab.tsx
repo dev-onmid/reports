@@ -6,7 +6,7 @@ import {
   Copy, Check, Trash2, Plus, RefreshCw, Eye, EyeOff,
   Settings2, MessageCircle, ShoppingCart, X, TrendingUp, Wifi, WifiOff, QrCode,
   HelpCircle, Zap, AlertCircle, Globe, BarChart3, Search,
-  Webhook, Building2, Store, Flame,
+  Webhook, Building2, Store, Flame, Link2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ConversaoTile, GuideStepModal } from './conversao-guias';
@@ -16,6 +16,7 @@ import SultsCard from './sults-card';
 import LpOrigensCard from './lp-origens-card';
 import { ClientDeliveryTab } from './delivery-tab';
 import { LandingPagesTab } from './landing-pages-tab';
+import { CaptureLinksTab } from './capture-links-tab';
 import { EVENTOS_MENSAGEM_META, eventoMensagemMeta } from '@/lib/meta-eventos-mensagem';
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -215,7 +216,7 @@ function SectionHeader({ icon: Icon, title, subtitle, color = 'text-muted-foregr
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-const SUBABAS_RASTREIO = ['whatsapp', 'sites', 'conversoes', 'webhooks', 'agendor', 'sults', 'delivery', 'heatmap', 'log'] as const;
+const SUBABAS_RASTREIO = ['whatsapp', 'captura', 'sites', 'conversoes', 'webhooks', 'agendor', 'sults', 'delivery', 'heatmap', 'log'] as const;
 
 /**
  * A sub-aba "Datalytics" virou "Webhooks" (genérica, N por cliente). Link
@@ -570,6 +571,7 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
       <div className="flex items-center gap-0.5 rounded-xl border border-border bg-card p-1 w-fit">
         {([
           { id: 'whatsapp'  as const, label: 'WhatsApp',   icon: Wifi },
+          { id: 'captura' as const, label: 'Fontes de Captura', icon: Link2 },
           { id: 'sites' as const, label: 'Sites e LPs', icon: Globe },
           { id: 'conversoes' as const, label: 'Conversões', icon: Zap },
           { id: 'webhooks' as const, label: 'Webhooks', icon: Webhook },
@@ -1093,6 +1095,8 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
 
         </div>
       )}
+
+      {activeTab === 'captura' && <CaptureLinksTab clientId={clientId} />}
 
       {activeTab === 'sites' && <LpOrigensCard clientId={clientId} />}
 

@@ -260,14 +260,13 @@ export function ClientConfigModal({ open, onClose, clientId, clientName, statusC
 
                 {ativa === 'crm' && onAcaoCrm && (
                   <section>
-                    <SecaoTitulo Icone={Kanban} titulo="CRM" sub="Funil, portal do cliente, critérios da IA e captura de leads." />
+                    <SecaoTitulo Icone={Kanban} titulo="CRM" sub="Funil, portal do cliente e critérios da IA." />
                     {/* Eram o ⋮ da barra do CRM. Cada um fecha este modal e abre na aba CRM. */}
-                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                       {([
                         ['funil', Pencil, 'Editar funil', 'Visualize e edite as etapas do funil de vendas.'],
                         ['portal', Globe2, 'Portal do cliente', 'Link somente-leitura para o cliente acompanhar.'],
                         ['criterios', Sparkles, 'Critérios IA', 'Regras que a IA usa para qualificar e mover leads.'],
-                        ['captura', Link2, 'Fontes de captura', 'WhatsApp rastreável, landing, Meta Forms e UTMs.'],
                       ] as Array<[AcaoConfigCrm, typeof Pencil, string, string]>).map(([acao, Icone, rotulo, desc]) => (
                         <button key={acao} type="button" onClick={() => { fechar(); onAcaoCrm(acao); }}
                           className="group flex flex-col rounded-xl border border-border bg-card p-4 text-left transition-colors hover:border-primary/40 hover:bg-primary/5">

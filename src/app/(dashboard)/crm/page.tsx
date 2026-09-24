@@ -23,7 +23,6 @@ import { SeletorModeloFunil } from '@/components/crm/seletor-modelo-funil';
 import { AplicarModeloFunil } from '@/components/crm/aplicar-modelo-funil';
 import { FollowupTab, useActiveFollowups, FollowupBadge } from './followup-tab';
 import Link from 'next/link';
-import { CaptureLinksTab } from '../clientes/[id]/capture-links-tab';
 import { CreativeLibrary } from '@/components/creative-library';
 import { useClients } from '@/lib/client-store';
 import { ClientAvatar, fetchClientPicture } from '@/components/client-avatar';
@@ -86,8 +85,11 @@ type Draft = Partial<Omit<CrmLead, 'id' | 'client_id' | 'created_at'>>;
 type CrmFunnel = { id: string; name: string; created_at: string };
 type CrmStage  = { id: string; label: string; color: string; position: number; etapa_funil?: EtapaFunil | null; situacao?: SituacaoStage | null };
 type LocalStage = CrmStage & { _isNew?: boolean };
-type CrmTab = 'leads' | 'capture' | 'chat' | 'followup' | 'attendance' | 'disparos' | 'ads';
-const ABAS_CRM = ['leads', 'capture', 'chat', 'followup', 'attendance', 'disparos', 'ads'] as const;
+type CrmTab = 'leads' | 'chat' | 'followup' | 'attendance' | 'disparos' | 'ads';
+// ⚠️ 'capture' saiu daqui: Fontes de Captura virou sub-aba de Integrações do
+// cliente (`?tab=rastreio&sub=captura`), junto das demais integrações. Quem
+// tiver 'capture' salvo no localStorage cai no fallback 'leads'.
+const ABAS_CRM = ['leads', 'chat', 'followup', 'attendance', 'disparos', 'ads'] as const;
 const VISOES_CRM = ['list', 'kanban'] as const;
 type DatePreset = 'all' | 'today' | 'yesterday' | 'last7' | 'last15' | 'last14' | 'last30' | 'last90' | 'thisMonth' | 'lastMonth' | 'thisYear' | 'custom';
 
@@ -2500,7 +2502,7 @@ function ClientChoiceCard({
 }
 
 /** Ações de configuração do CRM que a página do cliente dispara pelo modal Configurações. */
-export type AcaoConfigCrm = 'funil' | 'portal' | 'criterios' | 'captura';
+export type AcaoConfigCrm = 'funil' | 'portal' | 'criterios';
 
 type CrmPageProps = {
   lockedClientId?: string;
@@ -2592,7 +2594,6 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
     if (acaoConfig === 'funil') setShowFunnelEditor(true);
     else if (acaoConfig === 'portal') setShowPortalModal(true);
     else if (acaoConfig === 'criterios') setShowAiCriteria(true);
-    else if (acaoConfig === 'captura') setCrmView('capture');
     onAcaoConsumida?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [acaoConfig]);
@@ -3448,12 +3449,6 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
                       className="flex w-full items-center gap-2 px-3 py-2 text-xs text-muted-foreground hover:bg-muted hover:text-foreground">
                       <Sparkles className="h-3.5 w-3.5" /> Critérios IA
                     </button>
-                    <button type="button"
-                      onClick={() => { setFunnelMenuOpen(false); setCrmView('capture'); }}
-                      title="De onde os leads deste cliente estão vindo"
-                      className="flex w-full items-center gap-2 px-3 py-2 text-xs text-muted-foreground hover:bg-muted hover:text-foreground">
-                      <Link2 className="h-3.5 w-3.5" /> Fontes de Captura
-                    </button>
                   </div>
                 </>
               )}
@@ -3677,12 +3672,6 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
       {clientId && crmView === 'chat' && (
         <div className="flex-1 min-h-0 overflow-hidden">
           <ChatView clientId={clientId} statusOptions={statusOptions} focusLeadId={chatFocusLeadId} />
-        </div>
-      )}
-
-      {clientId && crmView === 'capture' && (
-        <div className="flex-1 min-h-0 overflow-y-auto">
-          <CaptureLinksTab clientId={clientId} />
         </div>
       )}
 
