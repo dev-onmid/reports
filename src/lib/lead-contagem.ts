@@ -68,7 +68,10 @@ export function rastroPagoSql(alias = ''): string {
  * é tratada por `contarFunil` (que recebe `rastreado` das rotas).
  */
 export function naoLeadSql(alias = ''): string {
-  return `(lower(btrim(${col(alias, 'status')})) IN ('paciente', 'não lead', 'nao lead', 'já é cliente', 'ja e cliente'))`;
+  // ⚠️ COALESCE obrigatório: `NULL IN (...)` é NULL, e `NOT (NULL AND x)` é NULL —
+  // todo lead com status vazio (importação de planilha grava NULL aos milhares)
+  // sumiria da dashboard e do CRM. Medido em São José: 1.176 leads.
+  return `COALESCE(lower(btrim(${col(alias, 'status')})) IN ('paciente', 'não lead', 'nao lead', 'já é cliente', 'ja e cliente'), FALSE)`;
 }
 
 /** Predicado: o lead CONTA na dashboard. */
