@@ -1,3 +1,12 @@
+## Fontes de Captura mudou de lugar: CRM → Integrações do cliente (2026-09-24)
+
+Pedido do Matheus: "esse Fontes de Captura tem que ficar dentro da aba do cliente, dentro de integrações igual as demais."
+
+- **Onde procurar agora**: Cliente → **Integrações** → sub-aba **Fontes de Captura** (2ª, logo depois de WhatsApp). Deep link `?tab=rastreio&sub=captura`. Antes vivia dentro do CRM, alcançável só pelo **⋮ da barra do funil** e por um atalho no modal Configurações — dois caminhos escondidos para uma tela que é de integração (é onde se configura por onde o lead ENTRA, ao lado de WhatsApp, Sites e LPs, Webhooks e Meta Forms).
+- **⚠️ O componente não mudou uma linha.** `clientes/[id]/capture-links-tab.tsx` já morava na pasta do cliente, já recebia só `clientId` e **não tinha acoplamento nenhum com o CRM** (sem `useRouter`, sem `useSearchParams`, sem estado do funil) — conferido antes de mover. Foi troca de lugar, não port.
+- `'capture'` saiu de `CrmTab`/`ABAS_CRM`: quem tiver esse valor salvo no localStorage cai no fallback `'leads'`, não numa aba inexistente. `'captura'` saiu de `AcaoConfigCrm` e do modal Configurações (a grade da seção CRM voltou de 4 para 3 colunas) — integração se configura em Integrações, não em dois lugares.
+- ✅ Verificado: tsc + build limpos; harness no browser com a barra renderizada — as 10 sub-abas na ordem (WhatsApp · **Fontes de Captura** · Sites e LPs · Conversões · Webhooks · Agendor · SULTS · Delivery · Mapa de Calor · Log), sem quebra de linha a 1440px, clique acendendo a aba certa, conteúdo montando e a URL virando `?sub=captura`. Produção em `2d555929`.
+
 ## Dashboard — cards preenchem a altura que a grade dá (fim do vão ocioso) (2026-09-24, noite)
 
 Print do Matheus: card de Gênero com metade vazia ("olha o tanto de espaço ocioso… veja outros cards assim"). Causa: em grade, o card estica até a altura do vizinho (Idade tinha 8 linhas de barras), mas o conteúdo ficava preso no topo.
