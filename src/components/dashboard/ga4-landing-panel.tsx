@@ -1329,12 +1329,14 @@ export function Ga4LandingPanel({ dados, loading, aviso }: { dados: Ga4Consolida
   // Seção sem dado nenhum não aparece.
   const temPago = pago.googleAds.length + pago.campanhas.length + pago.palavras.length + pago.termos.length > 0 || semVinculoAds;
   const temEntrada = co.paginasEntrada.length > 0;
-  const temAudiencia = au.dispositivos.length + au.cidades.length + au.novosRecorrentes.length + au.idades.length + au.generos.length + au.semanaHora.length + canais.length + co.paginasEntrada.length > 0;
   const temOrigem = canais.length === 0 && origens.length > 0;
   const temForm = co.funil.formInicio + co.funil.leadForm + co.funil.leadConfirmado > 0;
   const temExtras = temForm || dados.posicoes.length > 0 || dados.detalhes.some(d => d.linhas.length > 0) || co.secoes.length > 0 || co.videos.length > 0;
   const temRolagem = co.rolagem.length > 0 && a.usuarios > 0;
-  const temComportamento = temOrigem || temEntrada || temRolagem || temExtras;
+  // Audiência hospeda também páginas, blocos de evento e rolagem (mocks de 24/09);
+  // Comportamento ficou só com o fallback de origem/mídia.
+  const temAudiencia = au.dispositivos.length + au.cidades.length + au.novosRecorrentes.length + au.idades.length + au.generos.length + au.semanaHora.length + canais.length + co.paginasEntrada.length > 0 || temExtras || temRolagem;
+  const temComportamento = temOrigem;
 
   const rotuloForm = a.leadForm > 0 ? 'Formulário' : 'Cliques em botões';
 
@@ -1434,6 +1436,9 @@ export function Ga4LandingPanel({ dados, loading, aviso }: { dados: Ga4Consolida
               )}
             </div>
           )}
+          {/* Dia da semana × hora e Até onde rolam logo abaixo de Dispositivo / Novos × recorrentes (pedido do Matheus, 24/09) */}
+          <MapaSemanaHora celulas={au.semanaHora} />
+          <Rolagem linhas={co.rolagem} visitantes={a.usuarios} />
           {/* 5º mock: Cidades (com mapa) · Qualidade por canal (rosca) · Página de entrada */}
           {(au.cidades.length > 0 || canais.length > 0 || temEntrada) && (
             <div className="grid items-stretch gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -1454,8 +1459,6 @@ export function Ga4LandingPanel({ dados, loading, aviso }: { dados: Ga4Consolida
               <FunilForm f={co.funil} />
             </div>
           )}
-          {/* 3º mock: mapa de dia da semana × hora logo abaixo */}
-          <MapaSemanaHora celulas={au.semanaHora} />
           {au.idades.length + au.generos.length > 0 && (
             <div className="grid gap-4 md:grid-cols-2">
               {au.idades.length > 0 && (
@@ -1472,7 +1475,7 @@ export function Ga4LandingPanel({ dados, loading, aviso }: { dados: Ga4Consolida
         </>
       )}
 
-      {/* Comportamento: origem | entrada lado a lado, rolagem em faixa, demais em grade */}
+      {/* Comportamento: só o fallback "De onde vêm" (quando o GA4 não devolve canal) */}
       {temComportamento && (
         <>
           <GrupoTitulo titulo="Comportamento" />
@@ -1493,7 +1496,6 @@ export function Ga4LandingPanel({ dados, loading, aviso }: { dados: Ga4Consolida
               </Card>
             </div>
           )}
-          <Rolagem linhas={co.rolagem} visitantes={a.usuarios} />
         </>
       )}
 
