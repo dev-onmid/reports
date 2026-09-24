@@ -1,3 +1,15 @@
+## Dashboard — Funil de performance e Resumo por canal no layout novo, acima dos KPIs (2026-09-24, noite)
+
+Referência do Matheus: "tenho melhor visibilidade de ler os dados e está mais dividido". Tudo em `page.tsx`.
+
+- **`SimpleFunnel` refeito**: à esquerda, funil CLÁSSICO (largura cai por igual de 100% a ~40%, não mais proporcional ao volume — o número real está na faixa), faixas de 68px com gradiente da cor do degrau e brilho (`drop-shadow` no pai do `clip-path`). À direita, painel de **passagens** (uma linha por degrau i→i+1, ligadas por uma linha vertical com pontos na cor do degrau de destino): % de conversão grande (vermelho se gargalo), "de X para Y" e a **queda** em pílula (vermelha quando < 0, cinza em 0,0%).
+- **⚠️ Os semi-degraus da planilha (Perca / Em atendimento / Não compareceram / Faltam comparecer) e os chips (`detalhes`) NÃO sumiram**: viraram chips na passagem logo abaixo do degrau a que pertencem (`alvo(i) = min(i, n-2)`; os do último degrau vão na passagem que chega nele). O mock não os mostrava; tirar seria desfazer pedido anterior do Matheus.
+- **Seletor "Todos os canais" é REAL**: usa `/api/crm/por-canal-funil` (já carregado como `funilCanal`). `funilPorCanal` alinha cada canal aos degraus exibidos pela etapa semântica (`etapasDosDegraus` — no funil do Kanban há 1 degrau por etapa; no semântico o índice é a etapa). Com canal escolhido: números do canal, conversão geral recalculada (último ÷ topo), chips/semi-degraus e clique no degrau desligados (a lista de leads do modal não filtra por canal). ⚠️ O funil por canal conta pela régua semântica; no funil do Kanban o total de "Todos" pode diferir um pouco da soma dos canais.
+- **`ChannelSummaryTable` refeito**: cabeçalho com ícone e título em caixa normal, cabeçalho da tabela em faixa, rótulos em caixa normal, CPL colorido pelo status e a última linha **"Status CPL"** com `CartaoStatusCpl` (ícone em círculo + rótulo + explicação: Bom/Abaixo da meta, Atenção/Perto da meta, Acima/Acima da meta, Sem meta, Sem lead). **CPM ficou** (pedido anterior do Matheus), embora o mock não tenha.
+- **Posição**: a grade funil + resumo subiu para logo abaixo das metas (Faturamento/Leads) e ACIMA dos cards de Ticket médio / Agendamento / ROAS / Conversão do funil.
+- Mesmo pacote: **"Termos pesquisados" abre por padrão** (`useState(true)`), o botão continua recolhendo.
+- ✅ Verificado: tsc limpo, lint 164 = 164; harness extraindo os dois componentes do `page.tsx` (`scratchpad/harness-funil.tsx`, gerado por script) com os números do print (168/70/67/14/14, CPL 10,10/51,17/14,93) e o seletor trocando para um canal. ⚠️ Não visto com login em produção.
+
 ## Landing page — 5º mock: Cidades com MAPA do Brasil, canal em rosca, páginas e blocos de evento em barras (2026-09-24, noite)
 
 Quinto mock do Matheus ("várias tabelas com barras… só as últimas 2 mudam por cliente… e gostaria de simular o mapa do país nas cidades"). **Substitui o 2º mock** (os `CardRanking` de Cidades/Qualidade por canal/Página de entrada foram apagados — o Matheus mandou o layout novo poucas horas depois).

@@ -391,7 +391,7 @@ function Campanhas({ ads, utm, semCusto }: { ads: Ga4Seg[]; utm: Ga4Seg[]; semCu
 
 /** Palavras-chave (mock): as que trouxeram contato x as que só gastam (candidatas a negativar), em listas ranqueadas; termos pesquisados recolhidos. */
 function PalavrasChave({ palavras, termos }: { palavras: Ga4Seg[]; termos: Ga4Seg[] }) {
-  const [abrirTermos, setAbrirTermos] = useState(false);
+  const [abrirTermos, setAbrirTermos] = useState(true); // aberto por padrão (pedido do Matheus, 24/09)
   const cont = contador(palavras);
   const boas = palavras.filter(s => cont(s) > 0).sort((a, b) => cont(b) - cont(a) || b.sessoes - a.sessoes);
   const ruins = palavras.filter(s => cont(s) === 0 && s.sessoes >= 10).sort((a, b) => b.sessoes - a.sessoes);

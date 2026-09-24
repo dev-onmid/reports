@@ -41,6 +41,7 @@ import {
   Bell, DollarSign, Tag, TrendingUp, Calendar, BarChart3, Zap, Target, Briefcase,
   Wallet, MousePointerClick, CreditCard, PiggyBank, Clock, Info, Lightbulb, UserPlus, CheckCircle2, Receipt,
   Eye, Heart, Monitor, ExternalLink, Bookmark, MessageCircle, Repeat,
+  Funnel, CircleCheck, CircleArrowUp, CircleAlert, CircleMinus,
 } from 'lucide-react';
 import { getAuthSession } from '@/lib/auth-store';
 import type { AdSetWithMetrics } from '@/app/api/meta/campaigns/[id]/adsets/route';
@@ -4227,13 +4228,16 @@ const FUNNEL_STEP_COLORS = ['#6cff2f', '#0ea5e9', '#7b2cff', '#f97316', '#ec4899
  */
 type SemiDegrau = { apos: number; rotulo: string; valor: number; tom: 'ruim' | 'neutro' | 'bom' };
 
-function SimpleFunnel({ steps, totalRate, fonteLabel, onStageClick, todosClicaveis, semiDegraus }: {
+/** Valores do funil de UM canal, alinhados aos degraus exibidos (mesma ordem de `steps`). */
+type FunilDoCanal = { canal: string; valores: number[] };
+
+function SimpleFunnel({ steps, totalRate, fonteLabel, onStageClick, todosClicaveis, semiDegraus, porCanal }: {
   steps: Array<{
     label: string; actual: number; planned: number; color: string;
-    /** Quebra explicativa sob o número (ex: quantos ainda vêm × quantos furaram). */
+    /** Quebra explicativa (ex: quantos ainda vêm × quantos furaram). */
     detalhes?: Array<{ texto: string; tom: 'bom' | 'ruim' | 'neutro' }>;
   }>;
-  /** Linhas intermediárias (planilha) — renderizadas logo abaixo do degrau `apos`. */
+  /** Linhas intermediárias (planilha): viram chips na passagem logo abaixo do degrau `apos`. */
   semiDegraus?: SemiDegrau[];
   totalRate: string;
   /** De onde vem o topo ("fonte: CRM" / "estimado por anúncios" / mistas). */
@@ -4242,139 +4246,161 @@ function SimpleFunnel({ steps, totalRate, fonteLabel, onStageClick, todosClicave
   onStageClick?: (index: number) => void;
   /** Funil personalizado pelo Kanban: TODOS os degraus são clicáveis (não só os 5 semânticos). */
   todosClicaveis?: boolean;
+  /** Funil de cada canal (seletor "Todos os canais" do mock). Vazio = sem seletor. */
+  porCanal?: FunilDoCanal[];
 }) {
-  // No funil por etapa real, cada degrau tem lista própria; no semântico, só os
-  // índices que existem em ETAPAS_FUNIL abrem modal.
-  const podeClicar = (i: number) => !!onStageClick && (todosClicaveis || !!ETAPAS_FUNIL[i]);
+  const [canal, setCanal] = useState('');
   if (!steps.length) return null;
-  // Funil de verdade: faixas CENTRALIZADAS e empilhadas, cada uma um trapézio
-  // cuja borda de cima tem a largura do degrau e a de baixo a do próximo — o
-  // contorno é o funil, e a largura continua proporcional ao volume (com um
-  // piso visual para o rótulo caber; o número real está sempre escrito).
-  const topo = Math.max(...steps.map(st => st.actual), 0);
-  const PISO = 26;
-  const larguraDe = (v: number) => (topo > 0 ? Math.max(PISO, (v / topo) * 100) : PISO);
+  const filtro = canal ? porCanal?.find(c => c.canal === canal) ?? null : null;
+  // Com canal escolhido os números vêm do funil daquele canal; chips, semi-degraus
+  // e clique (a lista de leads não filtra por canal) ficam só em "Todos os canais".
+  const valores = steps.map((st, i) => (filtro ? filtro.valores[i] ?? 0 : st.actual));
+  const podeClicar = (i: number) => !filtro && !!onStageClick && (todosClicaveis || !!ETAPAS_FUNIL[i]);
+  const n = steps.length;
+  const taxaGeral = filtro
+    ? (valores[0] > 0 ? premiumValue((valores[n - 1] / valores[0]) * 100, 'percent') : '—')
+    : totalRate;
+  // Forma do mock: funil CLÁSSICO, largura cai por igual a cada faixa (de 100% a ~40%);
+  // o número real está escrito na faixa — a proporção de volume está nas passagens ao lado.
+  const passo = 60 / n;
+  const larg = (i: number) => 100 - i * passo;
+  // Chips de cada passagem (i → i+1): detalhes do degrau i e semi-degraus depois dele;
+  // os do último degrau vão na última passagem (a que chega nele).
+  const alvo = (i: number) => Math.min(i, n - 2);
+  const chipsDa = (t: number) => filtro ? [] : [
+    ...(semiDegraus ?? []).filter(sd => alvo(sd.apos) === t).map(sd => ({
+      texto: `${Math.round(sd.valor).toLocaleString('pt-BR')} ${sd.rotulo.toLowerCase()}`, tom: sd.tom,
+    })),
+    ...steps.flatMap((st, i) => (alvo(i) === t ? st.detalhes ?? [] : [])),
+  ];
 
   return (
-    <PremiumPanel className="p-5">
-      <div className="mb-4 flex items-center justify-between">
-        <div className="flex items-baseline gap-2">
-          <h3 className={T.cardTitulo}>Funil de Performance</h3>
-          {fonteLabel && <span className={T.cardSub}>· {fonteLabel}</span>}
+    <PremiumPanel className="flex flex-col p-5">
+      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <Funnel className="h-6 w-6 shrink-0 text-[#6cff2f]" style={{ fill: '#6cff2f' }} />
+          <h3 className="text-xl font-bold text-[#f4f7f8]">Funil de performance</h3>
+          {fonteLabel && <span className="text-sm text-[#a7b0b6]">· {fonteLabel}</span>}
         </div>
-        <span className={T.cardSub} title="Fechamentos ÷ contatos do funil">
-          Conversão geral: <span className="font-black text-[#6cff2f]">{totalRate}</span>
-        </span>
+        <div className="flex items-center gap-3">
+          <span className="text-xs text-[#a7b0b6]" title="Último degrau ÷ topo do funil">
+            Conversão geral: <b className="text-[#6cff2f]">{taxaGeral}</b>
+          </span>
+          {porCanal && porCanal.length > 0 && (
+            <label className="relative">
+              <select
+                value={canal}
+                onChange={e => setCanal(e.target.value)}
+                className="h-10 appearance-none rounded-lg border border-white/[0.1] bg-white/[0.03] pl-4 pr-9 text-sm text-[#dce4e8] focus:outline-none"
+                title="Funil só com os leads do canal escolhido (CRM)"
+              >
+                <option value="">Todos os canais</option>
+                {porCanal.map(c => <option key={c.canal} value={c.canal}>{c.canal}</option>)}
+              </select>
+              <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#a7b0b6]" />
+            </label>
+          )}
+        </div>
       </div>
 
-      <div className="space-y-1">
-        {steps.map((step, i) => {
-          const prev = steps[i - 1];
-          const next = steps[i + 1];
-          const actualPct = i === 0 ? null : prev && prev.actual > 0 ? (step.actual / prev.actual) * 100 : 0;
-          const plannedPct = i === 0 ? null : prev && prev.planned > 0 ? (step.planned / prev.planned) * 100 : 0;
-          const isBottleneck = actualPct !== null && plannedPct !== null && plannedPct > 0 && actualPct < plannedPct * 0.85;
-          const clicavel = podeClicar(i);
-          const cima = larguraDe(step.actual);
-          const baixo = next ? larguraDe(next.actual) : Math.max(PISO * 0.8, cima * 0.82);
-          const cor = step.color || FUNNEL_STEP_COLORS[i % FUNNEL_STEP_COLORS.length];
-          const clip = `polygon(${50 - cima / 2}% 0, ${50 + cima / 2}% 0, ${50 + baixo / 2}% 100%, ${50 - baixo / 2}% 100%)`;
-          const semis = (semiDegraus ?? []).filter(sd => sd.apos === i);
-          return (
-            <Fragment key={step.label}>
-            <div
-              onClick={clicavel ? () => onStageClick!(i) : undefined}
-              role={clicavel ? 'button' : undefined}
-              tabIndex={clicavel ? 0 : undefined}
-              onKeyDown={clicavel ? (e) => {
-                if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onStageClick!(i); }
-              } : undefined}
-              title={clicavel ? `Ver os leads de ${step.label.toLowerCase()}` : undefined}
-              className={cn(
-                'group grid grid-cols-[1fr_150px] items-center gap-3 sm:grid-cols-[1fr_190px]',
-                clicavel && 'cursor-pointer focus:outline-none focus-visible:ring-1 focus-visible:ring-[#6cff2f]',
-              )}
-            >
-              {/* Faixa do funil */}
-              <div className="relative h-[54px]">
+      <div className="grid flex-1 items-stretch gap-5 md:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
+        {/* Faixas do funil */}
+        <div className="flex flex-col justify-center gap-1.5">
+          {steps.map((step, i) => {
+            const clicavel = podeClicar(i);
+            const cima = larg(i);
+            const baixo = larg(i + 1);
+            const cor = step.color || FUNNEL_STEP_COLORS[i % FUNNEL_STEP_COLORS.length];
+            const clip = `polygon(${50 - cima / 2}% 0, ${50 + cima / 2}% 0, ${50 + baixo / 2}% 100%, ${50 - baixo / 2}% 100%)`;
+            return (
+              <div
+                key={step.label}
+                onClick={clicavel ? () => onStageClick!(i) : undefined}
+                role={clicavel ? 'button' : undefined}
+                tabIndex={clicavel ? 0 : undefined}
+                onKeyDown={clicavel ? (e) => {
+                  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onStageClick!(i); }
+                } : undefined}
+                title={clicavel ? `Ver os leads de ${step.label.toLowerCase()}` : undefined}
+                className={cn('group relative h-[68px]', clicavel && 'cursor-pointer focus:outline-none focus-visible:ring-1 focus-visible:ring-[#6cff2f]')}
+                style={{ filter: `drop-shadow(0 0 12px ${cor}55)` }}
+              >
                 <div
                   className={cn('absolute inset-0 transition-[filter] duration-200', clicavel && 'group-hover:brightness-125')}
-                  style={{
-                    clipPath: clip,
-                    background: `linear-gradient(180deg, ${cor}, ${cor}bf)`,
-                    boxShadow: `0 0 18px ${cor}55`,
-                  }}
+                  style={{ clipPath: clip, background: `linear-gradient(180deg, ${cor} 0%, ${cor}cc 100%)` }}
                 />
                 <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center leading-none">
-                  <span className="font-heading text-xl text-white" style={{ textShadow: '0 1px 3px rgba(0,0,0,0.7)' }}>
-                    {Math.round(step.actual).toLocaleString('pt-BR')}
+                  <span className="font-heading text-[28px] text-white" style={{ textShadow: '0 1px 3px rgba(0,0,0,0.55)' }}>
+                    {Math.round(valores[i]).toLocaleString('pt-BR')}
                   </span>
-                  <span className="mt-0.5 text-[10px] font-black uppercase tracking-[0.06em] text-white/90" style={{ textShadow: '0 1px 2px rgba(0,0,0,0.7)' }}>
+                  <span className="mt-1 text-xs font-black uppercase tracking-[0.06em] text-white/95" style={{ textShadow: '0 1px 2px rgba(0,0,0,0.6)' }}>
                     {step.label}
                   </span>
                 </div>
               </div>
+            );
+          })}
+        </div>
 
-              {/* Conversão do degrau + meta + quebra */}
-              <div className="min-w-0">
-                {actualPct !== null ? (
-                  <p className="whitespace-nowrap text-xs">
-                    <span className={cn(T.miniValor, isBottleneck ? 'text-red-400' : 'text-[#6cff2f]')} title="Conversão do degrau anterior para este">
-                      {actualPct.toFixed(1).replace('.', ',')}%
-                    </span>
-                    {plannedPct !== null && plannedPct > 0 && (
-                      <span className={cn('ml-1.5', T.nota)} title={`Conversão planejada para este degrau${step.planned > 0 ? ` — meta de ${Math.round(step.planned).toLocaleString('pt-BR')} no período` : ''}`}>
-                        meta {plannedPct.toFixed(0)}%{step.planned > 0 && <> · {Math.round(step.planned).toLocaleString('pt-BR')}</>}
-                      </span>
-                    )}
-                    {isBottleneck && <span className="ml-1 text-[11px] font-black text-red-400" title="Gargalo: abaixo de 85% da conversão planejada">⚠ gargalo</span>}
-                  </p>
-                ) : (
-                  <p className={T.miniRotulo}>topo do funil</p>
-                )}
-                {step.detalhes && step.detalhes.length > 0 && (
-                  <div className="mt-1 flex flex-wrap gap-1">
-                    {step.detalhes.map((d) => (
-                      <span
-                        key={d.texto}
-                        className={cn(
-                          'rounded px-1 py-px text-[9px] font-bold leading-tight',
-                          d.tom === 'bom' ? 'bg-[#6cff2f]/12 text-[#6cff2f]'
-                            : d.tom === 'ruim' ? 'bg-red-400/12 text-red-400'
-                            : 'bg-white/[0.06] text-[#9aa4aa]',
-                        )}
-                      >
-                        {d.texto}
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-            {/* Semi-degraus (linhas cinza da planilha): faixa estreita e neutra entre
-                as duas faixas coloridas, com a fatia do degrau de cima à direita. */}
-            {semis.map(sd => {
-              const fatia = step.actual > 0 ? (sd.valor / step.actual) * 100 : 0;
-              const larg = Math.max(PISO * 0.9, Math.min(cima, baixo));
+        {/* Passagens entre degraus: % de conversão, queda e chips */}
+        {n > 1 && (
+          <div className="relative flex flex-col rounded-xl border border-white/[0.07] bg-white/[0.015]">
+            {steps.slice(1).map((step, k) => {
+              const i = k + 1;
+              const prev = steps[k];
+              const pct = valores[k] > 0 ? (valores[i] / valores[k]) * 100 : 0;
+              const plannedPct = !filtro && prev.planned > 0 ? (step.planned / prev.planned) * 100 : null;
+              const gargalo = plannedPct !== null && plannedPct > 0 && pct < plannedPct * 0.85;
+              const queda = pct - 100;
+              const cor = step.color || FUNNEL_STEP_COLORS[i % FUNNEL_STEP_COLORS.length];
+              const chips = chipsDa(k);
               return (
-                <div key={sd.rotulo} className="grid grid-cols-[1fr_150px] items-center gap-3 sm:grid-cols-[1fr_190px]">
-                  <div className="relative h-[26px]">
-                    <div className="absolute inset-y-0 rounded-sm bg-white/[0.05] ring-1 ring-inset ring-white/[0.08]" style={{ left: `${50 - larg / 2}%`, width: `${larg}%` }} />
-                    <div className="pointer-events-none absolute inset-0 flex items-center justify-center gap-2 leading-none">
-                      <span className={cn('font-heading text-sm', sd.tom === 'ruim' ? 'text-red-300' : sd.tom === 'bom' ? 'text-[#6cff2f]' : 'text-[#c3ccd1]')}>{Math.round(sd.valor).toLocaleString('pt-BR')}</span>
-                      <span className="text-[9px] font-bold uppercase tracking-[0.06em] text-[#9aa4aa]">{sd.rotulo}</span>
-                    </div>
+                <div key={step.label} className={cn('relative flex flex-1 items-center gap-4 px-4 py-3', k > 0 && 'border-t border-white/[0.06]')}>
+                  {/* Linha vertical que liga os pontos (a linha do tempo do mock) */}
+                  <span className={cn('absolute left-[27px] w-px bg-white/[0.1]', k === 0 ? 'top-1/2 bottom-0' : k === n - 2 ? 'top-0 bottom-1/2' : 'inset-y-0')} />
+                  <span className="relative z-[1] h-3.5 w-3.5 shrink-0 rounded-full" style={{ background: cor, boxShadow: `0 0 10px ${cor}` }} />
+                  <div className="min-w-0 flex-1">
+                    <p className="flex flex-wrap items-baseline gap-x-2">
+                      <span className={cn('font-heading text-2xl leading-none tabular-nums', gargalo ? 'text-red-400' : 'text-[#6cff2f]')} title="Conversão do degrau anterior para este">
+                        {valores[k] > 0 ? `${pct.toFixed(1).replace('.', ',')}%` : '—'}
+                      </span>
+                      {plannedPct !== null && plannedPct > 0 && (
+                        <span className={T.nota} title="Conversão planejada para este degrau">meta {plannedPct.toFixed(0)}%</span>
+                      )}
+                      {gargalo && <span className="text-[11px] font-black text-red-400" title="Abaixo de 85% da conversão planejada">⚠ gargalo</span>}
+                    </p>
+                    <p className="mt-1 text-sm text-[#c7d0d5]">de {prev.label.toLowerCase()} para {step.label.toLowerCase()}</p>
+                    {chips.length > 0 && (
+                      <div className="mt-1.5 flex flex-wrap gap-1">
+                        {chips.map(d => (
+                          <span
+                            key={d.texto}
+                            className={cn(
+                              'rounded px-1.5 py-px text-[10px] font-bold leading-tight',
+                              d.tom === 'bom' ? 'bg-[#6cff2f]/12 text-[#6cff2f]'
+                                : d.tom === 'ruim' ? 'bg-red-400/12 text-red-400'
+                                : 'bg-white/[0.06] text-[#9aa4aa]',
+                            )}
+                          >
+                            {d.texto}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                  <p className="whitespace-nowrap text-[11px] text-[#9aa4aa]" title={`${sd.rotulo}: ${Math.round(sd.valor)} de ${Math.round(step.actual)} (${step.label.toLowerCase()})`}>
-                    {step.actual > 0 ? <span className={cn('font-bold', sd.tom === 'ruim' ? 'text-red-300' : sd.tom === 'bom' ? 'text-[#6cff2f]' : 'text-[#c3ccd1]')}>{fatia.toFixed(0)}%</span> : '—'}
-                    <span className="ml-1">de {step.label.toLowerCase()}</span>
-                  </p>
+                  {valores[k] > 0 && (
+                    <span
+                      className={cn('shrink-0 rounded-lg px-3 py-1.5 text-sm font-bold tabular-nums', queda < 0 ? 'bg-red-500/[0.14] text-red-400' : 'bg-white/[0.06] text-[#dce4e8]')}
+                      title="Quanto caiu (ou subiu) em relação ao degrau anterior"
+                    >
+                      {queda > 0 ? '+' : ''}{queda.toFixed(1).replace('.', ',')}%
+                    </span>
+                  )}
                 </div>
               );
             })}
-            </Fragment>
-          );
-        })}
+          </div>
+        )}
       </div>
     </PremiumPanel>
   );
@@ -4508,11 +4534,35 @@ type LinhaCanal = {
   leads: string; cpl: string; cplNum: number; status: StatusCpl;
 };
 
+/** Cartão de status do CPL (mock): ícone em círculo + rótulo + explicação. */
+const STATUS_CPL_CARTAO: Record<StatusCpl, { icone: React.ElementType; rotulo: string; sub: string; cor: string }> = {
+  na_meta: { icone: CircleCheck, rotulo: 'Bom', sub: 'Abaixo da meta', cor: '#6cff2f' },
+  atencao: { icone: CircleAlert, rotulo: 'Atenção', sub: 'Perto da meta', cor: '#f5b83d' },
+  acima: { icone: CircleArrowUp, rotulo: 'Acima', sub: 'Acima da meta', cor: '#ff5a5a' },
+  sem_meta: { icone: CircleMinus, rotulo: 'Sem meta', sub: 'Cadastre no planejamento', cor: '#a7b0b6' },
+  sem_lead: { icone: CircleArrowUp, rotulo: 'Sem lead', sub: 'Gastou 2× a meta', cor: '#ff5a5a' },
+  sem_lead_baixo: { icone: CircleMinus, rotulo: 'Sem lead', sub: 'Pouco gasto ainda', cor: '#a7b0b6' },
+  sem_dado: { icone: CircleMinus, rotulo: '—', sub: 'Sem investimento', cor: '#7c868c' },
+};
+
+function CartaoStatusCpl({ status, titulo }: { status: StatusCpl; titulo?: string }) {
+  const c = STATUS_CPL_CARTAO[status];
+  const Icone = c.icone;
+  return (
+    <span className="inline-flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left" style={{ background: `${c.cor}14`, boxShadow: `inset 0 0 0 1px ${c.cor}2e` }} title={titulo}>
+      <Icone className="h-7 w-7 shrink-0" style={{ color: c.cor }} />
+      <span className="min-w-0 leading-tight">
+        <span className="block text-sm font-bold" style={{ color: c.cor === '#a7b0b6' || c.cor === '#7c868c' ? '#dce4e8' : c.cor }}>{c.rotulo}</span>
+        <span className="block truncate text-[11px] text-[#a7b0b6]">{c.sub}</span>
+      </span>
+    </span>
+  );
+}
+
 /**
- * Resumo por Canal — TRANSPOSTO: métricas nas linhas, canais (+ Total) nas
- * colunas. Fica ao lado do funil, que é alto e estreito; com canais nas linhas
- * eram 2 linhas e um vazio enorme embaixo. Assim o card cabe na mesma coluna
- * estreita, tem a mesma altura do funil e ganhou impressões, cliques, CTR e CPC.
+ * Resumo por Canal (mock de 24/09) — TRANSPOSTO: métricas nas linhas, canais (+ Total)
+ * nas colunas; cabeçalho em faixa, rótulos em caixa normal, CPL colorido pelo status e
+ * a última linha com cartões de status do CPL contra a meta do planejamento.
  */
 function ChannelSummaryTable({ rows, total, metaCpl }: {
   rows: LinhaCanal[];
@@ -4522,58 +4572,55 @@ function ChannelSummaryTable({ rows, total, metaCpl }: {
   // ⚠️ A linha "Conversão" saiu: dividia leads do Meta pelo ALCANCE e
   // conversões do Google pelos CLIQUES — duas taxas sem relação lado a lado.
   const colunas = [...rows, total];
-  const metricas: Array<{ rotulo: string; valor: (l: LinhaCanal) => ReactNode; destaque?: boolean }> = [
-    { rotulo: 'Investimento', valor: l => l.investment, destaque: true },
+  const metricas: Array<{ rotulo: string; valor: (l: LinhaCanal) => ReactNode }> = [
+    { rotulo: 'Investimento', valor: l => l.investment },
     { rotulo: 'Impressões', valor: l => l.impressions },
     { rotulo: 'Cliques', valor: l => l.clicks },
     { rotulo: 'CTR', valor: l => l.ctr },
     { rotulo: 'CPC', valor: l => l.cpc },
-    // CPM logo acima de Leads (pedido do Matheus, 2026-09-24 — veio da tabela
-    // "Resumo de Tráfego", que saiu): CPL subindo com CPM estável é criativo;
-    // com CPM subindo é leilão.
+    // CPM logo acima de Leads (pedido do Matheus, 2026-09-24): CPL subindo com CPM
+    // estável é criativo; com CPM subindo é leilão.
     { rotulo: 'CPM', valor: l => l.cpm },
-    { rotulo: 'Leads', valor: l => l.leads, destaque: true },
+    { rotulo: 'Leads', valor: l => l.leads },
     { rotulo: 'CPL', valor: l => <span className={cn('font-bold', TEXTO_STATUS_CPL[l.status])}>{l.cpl}</span> },
   ];
   return (
-    <Superficie
-      titulo="Resumo por Canal"
-      direita={(
-        <span title="Status compara o CPL de cada canal com a meta de CPL do planejamento: até a meta = Na meta; até 1,5× = Atenção; acima = Acima.">
-          <Info className="h-3.5 w-3.5 text-[#a7b0b6]" />
-        </span>
-      )}
-    >
-      <div className="overflow-x-auto">
-        <table className={cn('w-full min-w-[380px] text-left tabular-nums', T.tabelaCel)}>
-          <thead className={T.tabelaCab}>
-            <tr>
-              <th className="py-2 pr-2">Métrica</th>
+    <PremiumPanel className="flex flex-col p-5">
+      <div className="mb-5 flex items-center gap-3">
+        <BarChart3 className="h-6 w-6 shrink-0 text-[#6cff2f]" />
+        <h3 className="text-xl font-bold text-[#f4f7f8]">Resumo por canal</h3>
+      </div>
+      <div className="flex-1 overflow-x-auto">
+        <table className="w-full min-w-[440px] text-left text-sm tabular-nums">
+          <thead>
+            <tr className="bg-white/[0.04] text-[11px] font-black uppercase tracking-[0.08em] text-[#a7b0b6]">
+              <th className="rounded-l-lg py-2.5 pl-4 pr-2">Métrica</th>
               {colunas.map((c, i) => (
-                <th key={c.channel} className={cn('py-2 pl-3 text-right', i === colunas.length - 1 && 'text-[#dce4e8]')}>
+                <th key={c.channel} className={cn('py-2.5 pl-3 pr-4 text-right', i === colunas.length - 1 && 'rounded-r-lg')}>
                   <span className="inline-flex items-center justify-end gap-1.5">{c.logo}{c.channel}</span>
                 </th>
               ))}
             </tr>
           </thead>
-          <tbody className="divide-y divide-white/[0.07]">
+          <tbody className="divide-y divide-white/[0.06]">
             {metricas.map(m => (
-              <tr key={m.rotulo} className="text-[#f4f7f8]">
-                <td className={cn('py-2.5 pr-2', T.miniRotulo)}>{m.rotulo}</td>
-                {colunas.map((c, i) => (
-                  <td key={c.channel} className={cn('whitespace-nowrap py-2.5 pl-3 text-right', m.destaque && 'font-bold', i === colunas.length - 1 && 'bg-white/[0.02]')}>
-                    {m.valor(c)}
-                  </td>
+              <tr key={m.rotulo}>
+                <td className="py-2.5 pl-4 pr-2 font-semibold text-[#dce4e8]">{m.rotulo}</td>
+                {colunas.map(c => (
+                  <td key={c.channel} className="whitespace-nowrap py-2.5 pl-3 pr-4 text-right text-[#f4f7f8]">{m.valor(c)}</td>
                 ))}
               </tr>
             ))}
             <tr>
-              <td className={cn('py-2.5 pr-2', T.miniRotulo)}>vs meta de CPL{metaCpl > 0 ? <span className="block normal-case tracking-normal text-[#7c868c]">{premiumValue(metaCpl, 'currency')}</span> : null}</td>
-              {colunas.map((c, i) => (
-                <td key={c.channel} className={cn('py-2.5 pl-3 text-right', i === colunas.length - 1 && 'bg-white/[0.02]')}>
-                  <StatusCplPill
+              <td className="py-3 pl-4 pr-2 font-semibold text-[#dce4e8]">
+                Status CPL
+                {metaCpl > 0 && <span className="block text-[11px] font-normal text-[#7c868c]">meta {premiumValue(metaCpl, 'currency')}</span>}
+              </td>
+              {colunas.map(c => (
+                <td key={c.channel} className="py-3 pl-3 pr-2">
+                  <CartaoStatusCpl
                     status={c.status}
-                    titulo={metaCpl > 0 && c.cplNum > 0 ? `${(c.cplNum / metaCpl).toFixed(2).replace('.', ',')}× a meta` : undefined}
+                    titulo={metaCpl > 0 && c.cplNum > 0 ? `${(c.cplNum / metaCpl).toFixed(2).replace('.', ',')}× a meta de CPL` : undefined}
                   />
                 </td>
               ))}
@@ -4581,7 +4628,7 @@ function ChannelSummaryTable({ rows, total, metaCpl }: {
           </tbody>
         </table>
       </div>
-    </Superficie>
+    </PremiumPanel>
   );
 }
 
@@ -6598,6 +6645,19 @@ export default function GeneralDashboard() {
   const funnelSemiDegraus: SemiDegrau[] = deliverySoloId ? [] : usaStageFunil
     ? semiDegrausSemantico({ contato: ultimoIdx('contato'), qualificado: ultimoIdx('qualificado'), agendamento: ultimoIdx('agendamento'), comparecimento: ultimoIdx('comparecimento') })
     : semiDegrausSemantico({ contato: 0, qualificado: 1, agendamento: 2, comparecimento: 3 });
+  // Funil de cada canal alinhado aos degraus exibidos (seletor do mock). Cada
+  // degrau vira sua etapa semântica — no funil do Kanban há UM degrau por etapa,
+  // então a correspondência é 1:1; no semântico, o índice é a etapa.
+  const ETAPA_SEMANTICA: EtapaFunil[] = ['contato', 'qualificado', 'agendamento', 'comparecimento', 'fechamento'];
+  const etapasDosDegraus: EtapaFunil[] = usaStageFunil
+    ? stageFunilSolo!.degraus.map(d => d.etapa)
+    : funnelStepsNew.map((_, i) => ETAPA_SEMANTICA[i] ?? 'fechamento');
+  const valorDaEtapa = (l: LinhaFunilCanal, e: EtapaFunil): number =>
+    e === 'contato' ? l.leads : e === 'qualificado' ? l.engajados : e === 'agendamento' ? l.agendamentos
+      : e === 'comparecimento' ? l.comparecimentos : e === 'fechamento' ? l.fechamentos : 0;
+  const funilPorCanal: FunilDoCanal[] = (funilCanal?.canais ?? [])
+    .filter(l => !l.semCanal && l.leads > 0)
+    .map(l => ({ canal: l.canal, valores: etapasDosDegraus.map(e => valorDaEtapa(l, e)) }));
   // Conversão geral do funil real = fechamento (último degrau) sobre o topo dele.
   const funnelTaxaFinal = usaStageFunil && stageFunilSolo!.degraus.length > 1
     ? (stageFunilSolo!.degraus[stageFunilSolo!.degraus.length - 1].alcancaram
@@ -7413,6 +7473,16 @@ export default function GeneralDashboard() {
                         ) : undefined}
                       />
                     </div>
+                    {/* Funil + Resumo por canal logo abaixo das metas e ACIMA dos cards de
+                        Ticket médio / Agendamento / ROAS / Conversão (pedido do Matheus, 24/09). */}
+                    <div className="grid gap-4 xl:grid-cols-[1.08fr_0.92fr]">
+                      {deliverySoloId ? (
+                        <DeliveryResumoCard clientId={deliverySoloId} from={deliveryRange.from} to={deliveryRange.to} />
+                      ) : (
+                        <SimpleFunnel steps={funnelStepsNew} totalRate={funnelTaxaFinal > 0 ? premiumValue(funnelTaxaFinal, 'percent') : '—'} fonteLabel={usaStageFunil ? 'fonte: CRM' : fonteTopoLabel} onStageClick={setFunilStageIdx} todosClicaveis={usaStageFunil} semiDegraus={funnelSemiDegraus} porCanal={funilPorCanal} />
+                      )}
+                      <ChannelSummaryTable rows={channelRows} total={channelTotal} metaCpl={cplMetaSel} />
+                    </div>
                     <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4">
                       {quickMetrics.map((metric) => <QuickMetricCard key={metric.title} {...metric} comparacao={rotuloComp} />)}
                     </div>
@@ -7434,14 +7504,6 @@ export default function GeneralDashboard() {
                       </div>
                     )}
                     {blocoAlertas}
-                    <div className="grid gap-4 xl:grid-cols-[1.08fr_0.92fr]">
-                      {deliverySoloId ? (
-                        <DeliveryResumoCard clientId={deliverySoloId} from={deliveryRange.from} to={deliveryRange.to} />
-                      ) : (
-                        <SimpleFunnel steps={funnelStepsNew} totalRate={funnelTaxaFinal > 0 ? premiumValue(funnelTaxaFinal, 'percent') : '—'} fonteLabel={usaStageFunil ? 'fonte: CRM' : fonteTopoLabel} onStageClick={setFunilStageIdx} todosClicaveis={usaStageFunil} semiDegraus={funnelSemiDegraus} />
-                      )}
-                      <ChannelSummaryTable rows={channelRows} total={channelTotal} metaCpl={cplMetaSel} />
-                    </div>
                     {/* Só para cliente com integração de leads via SULTS (pedido do
                         Matheus, 2026-09-24) — é onde origem e região chegam completas.
                         Com vários selecionados, TODOS precisam ter SULTS, senão a soma
