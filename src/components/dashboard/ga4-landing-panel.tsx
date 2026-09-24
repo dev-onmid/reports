@@ -30,7 +30,7 @@
 import { useMemo, useState, type ElementType, type ReactNode } from 'react';
 import {
   ArrowDown, ArrowUp, BarChart3, ChevronDown, ChevronRight, ChevronsUpDown, Clock, FileText, Info, MessageCircle, MessageSquare,
-  MousePointerClick, Percent, Phone, Search, UserPlus, Users, Activity,
+  MousePointerClick, Percent, Phone, Search, UserPlus, Users, Activity, Ban, Smartphone, MapPin, User,
 } from 'lucide-react';
 import type { Ga4Celula, Ga4Consolidado, Ga4Linha, Ga4Seg, Ga4Totais } from '@/lib/ga4-landing';
 import { EvolucaoDiaria, type Granularidade } from './ga4-landing-graficos';
@@ -185,24 +185,24 @@ function Empilhada({ linhas }: { linhas: Ga4Seg[] }) {
   const fatias = linhas.filter(s => s.sessoes > 0).sort((a, b) => b.sessoes - a.sessoes);
   const cor = (i: number) => PALETA[Math.min(i, PALETA.length - 1)];
   return (
-    <div className="flex flex-col items-center gap-4 sm:flex-row">
+    <div className="flex flex-col items-center gap-5 sm:flex-row">
       <Donut
-        tamanho={130}
-        espessura={22}
+        tamanho={148}
+        espessura={26}
         fatias={fatias.map((s, i) => ({ label: s.valor, valor: s.sessoes, cor: cor(i) }))}
         centroTitulo="sessões"
         centroValor={fmtN(total)}
         formatar={(n) => `${fmtN(n)} sessões`}
       />
-      <div className="grid w-full min-w-0 gap-2.5">
+      <div className="grid w-full min-w-0 gap-3">
         {fatias.map((s, i) => (
-          <div key={s.valor} className="min-w-0">
-            <p className={cx('flex items-center gap-1.5 truncate', T.listaRotulo)}>
-              <span className="h-2 w-2 shrink-0 rounded-sm" style={{ background: cor(i) }} />
-              {s.valor}
-              <span className={cx('ml-auto tabular-nums', T.miniValor)}>{fmtPct(s.sessoes / total, 0)}</span>
-            </p>
-            <p className="mt-0.5 text-[11px] text-[#7c868c]">{fmtN(s.sessoes)} sessões · converte <b className="text-[#c7d0d5]">{fmtPct(div(s.sessoesConv, s.sessoes))}</b></p>
+          <div key={s.valor} className="flex min-w-0 items-center gap-3">
+            <span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ background: cor(i) }} />
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-semibold text-[#f4f7f8]">{s.valor}</p>
+              <p className="mt-0.5 text-[11px] text-[#a7b0b6]">{fmtN(s.sessoes)} sessões · converte <b className="text-[#dce4e8]">{fmtPct(div(s.sessoesConv, s.sessoes))}</b></p>
+            </div>
+            <span className="shrink-0 font-heading text-[22px] leading-none text-[#f4f7f8] tabular-nums">{fmtPct(s.sessoes / total, 0)}</span>
           </div>
         ))}
       </div>
@@ -312,41 +312,59 @@ function Campanhas({ ads, utm, semCusto }: { ads: Ga4Seg[]; utm: Ga4Seg[]; semCu
   );
 }
 
-/** Palavras-chave: as que trouxeram contato x as que só gastam (candidatas a negativar). Termos pesquisados recolhidos. */
+/** Palavras-chave (mock): as que trouxeram contato x as que só gastam (candidatas a negativar), em listas ranqueadas; termos pesquisados recolhidos. */
 function PalavrasChave({ palavras, termos }: { palavras: Ga4Seg[]; termos: Ga4Seg[] }) {
   const [abrirTermos, setAbrirTermos] = useState(false);
   const cont = contador(palavras);
   const boas = palavras.filter(s => cont(s) > 0).sort((a, b) => cont(b) - cont(a) || b.sessoes - a.sessoes);
   const ruins = palavras.filter(s => cont(s) === 0 && s.sessoes >= 10).sort((a, b) => b.sessoes - a.sessoes);
+  const sessoesRuins = ruins.reduce((t, s) => t + s.sessoes, 0);
   const contT = contador(termos);
   const termosOrd = [...termos].sort((a, b) => contT(b) - contT(a) || b.sessoes - a.sessoes);
   if (boas.length + ruins.length + termos.length === 0) return null;
+
+  const detalhe = (s: Ga4Seg) => (
+    <span className="flex flex-wrap gap-x-4 gap-y-1">
+      <span>sessões <b className="text-[#f4f7f8]">{fmtN(s.sessoes)}</b></span>
+      <span>engajamento <b className="text-[#f4f7f8]">{fmtPct(div(s.engajadas, s.sessoes))}</b></span>
+      <span>tempo médio <b className="text-[#f4f7f8]">{fmtTempo(div(s.tempo, s.sessoes))}</b></span>
+      <span>WhatsApp <b className="text-[#f4f7f8]">{fmtN(s.whatsapp)}</b></span>
+      <span>formulário <b className="text-[#f4f7f8]">{fmtN(s.formulario)}</b></span>
+      <span>telefone <b className="text-[#f4f7f8]">{fmtN(s.telefone)}</b></span>
+    </span>
+  );
 
   return (
     <>
       {boas.length + ruins.length > 0 && (
         <div className="grid gap-4 md:grid-cols-2">
           <Card>
-            <Titulo dica="Palavras-chave com mais contatos. Taxa = contatos ÷ sessões.">
-              <span className="text-[#6cff2f]">●</span> Palavras que trouxeram contato
-            </Titulo>
+            <CabecalhoIcone
+              icone={Search} redondo
+              titulo="Palavras que trouxeram contato"
+              sub="Palavras-chave com mais contatos. Taxa = contatos ÷ sessões."
+              direita={boas.length > 0 ? <SeloContagem n={boas.length} cor={VERDE} texto="palavras geraram contato neste período" /> : undefined}
+            />
             {boas.length > 0 ? (
-              <ListaBarras itens={boas.map(s => ({
-                chave: s.valor, rotulo: s.valor, valor: cont(s),
-                direita: <><span className="font-bold text-[#f4f7f8]">{fmtN(cont(s))}</span><span className="ml-1 text-[11px] text-[#7c868c]">contato(s)</span></>,
-                extra: <>{fmtN(s.sessoes)} sessões · taxa <b className="text-[#c7d0d5]">{fmtPct(div(cont(s), s.sessoes))}</b></>,
+              <ListaRanking itens={boas.map(s => ({
+                chave: s.valor, rotulo: s.valor, valor: cont(s), numero: fmtN(cont(s)), unidade: cont(s) === 1 ? 'contato' : 'contatos',
+                sub: <>{fmtN(s.sessoes)} sessões · taxa <b className="text-[#dce4e8]">{fmtPct(div(cont(s), s.sessoes))}</b></>,
+                detalhe: detalhe(s),
               }))} />
             ) : <p className="text-xs text-[#7c868c]">Nenhuma palavra-chave trouxe contato no período.</p>}
           </Card>
           <Card>
-            <Titulo dica="10+ sessões pagas e zero contato — revisar, pausar ou negativar.">
-              <span className="text-[#ff5a5a]">●</span> Palavras que gastam sem contato
-            </Titulo>
+            <CabecalhoIcone
+              icone={Ban} cor={VERMELHO} redondo
+              titulo="Palavras que gastam sem contato"
+              sub="10+ sessões pagas e zero contato — revisar, pausar ou negativar."
+              direita={ruins.length > 0 ? <SeloContagem n={sessoesRuins} cor={VERMELHO} texto="sessões sem contato" /> : undefined}
+            />
             {ruins.length > 0 ? (
-              <ListaBarras cor={VERMELHO} itens={ruins.map(s => ({
-                chave: s.valor, rotulo: s.valor, valor: s.sessoes,
-                direita: <><span className="font-bold text-[#f4f7f8]">{fmtN(s.sessoes)}</span><span className="ml-1 text-[11px] text-[#7c868c]">sessões</span></>,
-                extra: <>engajamento {fmtPct(div(s.engajadas, s.sessoes))} · tempo médio {fmtTempo(div(s.tempo, s.sessoes))}</>,
+              <ListaRanking cor={VERMELHO} itens={ruins.map(s => ({
+                chave: s.valor, rotulo: s.valor, valor: s.sessoes, numero: fmtN(s.sessoes), unidade: 'sessões',
+                sub: <>engajamento {fmtPct(div(s.engajadas, s.sessoes))} · tempo médio {fmtTempo(div(s.tempo, s.sessoes))}</>,
+                detalhe: detalhe(s),
               }))} />
             ) : <p className="text-xs text-[#7c868c]">Nenhuma palavra com 10+ sessões sem contato.</p>}
           </Card>
@@ -354,14 +372,24 @@ function PalavrasChave({ palavras, termos }: { palavras: Ga4Seg[]; termos: Ga4Se
       )}
       {termosOrd.length > 0 && (
         <section className={SUPERFICIE}>
-          <button type="button" onClick={() => setAbrirTermos(v => !v)}
-            className="flex w-full items-center justify-between gap-2 px-5 py-4 text-left">
-            <span className={T.cardTitulo}>Termos pesquisados <span className={cx('ml-1 normal-case tracking-normal', T.cardSub)}>({fmtN(termosOrd.length)})</span></span>
-            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-[#9aa4aa] hover:text-[#6cff2f]">
-              {abrirTermos ? 'Recolher' : 'Ver termos'}
-              <ChevronDown className={cx('h-4 w-4 transition-transform', abrirTermos && 'rotate-180')} />
-            </span>
-          </button>
+          <div className="px-5 py-4">
+            <CabecalhoIcone
+              className="mb-0"
+              icone={FileText}
+              titulo={<>Termos pesquisados <span className={cx('ml-1 normal-case tracking-normal', T.cardSub)}>({fmtN(termosOrd.length)})</span></>}
+              sub="Veja todos os termos que seus visitantes pesquisaram no site."
+              direita={(
+                <button
+                  type="button"
+                  onClick={() => setAbrirTermos(v => !v)}
+                  className="inline-flex h-10 items-center gap-2 rounded-lg border border-white/[0.1] bg-white/[0.03] px-4 text-xs font-semibold text-[#dce4e8] transition-colors hover:bg-white/[0.06]"
+                >
+                  {abrirTermos ? 'Recolher' : 'Ver termos'}
+                  <ChevronDown className={cx('h-4 w-4 transition-transform', abrirTermos && 'rotate-180')} />
+                </button>
+              )}
+            />
+          </div>
           {abrirTermos && (
             <div className="border-t border-white/[0.06] px-5 pb-5 pt-3">
               <p className="mb-2 text-[11px] text-[#7c868c]">O que a pessoa digitou no Google. O Google esconde termos de pouco volume e da Performance Max — a soma fica abaixo do total.</p>
@@ -528,14 +556,123 @@ function BlocoContagem({ titulo, dica, linhas, total, rotulo }: { titulo: string
 // campanha / página". Só apresentação — mesmos dados de antes.
 
 /** Ícone numa caixa verde à esquerda do rótulo (mock). */
-function CaixaIcone({ icone: Icon, grande = false }: { icone: ElementType; grande?: boolean }) {
+function CaixaIcone({ icone: Icon, grande = false, cor = VERDE, redondo = false, tam }: {
+  icone: ElementType; grande?: boolean; cor?: string; redondo?: boolean; /** lado em px (padrão 32; `grande` = 36) */ tam?: number;
+}) {
+  const lado = tam ?? (grande ? 36 : 32);
+  const icone = Math.round(lado * 0.5);
   return (
     <span
-      className={cx('inline-flex shrink-0 items-center justify-center rounded-lg', grande ? 'h-9 w-9' : 'h-8 w-8')}
-      style={{ background: `${VERDE}22`, color: VERDE, boxShadow: `inset 0 0 0 1px ${VERDE}33` }}
+      className={cx('inline-flex shrink-0 items-center justify-center', redondo ? 'rounded-full' : 'rounded-lg')}
+      style={{ width: lado, height: lado, background: `${cor}22`, color: cor, boxShadow: `inset 0 0 0 1px ${cor}33` }}
     >
-      <Icon className={grande ? 'h-[18px] w-[18px]' : 'h-4 w-4'} />
+      <Icon style={{ width: icone, height: icone }} />
     </span>
+  );
+}
+
+/** Cabeçalho de card do mock: caixa de ícone + título/sub + slot à direita (selo, botão). */
+function CabecalhoIcone({ icone, cor = VERDE, redondo = false, titulo, sub, direita, className }: {
+  icone: ElementType; cor?: string; redondo?: boolean; titulo: ReactNode; sub?: ReactNode; direita?: ReactNode; className?: string;
+}) {
+  return (
+    <div className={cx('flex flex-wrap items-center justify-between gap-x-4 gap-y-3 md:flex-nowrap', className ?? 'mb-4')}>
+      <div className="flex min-w-0 flex-1 items-center gap-3">
+        <CaixaIcone icone={icone} cor={cor} redondo={redondo} tam={44} />
+        <div className="min-w-0">
+          <h4 className={T.cardTitulo}>{titulo}</h4>
+          {sub && <p className={cx('mt-0.5', T.cardSub)}>{sub}</p>}
+        </div>
+      </div>
+      {direita && <div className="flex shrink-0 items-center gap-2">{direita}</div>}
+    </div>
+  );
+}
+
+/** Selo de contagem do mock: número grande colorido + explicação em duas linhas. */
+function SeloContagem({ n, cor, texto }: { n: number; cor: string; texto: string }) {
+  return (
+    <div className="flex items-center gap-2.5">
+      <span
+        className="inline-flex h-10 min-w-10 items-center justify-center rounded-lg px-2 font-heading text-[22px] leading-none tabular-nums"
+        style={{ background: `${cor}1f`, color: cor, boxShadow: `inset 0 0 0 1px ${cor}33` }}
+      >
+        {fmtN(n)}
+      </span>
+      <span className="max-w-[150px] text-[11px] leading-snug text-[#a7b0b6]">{texto}</span>
+    </div>
+  );
+}
+
+function BarraFina({ pct, cor }: { pct: number; cor: string }) {
+  return (
+    <div className="h-2 w-full rounded-full bg-white/[0.06]">
+      <div className="h-2 rounded-full" style={{ width: `${Math.max(2, Math.min(100, pct * 100))}%`, background: cor }} />
+    </div>
+  );
+}
+
+type ItemRanking = {
+  chave: string; rotulo: string; sub?: ReactNode; valor: number; numero: string; unidade: string;
+  /** conteúdo que abre ao clicar na linha (o chevron do mock precisa de um destino) */
+  detalhe?: ReactNode;
+};
+
+/**
+ * Lista ranqueada do mock: caixa com a posição, rótulo + sub, barra proporcional ao
+ * maior, número + unidade e chevron. `barraEmbaixo` (Cidades): número na linha do
+ * rótulo, barra e sub embaixo. Mostra `limite` itens e "Ver mais (N)".
+ */
+function ListaRanking({ itens, cor = VERDE, limite = 5, barraEmbaixo = false }: {
+  itens: ItemRanking[]; cor?: string; limite?: number; barraEmbaixo?: boolean;
+}) {
+  const { visiveis, botao } = useVerMais(itens, limite);
+  const [aberto, setAberto] = useState<string | null>(null);
+  if (itens.length === 0) return null;
+  const max = Math.max(1, ...itens.map(i => i.valor));
+  return (
+    <>
+      <ul className="space-y-2">
+        {visiveis.map((i, idx) => {
+          const abriu = aberto === i.chave;
+          const clicavel = !!i.detalhe;
+          const Tag = clicavel ? 'button' : 'div';
+          return (
+            <li key={i.chave} className={cx('rounded-xl border bg-white/[0.02] transition-colors', abriu ? 'border-white/[0.14] bg-white/[0.05]' : 'border-white/[0.06] hover:border-white/[0.12] hover:bg-white/[0.04]')}>
+              <Tag
+                type={clicavel ? 'button' : undefined}
+                onClick={clicavel ? () => setAberto(v => (v === i.chave ? null : i.chave)) : undefined}
+                className={cx('flex w-full items-center gap-3 px-3 py-2.5 text-left', clicavel && 'cursor-pointer')}
+              >
+                <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-white/[0.1] bg-[#0b1114] text-sm font-bold text-[#f4f7f8] tabular-nums">{idx + 1}</span>
+                {barraEmbaixo ? (
+                  <span className="block min-w-0 flex-1">
+                    <span className="flex items-baseline justify-between gap-3">
+                      <span className="truncate text-sm font-semibold text-[#f4f7f8]" title={i.rotulo}>{i.rotulo}</span>
+                      <span className="shrink-0 whitespace-nowrap"><b className="text-sm font-bold text-[#f4f7f8] tabular-nums">{i.numero}</b> <span className="text-xs text-[#a7b0b6]">{i.unidade}</span></span>
+                    </span>
+                    <span className="mt-1.5 block"><BarraFina pct={i.valor / max} cor={cor} /></span>
+                    {i.sub && <span className="mt-1 block text-[11px] text-[#a7b0b6]">{i.sub}</span>}
+                  </span>
+                ) : (
+                  <>
+                    <span className="block min-w-0 flex-1">
+                      <span className="block truncate text-sm font-semibold text-[#f4f7f8]" title={i.rotulo}>{i.rotulo}</span>
+                      {i.sub && <span className="mt-0.5 block text-[11px] leading-snug text-[#a7b0b6]">{i.sub}</span>}
+                    </span>
+                    <span className="hidden w-[24%] shrink-0 sm:block"><BarraFina pct={i.valor / max} cor={cor} /></span>
+                    <span className="min-w-[84px] shrink-0 whitespace-nowrap text-right"><b className="text-sm font-bold text-[#f4f7f8] tabular-nums">{i.numero}</b> <span className="text-xs text-[#a7b0b6]">{i.unidade}</span></span>
+                    <ChevronRight className={cx('h-4 w-4 shrink-0 transition-transform', clicavel ? 'text-[#a7b0b6]' : 'text-[#4a5459]', abriu && 'rotate-90')} />
+                  </>
+                )}
+              </Tag>
+              {abriu && i.detalhe && <div className="border-t border-white/[0.06] px-3 py-2.5 text-[11px] text-[#c7d0d5]">{i.detalhe}</div>}
+            </li>
+          );
+        })}
+      </ul>
+      {botao}
+    </>
   );
 }
 
@@ -984,33 +1121,42 @@ export function Ga4LandingPanel({ dados, loading, aviso }: { dados: Ga4Consolida
       {/* Audiência */}
       {temAudiencia && (
         <>
-          <GrupoTitulo titulo="Audiência" />
-          {(au.dispositivos.length > 0 || au.novosRecorrentes.length > 0) && (
-            <div className="grid gap-4 md:grid-cols-2">
+          <CabecalhoIcone className="mb-0 mt-1" icone={Users} titulo="Audiência" sub="Entenda quem visita seu site e como eles se comportam." />
+          {(au.dispositivos.length > 0 || au.novosRecorrentes.length > 0 || au.cidades.length > 0) && (
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
               {au.dispositivos.length > 0 && (
                 <Card>
-                  <Titulo dica="Sessões por aparelho e % das sessões que converteram em cada um.">Dispositivo</Titulo>
+                  <CabecalhoIcone icone={Smartphone} titulo="Dispositivo" sub="Sessões por aparelho e % das sessões que converteram em cada um." />
                   <Empilhada linhas={au.dispositivos.map(traduz(DISPOSITIVOS))} />
                 </Card>
               )}
               {au.novosRecorrentes.length > 0 && (
                 <Card>
-                  <Titulo dica="Recorrente convertendo mais = remarketing vale a pena.">Novos × recorrentes</Titulo>
+                  <CabecalhoIcone icone={User} titulo="Novos × recorrentes" sub="Recorrente convertendo mais = remarketing vale a pena." />
                   <Empilhada linhas={au.novosRecorrentes.map(traduz(NOVOS))} />
+                </Card>
+              )}
+              {au.cidades.length > 0 && (
+                <Card>
+                  <CabecalhoIcone icone={MapPin} titulo="Cidades" sub="Cidades com mais sessões." />
+                  <ListaRanking barraEmbaixo limite={3} itens={au.cidades.map(s => {
+                    const c = contador(au.cidades)(s);
+                    return {
+                      chave: `${s.valor}|${s.sub ?? ''}`, rotulo: s.valor || '(sem nome)', valor: s.sessoes, numero: fmtN(s.sessoes), unidade: 'sessões',
+                      sub: <>{fmtN(c)} contato(s) · converteu <b className="text-[#dce4e8]">{fmtPct(div(s.sessoesConv, s.sessoes))}</b></>,
+                    };
+                  })} />
                 </Card>
               )}
             </div>
           )}
-          {au.idades.length + au.generos.length + au.cidades.length > 0 && (
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {au.idades.length + au.generos.length > 0 && (
+            <div className="grid gap-4 md:grid-cols-2">
               {au.idades.length > 0 && (
-                <Card><Titulo>Idade</Titulo><ListaBarras itens={barrasSeg(au.idades)} limite={8} /></Card>
+                <Card><CabecalhoIcone icone={Users} titulo="Idade" /><ListaBarras itens={barrasSeg(au.idades)} limite={8} /></Card>
               )}
               {au.generos.length > 0 && (
-                <Card><Titulo>Gênero</Titulo><Empilhada linhas={au.generos.map(traduz(GENEROS))} /></Card>
-              )}
-              {au.cidades.length > 0 && (
-                <Card><Titulo dica="Cidades com mais sessões.">Cidades</Titulo><ListaBarras itens={barrasSeg(au.cidades)} /></Card>
+                <Card><CabecalhoIcone icone={User} titulo="Gênero" /><Empilhada linhas={au.generos.map(traduz(GENEROS))} /></Card>
               )}
             </div>
           )}
