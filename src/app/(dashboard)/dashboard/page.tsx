@@ -7360,7 +7360,7 @@ export default function GeneralDashboard() {
               </>
             ) : (
               <>
-                {/* Página única — ordem: negócio → mídia paga → landing page → social → comercial. */}
+                {/* Página única — ordem: negócio (metas, KPIs, social, funil) → mídia paga → landing page → comercial. */}
                   <>
                     <div className="grid gap-4 xl:grid-cols-2">
                       <BulletMetaCard
@@ -7424,6 +7424,14 @@ export default function GeneralDashboard() {
                       </div>
                     )}
                     {blocoAlertas}
+                    {/* Social logo ACIMA do Funil de Performance (pedido do Matheus, 24/09):
+                        o orgânico fica colado no bloco de negócio, antes do funil. */}
+                    {secaoVisivel.social && (
+                      <>
+                        <TituloSecao titulo="Social" sub="Instagram orgânico" />
+                        {blocoInstagram}
+                      </>
+                    )}
                     <div className="grid gap-4 xl:grid-cols-[1.08fr_0.92fr]">
                       {deliverySoloId ? (
                         <DeliveryResumoCard clientId={deliverySoloId} from={deliveryRange.from} to={deliveryRange.to} />
@@ -7472,12 +7480,6 @@ export default function GeneralDashboard() {
                       )}
                     />
                     {blocoGa4}
-                  </>
-                )}
-                {secaoVisivel.social && (
-                  <>
-                    <TituloSecao titulo="Social" sub="Instagram orgânico" />
-                    {blocoInstagram}
                   </>
                 )}
                 {secaoVisivel.comercial && (
