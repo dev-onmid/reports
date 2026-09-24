@@ -19,6 +19,7 @@ import {
 import { ChatView } from './chat-view';
 import { LeadChatPanel } from './lead-chat-panel';
 import { PortalLinkModal } from './portal-link-modal';
+import { SeletorModeloFunil } from '@/components/crm/seletor-modelo-funil';
 import { FollowupTab, useActiveFollowups, FollowupBadge } from './followup-tab';
 import Link from 'next/link';
 import { CaptureLinksTab } from '../clientes/[id]/capture-links-tab';
@@ -31,7 +32,7 @@ import { cn, formatCurrencyBRL } from '@/lib/utils';
 import { localDoLead, type RespostaFormulario } from '@/lib/lead-formulario';
 import type { Client } from '@/lib/mock-data';
 import type { AttendanceAudit } from '@/lib/crm-attendance-audit';
-import { classificarEtapa, corDaEtapa, ETAPAS_PADRAO, OPCOES_EDITOR, opcaoDoValor, ROTULOS_ETAPA, valorOpcaoEditor, type EtapaFunil, type SituacaoStage } from '@/lib/funil-etapas';
+import { classificarEtapa, corDaEtapa, OPCOES_EDITOR, opcaoDoValor, ROTULOS_ETAPA, valorOpcaoEditor, type EtapaFunil, type SituacaoStage } from '@/lib/funil-etapas';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 
 type CrmLead = {
@@ -2183,35 +2184,6 @@ function FunnelEditorModal({
   );
 }
 
-type FunilModelo = {
-  id: string;
-  nome: string;
-  descricao: string | null;
-  etapas: { label: string; color: string; etapa_funil: EtapaFunil }[];
-  cliente_origem: string | null;
-  created_at: string;
-};
-
-/** Fileira de chips com as colunas que o funil vai ter — a prévia do modelo. */
-function PreviaEtapas({ etapas }: { etapas: { label: string; etapa_funil: EtapaFunil }[] }) {
-  return (
-    <div className="flex flex-wrap gap-1">
-      {etapas.map((e, i) => {
-        const cor = corDaEtapa(e.etapa_funil, e.label);
-        return (
-          <span
-            key={`${e.label}-${i}`}
-            className="rounded px-1.5 py-0.5 text-[10px] font-semibold leading-none"
-            style={{ background: `${cor}20`, color: cor }}
-          >
-            {e.label}
-          </span>
-        );
-      })}
-    </div>
-  );
-}
-
 /**
  * Criar funil escolhendo um modelo salvo.
  *
@@ -2229,23 +2201,9 @@ function NovoFunilModal({
 }) {
   const [nome, setNome] = useState('');
   const [nomeTocado, setNomeTocado] = useState(false);
-  const [modelos, setModelos] = useState<FunilModelo[]>([]);
   const [modeloId, setModeloId] = useState('');
-  const [carregando, setCarregando] = useState(true);
   const [criando, setCriando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
-
-  useEffect(() => {
-    let vivo = true;
-    fetch('/api/crm/funil-modelos')
-      .then(r => r.ok ? r.json() as Promise<FunilModelo[]> : [])
-      .then(d => { if (vivo) setModelos(Array.isArray(d) ? d : []); })
-      .catch(() => { if (vivo) setModelos([]); })
-      .finally(() => { if (vivo) setCarregando(false); });
-    return () => { vivo = false; };
-  }, []);
-
-  const etapasPadrao = ETAPAS_PADRAO.map(e => ({ label: e.label, etapa_funil: e.etapa }));
 
   function escolher(id: string, nomeSugerido: string) {
     setModeloId(id);
@@ -2274,15 +2232,6 @@ function NovoFunilModal({
     }
   }
 
-  async function excluirModelo(m: FunilModelo) {
-    if (!window.confirm(`Excluir o modelo "${m.nome}"? Os funis já criados com ele continuam como estão.`)) return;
-    const res = await fetch(`/api/crm/funil-modelos?id=${encodeURIComponent(m.id)}`, { method: 'DELETE' });
-    if (res.ok) {
-      setModelos(prev => prev.filter(x => x.id !== m.id));
-      if (modeloId === m.id) setModeloId('');
-    }
-  }
-
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={onClose}>
       <div className="flex max-h-[88vh] w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-2xl" onClick={e => e.stopPropagation()}>
@@ -2307,57 +2256,7 @@ function NovoFunilModal({
           <div className="space-y-2">
             <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Começar a partir de</span>
 
-            <button
-              type="button"
-              onClick={() => escolher('', '')}
-              className={cn(
-                'flex w-full flex-col gap-1.5 rounded-lg border p-3 text-left transition-colors',
-                modeloId === '' ? 'border-primary/50 bg-primary/5' : 'border-border hover:border-primary/30',
-              )}
-            >
-              <span className="flex items-center gap-2">
-                {modeloId === '' && <Check className="h-3.5 w-3.5 shrink-0 text-primary" />}
-                <span className="text-xs font-bold text-foreground">Padrão do sistema</span>
-                <span className="ml-auto text-[10px] text-muted-foreground">{etapasPadrao.length} etapas</span>
-              </span>
-              <PreviaEtapas etapas={etapasPadrao} />
-            </button>
-
-            {carregando && <p className="py-3 text-center text-xs text-muted-foreground">Carregando modelos…</p>}
-
-            {!carregando && modelos.length === 0 && (
-              <p className="rounded-lg border border-dashed border-border px-3 py-3 text-center text-[11px] text-muted-foreground">
-                Nenhum modelo salvo ainda. Monte um funil do jeito que quer e clique em
-                <strong className="text-foreground"> Salvar como modelo</strong> no editor — ele passa a aparecer aqui para qualquer cliente.
-              </p>
-            )}
-
-            {modelos.map(m => (
-              <div
-                key={m.id}
-                className={cn(
-                  'group flex w-full flex-col gap-1.5 rounded-lg border p-3 transition-colors',
-                  modeloId === m.id ? 'border-primary/50 bg-primary/5' : 'border-border hover:border-primary/30',
-                )}
-              >
-                <button type="button" onClick={() => escolher(m.id, m.nome)} className="flex w-full flex-col gap-1.5 text-left">
-                  <span className="flex items-center gap-2">
-                    {modeloId === m.id && <Check className="h-3.5 w-3.5 shrink-0 text-primary" />}
-                    <span className="min-w-0 truncate text-xs font-bold text-foreground">{m.nome}</span>
-                    <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">{m.etapas.length} etapas</span>
-                  </span>
-                  {m.descricao && <span className="text-[11px] text-muted-foreground">{m.descricao}</span>}
-                  <PreviaEtapas etapas={m.etapas} />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void excluirModelo(m)}
-                  className="self-start text-[10px] font-semibold text-muted-foreground opacity-0 transition-opacity hover:text-red-400 group-hover:opacity-100"
-                >
-                  Excluir modelo
-                </button>
-              </div>
-            ))}
+            <SeletorModeloFunil modeloId={modeloId} onEscolher={escolher} permitirExcluir />
           </div>
 
           {erro && <p className="text-xs text-red-400">{erro}</p>}

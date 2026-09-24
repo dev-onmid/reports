@@ -144,7 +144,12 @@ export function classificarEtapa(label: string | null | undefined): EtapaFunil {
   // negociação). Antes proposta/orçamento/negociação caíam em QUALIFICADO (posto
   // 1), no mesmo degrau que "Qualificação" — numa board de vendas os dois
   // colapsavam num degrau só. Aqui viram um degrau próprio, depois de qualificado.
-  if (/agendad|agendament|remarcad|remarcac|reagendad|marcad|proposta|orcament|orcado|cotacao|negocia/.test(s)) return 'agendamento';
+  // "oportunidade" entra aqui (padrão genérico, 2026-09-24): em CRM de vendas
+  // oportunidade é negócio com compromisso criado, o mesmo posto de
+  // proposta/orçamento/negociação — não é lead cru. Sem isto o rótulo do
+  // PRÓPRIO padrão auto-classificava como `contato` e quebrava a coerência
+  // seed↔regex que o teste cobra.
+  if (/agendad|agendament|remarcad|remarcac|reagendad|marcad|proposta|orcament|orcado|cotacao|negocia|oportunidade/.test(s)) return 'agendamento';
   if (/em atendimento|qualificad|qualificac|nao retorna|engajad/.test(s)) return 'qualificado';
   return 'contato';
 }
@@ -622,21 +627,29 @@ export function rotuloFonteTopo(fontes: ('crm' | 'anuncios')[]): string {
 // (crm-saneamento.ts); o regex de classificarEtapa segue reconhecendo
 // "Comprou" em dado legado.
 export const ETAPAS_PADRAO: { label: string; color: string; position: number; etapa: EtapaFunil }[] = [
-  { label: 'Em Atendimento', color: '#0ea5e9', position: 0, etapa: 'qualificado' },
-  // ⚠️ Engajado é o 2º DEGRAU (posto 1), não o topo — decisão do Matheus em
-  // 2026-09-24, revertendo a de 4df6ebb: na dashboard o topo é sempre "Leads"
-  // (todo mundo que entrou) e logo abaixo vem "Engajados" (quem respondeu ou
-  // interagiu). Com Engajado em `contato`, a coluna virava o RÓTULO do topo
-  // no funil real ("351 ENGAJADO") e o degrau de engajamento não existia.
-  { label: 'Engajado',       color: '#22d3ee', position: 1, etapa: 'qualificado' },
-  { label: 'Agendado',       color: '#3b82f6', position: 2, etapa: 'agendamento' },
-  { label: 'Reagendado',     color: '#7dd3fc', position: 3, etapa: 'agendamento' },
-  { label: 'Fechado',        color: '#10b981', position: 4, etapa: 'fechamento' },
-  { label: 'Paciente',       color: '#a1a1aa', position: 5, etapa: 'nao_lead' },
-  { label: 'Não Retorna',    color: '#71717a', position: 6, etapa: 'qualificado' },
-  { label: 'Distante',       color: '#f97316', position: 7, etapa: 'perdido' },
-  { label: 'Sem Interesse',  color: '#ef4444', position: 8, etapa: 'perdido' },
-  { label: 'Desqualificado', color: '#dc2626', position: 9, etapa: 'perdido' },
+  // ⚠️ Padrão GENÉRICO (decisão do Matheus, 2026-09-24). O anterior era de
+  // clínica — "Agendado", "Reagendado", "Paciente", "Não Retorna" — e nascia
+  // errado em franquia, e-commerce ou B2B. Quem quer o vocabulário de clínica
+  // agora salva um MODELO de funil e escolhe ele ao criar o cliente.
+  { label: 'Leads',                  color: '#7dd3fc', position: 0, etapa: 'contato' },
+  // Engajados é o 2º DEGRAU (posto 1), não o topo: na dashboard o topo é sempre
+  // "Leads" (todo mundo que entrou) e logo abaixo quem respondeu.
+  { label: 'Engajados (Respondidos)', color: '#0ea5e9', position: 1, etapa: 'qualificado' },
+  // ⚠️ "Não Responde" fica em `contato`, NUNCA em qualificado: qualificado é o
+  // degrau de quem RESPONDEU, e pôr aqui quem não respondeu inflaria
+  // "Engajados" com o oposto do que a palavra diz (mesma correção que tirou
+  // "Distante" de qualificado). Ele entrou, só não respondeu — é topo de funil.
+  { label: 'Não Responde',           color: '#7dd3fc', position: 2, etapa: 'contato' },
+  // Posto 2 é "compromisso criado", genérico por desenho: vale proposta,
+  // reunião marcada ou avaliação agendada, conforme o negócio.
+  { label: 'Oportunidade',           color: '#8b5cf6', position: 3, etapa: 'agendamento' },
+  { label: 'Ganho',                  color: '#10b981', position: 4, etapa: 'fechamento' },
+  { label: 'Desqualificado',         color: '#ef4444', position: 5, etapa: 'perdido' },
+  { label: 'Sem Interesse',          color: '#ef4444', position: 6, etapa: 'perdido' },
+  // Fora de TODA contagem (grau `nao_lead`) — salvo quando o lead tem rastro de
+  // anúncio, e aí `contarFunil` o promove a fechamento: se o anúncio trouxe de
+  // volta quem já era cliente, isso é resultado, não descarte.
+  { label: 'Não é Lead',             color: '#52525b', position: 7, etapa: 'nao_lead' },
 ];
 
 // ------------------------------------------- Funil pelas etapas reais do Kanban

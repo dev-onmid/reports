@@ -183,9 +183,18 @@ eq(normalizarFonteTopo('qualquer'), 'auto', 'fonte invalida vira auto');
 eq(normalizarFonteTopo(null), 'auto', 'null vira auto');
 
 // ------------------------------------------------------------ seeds padrao
-eq(ETAPAS_PADRAO.length, 10, '10 etapas padrao (Comprou fundido em Fechado; Engajado entrou em 4df6ebb)');
-ok(!ETAPAS_PADRAO.some(e => e.label === 'Comprou'), 'Comprou fora do seed');
-ok(ETAPAS_PADRAO.some(e => e.label === 'Fechado' && e.etapa === 'fechamento'), 'Fechado segue como ganho');
+// Padrao GENERICO desde 2026-09-24 — o anterior era de clinica (Agendado,
+// Reagendado, Paciente, Nao Retorna). Vocabulario de clinica virou MODELO.
+eq(ETAPAS_PADRAO.length, 8, '8 etapas no padrao generico');
+eq(ETAPAS_PADRAO.map(e => e.label).join('|'),
+  'Leads|Engajados (Respondidos)|Nao Responde|Oportunidade|Ganho|Desqualificado|Sem Interesse|Nao e Lead'
+    .replace('Nao Responde', 'Não Responde').replace('Nao e Lead', 'Não é Lead'),
+  'rotulos e ordem do padrao generico');
+ok(ETAPAS_PADRAO.some(e => e.label === 'Ganho' && e.etapa === 'fechamento'), 'Ganho e o fechamento');
+ok(ETAPAS_PADRAO.some(e => e.label === 'Não é Lead' && e.etapa === 'nao_lead'), 'Nao e Lead fora da contagem');
+// ⚠️ "Nao Responde" NUNCA pode ser qualificado: qualificado e o degrau de quem
+// respondeu, e po-lo ali inflaria "Engajados" com o oposto do que a palavra diz.
+eq(ETAPAS_PADRAO.find(e => e.label === 'Não Responde').etapa, 'contato', 'Nao Responde fica no topo, nao em qualificado');
 // Coerencia forte: a classificacao explicita dos seeds bate com a automatica
 for (const e of ETAPAS_PADRAO) {
   eq(classificarEtapa(e.label), e.etapa, `seed "${e.label}" auto-classifica igual ao explicito`);

@@ -12,6 +12,7 @@ import { addClientLink, loadClientLinks, type ClientAccountLink } from '@/lib/cl
 import type { MetaAdAccount } from '@/app/api/meta/ad-accounts/route';
 import type { DashboardType } from '@/lib/mock-data';
 import { cn } from '@/lib/utils';
+import { SeletorModeloFunil } from '@/components/crm/seletor-modelo-funil';
 
 // Onboarding obrigatório de cliente novo: enquanto não concluir os 4 passos, o cliente
 // fica em modo rascunho (onboarding_completed=false) e qualquer tentativa de abrir as
@@ -65,6 +66,7 @@ function NovoClienteWizard() {
   const [newCategoryName, setNewCategoryName] = useState('');
   const [showNewCategory, setShowNewCategory] = useState(false);
   const [dashType, setDashType] = useState<DashboardType>('leads');
+  const [modeloFunilId, setModeloFunilId] = useState('');
   const [gestorId, setGestorId] = useState('');
   const [users, setUsers] = useState<{ id: string; name: string; role: string }[]>([]);
 
@@ -100,6 +102,20 @@ function NovoClienteWizard() {
       dashboard_type: dashType,
       onboarding_completed: false,
     });
+    // ⚠️ Cria o funil AQUI, com o modelo escolhido. Sem isto o CRM criaria o
+    // "Funil Principal" sozinho na primeira abertura, sempre no padrão — e a
+    // escolha feita neste passo seria descartada em silêncio.
+    // Best-effort de propósito: falha de rede não pode travar o cadastro do
+    // cliente; sem funil, o CRM cria o padrão como sempre fez.
+    void fetch('/api/crm/funnels', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        clientId: client.id,
+        name: 'Funil Principal',
+        modeloId: modeloFunilId || undefined,
+      }),
+    }).catch(() => {});
     setClientId(client.id);
     router.replace(`/clientes/novo?id=${client.id}`);
     setStep(2);
@@ -332,6 +348,13 @@ function NovoClienteWizard() {
               <option value="">Sem gestor</option>
               {users.map(u => <option key={u.id} value={u.id}>{u.name} ({u.role})</option>)}
             </select>
+          </div>
+          <div className="space-y-1.5">
+            <Label>Funil do CRM</Label>
+            <p className="text-[11px] text-muted-foreground">
+              As colunas que o Kanban deste cliente vai ter. Dá para mudar depois no editor de funil.
+            </p>
+            <SeletorModeloFunil modeloId={modeloFunilId} onEscolher={id => setModeloFunilId(id)} />
           </div>
           <div className="flex justify-between pt-2">
             <Link href="/clientes" className="text-xs text-muted-foreground hover:underline self-center">Cancelar</Link>

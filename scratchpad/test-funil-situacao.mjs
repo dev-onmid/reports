@@ -65,7 +65,11 @@ import { leadNaEtapa, etapaDoLead, contarFunilPorStage, ETAPAS_PADRAO, OPCOES_ED
 eq(classificarEtapa('Não Lead'), 'nao_lead', 'Não Lead');
 eq(classificarEtapa('Já sou cliente'), 'nao_lead', 'já sou cliente');
 eq(classificarEtapa('Fechado'), 'fechamento', 'Fechado segue fechamento');
-eq(ETAPAS_PADRAO.find(e => e.label === 'Paciente').etapa, 'nao_lead', 'semente Paciente = não lead');
+// "Paciente" saiu do padrao em 2026-09-24 (virou generico); quem carrega o grau
+// agora e "Nao e Lead". A classificacao de "Paciente" por TEXTO segue valendo —
+// e o que cobre cliente de clinica que ja tem a coluna criada.
+eq(ETAPAS_PADRAO.find(e => e.label === 'Não é Lead').etapa, 'nao_lead', 'semente Não é Lead = não lead');
+eq(classificarEtapa('Paciente'), 'nao_lead', 'Paciente segue fora da contagem pelo texto');
 const fNL = contarFunil([
   L('Paciente'), L('Paciente', { fechou: true, receita: 500 }),          // sem rastro: fora, mesmo com "fechou"
   L('Paciente', { rastreado: true, receita: 900 }),                       // com rastro: fechamento

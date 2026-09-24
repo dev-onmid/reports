@@ -76,7 +76,11 @@ export function naoLeadSql(alias = ''): string {
   // ⚠️ COALESCE obrigatório: `NULL IN (...)` é NULL, e `NOT (NULL AND x)` é NULL —
   // todo lead com status vazio (importação de planilha grava NULL aos milhares)
   // sumiria da dashboard e do CRM. Medido em São José: 1.176 leads.
-  return `COALESCE(lower(btrim(${col(alias, 'status')})) IN ('paciente', 'não lead', 'nao lead', 'já é cliente', 'ja e cliente'), FALSE)`;
+  // ⚠️ 'não é lead'/'nao e lead' entram aqui porque é o RÓTULO do padrão
+  // genérico (ETAPAS_PADRAO, 2026-09-24). Esta lista casa por TEXTO do status —
+  // sem a variante com "é", a coluna nova sairia do funil (que lê `etapa_funil`)
+  // mas continuaria contando na dashboard, que lê daqui.
+  return `COALESCE(lower(btrim(${col(alias, 'status')})) IN ('paciente', 'não lead', 'nao lead', 'não é lead', 'nao e lead', 'já é cliente', 'ja e cliente'), FALSE)`;
 }
 
 /**
