@@ -183,6 +183,8 @@ export type EtapaDeStage = {
   label: string;
   /** null = não configurado explicitamente → cai na auto-classificação do rótulo. */
   etapa: EtapaFunil | null;
+  /** `crm_stages.situacao`: explícita, 'nenhuma', ou null/ausente = auto pelo rótulo. */
+  situacao?: SituacaoStage | null;
 };
 
 /**
@@ -204,6 +206,55 @@ export function situacaoDaEtapa(label: string | null | undefined): SituacaoEtapa
   if (/nao atend|nao contactad|nao contatad|ligar depois|nao respond|sem resposta|tentativa|caixa postal|nao retornou a ligacao/.test(s)) return 'tentativa';
   if (/nao retorna|parou de responder|sumiu|sem retorno/.test(s)) return 'parado';
   return null;
+}
+
+/**
+ * O que o EDITOR grava em `crm_stages.situacao`: a situação explícita, ou
+ * 'nenhuma' (o gestor olhou e disse que aquela coluna não é situação). NULL na
+ * coluna = etapa anterior ao editor → auto-classificação pelo rótulo, igual ao
+ * que `etapa_funil` NULL faz com o grau.
+ */
+export type SituacaoStage = SituacaoEtapa | 'nenhuma';
+export const SITUACOES_STAGE: readonly SituacaoStage[] = ['nenhuma', 'tentativa', 'parado'];
+
+/** Situação EFETIVA de uma coluna: explícita vence; 'nenhuma' cala a regex; null cai nela. */
+export function situacaoEfetiva(situacao: SituacaoStage | null | undefined, label: string | null | undefined): SituacaoEtapa | null {
+  if (situacao === 'nenhuma') return null;
+  if (situacao === 'tentativa' || situacao === 'parado') return situacao;
+  return situacaoDaEtapa(label);
+}
+
+/**
+ * Dropdown COMPOSTO do editor de funil (fase 2 da planilha, 2026-09-24): uma
+ * escolha só resolve grau E situação. A situação só existe nos dois graus em
+ * que `contarFunil` a lê — tentativa no topo, parado em engajado — então as
+ * opções são os 6 graus + "Contato · sem resposta" + "Qualificado · parou de
+ * responder". Valor = 'grau' ou 'grau:situacao'.
+ */
+export type OpcaoEditor = { valor: string; etapa: EtapaFunil; situacao: SituacaoStage; rotulo: string };
+export const OPCOES_EDITOR: OpcaoEditor[] = ([...ETAPAS_FUNIL, 'perdido'] as EtapaFunil[]).flatMap((etapa): OpcaoEditor[] => {
+  const base: OpcaoEditor = { valor: etapa, etapa, situacao: 'nenhuma', rotulo: ROTULOS_ETAPA_EDITOR[etapa] };
+  if (etapa === 'contato') return [base, { valor: 'contato:tentativa', etapa, situacao: 'tentativa', rotulo: `${ROTULOS_ETAPA_EDITOR[etapa]} · sem resposta` }];
+  if (etapa === 'qualificado') return [base, { valor: 'qualificado:parado', etapa, situacao: 'parado', rotulo: `${ROTULOS_ETAPA_EDITOR[etapa]} · parou de responder` }];
+  return [base];
+});
+
+/**
+ * Valor do dropdown para uma coluna (explícito ou auto). Situação que não casa
+ * com o grau (ex.: 'parado' numa coluna de contato) não tem opção — cai no grau
+ * puro, e ao salvar vira 'nenhuma'.
+ */
+export function valorOpcaoEditor(etapa: EtapaFunil | null | undefined, situacao: SituacaoStage | null | undefined, label: string): string {
+  const e = etapa ?? classificarEtapa(label);
+  const s = situacaoEfetiva(situacao, label);
+  if (e === 'contato' && s === 'tentativa') return 'contato:tentativa';
+  if (e === 'qualificado' && s === 'parado') return 'qualificado:parado';
+  return e;
+}
+
+export function opcaoDoValor(valor: string): { etapa: EtapaFunil; situacao: SituacaoStage } {
+  const o = OPCOES_EDITOR.find(x => x.valor === valor);
+  return o ? { etapa: o.etapa, situacao: o.situacao } : { etapa: 'contato', situacao: 'nenhuma' };
 }
 
 export type ContagemFunil = {
@@ -295,20 +346,43 @@ export function diaISO(v: string | null | undefined): string | null {
 export type MapaEtapas = {
   porFunil: Map<string, EtapaFunil>;
   porLabel: Map<string, EtapaFunil>;
+  /** Situação efetiva da coluna, pelas mesmas chaves — só para colunas cadastradas. */
+  situacaoPorFunil: Map<string, SituacaoEtapa | null>;
+  situacaoPorLabel: Map<string, SituacaoEtapa | null>;
 };
 
 export function construirMapaEtapas(stages: EtapaDeStage[]): MapaEtapas {
   const porFunil = new Map<string, EtapaFunil>();
   const porLabel = new Map<string, EtapaFunil>();
+  const situacaoPorFunil = new Map<string, SituacaoEtapa | null>();
+  const situacaoPorLabel = new Map<string, SituacaoEtapa | null>();
   for (const s of stages) {
     const etapa = s.etapa ?? classificarEtapa(s.label);
+    const situacao = situacaoEfetiva(s.situacao, s.label);
     const label = normalizarEtiqueta(s.label);
     if (!label) continue;
     porFunil.set(`${s.funnelId}:${label}`, etapa);
+    situacaoPorFunil.set(`${s.funnelId}:${label}`, situacao);
     // Primeiro funil vence no fallback — determinístico pela ordem de entrada.
-    if (!porLabel.has(label)) porLabel.set(label, etapa);
+    if (!porLabel.has(label)) { porLabel.set(label, etapa); situacaoPorLabel.set(label, situacao); }
   }
-  return { porFunil, porLabel };
+  return { porFunil, porLabel, situacaoPorFunil, situacaoPorLabel };
+}
+
+/**
+ * Situação do lead: a da COLUNA dele quando ela está cadastrada (explícita ou
+ * 'nenhuma' calam a regex), senão a regex sobre o status cru — o mesmo
+ * casamento funil→rótulo→texto que `etapaDoLead` faz para o grau.
+ */
+export function situacaoDoLead(lead: Pick<LeadParaFunil, 'status' | 'funnelId'>, mapa: MapaEtapas): SituacaoEtapa | null {
+  const label = normalizarEtiqueta(lead.status);
+  if (!label) return null;
+  if (lead.funnelId) {
+    const k = `${lead.funnelId}:${label}`;
+    if (mapa.situacaoPorFunil.has(k)) return mapa.situacaoPorFunil.get(k) ?? null;
+  }
+  if (mapa.situacaoPorLabel.has(label)) return mapa.situacaoPorLabel.get(label) ?? null;
+  return situacaoDaEtapa(lead.status);
 }
 
 export type PostoDoLead = {
@@ -405,7 +479,7 @@ export function contarFunil(
 
     // Situação (linhas cinza da planilha): só faz sentido em quem NÃO avançou
     // nem perdeu — no topo (tentativa) ou em engajado (parado / em atendimento).
-    const situacao = perdido ? null : situacaoDaEtapa(lead.status);
+    const situacao = perdido ? null : situacaoDoLead(lead, mapa);
     if (!perdido && posto === 0 && situacao === 'tentativa') c.semResposta++;
     if (!perdido && posto === 1) {
       if (situacao === 'parado') c.pararamResponder++;

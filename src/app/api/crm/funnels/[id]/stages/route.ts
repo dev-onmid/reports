@@ -1,6 +1,6 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
-import { classificarEtapa, type EtapaFunil } from '@/lib/funil-etapas';
+import { classificarEtapa, SITUACOES_STAGE, type EtapaFunil, type SituacaoStage } from '@/lib/funil-etapas';
 
 const ETAPAS_VALIDAS = new Set<string>(['contato', 'qualificado', 'agendamento', 'comparecimento', 'fechamento', 'perdido']);
 
@@ -14,10 +14,10 @@ export async function GET(
     // Instalação anterior a etapa_funil: fallback sem a coluna (o editor então
     // auto-classifica pelo rótulo no client).
     const { rows } = await pool.query(
-      `SELECT id, label, color, position, etapa_funil FROM public.crm_stages WHERE funnel_id = $1 ORDER BY position ASC`,
+      `SELECT id, label, color, position, etapa_funil, situacao FROM public.crm_stages WHERE funnel_id = $1 ORDER BY position ASC`,
       [id],
     ).catch(() => pool.query(
-      `SELECT id, label, color, position, NULL AS etapa_funil FROM public.crm_stages WHERE funnel_id = $1 ORDER BY position ASC`,
+      `SELECT id, label, color, position, NULL AS etapa_funil, NULL AS situacao FROM public.crm_stages WHERE funnel_id = $1 ORDER BY position ASC`,
       [id],
     ));
     return Response.json(rows);
@@ -31,8 +31,8 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id: funnelId } = await params;
-  const { label, color = '#71717a', clientId, etapa_funil, position } = await req.json().catch(() => ({})) as {
-    label?: string; color?: string; clientId?: string; etapa_funil?: string; position?: number;
+  const { label, color = '#71717a', clientId, etapa_funil, situacao, position } = await req.json().catch(() => ({})) as {
+    label?: string; color?: string; clientId?: string; etapa_funil?: string; situacao?: string; position?: number;
   };
   if (!label?.trim() || !clientId) return Response.json({ error: 'label and clientId required' }, { status: 400 });
   // Etapa nova nasce classificada: explícita se o editor mandou, senão pela
@@ -41,6 +41,8 @@ export async function POST(
   const etapa: EtapaFunil = ETAPAS_VALIDAS.has(etapa_funil ?? '')
     ? (etapa_funil as EtapaFunil)
     : classificarEtapa(label);
+  // Situação só quando o editor mandou; outros chamadores deixam NULL (= auto).
+  const sit: SituacaoStage | null = SITUACOES_STAGE.includes(situacao as SituacaoStage) ? (situacao as SituacaoStage) : null;
 
   const pool = makeServerPool();
   try {
@@ -57,10 +59,10 @@ export async function POST(
       [funnelId],
     );
     const { rows: [stage] } = await pool.query(
-      `INSERT INTO public.crm_stages (funnel_id, client_id, label, color, position, etapa_funil)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       RETURNING id, label, color, position, etapa_funil`,
-      [funnelId, clientId, label.trim(), color, posExplicita ?? (max_pos as number) + 1, etapa],
+      `INSERT INTO public.crm_stages (funnel_id, client_id, label, color, position, etapa_funil, situacao)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       RETURNING id, label, color, position, etapa_funil, situacao`,
+      [funnelId, clientId, label.trim(), color, posExplicita ?? (max_pos as number) + 1, etapa, sit],
     );
     return Response.json(stage, { status: 201 });
   } finally {

@@ -1,5 +1,6 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
+import { SITUACOES_STAGE, type SituacaoStage } from '@/lib/funil-etapas';
 
 // Leads guardam a etapa como TEXTO em crm_leads.status (não por stage_id). Por isso,
 // renomear/excluir uma etapa PRECISA migrar o status dos leads junto — senão eles
@@ -10,8 +11,8 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  const { label, color, position, etapa_funil } = await req.json().catch(() => ({})) as {
-    label?: string; color?: string; position?: number; etapa_funil?: string;
+  const { label, color, position, etapa_funil, situacao } = await req.json().catch(() => ({})) as {
+    label?: string; color?: string; position?: number; etapa_funil?: string; situacao?: string;
   };
 
   const pool = makeServerPool();
@@ -35,11 +36,17 @@ export async function PUT(
       }
       sets.push(`etapa_funil = $${n++}`); vals.push(etapa_funil);
     }
+    if (situacao !== undefined) {
+      if (!SITUACOES_STAGE.includes(situacao as SituacaoStage)) {
+        return Response.json({ error: 'situacao inválida' }, { status: 400 });
+      }
+      sets.push(`situacao = $${n++}`); vals.push(situacao);
+    }
     if (sets.length === 0) return Response.json({ error: 'nothing to update' }, { status: 400 });
 
     vals.push(id);
     const { rows: [stage] } = await pool.query(
-      `UPDATE public.crm_stages SET ${sets.join(', ')} WHERE id = $${n} RETURNING id, label, color, position, etapa_funil`,
+      `UPDATE public.crm_stages SET ${sets.join(', ')} WHERE id = $${n} RETURNING id, label, color, position, etapa_funil, situacao`,
       vals,
     );
     if (!stage) return Response.json({ error: 'not found' }, { status: 404 });

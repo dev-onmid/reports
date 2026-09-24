@@ -124,7 +124,7 @@ export async function GET(req: NextRequest) {
     const kanbanPorCliente = new Map<string, StageKanban[]>();
     try {
       const { rows: stageRows } = await pool.query(
-        `SELECT client_id, funnel_id, label, etapa_funil, position FROM public.crm_stages`,
+        `SELECT client_id, funnel_id, label, etapa_funil, situacao, position FROM public.crm_stages`,
       );
       for (const s of stageRows) {
         const cid = String(s.client_id);
@@ -132,7 +132,7 @@ export async function GET(req: NextRequest) {
         const label = String(s.label ?? '');
         const etapa = (s.etapa_funil ?? null) as EtapaFunil | null;
         if (!stagesPorCliente.has(cid)) stagesPorCliente.set(cid, []);
-        stagesPorCliente.get(cid)!.push({ funnelId, label, etapa });
+        stagesPorCliente.get(cid)!.push({ funnelId, label, etapa, situacao: (s.situacao ?? null) as EtapaDeStage['situacao'] });
         if (!kanbanPorCliente.has(cid)) kanbanPorCliente.set(cid, []);
         kanbanPorCliente.get(cid)!.push({ funnelId, label, etapa, position: Number(s.position) || 0 });
       }

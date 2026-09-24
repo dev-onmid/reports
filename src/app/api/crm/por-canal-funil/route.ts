@@ -88,13 +88,13 @@ export async function GET(req: NextRequest) {
     const stagesPorCliente = new Map<string, EtapaDeStage[]>();
     try {
       const { rows: stageRows } = await pool.query(
-        `SELECT client_id, funnel_id, label, etapa_funil FROM public.crm_stages WHERE client_id = ANY($1)`,
+        `SELECT client_id, funnel_id, label, etapa_funil, situacao FROM public.crm_stages WHERE client_id = ANY($1)`,
         [clientIds],
       );
       for (const s of stageRows) {
         const cid = String(s.client_id);
         if (!stagesPorCliente.has(cid)) stagesPorCliente.set(cid, []);
-        stagesPorCliente.get(cid)!.push({ funnelId: String(s.funnel_id), label: String(s.label ?? ''), etapa: (s.etapa_funil ?? null) as EtapaFunil | null });
+        stagesPorCliente.get(cid)!.push({ funnelId: String(s.funnel_id), label: String(s.label ?? ''), etapa: (s.etapa_funil ?? null) as EtapaFunil | null, situacao: (s.situacao ?? null) as EtapaDeStage['situacao'] });
       }
     } catch {
       // sem crm_stages → auto-classificação pelo texto do status

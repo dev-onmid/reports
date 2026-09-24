@@ -31,7 +31,7 @@ import { cn, formatCurrencyBRL } from '@/lib/utils';
 import { localDoLead, type RespostaFormulario } from '@/lib/lead-formulario';
 import type { Client } from '@/lib/mock-data';
 import type { AttendanceAudit } from '@/lib/crm-attendance-audit';
-import { classificarEtapa, corDaEtapa, ETAPAS_FUNIL, ROTULOS_ETAPA, ROTULOS_ETAPA_EDITOR, type EtapaFunil } from '@/lib/funil-etapas';
+import { classificarEtapa, corDaEtapa, OPCOES_EDITOR, opcaoDoValor, ROTULOS_ETAPA, valorOpcaoEditor, type EtapaFunil, type SituacaoStage } from '@/lib/funil-etapas';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 
 type CrmLead = {
@@ -82,7 +82,7 @@ type CrmLead = {
 type Draft = Partial<Omit<CrmLead, 'id' | 'client_id' | 'created_at'>>;
 
 type CrmFunnel = { id: string; name: string; created_at: string };
-type CrmStage  = { id: string; label: string; color: string; position: number; etapa_funil?: EtapaFunil | null };
+type CrmStage  = { id: string; label: string; color: string; position: number; etapa_funil?: EtapaFunil | null; situacao?: SituacaoStage | null };
 type LocalStage = CrmStage & { _isNew?: boolean };
 type CrmTab = 'leads' | 'capture' | 'chat' | 'followup' | 'attendance' | 'disparos' | 'ads';
 const ABAS_CRM = ['leads', 'capture', 'chat', 'followup', 'attendance', 'disparos', 'ads'] as const;
@@ -1838,16 +1838,18 @@ function SortableStageRow({
       />
 
       {/* O que esta etapa SIGNIFICA no Funil de Performance — é daqui que o
-          dashboard conta Agendamentos/Comparecimentos/Fechamentos. Sem escolha
+          dashboard conta Agendamentos/Comparecimentos/Fechamentos. Dropdown
+          COMPOSTO: grau e, onde existe, a situação ("sem resposta" no topo,
+          "parou de responder" em qualificado) numa escolha só. Sem escolha
           explícita, vale a auto-classificação pelo nome. */}
       <select
-        value={stage.etapa_funil ?? classificarEtapa(stage.label)}
-        onChange={e => onChange({ etapa_funil: e.target.value as EtapaFunil })}
-        title="Em qual degrau do Funil de Performance esta coluna entra"
-        className="w-[172px] shrink-0 rounded-md border border-border bg-background px-1.5 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+        value={valorOpcaoEditor(stage.etapa_funil, stage.situacao, stage.label)}
+        onChange={e => { const o = opcaoDoValor(e.target.value); onChange({ etapa_funil: o.etapa, situacao: o.situacao }); }}
+        title="Em qual degrau do Funil de Performance esta coluna entra — e, se for o caso, a situação (sem resposta / parou de responder)"
+        className="w-[196px] shrink-0 rounded-md border border-border bg-background px-1.5 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
       >
-        {[...ETAPAS_FUNIL, 'perdido' as const].map(e => (
-          <option key={e} value={e}>{ROTULOS_ETAPA_EDITOR[e]}</option>
+        {OPCOES_EDITOR.map(o => (
+          <option key={o.valor} value={o.valor}>{o.rotulo}</option>
         ))}
       </select>
 
@@ -1921,23 +1923,24 @@ function FunnelEditorModal({
       const savedStages: CrmStage[] = [];
       for (let i = 0; i < localStages.length; i++) {
         const s = localStages[i];
-        // Persistir sempre a etapa exibida (explícita ou auto) — assim um
-        // rename futuro não muda o funil por baixo de quem já conferiu.
-        const etapaFunil = s.etapa_funil ?? classificarEtapa(s.label);
+        // Persistir sempre o que o dropdown EXIBE (explícito ou auto) — grau e
+        // situação — assim um rename futuro não muda o funil por baixo de quem
+        // já conferiu.
+        const { etapa: etapaFunil, situacao } = opcaoDoValor(valorOpcaoEditor(s.etapa_funil, s.situacao, s.label));
         if (s._isNew) {
           const res = await fetch(`/api/crm/funnels/${funnel.id}/stages`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             // `position: i` é o que faz a etapa nova nascer ONDE foi arrastada —
             // sem ele a rota grava MAX+1 e ela volta pro fim no refresh.
-            body: JSON.stringify({ label: s.label, color: s.color, clientId, etapa_funil: etapaFunil, position: i }),
+            body: JSON.stringify({ label: s.label, color: s.color, clientId, etapa_funil: etapaFunil, situacao, position: i }),
           });
           if (res.ok) savedStages.push(await res.json() as CrmStage);
         } else {
           const res = await fetch(`/api/crm/stages/${s.id}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ label: s.label, color: s.color, position: i, etapa_funil: etapaFunil }),
+            body: JSON.stringify({ label: s.label, color: s.color, position: i, etapa_funil: etapaFunil, situacao }),
           });
           savedStages.push(res.ok ? await res.json() as CrmStage : { ...s, position: i });
         }

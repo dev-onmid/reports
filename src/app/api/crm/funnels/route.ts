@@ -27,6 +27,7 @@ async function ensureSchemaInterno(pool: ReturnType<typeof makeServerPool>) {
     );
     ALTER TABLE public.crm_leads ADD COLUMN IF NOT EXISTS funnel_id UUID REFERENCES public.crm_funnels(id) ON DELETE SET NULL;
     ALTER TABLE public.crm_stages ADD COLUMN IF NOT EXISTS etapa_funil TEXT;
+    ALTER TABLE public.crm_stages ADD COLUMN IF NOT EXISTS situacao TEXT;
     CREATE INDEX IF NOT EXISTS crm_funnels_client_id_idx ON public.crm_funnels(client_id);
     CREATE INDEX IF NOT EXISTS crm_stages_funnel_id_idx ON public.crm_stages(funnel_id);
     CREATE INDEX IF NOT EXISTS crm_leads_funnel_id_idx ON public.crm_leads(funnel_id);
