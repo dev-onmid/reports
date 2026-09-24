@@ -1,3 +1,11 @@
+## Mídia paga — a tabela Meta "abrir tudo" nunca abria em produção: cleanup de efeito cancelava a busca (2026-09-24, noite)
+
+Print do Matheus da tabela de campanhas Meta: "quero que fique assim, campanhas abertas, já mostrando tudo". O `abrirTudo` de `68e0c2c` existia, mas em produção a tabela seguia fechada.
+
+- **Causa**: o efeito de `abrirTudo` em `CampaignPerformanceTable` tinha `return () => { cancelado = true }` e dependia de `campaigns` — que troca de REFERÊNCIA a cada re-render do pai (`setCampaigns(initialCampaigns)`). O React roda o cleanup da rodada anterior ANTES da nova; a nova via a mesma assinatura e saía cedo, mas a busca em voo já estava marcada como cancelada → `setChildrenMap`/`setExpanded` nunca rodavam. Só abria à mão.
+- **Correção**: sem cleanup; um ref `vooAbrirTudo {assinatura, cancelado}` — só uma rodada com assinatura NOVA (campanhas ou período diferentes) cancela a anterior. ⚠️ Padrão a lembrar: efeito com `cancelado` no cleanup + dependência que muda de referência sem mudar de conteúdo = trabalho assíncrono que nunca termina.
+- Google segue sem `abrirTudo` (o pedido foi para a tabela Meta; grupos do Google abrem no clique).
+
 ## Dashboard — sparklines são reais, detalhes do funil sempre abertos, Social acima do Funil de Performance (2026-09-24, noite)
 
 Três pedidos curtos do Matheus na sequência dos mocks da Landing page.

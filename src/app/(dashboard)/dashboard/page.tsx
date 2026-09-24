@@ -1749,19 +1749,25 @@ function CampaignPerformanceTable({
   // anúncios de todos os conjuntos, e marca tudo como expandido. Refaz quando
   // muda o conjunto de campanhas ou o período (senão ficariam números velhos
   // nas linhas filhas). O usuário ainda pode recolher à mão.
-  const abriuTudoPara = useRef('');
+  // ⚠️ Sem cleanup de efeito: `campaigns` troca de referência a cada
+  // re-render do pai (setCampaigns(initialCampaigns)) e o cleanup marcava a
+  // busca em voo como cancelada ANTES de a nova rodada ver que a assinatura
+  // era a mesma e sair — a tabela nunca abria em produção (24/09). Agora só uma
+  // rodada com assinatura NOVA cancela a anterior.
+  const vooAbrirTudo = useRef<{ assinatura: string; cancelado: boolean } | null>(null);
   useEffect(() => {
     if (!abrirTudo || campaigns.length === 0) return;
     const assinatura = `${campaigns.map(c => c.id).join(',')}|${periodParams}`;
-    if (abriuTudoPara.current === assinatura) return;
-    abriuTudoPara.current = assinatura;
-    let cancelado = false;
+    if (vooAbrirTudo.current?.assinatura === assinatura) return;
+    if (vooAbrirTudo.current) vooAbrirTudo.current.cancelado = true;
+    const voo = { assinatura, cancelado: false };
+    vooAbrirTudo.current = voo;
     const buscar = async (url: string): Promise<unknown[]> => {
       try { const r = await fetch(url); const d = await r.json(); return Array.isArray(d) ? d : []; } catch { return []; }
     };
     void (async () => {
       const filhos = await Promise.all(campaigns.map(c => buscar(urlFilhosCampanha(c, periodParams))));
-      if (cancelado) return;
+      if (voo.cancelado) return;
       const mapa: Record<string, ChildState> = {};
       const abertos = new Set<string>();
       const conjuntos: Array<{ key: string; url: string }> = [];
@@ -1779,14 +1785,13 @@ function CampaignPerformanceTable({
       setChildrenMap(mapa);
       setExpanded(abertos);
       const anuncios = await Promise.all(conjuntos.map(x => buscar(x.url)));
-      if (cancelado) return;
+      if (voo.cancelado) return;
       setChildrenMap(prev => {
         const next = { ...prev };
         conjuntos.forEach((x, i) => { next[x.key] = { loading: false, data: anuncios[i] as ChildState['data'] }; });
         return next;
       });
     })();
-    return () => { cancelado = true; };
   }, [abrirTudo, campaigns, periodParams]);
 
   async function toggleExpand(key: string, fetchUrl: string) {
