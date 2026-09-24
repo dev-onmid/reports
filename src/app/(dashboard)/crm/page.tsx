@@ -15,7 +15,7 @@ import {
   ChevronLeft, ChevronRight, ChevronDown, SlidersHorizontal,
   AlignJustify, Trash2, Pencil, Sparkles, Clock3, LayoutGrid, List, ArrowUpDown,
   BarChart3, UserRound, MessageCircle, X, Send, GripVertical, Layers, WifiOff, Link2,
-  Globe2, Clapperboard, Info, MapPin, ClipboardList, BadgeCheck } from 'lucide-react';
+  Globe2, Clapperboard, Info, MapPin, ClipboardList, BadgeCheck, BookmarkPlus, Check } from 'lucide-react';
 import { ChatView } from './chat-view';
 import { LeadChatPanel } from './lead-chat-panel';
 import { PortalLinkModal } from './portal-link-modal';
@@ -31,7 +31,7 @@ import { cn, formatCurrencyBRL } from '@/lib/utils';
 import { localDoLead, type RespostaFormulario } from '@/lib/lead-formulario';
 import type { Client } from '@/lib/mock-data';
 import type { AttendanceAudit } from '@/lib/crm-attendance-audit';
-import { classificarEtapa, corDaEtapa, OPCOES_EDITOR, opcaoDoValor, ROTULOS_ETAPA, valorOpcaoEditor, type EtapaFunil, type SituacaoStage } from '@/lib/funil-etapas';
+import { classificarEtapa, corDaEtapa, ETAPAS_PADRAO, OPCOES_EDITOR, opcaoDoValor, ROTULOS_ETAPA, valorOpcaoEditor, type EtapaFunil, type SituacaoStage } from '@/lib/funil-etapas';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 
 type CrmLead = {
@@ -1924,6 +1924,46 @@ function FunnelEditorModal({
   const [localStages, setLocalStages] = useState<LocalStage[]>(initialStages.map(s => ({ ...s })));
   const [deletedIds, setDeletedIds] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
+  // "Salvar como modelo": fotografa as etapas que estão NA TELA (não as do
+  // banco) — o gestor costuma ajustar e só então decidir guardar o desenho.
+  const [modoModelo, setModoModelo] = useState(false);
+  const [nomeModelo, setNomeModelo] = useState('');
+  const [salvandoModelo, setSalvandoModelo] = useState(false);
+  const [recadoModelo, setRecadoModelo] = useState<string | null>(null);
+
+  async function salvarComoModelo() {
+    const nomeLimpo = nomeModelo.trim();
+    if (!nomeLimpo || salvandoModelo) return;
+    setSalvandoModelo(true);
+    setRecadoModelo(null);
+    try {
+      const res = await fetch('/api/crm/funil-modelos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          nome: nomeLimpo,
+          clientId,
+          etapas: localStages.map(st => ({
+            label: st.label,
+            color: st.color,
+            etapa_funil: st.etapa_funil ?? classificarEtapa(st.label),
+          })),
+        }),
+      });
+      if (res.ok) {
+        setRecadoModelo(`Modelo "${nomeLimpo}" salvo — já aparece ao criar funil em qualquer cliente.`);
+        setModoModelo(false);
+        setNomeModelo('');
+      } else {
+        const d = await res.json().catch(() => ({})) as { error?: string };
+        setRecadoModelo(d.error ?? 'Não foi possível salvar o modelo.');
+      }
+    } catch {
+      setRecadoModelo('Erro de conexão ao salvar o modelo.');
+    } finally {
+      setSalvandoModelo(false);
+    }
+  }
 
   const editorSensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
@@ -2066,6 +2106,46 @@ function FunnelEditorModal({
           </div>
         </div>
 
+        {(modoModelo || recadoModelo) && (
+          <div className="shrink-0 border-t border-border bg-background/40 px-5 py-3">
+            {modoModelo ? (
+              <div className="flex items-center gap-2">
+                <input
+                  value={nomeModelo}
+                  autoFocus
+                  onChange={e => setNomeModelo(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') void salvarComoModelo();
+                    if (e.key === 'Escape') { setModoModelo(false); setNomeModelo(''); }
+                  }}
+                  placeholder="Nome do modelo — ex.: Funil Clínica Odontológica"
+                  className="flex-1 rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+                />
+                <button
+                  onClick={() => void salvarComoModelo()}
+                  disabled={salvandoModelo || !nomeModelo.trim()}
+                  className="rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+                >
+                  {salvandoModelo ? 'Salvando…' : 'Salvar modelo'}
+                </button>
+                <button
+                  onClick={() => { setModoModelo(false); setNomeModelo(''); }}
+                  className="rounded-lg border border-border px-3 py-2 text-xs font-semibold text-muted-foreground transition-colors hover:text-foreground"
+                >
+                  Cancelar
+                </button>
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground">{recadoModelo}</p>
+            )}
+            {modoModelo && (
+              <p className="mt-1.5 text-[11px] text-muted-foreground">
+                Guarda as {localStages.length} etapas desta tela. É uma cópia: mudar este funil depois não altera o modelo.
+              </p>
+            )}
+          </div>
+        )}
+
         <div className="flex items-center justify-between gap-3 px-5 py-4 border-t border-border shrink-0">
           <div className="flex gap-2">
             {funnelCount > 1 && (
@@ -2078,6 +2158,14 @@ function FunnelEditorModal({
               className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs font-semibold text-muted-foreground hover:text-foreground transition-colors">
               <Plus className="h-3.5 w-3.5" /> Novo funil
             </button>
+            <button
+              onClick={() => { setRecadoModelo(null); setModoModelo(true); setNomeModelo(name); }}
+              disabled={localStages.length === 0}
+              title="Guardar este desenho de funil para reusar em outros clientes"
+              className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs font-semibold text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
+            >
+              <BookmarkPlus className="h-3.5 w-3.5" /> Salvar como modelo
+            </button>
           </div>
           <div className="flex gap-2">
             <button onClick={onClose}
@@ -2089,6 +2177,203 @@ function FunnelEditorModal({
               {saving ? 'Salvando…' : 'Salvar'}
             </button>
           </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+type FunilModelo = {
+  id: string;
+  nome: string;
+  descricao: string | null;
+  etapas: { label: string; color: string; etapa_funil: EtapaFunil }[];
+  cliente_origem: string | null;
+  created_at: string;
+};
+
+/** Fileira de chips com as colunas que o funil vai ter — a prévia do modelo. */
+function PreviaEtapas({ etapas }: { etapas: { label: string; etapa_funil: EtapaFunil }[] }) {
+  return (
+    <div className="flex flex-wrap gap-1">
+      {etapas.map((e, i) => {
+        const cor = corDaEtapa(e.etapa_funil, e.label);
+        return (
+          <span
+            key={`${e.label}-${i}`}
+            className="rounded px-1.5 py-0.5 text-[10px] font-semibold leading-none"
+            style={{ background: `${cor}20`, color: cor }}
+          >
+            {e.label}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * Criar funil escolhendo um modelo salvo.
+ *
+ * ⚠️ O modelo é aplicado só no NASCIMENTO do funil. Trocar as colunas de um
+ * funil que já tem lead exigiria migrar o `status` (que é TEXTO) de cada um —
+ * é o mesmo buraco que faz lead sumir do Kanban quando uma etapa é renomeada
+ * por fora. Por isso aqui não existe "aplicar modelo num funil existente".
+ */
+function NovoFunilModal({
+  clientId, onCriado, onClose,
+}: {
+  clientId: string;
+  onCriado: (funnel: CrmFunnel) => void;
+  onClose: () => void;
+}) {
+  const [nome, setNome] = useState('');
+  const [nomeTocado, setNomeTocado] = useState(false);
+  const [modelos, setModelos] = useState<FunilModelo[]>([]);
+  const [modeloId, setModeloId] = useState('');
+  const [carregando, setCarregando] = useState(true);
+  const [criando, setCriando] = useState(false);
+  const [erro, setErro] = useState<string | null>(null);
+
+  useEffect(() => {
+    let vivo = true;
+    fetch('/api/crm/funil-modelos')
+      .then(r => r.ok ? r.json() as Promise<FunilModelo[]> : [])
+      .then(d => { if (vivo) setModelos(Array.isArray(d) ? d : []); })
+      .catch(() => { if (vivo) setModelos([]); })
+      .finally(() => { if (vivo) setCarregando(false); });
+    return () => { vivo = false; };
+  }, []);
+
+  const etapasPadrao = ETAPAS_PADRAO.map(e => ({ label: e.label, etapa_funil: e.etapa }));
+
+  function escolher(id: string, nomeSugerido: string) {
+    setModeloId(id);
+    // Preenche o nome com o do modelo até o gestor digitar o dele — economiza
+    // o passo mais chato sem sequestrar o que ele escreveu.
+    if (!nomeTocado) setNome(nomeSugerido);
+  }
+
+  async function criar() {
+    const limpo = nome.trim();
+    if (!limpo || criando) return;
+    setCriando(true);
+    setErro(null);
+    try {
+      const res = await fetch('/api/crm/funnels', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clientId, name: limpo, modeloId: modeloId || undefined }),
+      });
+      if (!res.ok) { setErro('Não foi possível criar o funil.'); return; }
+      onCriado(await res.json() as CrmFunnel);
+    } catch {
+      setErro('Erro de conexão ao criar o funil.');
+    } finally {
+      setCriando(false);
+    }
+  }
+
+  async function excluirModelo(m: FunilModelo) {
+    if (!window.confirm(`Excluir o modelo "${m.nome}"? Os funis já criados com ele continuam como estão.`)) return;
+    const res = await fetch(`/api/crm/funil-modelos?id=${encodeURIComponent(m.id)}`, { method: 'DELETE' });
+    if (res.ok) {
+      setModelos(prev => prev.filter(x => x.id !== m.id));
+      if (modeloId === m.id) setModeloId('');
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={onClose}>
+      <div className="flex max-h-[88vh] w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-2xl" onClick={e => e.stopPropagation()}>
+        <div className="flex shrink-0 items-center justify-between border-b border-border px-5 py-4">
+          <h2 className="text-sm font-bold">Novo funil</h2>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><X className="h-4 w-4" /></button>
+        </div>
+
+        <div className="flex-1 space-y-4 overflow-y-auto px-5 py-4">
+          <label className="block space-y-1.5">
+            <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Nome do funil</span>
+            <input
+              value={nome}
+              autoFocus
+              onChange={e => { setNome(e.target.value); setNomeTocado(true); }}
+              onKeyDown={e => { if (e.key === 'Enter') void criar(); }}
+              placeholder="Ex.: Funil Comercial"
+              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+            />
+          </label>
+
+          <div className="space-y-2">
+            <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Começar a partir de</span>
+
+            <button
+              type="button"
+              onClick={() => escolher('', '')}
+              className={cn(
+                'flex w-full flex-col gap-1.5 rounded-lg border p-3 text-left transition-colors',
+                modeloId === '' ? 'border-primary/50 bg-primary/5' : 'border-border hover:border-primary/30',
+              )}
+            >
+              <span className="flex items-center gap-2">
+                {modeloId === '' && <Check className="h-3.5 w-3.5 shrink-0 text-primary" />}
+                <span className="text-xs font-bold text-foreground">Padrão do sistema</span>
+                <span className="ml-auto text-[10px] text-muted-foreground">{etapasPadrao.length} etapas</span>
+              </span>
+              <PreviaEtapas etapas={etapasPadrao} />
+            </button>
+
+            {carregando && <p className="py-3 text-center text-xs text-muted-foreground">Carregando modelos…</p>}
+
+            {!carregando && modelos.length === 0 && (
+              <p className="rounded-lg border border-dashed border-border px-3 py-3 text-center text-[11px] text-muted-foreground">
+                Nenhum modelo salvo ainda. Monte um funil do jeito que quer e clique em
+                <strong className="text-foreground"> Salvar como modelo</strong> no editor — ele passa a aparecer aqui para qualquer cliente.
+              </p>
+            )}
+
+            {modelos.map(m => (
+              <div
+                key={m.id}
+                className={cn(
+                  'group flex w-full flex-col gap-1.5 rounded-lg border p-3 transition-colors',
+                  modeloId === m.id ? 'border-primary/50 bg-primary/5' : 'border-border hover:border-primary/30',
+                )}
+              >
+                <button type="button" onClick={() => escolher(m.id, m.nome)} className="flex w-full flex-col gap-1.5 text-left">
+                  <span className="flex items-center gap-2">
+                    {modeloId === m.id && <Check className="h-3.5 w-3.5 shrink-0 text-primary" />}
+                    <span className="min-w-0 truncate text-xs font-bold text-foreground">{m.nome}</span>
+                    <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">{m.etapas.length} etapas</span>
+                  </span>
+                  {m.descricao && <span className="text-[11px] text-muted-foreground">{m.descricao}</span>}
+                  <PreviaEtapas etapas={m.etapas} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void excluirModelo(m)}
+                  className="self-start text-[10px] font-semibold text-muted-foreground opacity-0 transition-opacity hover:text-red-400 group-hover:opacity-100"
+                >
+                  Excluir modelo
+                </button>
+              </div>
+            ))}
+          </div>
+
+          {erro && <p className="text-xs text-red-400">{erro}</p>}
+        </div>
+
+        <div className="flex shrink-0 items-center justify-end gap-2 border-t border-border px-5 py-4">
+          <button onClick={onClose} className="rounded-lg border border-border px-4 py-2 text-sm font-semibold text-muted-foreground transition-colors hover:text-foreground">
+            Cancelar
+          </button>
+          <button
+            onClick={() => void criar()}
+            disabled={criando || !nome.trim()}
+            className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+          >
+            {criando ? 'Criando…' : 'Criar funil'}
+          </button>
         </div>
       </div>
     </div>
@@ -2327,6 +2612,7 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
   const [selectedFunnelId, setSelectedFunnelId] = useState('');
   const [stages, setStages] = useState<CrmStage[]>([]);
   const [showFunnelEditor, setShowFunnelEditor] = useState(false);
+  const [showNovoFunil, setShowNovoFunil] = useState(false);
   const [showPortalModal, setShowPortalModal] = useState(false);
   const [showAiCriteria, setShowAiCriteria] = useState(false);
 
@@ -2710,20 +2996,17 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
     setShowFunnelEditor(false);
   }
 
-  async function handleNewFunnel() {
-    const name = window.prompt('Nome do novo funil:')?.trim();
-    if (!name) return;
-    const res = await fetch('/api/crm/funnels', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ clientId, name }),
-    });
-    if (res.ok) {
-      const newFunnel = await res.json() as CrmFunnel;
-      setFunnels(prev => [...prev, newFunnel]);
-      setSelectedFunnelId(newFunnel.id);
-      setShowFunnelEditor(false);
-    }
+  // O `window.prompt` saiu: criar funil passou a ser escolher um MODELO, e a
+  // lista de modelos com prévia das colunas não cabe num prompt do navegador.
+  function handleNewFunnel() {
+    setShowNovoFunil(true);
+  }
+
+  function handleFunilCriado(newFunnel: CrmFunnel) {
+    setFunnels(prev => [...prev, newFunnel]);
+    setSelectedFunnelId(newFunnel.id);
+    setShowNovoFunil(false);
+    setShowFunnelEditor(false);
   }
 
   async function handleDeleteFunnel() {
@@ -4078,6 +4361,14 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
           onClose={() => setShowFunnelEditor(false)}
           onDeleteFunnel={handleDeleteFunnel}
           onNewFunnel={handleNewFunnel}
+        />
+      )}
+
+      {showNovoFunil && clientId && (
+        <NovoFunilModal
+          clientId={clientId}
+          onCriado={handleFunilCriado}
+          onClose={() => setShowNovoFunil(false)}
         />
       )}
 

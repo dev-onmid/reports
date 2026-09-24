@@ -3,6 +3,7 @@ import { memoizarSchema } from '@/lib/schema-memo';
 import { makeServerPool } from '@/lib/server-db';
 import { ETAPAS_PADRAO } from '@/lib/funil-etapas';
 import { sanearFunisDoCliente } from '@/lib/crm-saneamento';
+import { buscarModelo, ensureFunilModelosSchema, aplicarEtapasNoFunil, type EtapaModelo } from '@/lib/crm-funil-modelos';
 
 // Fonte única dos seeds (com a etapa semântica do Funil de Performance) —
 // compartilhada com o seed gêmeo de crm-conversation-sync.ts.
@@ -86,22 +87,40 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const { clientId, name } = await req.json().catch(() => ({})) as { clientId?: string; name?: string };
+  const { clientId, name, modeloId } = await req.json().catch(() => ({})) as {
+    clientId?: string; name?: string; modeloId?: string;
+  };
   if (!clientId || !name?.trim()) return Response.json({ error: 'clientId and name required' }, { status: 400 });
 
   const pool = makeServerPool();
   try {
     await ensureSchema(pool);
 
+    // Modelo escolhido pelo gestor; sem modelo (ou modelo apagado no meio do
+    // caminho) o funil nasce no padrão de sempre.
+    // ⚠️ Modelo INEXISTENTE não é erro: o funil precisa nascer com colunas de
+    // qualquer jeito — funil sem etapa é um board vazio que esconde os leads.
+    let etapasDoModelo: EtapaModelo[] | null = null;
+    if (modeloId) {
+      await ensureFunilModelosSchema(pool);
+      const modelo = await buscarModelo(pool, modeloId).catch(() => null);
+      if (modelo && modelo.etapas.length > 0) etapasDoModelo = modelo.etapas;
+    }
+
     const { rows: [funnel] } = await pool.query(
       `INSERT INTO public.crm_funnels (client_id, name) VALUES ($1, $2) RETURNING id, name, created_at`,
       [clientId, name.trim()],
     );
-    for (const s of DEFAULT_STAGES) {
-      await pool.query(
-        `INSERT INTO public.crm_stages (funnel_id, client_id, label, color, position, etapa_funil) VALUES ($1, $2, $3, $4, $5, $6)`,
-        [funnel.id, clientId, s.label, s.color, s.position, s.etapa],
-      );
+
+    if (etapasDoModelo) {
+      await aplicarEtapasNoFunil(pool, funnel.id, clientId, etapasDoModelo);
+    } else {
+      for (const s of DEFAULT_STAGES) {
+        await pool.query(
+          `INSERT INTO public.crm_stages (funnel_id, client_id, label, color, position, etapa_funil) VALUES ($1, $2, $3, $4, $5, $6)`,
+          [funnel.id, clientId, s.label, s.color, s.position, s.etapa],
+        );
+      }
     }
     return Response.json(funnel, { status: 201 });
   } finally {
