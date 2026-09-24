@@ -25,7 +25,7 @@ eq(classificarEtapa('Avaliação Realizada'), 'comparecimento', 'realizada = com
 eq(classificarEtapa('Avaliação Efetivada'), 'fechamento', 'efetivada = vendeu');
 eq(classificarEtapa('Paciente'), 'fechamento', 'paciente');
 eq(classificarEtapa('Não Retorna'), 'qualificado', 'nao retorna preserva getStage antigo');
-eq(classificarEtapa('Distante'), 'qualificado', 'distante preserva getStage antigo');
+eq(classificarEtapa('Distante'), 'perdido', 'distante = perda (decisão do Matheus 2026-09-24; antes preservava o getStage antigo)');
 eq(classificarEtapa('Sem Interesse'), 'perdido', 'sem interesse');
 eq(classificarEtapa('Desqualificado'), 'perdido', 'desqualificado nao casa em qualificad');
 

@@ -116,7 +116,9 @@ export function classificarEtapa(label: string | null | undefined): EtapaFunil {
   // ⚠️ PERDA É TESTADA ANTES DO GANHO, de propósito: "Venda Perdida" e "Contrato
   // Perdido" contêm a palavra do ganho e entrariam como FATURAMENTO se a ordem
   // fosse a inversa — o pior erro possível nesta função.
-  if (/sem interesse|desqualificad|desqualificac|perdid|\bperdas?\b|\bperca\b|\blost\b|descartad/.test(s)) return 'perdido';
+  // "Distante" é perda (decisão do Matheus, 2026-09-24): mora longe, não vai
+  // virar paciente — deixá-lo em qualificado inflava "Engajados".
+  if (/sem interesse|desqualificad|desqualificac|perdid|\bperdas?\b|\bperca\b|\blost\b|descartad|distante/.test(s)) return 'perdido';
   // ⚠️ A regra nasceu só com PARTICÍPIO (fechad, vendid, contratad) e não
   // reconhecia o SUBSTANTIVO que o gestor usa como nome de coluna: "Fechamento",
   // "Vendas" e "Contratação" caíam todos em 'contato'. Medido em 14/09: os 503
@@ -133,7 +135,7 @@ export function classificarEtapa(label: string | null | undefined): EtapaFunil {
   // 1), no mesmo degrau que "Qualificação" — numa board de vendas os dois
   // colapsavam num degrau só. Aqui viram um degrau próprio, depois de qualificado.
   if (/agendad|agendament|remarcad|remarcac|reagendad|marcad|proposta|orcament|orcado|cotacao|negocia/.test(s)) return 'agendamento';
-  if (/em atendimento|qualificad|qualificac|nao retorna|distante|engajad/.test(s)) return 'qualificado';
+  if (/em atendimento|qualificad|qualificac|nao retorna|engajad/.test(s)) return 'qualificado';
   return 'contato';
 }
 
@@ -183,6 +185,27 @@ export type EtapaDeStage = {
   etapa: EtapaFunil | null;
 };
 
+/**
+ * SITUAÇÃO da coluna — ortogonal ao grau (decisão do Matheus, 2026-09-24, a
+ * partir da planilha antiga dele). O grau diz até onde o lead chegou; a
+ * situação diz o que está acontecendo com ele ali:
+ *  • 'tentativa' → ainda não conseguimos falar (Não Atende, Não Contactado,
+ *                  Ligar Depois): chip "sem resposta" sob Leads;
+ *  • 'parado'    → engajou e sumiu (Não Retorna): chip "pararam de responder"
+ *                  sob Engajados.
+ * Resgate e "Já teve agendamento" NÃO são situação: ficam no grau normal
+ * (Entrada e Agendado), sem chip — decisão explícita dele.
+ */
+export type SituacaoEtapa = 'tentativa' | 'parado';
+
+export function situacaoDaEtapa(label: string | null | undefined): SituacaoEtapa | null {
+  const s = normalizarEtiqueta(label);
+  if (!s) return null;
+  if (/nao atend|nao contactad|nao contatad|ligar depois|nao respond|sem resposta|tentativa|caixa postal|nao retornou a ligacao/.test(s)) return 'tentativa';
+  if (/nao retorna|parou de responder|sumiu|sem retorno/.test(s)) return 'parado';
+  return null;
+}
+
 export type ContagemFunil = {
   contatos: number;
   qualificados: number;
@@ -217,12 +240,19 @@ export type ContagemFunil = {
    * presença de uma data.
    */
   agendamentoSemDesfecho: number;
+  /** Ainda no topo e numa coluna de TENTATIVA (não atende/ligar depois): chip "sem resposta" sob Leads. */
+  semResposta: number;
+  /** Engajou, não agendou, não perdeu e não parou: é quem está sendo trabalhado — chip "em atendimento" sob Engajados. */
+  emAtendimento: number;
+  /** Engajou e sumiu (Não Retorna): chip "pararam de responder" sob Engajados. */
+  pararamResponder: number;
 };
 
 export const FUNIL_VAZIO: ContagemFunil = {
   contatos: 0, qualificados: 0, agendamentos: 0, comparecimentos: 0,
   fechamentos: 0, perdidos: 0, receita: 0,
   aComparecer: 0, faltaram: 0, agendamentoSemData: 0, agendamentoSemDesfecho: 0,
+  semResposta: 0, emAtendimento: 0, pararamResponder: 0,
 };
 
 /** Reconhece o rótulo de ausência — a mesma família que `classificarEtapa` já isola. */
@@ -373,6 +403,15 @@ export function contarFunil(
     const { posto, perdido, diaAgenda, agendaSoPelaData } = etapaDoLead(lead, mapa);
     if (perdido) c.perdidos++;
 
+    // Situação (linhas cinza da planilha): só faz sentido em quem NÃO avançou
+    // nem perdeu — no topo (tentativa) ou em engajado (parado / em atendimento).
+    const situacao = perdido ? null : situacaoDaEtapa(lead.status);
+    if (!perdido && posto === 0 && situacao === 'tentativa') c.semResposta++;
+    if (!perdido && posto === 1) {
+      if (situacao === 'parado') c.pararamResponder++;
+      else c.emAtendimento++;
+    }
+
     if (posto >= 1) c.qualificados++;
     if (posto >= 2) c.agendamentos++;
     if (posto >= 3) c.comparecimentos++;
@@ -431,6 +470,9 @@ export function somarFunis(funis: ContagemFunil[]): ContagemFunil {
     total.faltaram += f.faltaram;
     total.agendamentoSemData += f.agendamentoSemData;
     total.agendamentoSemDesfecho += f.agendamentoSemDesfecho;
+    total.semResposta += f.semResposta;
+    total.emAtendimento += f.emAtendimento;
+    total.pararamResponder += f.pararamResponder;
   }
   return total;
 }
@@ -491,7 +533,7 @@ export const ETAPAS_PADRAO: { label: string; color: string; position: number; et
   { label: 'Fechado',        color: '#10b981', position: 4, etapa: 'fechamento' },
   { label: 'Paciente',       color: '#a1a1aa', position: 5, etapa: 'fechamento' },
   { label: 'Não Retorna',    color: '#71717a', position: 6, etapa: 'qualificado' },
-  { label: 'Distante',       color: '#f97316', position: 7, etapa: 'qualificado' },
+  { label: 'Distante',       color: '#f97316', position: 7, etapa: 'perdido' },
   { label: 'Sem Interesse',  color: '#ef4444', position: 8, etapa: 'perdido' },
   { label: 'Desqualificado', color: '#dc2626', position: 9, etapa: 'perdido' },
 ];

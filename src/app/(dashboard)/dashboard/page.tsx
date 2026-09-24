@@ -4849,7 +4849,9 @@ function SimpleFunnel({ steps, totalRate, fonteLabel, onStageClick, todosClicave
                       {actualPct.toFixed(1).replace('.', ',')}%
                     </span>
                     {plannedPct !== null && plannedPct > 0 && (
-                      <span className={cn('ml-1.5', T.nota)} title="Conversão planejada para este degrau">meta {plannedPct.toFixed(0)}%</span>
+                      <span className={cn('ml-1.5', T.nota)} title={`Conversão planejada para este degrau${step.planned > 0 ? ` — meta de ${Math.round(step.planned).toLocaleString('pt-BR')} no período` : ''}`}>
+                        meta {plannedPct.toFixed(0)}%{step.planned > 0 && <> · {Math.round(step.planned).toLocaleString('pt-BR')}</>}
+                      </span>
                     )}
                     {isBottleneck && <span className="ml-1 text-[11px] font-black text-red-400" title="Gargalo: abaixo de 85% da conversão planejada">⚠ gargalo</span>}
                   </p>
@@ -6863,6 +6865,19 @@ export default function GeneralDashboard() {
   if (funilCrm.agendamentoSemData > 0) {
     detalhesAgendamento.push({ texto: `${funilCrm.agendamentoSemData} sem data`, tom: 'neutro' });
   }
+  // Taxa de presença entre quem JÁ deveria ter vindo (compareceu ÷ (compareceu +
+  // faltou)) — o "67%" da planilha do Matheus. Quem ainda vai vir fica fora.
+  if (funilCrm.comparecimentos + funilCrm.faltaram > 0) {
+    const presenca = (funilCrm.comparecimentos / (funilCrm.comparecimentos + funilCrm.faltaram)) * 100;
+    detalhesAgendamento.push({ texto: `${presenca.toFixed(0)}% compareceram`, tom: presenca >= 50 ? 'bom' : 'ruim' });
+  }
+  // Linhas cinza da planilha sob Leads e sob Engajados (situação da coluna).
+  const detalhesLeads: Array<{ texto: string; tom: 'bom' | 'ruim' | 'neutro' }> = [];
+  if (funilCrm.perdidos > 0) detalhesLeads.push({ texto: `${funilCrm.perdidos} perdidos`, tom: 'ruim' });
+  if (funilCrm.semResposta > 0) detalhesLeads.push({ texto: `${funilCrm.semResposta} sem resposta`, tom: 'neutro' });
+  const detalhesEngajados: Array<{ texto: string; tom: 'bom' | 'ruim' | 'neutro' }> = [];
+  if (funilCrm.emAtendimento > 0) detalhesEngajados.push({ texto: `${funilCrm.emAtendimento} em atendimento`, tom: 'neutro' });
+  if (funilCrm.pararamResponder > 0) detalhesEngajados.push({ texto: `${funilCrm.pararamResponder} pararam de responder`, tom: 'ruim' });
   // Funil pelas ETAPAS REAIS do Kanban do cliente — nome, cor e nº de degraus
   // vêm do CRM dele (pedido do Matheus, 2026-09-14). Só com UM cliente
   // selecionado: Kanbans de clientes diferentes não se somam num funil só, então
@@ -6891,7 +6906,10 @@ export default function GeneralDashboard() {
           actual: d.alcancaram,
           planned: 0,
           color: d.color,
-          detalhes: ehUltimoAgendamento ? detalhesAgendamento : ehFechamento && detalhesVendas.length ? detalhesVendas : undefined,
+          detalhes: d.etapa === 'contato' && !restante.some(x => x.etapa === 'contato') && detalhesLeads.length ? detalhesLeads
+            : d.etapa === 'qualificado' && !restante.some(x => x.etapa === 'qualificado') && detalhesEngajados.length ? detalhesEngajados
+            : ehUltimoAgendamento ? detalhesAgendamento
+            : ehFechamento && detalhesVendas.length ? detalhesVendas : undefined,
         };
       })
     : firstPlanningForFunnel.stages.map((stage, i) => ({
@@ -6904,7 +6922,7 @@ export default function GeneralDashboard() {
         // agendamentos e comparecimentos vêm do CRM nos dois casos (só o TOPO muda
         // de fonte), então a quebra sempre fecha com os números exibidos.
         // Lei 5 no degrau de vendas (4): de leads do período × de leads anteriores.
-        detalhes: i === 2 ? detalhesAgendamento : i === 4 && detalhesVendas.length ? detalhesVendas : undefined,
+        detalhes: i === 0 && detalhesLeads.length ? detalhesLeads : i === 1 && detalhesEngajados.length ? detalhesEngajados : i === 2 ? detalhesAgendamento : i === 4 && detalhesVendas.length ? detalhesVendas : undefined,
       }));
   // Conversão geral do funil real = fechamento (último degrau) sobre o topo dele.
   const funnelTaxaFinal = usaStageFunil && stageFunilSolo!.degraus.length > 1
