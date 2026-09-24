@@ -132,6 +132,16 @@ function matches(pathname: string, prefixes: string[]): boolean {
 export function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
+  // ⚠️ O portal do cliente é SOMENTE LEITURA, e isso é garantido AQUI — na
+  // borda —, não só pelo fato de as rotas terem apenas GET hoje. Sem esta
+  // trava, bastaria alguém acrescentar um POST em /api/portal/* um dia para
+  // abrir um caminho de escrita sem sessão, sem que nada no código gritasse.
+  // Quem precisar de escrita para o cliente tem de tirar o prefixo do público
+  // e pensar na autenticação — que é exatamente a conversa que deve acontecer.
+  if (pathname.startsWith('/api/portal/') && req.method !== 'GET' && req.method !== 'HEAD') {
+    return Response.json({ error: 'O portal é somente leitura.' }, { status: 405 });
+  }
+
   if (matches(pathname, PUBLIC_PREFIXES)) return NextResponse.next();
 
   // Chamada servidor→servidor (Luna, cron do CRM, disparo de relatório). Elas

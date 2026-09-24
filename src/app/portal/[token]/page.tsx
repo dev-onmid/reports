@@ -248,9 +248,11 @@ export default function PortalClientePage({ params }: { params: Promise<{ token:
                 <p className="text-[11px] font-bold uppercase tracking-widest text-[#8a9188]">
                   {data.leads.length} contato{data.leads.length !== 1 ? 's' : ''} · últimos {data.days} dias
                 </p>
-                <button onClick={load} className="rounded-lg border border-[#2a2c33] p-1.5 text-[#9aa1a6] transition-colors hover:text-white">
-                  <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
-                </button>
+                {loading && (
+                  <span className="flex items-center gap-1.5 text-[11px] text-[#8a9188]">
+                    <RefreshCw className="h-3 w-3 animate-spin" /> atualizando…
+                  </span>
+                )}
               </div>
               {data.leads.length === 0 ? (
                 <div className="rounded-xl border border-dashed border-[#2a2c33] p-10 text-center text-sm text-[#8a9188]">
@@ -328,7 +330,7 @@ export default function PortalClientePage({ params }: { params: Promise<{ token:
       )}
 
       <footer className={`mx-auto mt-10 ${largura} px-4 text-center text-[10px] text-[#5a5f5d]`}>
-        Painel de acompanhamento gerado pela ONMID · atualizado em tempo real
+        Painel de acompanhamento gerado pela ONMID · somente leitura · atualizado em tempo real
       </footer>
     </div>
   );

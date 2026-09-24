@@ -272,10 +272,13 @@ export function DashboardPortal({ token }: { token: string }) {
             </button>
           ))}
         </div>
-        <button onClick={() => void carregar()} className="rounded-lg border p-1.5 transition-colors hover:text-white"
-          style={{ borderColor: BORDA, color: '#9aa1a6' }} aria-label="Atualizar">
-          <RefreshCw className={`h-3.5 w-3.5 ${carregando ? 'animate-spin' : ''}`} />
-        </button>
+        {/* Sinal de carregamento, não botão: o cliente não tem ação nenhuma
+            nesta tela além de trocar o período. */}
+        {carregando && (
+          <span className="flex items-center gap-1.5 text-[11px]" style={{ color: MUDO }}>
+            <RefreshCw className="h-3 w-3 animate-spin" /> atualizando…
+          </span>
+        )}
       </div>
 
       {/* ── Resultado ───────────────────────────────────────────────────────── */}
