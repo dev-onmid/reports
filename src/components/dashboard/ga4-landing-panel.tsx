@@ -831,7 +831,6 @@ function MiniLp({ rotulo, icone, valor, variacao: v, unidade, dica }: {
 
 /** Funil do anúncio em SETAS (chevrons), como no mock: ícone, rótulo, número; % embaixo. */
 function FunilSetas({ ads, atual }: { ads: Ga4Seg[]; atual: Ga4Totais }) {
-  const [detalhes, setDetalhes] = useState(false);
   const cont = contador(ads);
   const cliques = ads.reduce((t, g) => t + (g.cliques ?? 0), 0);
   const comAds = ads.length > 0 && cliques > 0;
@@ -866,13 +865,6 @@ function FunilSetas({ ads, atual }: { ads: Ga4Seg[]; atual: Ga4Totais }) {
             <p className="mt-0.5 text-xs text-[#a7b0b6]">Veja quantas pessoas avançam de cada etapa, do clique no anúncio até o contato.</p>
           </div>
         </div>
-        <button
-          type="button"
-          onClick={() => setDetalhes(v => !v)}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-white/[0.1] bg-white/[0.03] px-3 py-1.5 text-xs font-semibold text-[#dce4e8] transition-colors hover:bg-white/[0.06]"
-        >
-          {detalhes ? 'Ocultar detalhes' : 'Ver detalhes'} <ChevronRight className={cx('h-3.5 w-3.5 transition-transform', detalhes && 'rotate-90')} />
-        </button>
       </div>
 
       <div className="grid gap-0" style={{ gridTemplateColumns: `repeat(${etapas.length}, minmax(0, 1fr))` }}>
@@ -902,8 +894,8 @@ function FunilSetas({ ads, atual }: { ads: Ga4Seg[]; atual: Ga4Totais }) {
         })}
       </div>
 
-      {detalhes && (
-        <div className="mt-4 space-y-2 rounded-[10px] bg-white/[0.02] px-4 py-3 text-xs text-[#c7d0d5]">
+      {/* Detalhes sempre visíveis (pedido do Matheus, 24/09): connect rate + o que cada etapa mede. */}
+      <div className="mt-4 space-y-2 rounded-[10px] bg-white/[0.02] px-4 py-3 text-xs text-[#c7d0d5]">
           {comAds && (
             <p>
               <span className={T.miniRotulo}>Connect rate</span>{' '}
@@ -916,8 +908,7 @@ function FunilSetas({ ads, atual }: { ads: Ga4Seg[]; atual: Ga4Totais }) {
             {etapas.map(e => <li key={e.rotulo}><b className="text-[#f4f7f8]">{e.rotulo}</b> — {e.sub}</li>)}
           </ul>
           {comAds && <p className="text-[11px] text-[#7c868c]">Cliques vêm do Google Ads; sessões, engajamento e contatos vêm do GA4.</p>}
-        </div>
-      )}
+      </div>
     </Card>
   );
 }
