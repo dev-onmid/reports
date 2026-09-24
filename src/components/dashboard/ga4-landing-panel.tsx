@@ -30,7 +30,7 @@
 import { useMemo, useState, type ElementType, type ReactNode } from 'react';
 import {
   ArrowDown, ArrowUp, BarChart3, ChevronDown, ChevronRight, ChevronsUpDown, Clock, FileText, Info, MessageCircle, MessageSquare,
-  MousePointerClick, Percent, Phone, Search, UserPlus, Users, Activity, Ban, Smartphone, User, CalendarDays, ArrowRight, CircleDollarSign, DollarSign, Link2, Calculator, Trophy, Package,
+  MousePointerClick, Percent, Phone, Search, UserPlus, Users, Activity, Ban, Smartphone, User, CalendarDays, ArrowRight, CircleDollarSign, DollarSign, Link2, Calculator, Star, Package,
 } from 'lucide-react';
 import type { Ga4Celula, Ga4Consolidado, Ga4Linha, Ga4Seg, Ga4Totais } from '@/lib/ga4-landing';
 import { EvolucaoDiaria, type Granularidade } from './ga4-landing-graficos';
@@ -248,8 +248,7 @@ function Pilula({ cor, children, contorno = false }: { cor: string; children: Re
   );
 }
 
-// 9ª coluna = selo "Melhor desempenho" (só na linha vencedora; vazia nas demais e no cabeçalho).
-const COLS_CAMPANHAS = 'grid-cols-[56px_minmax(220px,1fr)_repeat(6,minmax(104px,auto))_minmax(0,auto)]';
+const COLS_CAMPANHAS = 'grid-cols-[56px_minmax(220px,1fr)_repeat(6,minmax(104px,auto))]';
 
 function CabCampanhas({ icone: Icone, children, esquerda = false }: { icone?: ElementType; children: ReactNode; esquerda?: boolean }) {
   return (
@@ -262,7 +261,8 @@ function CabCampanhas({ icone: Icone, children, esquerda = false }: { icone?: El
 /**
  * Campanhas ranqueadas por custo (mock): cabeçalho com caixa de ícone e título grande,
  * colunas com ícone, linhas em caixa com a posição, barra de custo, connect e custo por
- * contato em pílula, a de MENOR custo por contato destacada com troféu; campanhas UTM
+ * contato em pílula; a de MENOR custo por contato ganha só uma estrelinha sobre a pílula
+ * (posição absoluta — não mexe no espaçamento das colunas; pedido do Matheus); campanhas UTM
  * (sem custo no GA4) abaixo, esmaecidas, com ponto no lugar da posição.
  */
 function Campanhas({ ads, utm, semCusto }: { ads: Ga4Seg[]; utm: Ga4Seg[]; semCusto: boolean }) {
@@ -308,7 +308,6 @@ function Campanhas({ ads, utm, semCusto }: { ads: Ga4Seg[]; utm: Ga4Seg[]; semCu
             <CabCampanhas icone={Link2}>Connect</CabCampanhas>
             <CabCampanhas icone={Users}>Contatos</CabCampanhas>
             <CabCampanhas icone={Calculator}>Custo/contato</CabCampanhas>
-            <span />
           </div>
 
           <div className="space-y-2">
@@ -323,13 +322,9 @@ function Campanhas({ ads, utm, semCusto }: { ads: Ga4Seg[]; utm: Ga4Seg[]; semCu
               return (
                 <div
                   key={c.valor}
-                  className={cx('relative grid items-center gap-x-3 rounded-xl border px-3 py-3', COLS_CAMPANHAS, ehMelhor ? 'bg-[#6cff2f]/[0.05]' : 'border-white/[0.06] bg-white/[0.02]')}
-                  style={ehMelhor ? { borderColor: `${VERDE}66`, boxShadow: `0 0 0 1px ${VERDE}22, 0 0 18px ${VERDE}14` } : undefined}
+                  className={cx('grid items-center gap-x-3 rounded-xl border border-white/[0.06] bg-white/[0.02] px-3 py-3', COLS_CAMPANHAS)}
                 >
-                  <span
-                    className={cx('inline-flex h-9 w-9 items-center justify-center rounded-lg text-sm font-bold tabular-nums', ehMelhor ? 'text-black' : 'border border-white/[0.1] bg-white/[0.05] text-[#f4f7f8]')}
-                    style={ehMelhor ? { background: VERDE, boxShadow: `0 0 14px ${VERDE}66` } : undefined}
-                  >
+                  <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-white/[0.1] bg-white/[0.05] text-sm font-bold text-[#f4f7f8] tabular-nums">
                     {i + 1}
                   </span>
                   <div className="min-w-0">
@@ -347,16 +342,17 @@ function Campanhas({ ads, utm, semCusto }: { ads: Ga4Seg[]; utm: Ga4Seg[]; semCu
                   <span className={cx(celula, 'font-bold text-[#f4f7f8]')}>{fmtN(k)}</span>
                   <span className={celula}>
                     {cc !== null
-                      ? <Pilula cor={VERDE} contorno>{fmtBRL(cc)}</Pilula>
+                      ? (
+                        <span className="relative inline-flex">
+                          <Pilula cor={VERDE} contorno>{fmtBRL(cc)}</Pilula>
+                          {ehMelhor && (
+                            <span className="pointer-events-none absolute -right-2 -top-2" title="Menor custo por contato do período">
+                              <Star className="h-4 w-4" style={{ color: VERDE, fill: VERDE }} />
+                            </span>
+                          )}
+                        </span>
+                      )
                       : custo > 0 ? <Pilula cor={VERMELHO} contorno><span className="text-[11px] font-black uppercase tracking-[0.06em]">Sem contato</span></Pilula> : <span className="text-[#6c767c]">—</span>}
-                  </span>
-                  <span className="flex items-center">
-                    {ehMelhor && (
-                      <span className="inline-flex items-center gap-1.5 whitespace-nowrap pl-1 text-[10px] font-black uppercase leading-[1.1] tracking-[0.06em]" style={{ color: VERDE }}>
-                        <Trophy className="h-4 w-4" />
-                        <span>Melhor<br />desempenho</span>
-                      </span>
-                    )}
                   </span>
                 </div>
               );
@@ -382,7 +378,6 @@ function Campanhas({ ads, utm, semCusto }: { ads: Ga4Seg[]; utm: Ga4Seg[]; semCu
                     <span className={celula}>—</span>
                     <span className={cx(celula, 'text-[#a7b0b6]')}>{fmtN(contUtm(c))}</span>
                     <span className={celula}>—</span>
-                    <span />
                   </div>
                 ))}
               </div>
