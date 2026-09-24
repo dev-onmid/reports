@@ -30,7 +30,7 @@
 import { useMemo, useState, type ElementType, type ReactNode } from 'react';
 import {
   ArrowDown, ArrowUp, BarChart3, ChevronDown, ChevronRight, ChevronsUpDown, Clock, FileText, Info, MessageCircle, MessageSquare,
-  MousePointerClick, Percent, Phone, Search, UserPlus, Users, Activity, Ban, Smartphone, MapPin, User,
+  MousePointerClick, Percent, Phone, Search, UserPlus, Users, Activity, Ban, Smartphone, MapPin, User, CalendarDays, ArrowRight, BarChart2,
 } from 'lucide-react';
 import type { Ga4Celula, Ga4Consolidado, Ga4Linha, Ga4Seg, Ga4Totais } from '@/lib/ga4-landing';
 import { EvolucaoDiaria, type Granularidade } from './ga4-landing-graficos';
@@ -423,6 +423,96 @@ function PalavrasChave({ palavras, termos }: { palavras: Ga4Seg[]; termos: Ga4Se
   );
 }
 
+type LinhaRankingItem = {
+  chave: string; rotulo: string; sessoes: number;
+  /** % das sessões que converteram (0–1) */ taxa: number; contatos: number;
+  /** engajamento (0–1); Cidades não tem */ engajamento?: number;
+};
+
+/**
+ * Card ranqueado do 2º mock (Cidades / Qualidade por canal / Página de entrada):
+ * cabeçalho com caixa de ícone, título grande, sub e "Ver todas"; divisor; linhas
+ * com círculo da posição, nome + sessões, barra, e a linha de indicadores. Em
+ * `modo="cidade"` a taxa vai com seta ao lado da barra; nos demais, engajamento
+ * entra na linha de indicadores.
+ */
+function CardRanking({ icone, titulo, sub, itens, modo = 'canal', limite = 5 }: {
+  icone: ElementType; titulo: string; sub: string; itens: LinhaRankingItem[]; modo?: 'cidade' | 'canal'; limite?: number;
+}) {
+  const [todas, setTodas] = useState(false);
+  if (itens.length === 0) return null;
+  const visiveis = todas ? itens : itens.slice(0, limite);
+  const max = Math.max(1, ...itens.map(i => i.sessoes));
+  const Icone = icone;
+  return (
+    <section className={cx(SUPERFICIE, 'flex flex-col')}>
+      <div className="flex items-center justify-between gap-3 px-5 py-5">
+        <div className="flex min-w-0 items-center gap-4">
+          <span className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-xl 2xl:h-14 2xl:w-14" style={{ background: `${VERDE}14`, color: VERDE, boxShadow: `inset 0 0 0 1px ${VERDE}66, 0 0 18px ${VERDE}22` }}>
+            <Icone className="h-6 w-6" />
+          </span>
+          <div className="min-w-0">
+            <h4 className="text-lg font-bold leading-tight text-[#f4f7f8] 2xl:text-xl">{titulo}</h4>
+            <p className="mt-1 text-xs leading-snug text-[#a7b0b6] 2xl:text-[13px]">{sub}</p>
+          </div>
+        </div>
+        {itens.length > limite && (
+          <button
+            type="button"
+            onClick={() => setTodas(v => !v)}
+            className="inline-flex h-9 shrink-0 items-center gap-1 whitespace-nowrap rounded-lg border px-3 text-xs font-semibold transition-colors hover:bg-white/[0.06] 2xl:h-10 2xl:text-[13px]"
+            style={{ color: VERDE, borderColor: `${VERDE}66` }}
+          >
+            {todas ? 'Ver menos' : 'Ver todas'} <ChevronRight className={cx('h-4 w-4 transition-transform', todas && 'rotate-90')} />
+          </button>
+        )}
+      </div>
+      <ul className="divide-y divide-white/[0.06] border-t border-white/[0.06]">
+        {visiveis.map((i, idx) => (
+          <li key={i.chave} className="flex items-start gap-4 px-5 py-4">
+            <span className="mt-1 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-white/[0.12] bg-[#0b1114] text-base font-bold text-[#f4f7f8] tabular-nums">{idx + 1}</span>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-baseline justify-between gap-3">
+                <span className="min-w-0 break-words text-[15px] font-semibold leading-snug text-[#f4f7f8]" title={i.rotulo}>{i.rotulo}</span>
+                <span className="shrink-0 whitespace-nowrap"><b className="text-[15px] font-bold text-[#f4f7f8] tabular-nums">{fmtN(i.sessoes)}</b> <span className="text-[13px] text-[#a7b0b6]">sessões</span></span>
+              </div>
+              <div className="mt-2 flex items-center gap-3">
+                <BarraFina pct={i.sessoes / max} cor={VERDE} />
+                {modo === 'cidade' && (
+                  <span className="inline-flex shrink-0 items-center gap-1 text-[13px] font-bold tabular-nums" style={{ color: i.taxa > 0 ? VERDE : '#a7b0b6' }}>
+                    {i.taxa > 0 ? <ArrowUp className="h-3.5 w-3.5" /> : <ArrowRight className="h-3.5 w-3.5" />}{fmtPct(i.taxa)}
+                  </span>
+                )}
+              </div>
+              <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[13px] text-[#a7b0b6]">
+                {modo === 'canal' && i.engajamento !== undefined && (
+                  <>
+                    <span className="inline-flex items-center gap-1.5"><BarChart2 className="h-3.5 w-3.5" /> Engajamento <b className="font-bold" style={{ color: VERDE }}>{fmtPct(i.engajamento)}</b></span>
+                    <span className="text-[#5c666c]">•</span>
+                  </>
+                )}
+                <span className="inline-flex items-center gap-1.5"><Users className="h-3.5 w-3.5" /> {fmtN(i.contatos)} contato(s)</span>
+                <span className="text-[#5c666c]">•</span>
+                <span>Converteu <b className={cx('font-bold', modo === 'canal' ? '' : 'text-[#f4f7f8]')} style={modo === 'canal' ? { color: VERDE } : undefined}>{fmtPct(i.taxa)}</b></span>
+              </p>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+/** Converte segmentos do GA4 (cidade, canal, página) na linha do CardRanking. */
+function linhasRanking(linhas: Ga4Seg[], comEngajamento: boolean): LinhaRankingItem[] {
+  const cont = contador(linhas);
+  return linhas.map(s => ({
+    chave: `${s.valor}|${s.sub ?? ''}`, rotulo: s.valor || '(sem nome)', sessoes: s.sessoes,
+    taxa: div(s.sessoesConv, s.sessoes), contatos: cont(s),
+    engajamento: comEngajamento ? div(s.engajadas, s.sessoes) : undefined,
+  }));
+}
+
 /** Grade dia da semana × hora: cor = sessões ou conversões. */
 function MapaSemanaHora({ celulas }: { celulas: Ga4Celula[] }) {
   const [modo, setModo] = useState<'sessoes' | 'conversoes'>('conversoes');
@@ -433,30 +523,39 @@ function MapaSemanaHora({ celulas }: { celulas: Ga4Celula[] }) {
   const pico = porHora.indexOf(Math.max(...porHora));
   return (
     <Card>
-      <Titulo
-        dica={`No fuso horário da propriedade GA4. Pico de ${modo === 'sessoes' ? 'visitas' : 'conversões'}: ${pico}h.`}
+      <CabecalhoIcone
+        icone={CalendarDays}
+        titulo="Dia da semana e hora"
+        sub={`No fuso horário da propriedade GA4. Pico de ${modo === 'sessoes' ? 'visitas' : 'conversões'}: ${pico}h.`}
         direita={(
-          <div className="flex overflow-hidden rounded-md border border-white/10 text-[10px] font-bold">
+          <div className="flex rounded-full border border-white/[0.1] bg-white/[0.03] p-1 text-xs font-bold">
             {(['conversoes', 'sessoes'] as const).map(m => (
-              <button key={m} type="button" onClick={() => setModo(m)} className={`px-2 py-1 ${modo === m ? 'bg-[#6cff2f] text-black' : 'text-[#9aa4aa]'}`}>{m === 'sessoes' ? 'Visitas' : 'Conversões'}</button>
+              <button
+                key={m}
+                type="button"
+                onClick={() => setModo(m)}
+                className={cx('rounded-full px-4 py-1.5 transition-colors', modo === m ? 'text-black' : 'text-[#a7b0b6] hover:text-[#f4f7f8]')}
+                style={modo === m ? { background: VERDE, boxShadow: `0 0 16px ${VERDE}66` } : undefined}
+              >
+                {m === 'sessoes' ? 'Visitas' : 'Conversões'}
+              </button>
             ))}
           </div>
-        )}>
-        Dia da semana e hora
-      </Titulo>
+        )}
+      />
       <div className="overflow-x-auto">
-        <div className="grid min-w-[560px] gap-[2px]" style={{ gridTemplateColumns: '32px repeat(24, minmax(0, 1fr))' }}>
+        <div className="grid min-w-[760px] gap-1" style={{ gridTemplateColumns: '36px repeat(24, minmax(0, 1fr))' }}>
           <div />
-          {Array.from({ length: 24 }, (_, h) => <div key={h} className="text-center text-[9px] text-[#6c767c]">{h % 3 === 0 ? h : ''}</div>)}
+          {Array.from({ length: 24 }, (_, h) => <div key={h} className="pb-1 text-center text-[11px] text-[#a7b0b6] tabular-nums">{h}</div>)}
           {DIAS.map((d, dia) => (
             <div key={d} className="contents">
-              <div className="text-[10px] leading-4 text-[#9aa4aa]">{d}</div>
+              <div className="pr-2 text-right text-[11px] leading-5 text-[#a7b0b6]">{d}</div>
               {Array.from({ length: 24 }, (_, h) => {
                 const c = grade.get(`${dia}|${h}`);
                 const v = c?.[modo] ?? 0;
                 return (
-                  <div key={h} className="h-4 rounded-[2px]" title={`${d} ${h}h · ${fmtN(c?.sessoes ?? 0)} visitas · ${fmtN(c?.conversoes ?? 0)} conversões`}
-                    style={{ background: v > 0 ? `rgba(108,255,47,${0.12 + 0.88 * (v / max)})` : 'rgba(255,255,255,0.04)' }} />
+                  <div key={h} className="h-5 rounded-[5px]" title={`${d} ${h}h · ${fmtN(c?.sessoes ?? 0)} visitas · ${fmtN(c?.conversoes ?? 0)} conversões`}
+                    style={{ background: v > 0 ? `rgba(108,255,47,${0.18 + 0.82 * (v / max)})` : 'rgba(255,255,255,0.06)' }} />
                 );
               })}
             </div>
@@ -1032,9 +1131,9 @@ export function Ga4LandingPanel({ dados, loading, aviso }: { dados: Ga4Consolida
 
   // Seção sem dado nenhum não aparece.
   const temPago = pago.googleAds.length + pago.campanhas.length + pago.palavras.length + pago.termos.length > 0 || semVinculoAds;
-  const temAudiencia = au.dispositivos.length + au.cidades.length + au.novosRecorrentes.length + au.idades.length + au.generos.length + au.semanaHora.length > 0;
-  const temOrigem = canais.length > 0 || origens.length > 0;
   const temEntrada = co.paginasEntrada.length > 0;
+  const temAudiencia = au.dispositivos.length + au.cidades.length + au.novosRecorrentes.length + au.idades.length + au.generos.length + au.semanaHora.length + canais.length + co.paginasEntrada.length > 0;
+  const temOrigem = canais.length === 0 && origens.length > 0;
   const temForm = co.funil.formInicio + co.funil.leadForm + co.funil.leadConfirmado > 0;
   const temExtras = temForm || dados.posicoes.length > 0 || dados.detalhes.some(d => d.linhas.length > 0) || co.secoes.length > 0 || co.videos.length > 0;
   const temRolagem = co.rolagem.length > 0 && a.usuarios > 0;
@@ -1122,8 +1221,8 @@ export function Ga4LandingPanel({ dados, loading, aviso }: { dados: Ga4Consolida
       {temAudiencia && (
         <>
           <CabecalhoIcone className="mb-0 mt-1" icone={Users} titulo="Audiência" sub="Entenda quem visita seu site e como eles se comportam." />
-          {(au.dispositivos.length > 0 || au.novosRecorrentes.length > 0 || au.cidades.length > 0) && (
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {(au.dispositivos.length > 0 || au.novosRecorrentes.length > 0) && (
+            <div className="grid gap-4 md:grid-cols-2">
               {au.dispositivos.length > 0 && (
                 <Card>
                   <CabecalhoIcone icone={Smartphone} titulo="Dispositivo" sub="Sessões por aparelho e % das sessões que converteram em cada um." />
@@ -1136,20 +1235,24 @@ export function Ga4LandingPanel({ dados, loading, aviso }: { dados: Ga4Consolida
                   <Empilhada linhas={au.novosRecorrentes.map(traduz(NOVOS))} />
                 </Card>
               )}
+            </div>
+          )}
+          {/* 2º mock: Cidades · Qualidade por canal · Página de entrada numa linha só */}
+          {(au.cidades.length > 0 || canais.length > 0 || temEntrada) && (
+            <div className="grid items-stretch gap-4 md:grid-cols-2 xl:grid-cols-3">
               {au.cidades.length > 0 && (
-                <Card>
-                  <CabecalhoIcone icone={MapPin} titulo="Cidades" sub="Cidades com mais sessões." />
-                  <ListaRanking barraEmbaixo limite={3} itens={au.cidades.map(s => {
-                    const c = contador(au.cidades)(s);
-                    return {
-                      chave: `${s.valor}|${s.sub ?? ''}`, rotulo: s.valor || '(sem nome)', valor: s.sessoes, numero: fmtN(s.sessoes), unidade: 'sessões',
-                      sub: <>{fmtN(c)} contato(s) · converteu <b className="text-[#dce4e8]">{fmtPct(div(s.sessoesConv, s.sessoes))}</b></>,
-                    };
-                  })} />
-                </Card>
+                <CardRanking icone={MapPin} titulo="Cidades" sub="Cidades com mais sessões do seu site." modo="cidade" itens={linhasRanking(au.cidades, false)} />
+              )}
+              {canais.length > 0 && (
+                <CardRanking icone={BarChart3} titulo="Qualidade por canal" sub="Engajamento e conversão por canal de aquisição." itens={linhasRanking(canais, true)} />
+              )}
+              {temEntrada && (
+                <CardRanking icone={FileText} titulo="Página de entrada" sub="Páginas por onde mais gente entrou no seu site." itens={linhasRanking(co.paginasEntrada, true)} />
               )}
             </div>
           )}
+          {/* 3º mock: mapa de dia da semana × hora logo abaixo */}
+          <MapaSemanaHora celulas={au.semanaHora} />
           {au.idades.length + au.generos.length > 0 && (
             <div className="grid gap-4 md:grid-cols-2">
               {au.idades.length > 0 && (
@@ -1163,7 +1266,6 @@ export function Ga4LandingPanel({ dados, loading, aviso }: { dados: Ga4Consolida
           {au.idades.length + au.generos.length === 0 && (
             <p className="text-[11px] text-[#7c868c]">Idade e gênero não aparecem: o GA4 esconde com pouco volume ou sem Google Signals ligado.</p>
           )}
-          <MapaSemanaHora celulas={au.semanaHora} />
         </>
       )}
 
@@ -1171,34 +1273,21 @@ export function Ga4LandingPanel({ dados, loading, aviso }: { dados: Ga4Consolida
       {temComportamento && (
         <>
           <GrupoTitulo titulo="Comportamento" />
-          {(temOrigem || temEntrada) && (
-            <div className={cx('grid gap-4', temOrigem && temEntrada && 'md:grid-cols-2')}>
-              {canais.length > 0 ? (
-                <Card>
-                  <Titulo dica="Engajamento mostra se o clique é de gente interessada; converteu = % das sessões com contato.">Qualidade por canal</Titulo>
-                  <ListaBarras itens={barrasSeg(canais, { engaj: true })} />
-                </Card>
-              ) : origens.length > 0 && (
-                <Card>
-                  <Titulo dica={origensTemConv ? 'Conversões (eventos-chave do GA4) por origem / mídia.' : 'Sessões por origem / mídia.'}>
-                    {origensTemConv ? 'De onde vêm as conversões' : 'De onde vêm as sessões'}
-                  </Titulo>
-                  <ListaBarras itens={origens.map(o => ({
-                    chave: `${o.origem}/${o.midia}`, rotulo: o.origem, sub: o.midia,
-                    valor: origensTemConv ? o.contatos : o.sessoes,
-                    direita: origensTemConv
-                      ? <><span className="font-bold text-[#f4f7f8]">{fmtN(o.contatos)}</span><span className="ml-1 text-[11px] text-[#7c868c]">conv.</span></>
-                      : <><span className="font-bold text-[#f4f7f8]">{fmtN(o.sessoes)}</span><span className="ml-1 text-[11px] text-[#7c868c]">sessões</span></>,
-                    extra: origensTemConv ? <>{fmtN(o.sessoes)} sessões</> : undefined,
-                  }))} />
-                </Card>
-              )}
-              {temEntrada && (
-                <Card>
-                  <Titulo dica="Páginas por onde mais gente entrou.">Página de entrada</Titulo>
-                  <ListaBarras itens={barrasSeg(co.paginasEntrada, { engaj: true })} />
-                </Card>
-              )}
+          {canais.length === 0 && origens.length > 0 && (
+            <div className="grid gap-4 md:grid-cols-2">
+              <Card>
+                <Titulo dica={origensTemConv ? 'Conversões (eventos-chave do GA4) por origem / mídia.' : 'Sessões por origem / mídia.'}>
+                  {origensTemConv ? 'De onde vêm as conversões' : 'De onde vêm as sessões'}
+                </Titulo>
+                <ListaBarras itens={origens.map(o => ({
+                  chave: `${o.origem}/${o.midia}`, rotulo: o.origem, sub: o.midia,
+                  valor: origensTemConv ? o.contatos : o.sessoes,
+                  direita: origensTemConv
+                    ? <><span className="font-bold text-[#f4f7f8]">{fmtN(o.contatos)}</span><span className="ml-1 text-[11px] text-[#7c868c]">conv.</span></>
+                    : <><span className="font-bold text-[#f4f7f8]">{fmtN(o.sessoes)}</span><span className="ml-1 text-[11px] text-[#7c868c]">sessões</span></>,
+                  extra: origensTemConv ? <>{fmtN(o.sessoes)} sessões</> : undefined,
+                }))} />
+              </Card>
             </div>
           )}
           <Rolagem linhas={co.rolagem} visitantes={a.usuarios} />
