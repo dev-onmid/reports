@@ -7998,7 +7998,7 @@ export default function GeneralDashboard() {
                         // Lei 1/3 (lead-contagem.ts): com planilha/CRM externo, o número
                         // é o do CRM validado — as plataformas viram nota de rodapé.
                         fonte={topoEhCrm ? 'CRM (planilha / integração)' : 'Meta + Google (plataformas)'}
-                        fonteTitulo={topoEhCrm ? 'Leads validados: planilha, CRM externo, formulário e chat com rastro de anúncio — unidos por telefone' : 'Leads do Meta Ads + conversões do Google Ads, como as plataformas reportam'}
+                        fonteTitulo={topoEhCrm ? 'Leads validados: planilha, CRM externo, formulário e chat com rastro de anúncio (o chat inteiro quando o cliente não tem importação) — unidos por telefone' : 'Leads do Meta Ads + conversões do Google Ads, como as plataformas reportam'}
                         metaMes={leadsGoal}
                         esperado={effectiveLeadsGoal}
                         realizado={topoEhCrm ? funnelTopo : totalLeads}

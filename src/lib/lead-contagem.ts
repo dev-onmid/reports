@@ -11,8 +11,13 @@
  * Regra de contagem:
  *   planilha / crm_externo / formulario → contam SEMPRE (já filtrados na entrada:
  *     o relatório da clínica e o CRM externo só trazem o que passa pelo filtro deles)
- *   chat → conta SÓ com rastro de tráfego pago (CTWA, código do link /r/, gclid,
- *     fbclid, UTM de campanha). Conversa sem rastro não é mérito nosso.
+ *   chat → depende do CLIENTE (Lei 3, reafirmada pelo Matheus em 2026-09-24):
+ *     · cliente que TEM porta validada (alguma planilha/CRM externo/formulário
+ *       na base): chat conta SÓ com rastro de tráfego pago (CTWA, código do link
+ *       /r/, gclid, fbclid, UTM de campanha) — a conversa sem rastro é o que a
+ *       planilha já trouxe, ou não é mérito nosso;
+ *     · cliente SEM porta validada (Empas, Tokiomaki, Tapeçaria, Meta Pizzaria…
+ *       — o CRM deles É o WhatsApp do Evolution): o chat inteiro são os leads.
  *   manual → não conta.
  * Tudo unido por telefone (régua única de identidade): quem está na planilha E
  * no chat é um lead só — e a porta "validada" vence a do chat.
@@ -74,10 +79,26 @@ export function naoLeadSql(alias = ''): string {
   return `COALESCE(lower(btrim(${col(alias, 'status')})) IN ('paciente', 'não lead', 'nao lead', 'já é cliente', 'ja e cliente'), FALSE)`;
 }
 
+/**
+ * Clientes que TÊM porta validada (base inteira, não só o período): é o que
+ * decide se o chat precisa de rastro. Subquery NÃO correlacionada de propósito —
+ * o Postgres a avalia UMA vez (hashed SubPlan); uma EXISTS correlacionada por
+ * linha varreria o cliente inteiro a cada lead dentro de um COUNT FILTER.
+ * `client_id IS NOT NULL` porque um NULL no NOT IN anularia o predicado todo.
+ */
+export function clientesComPortaValidadaSql(): string {
+  return `(SELECT v.client_id FROM public.crm_leads v WHERE v.client_id IS NOT NULL AND ${portaValidadaSql('v')} GROUP BY v.client_id)`;
+}
+
+/** Chat que conta: com rastro pago, OU o cliente não tem porta validada (o chat É o CRM dele). */
+function chatContaSql(alias = ''): string {
+  return `(${rastroPagoSql(alias)} OR ${col(alias, 'client_id')} NOT IN ${clientesComPortaValidadaSql()})`;
+}
+
 /** Predicado: o lead CONTA na dashboard. */
 export function leadContaSql(alias = ''): string {
   const p = portaSql(alias);
-  return `(NOT (${naoLeadSql(alias)} AND NOT ${rastroPagoSql(alias)}) AND ((${p}) IN ('planilha', 'crm_externo', 'formulario') OR ((${p}) = 'chat' AND ${rastroPagoSql(alias)})))`;
+  return `(NOT (${naoLeadSql(alias)} AND NOT ${rastroPagoSql(alias)}) AND ((${p}) IN ('planilha', 'crm_externo', 'formulario') OR ((${p}) = 'chat' AND ${chatContaSql(alias)})))`;
 }
 
 /**
@@ -85,10 +106,11 @@ export function leadContaSql(alias = ''): string {
  * 2026-09-24: "só os qualificados para o funil, mesmas regras". Difere da
  * dashboard num ponto, de propósito: lead criado À MÃO no CRM continua
  * visível (senão o gestor cria e ele some no próximo poll). O que sai é o chat
- * do Evolution sem rastro pago e o não-lead sem rastro.
+ * do Evolution sem rastro pago — só em cliente que TEM porta validada (Lei 3:
+ * sem importação, o chat é o CRM e fica inteiro) — e o não-lead sem rastro.
  */
 export function leadVisivelCrmSql(alias = ''): string {
-  return `(NOT ((${portaSql(alias)}) = 'chat' AND NOT ${rastroPagoSql(alias)}) AND NOT (${naoLeadSql(alias)} AND NOT ${rastroPagoSql(alias)}))`;
+  return `(NOT ((${portaSql(alias)}) = 'chat' AND NOT ${chatContaSql(alias)}) AND NOT (${naoLeadSql(alias)} AND NOT ${rastroPagoSql(alias)}))`;
 }
 
 /** Predicado: porta validada (planilha/CRM externo/formulário) — decide se o topo do funil é o CRM (Lei 1) ou as plataformas (Lei 3). */

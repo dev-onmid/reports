@@ -1,6 +1,6 @@
 import type { NextRequest } from 'next/server';
 import { parseRecorte, filtroRegiaoSql, type ContagemRegioes } from '@/lib/regiao-recorte';
-import { ENSURE_COLUNAS_CONTAGEM, leadContaSql, portaValidadaSql, rastroPagoSql } from '@/lib/lead-contagem';
+import { ENSURE_COLUNAS_CONTAGEM, leadContaSql, rastroPagoSql } from '@/lib/lead-contagem';
 import { makeServerPool } from '@/lib/server-db';
 import {
   contarFunil,
@@ -105,7 +105,9 @@ export async function GET(req: NextRequest) {
       const { rows: cont } = await pool.query(
         `SELECT client_id,
                 COUNT(*) FILTER (WHERE NOT ${leadContaSql()})::int AS fora,
-                COUNT(*) FILTER (WHERE ${portaValidadaSql()})::int AS validados
+                -- "validados" = leads que CONTAM (Lei 3): decide se o topo do funil é o CRM.
+                -- Cliente só-chat (sem importação) tem contatos > 0 aqui e o topo é o CRM dele.
+                COUNT(*) FILTER (WHERE ${leadContaSql()})::int AS validados
            FROM public.crm_leads
           WHERE COALESCE(registro_tipo, 'hibrido') <> 'venda' ${dateFilter}
           GROUP BY client_id`,
