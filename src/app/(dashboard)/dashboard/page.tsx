@@ -36,19 +36,17 @@ import type { ReactNode } from 'react';
 import Link from 'next/link';
 import {
   AlertTriangle, ChevronDown, ChevronUp, ChevronRight, GripVertical, ImageIcon,
-  LayoutDashboard, LayoutTemplate, Play, RefreshCw, Search, Sparkles, Check, X,
-  Pause, CircleDot, Pencil, Settings2, Users, Copy,
+  LayoutDashboard, LayoutTemplate, Play, RefreshCw, Search, Check, X,
+  CircleDot,   Users,
   Bell, DollarSign, Tag, TrendingUp, Calendar, BarChart3, Zap, Target, Briefcase,
   Wallet, MousePointerClick, CreditCard, PiggyBank, Clock, Info, Lightbulb, UserPlus, CheckCircle2, Receipt,
   Eye, Heart, Monitor, ExternalLink, Bookmark, MessageCircle, Repeat,
 } from 'lucide-react';
 import { getAuthSession } from '@/lib/auth-store';
-import type { AdSet, AdSetWithMetrics } from '@/app/api/meta/campaigns/[id]/adsets/route';
-import type { MetaAd } from '@/app/api/meta/campaigns/[id]/ads/route';
+import type { AdSetWithMetrics } from '@/app/api/meta/campaigns/[id]/adsets/route';
 import type { MetaAdWithMetrics } from '@/app/api/meta/adsets/[id]/ads/route';
 import type { GoogleAdGroup } from '@/app/api/google/campaigns/[id]/adgroups/route';
 import type { GoogleAd } from '@/app/api/google/adgroups/[id]/ads/route';
-import type { CopyVariation } from '@/app/api/ai/copy/route';
 import {
   DndContext, closestCenter, KeyboardSensor, PointerSensor,
   useSensor, useSensors, type DragEndEvent,
@@ -1532,390 +1530,10 @@ function CampaignStatusDot({ status }: { status: string }) {
 
 // ─── Campaign Optimize Drawer ─────────────────────────────────────────────────
 
-function CampaignOptimizeDrawer({ campaign, onClose }: { campaign: CampaignPerformance; onClose: () => void }) {
-  const [tab, setTab] = useState<'publico' | 'copy'>('publico');
-
-  // Audience state
-  const [adsets, setAdsets] = useState<AdSet[]>([]);
-  const [adsetsLoading, setAdsetsLoading] = useState(false);
-  const [savingAdset, setSavingAdset] = useState<string | null>(null);
-  const [adsetMsg, setAdsetMsg] = useState<Record<string, string>>({});
-  const [editedTargeting, setEditedTargeting] = useState<Record<string, AdSet>>({});
-
-  // Copy state
-  const [ads, setAds] = useState<MetaAd[]>([]);
-  const [adsLoading, setAdsLoading] = useState(false);
-  const [copyLoading, setCopyLoading] = useState(false);
-  const [variations, setVariations] = useState<CopyVariation[]>([]);
-  const [copyError, setCopyError] = useState('');
-  const [creatingAd, setCreatingAd] = useState<string | null>(null);
-  const [createMsg, setCreateMsg] = useState('');
-
-  useEffect(() => {
-    if (campaign.platform !== 'meta') return;
-    setAdsetsLoading(true);
-    fetch(`/api/meta/campaigns/${campaign.id}/adsets?connectionId=${campaign.connectionId}`)
-      .then(r => r.json() as Promise<AdSet[]>)
-      .then(data => { setAdsets(data); setEditedTargeting(Object.fromEntries(data.map(s => [s.id, { ...s }]))); })
-      .finally(() => setAdsetsLoading(false));
-  }, [campaign.id, campaign.connectionId, campaign.platform]);
-
-  useEffect(() => {
-    if (tab !== 'copy' || campaign.platform !== 'meta') return;
-    if (ads.length > 0) return;
-    setAdsLoading(true);
-    fetch(`/api/meta/campaigns/${campaign.id}/ads?connectionId=${campaign.connectionId}`)
-      .then(r => r.json() as Promise<MetaAd[]>)
-      .then(setAds)
-      .finally(() => setAdsLoading(false));
-  }, [tab, campaign.id, campaign.connectionId, campaign.platform, ads.length]);
-
-  async function saveTargeting(adset: AdSet) {
-    const edited = editedTargeting[adset.id];
-    if (!edited) return;
-    setSavingAdset(adset.id);
-    setAdsetMsg(p => ({ ...p, [adset.id]: '' }));
-    const res = await fetch(`/api/meta/adsets/${adset.id}/targeting`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ connectionId: campaign.connectionId, targeting: edited.targeting, daily_budget: edited.daily_budget }),
-    });
-    const data = await res.json() as { ok?: boolean; error?: string };
-    setAdsetMsg(p => ({ ...p, [adset.id]: res.ok ? '✓ Salvo' : (data.error ?? 'Erro') }));
-    setSavingAdset(null);
-  }
-
-  function patchTargeting(adsetId: string, patch: Partial<AdSet['targeting']>) {
-    setEditedTargeting(p => ({
-      ...p,
-      [adsetId]: { ...p[adsetId], targeting: { ...p[adsetId].targeting, ...patch } },
-    }));
-  }
-
-  async function generateCopy() {
-    setCopyLoading(true);
-    setCopyError('');
-    setVariations([]);
-    const res = await fetch('/api/ai/copy', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        campaignName: campaign.name,
-        platform: campaign.platform,
-        currentAds: ads.map(a => ({ name: a.name, body: a.body ?? '', title: a.title ?? '' })),
-        metrics: { spend: campaign.spend, leads: campaign.leads, ctr: campaign.ctr, cpl: campaign.cpl },
-      }),
-    });
-    const data = await res.json() as CopyVariation[] | { error: string };
-    if (!res.ok) { setCopyError((data as { error: string }).error); }
-    else setVariations(data as CopyVariation[]);
-    setCopyLoading(false);
-  }
-
-  async function useVariation(v: CopyVariation, sourceAd: MetaAd, pauseOld: boolean) {
-    if (!sourceAd.creativeId) { setCreateMsg('Anúncio sem criativo identificado.'); return; }
-    const firstAdset = adsets[0];
-    if (!firstAdset) { setCreateMsg('Nenhum conjunto de anúncios encontrado.'); return; }
-    setCreatingAd(v.body);
-    setCreateMsg('');
-    const res = await fetch(`/api/meta/campaigns/${campaign.id}/create-ad`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        connectionId: campaign.connectionId,
-        accountId: campaign.accountId,
-        adsetId: firstAdset.id,
-        sourceCreativeId: sourceAd.creativeId,
-        newBody: v.body,
-        newTitle: v.title,
-        pauseSourceAdId: pauseOld ? sourceAd.id : undefined,
-      }),
-    });
-    const data = await res.json() as { ok?: boolean; newAdId?: string; error?: string };
-    setCreateMsg(res.ok ? `✓ Anúncio criado (ID: ${data.newAdId})` : (data.error ?? 'Erro ao criar anúncio.'));
-    setCreatingAd(null);
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 flex">
-      <div className="absolute inset-0 bg-black/60" onClick={onClose} />
-      <div className="relative ml-auto h-full w-full max-w-[520px] bg-background border-l border-border flex flex-col shadow-2xl">
-        {/* Header */}
-        <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-border shrink-0">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              {campaign.platform === 'meta' ? <MetaMark /> : <GoogleMark />}
-              <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Otimizar campanha</p>
-            </div>
-            <p className="mt-1 text-sm font-bold truncate">{campaign.name}</p>
-          </div>
-          <button type="button" onClick={onClose} className="shrink-0 text-muted-foreground hover:text-foreground transition-colors">
-            <X className="h-5 w-5" />
-          </button>
-        </div>
-
-        {campaign.platform === 'google' && (
-          <div className="px-5 py-8 text-sm text-muted-foreground text-center">
-            Edição de público e copy disponível apenas para Meta Ads no momento.
-          </div>
-        )}
-
-        {campaign.platform === 'meta' && (
-          <>
-            {/* Tabs */}
-            <div className="flex border-b border-border shrink-0">
-              {([['publico', Users, 'Público'], ['copy', Copy, 'Copy IA']] as const).map(([id, Icon, label]) => (
-                <button
-                  key={id}
-                  type="button"
-                  onClick={() => setTab(id)}
-                  className={cn(
-                    'flex items-center gap-2 px-5 py-3 text-xs font-bold uppercase tracking-wider border-b-2 transition-colors',
-                    tab === id ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground',
-                  )}
-                >
-                  <Icon className="h-3.5 w-3.5" />
-                  {label}
-                </button>
-              ))}
-            </div>
-
-            {/* Content */}
-            <div className="flex-1 overflow-y-auto p-5 space-y-6">
-
-              {/* ── Público tab ── */}
-              {tab === 'publico' && (
-                <>
-                  {adsetsLoading && (
-                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                      <RefreshCw className="h-4 w-4 animate-spin" /> Carregando conjuntos...
-                    </div>
-                  )}
-                  {!adsetsLoading && adsets.length === 0 && (
-                    <p className="text-sm text-muted-foreground">Nenhum conjunto de anúncios encontrado.</p>
-                  )}
-                  {adsets.map((adset) => {
-                    const edited = editedTargeting[adset.id] ?? adset;
-                    const t = edited.targeting;
-                    const countries = t.geo_locations?.countries ?? [];
-                    const interests = (t.flexible_spec ?? []).flatMap(s => s.interests ?? []);
-                    return (
-                      <div key={adset.id} className="rounded-xl border border-border bg-card p-4 space-y-4">
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <p className="text-sm font-bold">{adset.name}</p>
-                            <CampaignStatusDot status={adset.status} />
-                          </div>
-                          {adset.daily_budget != null && (
-                            <span className="text-xs text-muted-foreground">Verba: {formatCurrencyBRL(edited.daily_budget ?? adset.daily_budget ?? 0)}/dia</span>
-                          )}
-                        </div>
-
-                        {/* Budget */}
-                        {adset.daily_budget != null && (
-                          <div className="space-y-1">
-                            <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Orçamento diário (R$)</label>
-                            <input
-                              type="number"
-                              min={1}
-                              value={edited.daily_budget ?? adset.daily_budget ?? ''}
-                              onChange={e => setEditedTargeting(p => ({ ...p, [adset.id]: { ...p[adset.id], daily_budget: Number(e.target.value) } }))}
-                              className="w-full h-9 rounded-lg border border-border bg-background px-3 text-sm outline-none focus:ring-1 focus:ring-primary"
-                            />
-                          </div>
-                        )}
-
-                        {/* Age */}
-                        <div className="space-y-1">
-                          <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Faixa etária</label>
-                          <div className="flex items-center gap-2">
-                            <input
-                              type="number" min={13} max={65}
-                              value={t.age_min ?? 18}
-                              onChange={e => patchTargeting(adset.id, { age_min: Number(e.target.value) })}
-                              className="w-20 h-9 rounded-lg border border-border bg-background px-3 text-sm outline-none focus:ring-1 focus:ring-primary"
-                            />
-                            <span className="text-xs text-muted-foreground">até</span>
-                            <input
-                              type="number" min={13} max={65}
-                              value={t.age_max ?? 65}
-                              onChange={e => patchTargeting(adset.id, { age_max: Number(e.target.value) })}
-                              className="w-20 h-9 rounded-lg border border-border bg-background px-3 text-sm outline-none focus:ring-1 focus:ring-primary"
-                            />
-                            <span className="text-[10px] text-muted-foreground">anos</span>
-                          </div>
-                        </div>
-
-                        {/* Gender */}
-                        <div className="space-y-1">
-                          <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Gênero</label>
-                          <div className="flex gap-2">
-                            {[{ label: 'Todos', val: [] }, { label: 'Masculino', val: [1] }, { label: 'Feminino', val: [2] }].map(opt => {
-                              const active = JSON.stringify(t.genders ?? []) === JSON.stringify(opt.val);
-                              return (
-                                <button
-                                  key={opt.label}
-                                  type="button"
-                                  onClick={() => patchTargeting(adset.id, { genders: opt.val })}
-                                  className={cn(
-                                    'px-3 py-1.5 rounded-lg border text-xs font-semibold transition-colors',
-                                    active ? 'border-primary/40 bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:bg-muted/50',
-                                  )}
-                                >{opt.label}</button>
-                              );
-                            })}
-                          </div>
-                        </div>
-
-                        {/* Countries */}
-                        <div className="space-y-1">
-                          <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Países</label>
-                          <div className="flex flex-wrap gap-1.5">
-                            {countries.map(c => (
-                              <span key={c} className="flex items-center gap-1 rounded-full bg-muted/50 px-2.5 py-0.5 text-xs font-semibold">
-                                {c}
-                                <button type="button" onClick={() => patchTargeting(adset.id, { geo_locations: { ...t.geo_locations, countries: countries.filter(x => x !== c) } })}>
-                                  <X className="h-2.5 w-2.5" />
-                                </button>
-                              </span>
-                            ))}
-                            <input
-                              placeholder="+ código (ex: BR)"
-                              className="h-6 w-24 rounded-full border border-dashed border-border bg-background px-2 text-xs outline-none focus:ring-1 focus:ring-primary"
-                              onKeyDown={e => {
-                                if (e.key === 'Enter') {
-                                  const val = (e.target as HTMLInputElement).value.trim().toUpperCase();
-                                  if (val && !countries.includes(val)) {
-                                    patchTargeting(adset.id, { geo_locations: { ...t.geo_locations, countries: [...countries, val] } });
-                                  }
-                                  (e.target as HTMLInputElement).value = '';
-                                }
-                              }}
-                            />
-                          </div>
-                        </div>
-
-                        {/* Interests (read-only) */}
-                        {interests.length > 0 && (
-                          <div className="space-y-1">
-                            <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Interesses (somente leitura)</label>
-                            <div className="flex flex-wrap gap-1.5">
-                              {interests.map(i => (
-                                <span key={i.id} className="rounded-full bg-muted/30 px-2.5 py-0.5 text-xs text-muted-foreground">{i.name}</span>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-
-                        <div className="flex items-center gap-3">
-                          <button
-                            type="button"
-                            disabled={savingAdset === adset.id}
-                            onClick={() => saveTargeting(adset)}
-                            className="flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-xs font-bold uppercase tracking-wider text-black hover:bg-primary/90 disabled:opacity-50"
-                          >
-                            {savingAdset === adset.id ? <RefreshCw className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
-                            Salvar alterações
-                          </button>
-                          {adsetMsg[adset.id] && (
-                            <span className={cn('text-xs font-semibold', adsetMsg[adset.id].startsWith('✓') ? 'text-emerald-400' : 'text-red-400')}>
-                              {adsetMsg[adset.id]}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </>
-              )}
-
-              {/* ── Copy IA tab ── */}
-              {tab === 'copy' && (
-                <div className="space-y-5">
-                  {/* Current ads */}
-                  {adsLoading && <div className="flex items-center gap-2 text-sm text-muted-foreground"><RefreshCw className="h-4 w-4 animate-spin" /> Carregando anúncios...</div>}
-                  {!adsLoading && ads.length > 0 && (
-                    <div className="space-y-2">
-                      <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Anúncios atuais</p>
-                      {ads.slice(0, 3).map(ad => (
-                        <div key={ad.id} className="rounded-lg border border-border bg-card p-3 space-y-1">
-                          <div className="flex items-center gap-2">
-                            <CampaignStatusDot status={ad.status} />
-                            <p className="text-xs font-semibold truncate">{ad.name}</p>
-                          </div>
-                          {ad.title && <p className="text-xs font-bold text-foreground">{ad.title}</p>}
-                          {ad.body && <p className="text-xs text-muted-foreground line-clamp-2">{ad.body}</p>}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  <button
-                    type="button"
-                    onClick={generateCopy}
-                    disabled={copyLoading}
-                    className="flex items-center gap-2 rounded-lg border border-violet-500/40 bg-violet-500/10 px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-violet-400 hover:bg-violet-500/20 disabled:opacity-50 w-full justify-center"
-                  >
-                    {copyLoading ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
-                    {copyLoading ? 'Gerando variações...' : 'Gerar variações com IA'}
-                  </button>
-                  {copyError && <p className="text-xs text-red-400">{copyError}</p>}
-
-                  {/* Variations */}
-                  {variations.length > 0 && (
-                    <div className="space-y-3">
-                      <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Variações geradas — escolha uma para criar</p>
-                      {variations.map((v, idx) => (
-                        <div key={idx} className="rounded-xl border border-violet-500/20 bg-violet-500/5 p-4 space-y-2">
-                          <p className="text-[10px] font-bold uppercase tracking-wider text-violet-400">Variação {idx + 1}</p>
-                          {v.title && <p className="text-sm font-bold">{v.title}</p>}
-                          <p className="text-sm text-foreground leading-relaxed">{v.body}</p>
-                          <p className="text-[11px] text-muted-foreground italic">{v.rationale}</p>
-                          {ads.length > 0 && (
-                            <div className="flex gap-2 pt-1">
-                              <button
-                                type="button"
-                                disabled={creatingAd === v.body}
-                                onClick={() => useVariation(v, ads[0], false)}
-                                className="flex items-center gap-1 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 text-[10px] font-bold uppercase text-emerald-400 hover:bg-emerald-500/20 disabled:opacity-50"
-                              >
-                                {creatingAd === v.body ? <RefreshCw className="h-3 w-3 animate-spin" /> : <Play className="h-3 w-3" />}
-                                Criar anúncio
-                              </button>
-                              <button
-                                type="button"
-                                disabled={creatingAd === v.body}
-                                onClick={() => useVariation(v, ads[0], true)}
-                                className="flex items-center gap-1 rounded-lg border border-border px-3 py-1.5 text-[10px] font-bold uppercase text-muted-foreground hover:bg-muted/50 disabled:opacity-50"
-                              >
-                                Criar + pausar original
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                      {createMsg && (
-                        <p className={cn('text-xs font-semibold', createMsg.startsWith('✓') ? 'text-emerald-400' : 'text-red-400')}>
-                          {createMsg}
-                        </p>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          </>
-        )}
-      </div>
-    </div>
-  );
-}
-
 // ─── Campaign Performance Table ───────────────────────────────────────────────
 
 type ChildState = { loading: boolean; data: unknown[] };
 
-type RowKind = 'campaign' | 'adset' | 'meta-ad' | 'adgroup' | 'google-ad';
 
 type ExpandableRow =
   | { kind: 'campaign'; key: string; fetchUrl: string; data: CampaignPerformance; level: 0; colorIdx: number }
@@ -1941,32 +1559,6 @@ const CAMPAIGN_ROW_COLORS = [
   '#06b6d4', // ciano
   '#84cc16', // lima
 ];
-
-function PauseActivateBtn({
-  status, busy, onClick, armed,
-}: { status: string; busy: boolean; onClick: () => void; armed?: boolean }) {
-  const isActive = status === 'ACTIVE' || status === 'ENABLED';
-  return (
-    <button
-      type="button"
-      disabled={busy}
-      onClick={onClick}
-      title={armed ? 'Clique de novo para confirmar' : isActive ? 'Pausar' : 'Ativar'}
-      className={cn(
-        'inline-flex h-7 items-center justify-center rounded-lg border transition-colors',
-        armed ? 'px-2' : 'w-7',
-        busy && 'opacity-50 cursor-wait',
-        armed ? 'border-red-500/40 bg-red-500/15 text-red-400 hover:bg-red-500/25'
-        : isActive ? 'border-yellow-500/30 bg-yellow-500/10 text-yellow-400 hover:bg-yellow-500/20'
-                 : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20',
-      )}
-    >
-      {busy ? <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-        : armed ? <span className="whitespace-nowrap text-[10px] font-bold">Confirmar?</span>
-        : isActive ? <Pause className="h-3.5 w-3.5" /> : <CircleDot className="h-3.5 w-3.5" />}
-    </button>
-  );
-}
 
 const MATCH_COLORS: Record<string, string> = {
   'Exata': 'bg-blue-500/15 text-blue-400 border-blue-500/30',
@@ -2116,19 +1708,12 @@ function CampaignPerformanceTable({
   // Tabela de UMA plataforma (o logo já está no título do card): a coluna
   // "Plataforma" só repetia o mesmo ícone em todas as linhas.
   const mostrarPlataforma = new Set(campaigns.map(c => c.platform)).size > 1;
-  const totalColunas = (mostrarIS ? 11 : 8) + (mostrarPlataforma ? 1 : 0);
-  const [actionLoading, setActionLoading] = useState<Record<string, boolean>>({});
-  const [actionError, setActionError] = useState<Record<string, string>>({});
-  const [editingBudget, setEditingBudget] = useState<string | null>(null);
-  const [budgetInput, setBudgetInput] = useState('');
-  const [savingBudget, setSavingBudget] = useState<string | null>(null);
-  // Pausar/ativar campanha em DOIS cliques: o 1º arma o botão ("Confirmar?" por ~3s), o 2º executa.
-  const [armedToggle, setArmedToggle] = useState<string | null>(null);
-  const armedToggleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [optimizeCampaign, setOptimizeCampaign] = useState<CampaignPerformance | null>(null);
+  // Só CONSULTA (pedido do Matheus, 2026-09-24): pausar/ativar, editar verba e
+  // otimizar saíram da dashboard — ação em campanha é no gerenciador/CRM, não
+  // num painel de leitura onde um clique errado pausa a conta do cliente.
+  const totalColunas = (mostrarIS ? 10 : 7) + (mostrarPlataforma ? 1 : 0);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [childrenMap, setChildrenMap] = useState<Record<string, ChildState>>({});
-  const [childStatus, setChildStatus] = useState<Record<string, string>>({});
   const [adPreview, setAdPreview] = useState<{ ad: MetaAdWithMetrics; x: number; y: number } | null>(null);
   const adPreviewTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [tableExpanded, setTableExpanded] = useState(false);
@@ -2215,73 +1800,6 @@ function CampaignPerformanceTable({
     return result;
   }, [campaigns, expanded, childrenMap, periodParams]);
 
-  async function toggleStatus(c: CampaignPerformance) {
-    const isActive = c.status === 'ACTIVE' || c.status === 'ENABLED';
-    setActionLoading(p => ({ ...p, [c.id]: true }));
-    setActionError(p => ({ ...p, [c.id]: '' }));
-    const apiBase = c.platform === 'meta' ? '/api/meta' : '/api/google';
-    const res = await fetch(`${apiBase}/campaigns/${c.id}/action`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: isActive ? 'pause' : 'activate', connectionId: c.connectionId, accountId: c.accountId, loginCustomerId: c.loginCustomerId }),
-    });
-    const data = await res.json() as { ok?: boolean; newStatus?: string; error?: string };
-    if (res.ok && data.newStatus) setCampaigns(prev => prev.map(x => x.id === c.id ? { ...x, status: data.newStatus! } : x));
-    else setActionError(p => ({ ...p, [c.id]: data.error ?? 'Erro.' }));
-    setActionLoading(p => ({ ...p, [c.id]: false }));
-  }
-
-  async function toggleChildStatus(
-    rowKey: string,
-    currentStatus: string,
-    apiUrl: string,
-    body: Record<string, unknown>,
-  ) {
-    const isActive = currentStatus === 'ACTIVE' || currentStatus === 'ENABLED';
-    setActionLoading(p => ({ ...p, [rowKey]: true }));
-    setActionError(p => ({ ...p, [rowKey]: '' }));
-    const res = await fetch(apiUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...body, action: isActive ? 'pause' : 'activate' }),
-    });
-    const data = await res.json() as { ok?: boolean; newStatus?: string; error?: string };
-    if (res.ok && data.newStatus) {
-      setChildStatus(p => ({ ...p, [rowKey]: data.newStatus! }));
-    } else {
-      setActionError(p => ({ ...p, [rowKey]: data.error ?? 'Erro.' }));
-    }
-    setActionLoading(p => ({ ...p, [rowKey]: false }));
-  }
-
-  async function saveBudget(c: CampaignPerformance) {
-    const value = parseFloat(budgetInput);
-    if (!value || value <= 0) { setEditingBudget(null); return; }
-    setSavingBudget(c.id);
-    setActionError(p => ({ ...p, [c.id]: '' }));
-    const apiBase = c.platform === 'meta' ? '/api/meta' : '/api/google';
-    const res = await fetch(`${apiBase}/campaigns/${c.id}/action`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        action: 'set_budget',
-        connectionId: c.connectionId,
-        accountId: c.accountId,
-        loginCustomerId: c.loginCustomerId,
-        budgetResourceName: c.budgetResourceName,
-        dailyBudget: value,
-      }),
-    });
-    const data = await res.json().catch(() => ({})) as { ok?: boolean; error?: string };
-    if (res.ok) {
-      setCampaigns(prev => prev.map(x => x.id === c.id ? { ...x, dailyBudget: value } : x));
-      setEditingBudget(null);
-    } else {
-      setActionError(p => ({ ...p, [c.id]: data.error ?? 'Erro ao salvar orçamento.' }));
-    }
-    setSavingBudget(null);
-  }
-
   if (loading) {
     return (
       <div className="py-6">
@@ -2295,7 +1813,7 @@ function CampaignPerformanceTable({
     return (
       <div className="py-6">
         <p className="text-sm font-semibold text-foreground">Nenhuma campanha ativa no período.</p>
-        <p className="mt-1 text-xs text-muted-foreground">Quando houver investido nas contas vinculadas, as campanhas aparecem aqui com métricas e ações rápidas.</p>
+        <p className="mt-1 text-xs text-muted-foreground">Quando houver investido nas contas vinculadas, as campanhas aparecem aqui com as métricas do período.</p>
       </div>
     );
   }
@@ -2316,11 +1834,6 @@ function CampaignPerformanceTable({
     const isExpanded = 'fetchUrl' in row && expanded.has(row.key);
     const expandable = canExpand(row);
 
-    const rowKind: RowKind = row.kind;
-    const busy = actionLoading[row.key] ?? false;
-    const err = actionError[row.key] ?? '';
-
-    // Determine display status (with optimistic override for children)
     let displayStatus: string;
     let displayName: string;
     let spend = 0, impressions = 0, clicks = 0, leads = 0, ctr = 0, cpl = 0;
@@ -2338,7 +1851,7 @@ function CampaignPerformanceTable({
       cpl = row.data.cpl;
       dailyBudget = row.data.dailyBudget;
     } else if (row.kind === 'adset') {
-      displayStatus = childStatus[row.key] ?? row.data.status;
+      displayStatus = row.data.status;
       displayName = row.data.name;
       spend = row.data.spend;
       impressions = row.data.impressions;
@@ -2348,7 +1861,7 @@ function CampaignPerformanceTable({
       cpl = row.data.cpl;
       dailyBudget = row.data.daily_budget;
     } else if (row.kind === 'meta-ad') {
-      displayStatus = childStatus[row.key] ?? row.data.status;
+      displayStatus = row.data.status;
       displayName = row.data.name;
       spend = row.data.spend;
       impressions = row.data.impressions;
@@ -2357,7 +1870,7 @@ function CampaignPerformanceTable({
       ctr = row.data.ctr;
       cpl = row.data.cpl;
     } else if (row.kind === 'adgroup') {
-      displayStatus = childStatus[row.key] ?? row.data.status;
+      displayStatus = row.data.status;
       displayName = row.data.name;
       spend = row.data.spend;
       impressions = row.data.impressions;
@@ -2367,7 +1880,7 @@ function CampaignPerformanceTable({
       cpl = row.data.cpl;
     } else {
       // google-ad
-      displayStatus = childStatus[row.key] ?? row.data.status;
+      displayStatus = row.data.status;
       displayName = row.data.name;
       spend = row.data.spend;
       impressions = row.data.impressions;
@@ -2444,7 +1957,6 @@ function CampaignPerformanceTable({
               {row.kind === 'adset' && (row.data.targeting?.geo_locations?.countries?.length ?? 0) > 0 && (
                 <p className="truncate text-[10px] text-foreground/45">{(row.data.targeting.geo_locations?.countries ?? []).join(', ')}</p>
               )}
-              {err && <p className="text-[10px] text-red-400 mt-0.5 truncate">{err}</p>}
             </div>
           </div>
         </td>
@@ -2459,36 +1971,9 @@ function CampaignPerformanceTable({
           </td>
         )}
 
-        {/* Budget cell — editable for campaign level */}
-        <td className="px-2 py-2.5 text-right">
-          {row.kind === 'campaign' && editingBudget === row.data.id ? (
-            <div className="flex items-center justify-end gap-1">
-              <input
-                autoFocus
-                type="number"
-                min={1}
-                value={budgetInput}
-                onChange={e => setBudgetInput(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') saveBudget(row.data); if (e.key === 'Escape') setEditingBudget(null); }}
-                className="w-20 h-7 rounded border border-primary bg-background px-2 text-xs outline-none"
-              />
-              <button type="button" onClick={() => saveBudget(row.data)} className="text-emerald-400 hover:text-emerald-300">
-                {savingBudget === row.data.id ? <RefreshCw className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
-              </button>
-              <button type="button" onClick={() => setEditingBudget(null)} className="text-muted-foreground hover:text-foreground"><X className="h-3 w-3" /></button>
-            </div>
-          ) : dailyBudget != null ? (
-            <button
-              type="button"
-              onClick={row.kind === 'campaign' ? () => { setEditingBudget(row.data.id); setBudgetInput(String(dailyBudget ?? '')); } : undefined}
-              className={cn('group flex items-center justify-end gap-1 text-xs font-semibold', row.kind === 'campaign' && 'hover:text-primary transition-colors')}
-            >
-              <span className="whitespace-nowrap">{formatCurrencyBRL(dailyBudget)}</span>
-              {row.kind === 'campaign' && <Pencil className="h-3 w-3 opacity-0 group-hover:opacity-60 transition-opacity" />}
-            </button>
-          ) : (
-            <span className="text-xs text-muted-foreground/40">—</span>
-          )}
+        {/* Verba/dia — só leitura */}
+        <td className="whitespace-nowrap px-2 py-2.5 text-right text-xs font-semibold">
+          {dailyBudget != null ? formatCurrencyBRL(dailyBudget) : <span className="text-muted-foreground/40">—</span>}
         </td>
 
         {/* Metrics */}
@@ -2524,98 +2009,6 @@ function CampaignPerformanceTable({
           );
         })()}
 
-        {/* Actions */}
-        <td className="px-2 py-2.5">
-          <div className="flex items-center justify-center gap-1">
-            {/* Pause/Activate */}
-            {rowKind === 'campaign' && (
-              <PauseActivateBtn
-                status={displayStatus}
-                busy={busy}
-                armed={armedToggle === (row.data as CampaignPerformance).id}
-                onClick={() => {
-                  const c = row.data as CampaignPerformance;
-                  if (armedToggleTimer.current) clearTimeout(armedToggleTimer.current);
-                  if (armedToggle === c.id) {
-                    setArmedToggle(null);
-                    void toggleStatus(c);
-                  } else {
-                    setArmedToggle(c.id);
-                    armedToggleTimer.current = setTimeout(() => setArmedToggle(null), 3000);
-                  }
-                }}
-              />
-            )}
-            {rowKind === 'adset' && (
-              <PauseActivateBtn
-                status={displayStatus}
-                busy={busy}
-                onClick={() => {
-                  const r = row as Extract<ExpandableRow, { kind: 'adset' }>;
-                  toggleChildStatus(
-                    row.key, displayStatus,
-                    `/api/meta/adsets/${r.data.id}/action`,
-                    { connectionId: r.campaign.connectionId },
-                  );
-                }}
-              />
-            )}
-            {rowKind === 'meta-ad' && (
-              <PauseActivateBtn
-                status={displayStatus}
-                busy={busy}
-                onClick={() => {
-                  const r = row as Extract<ExpandableRow, { kind: 'meta-ad' }>;
-                  toggleChildStatus(
-                    row.key, displayStatus,
-                    `/api/meta/ads/${r.data.id}/action`,
-                    { connectionId: r.campaign.connectionId },
-                  );
-                }}
-              />
-            )}
-            {rowKind === 'adgroup' && (
-              <PauseActivateBtn
-                status={displayStatus}
-                busy={busy}
-                onClick={() => {
-                  const r = row as Extract<ExpandableRow, { kind: 'adgroup' }>;
-                  toggleChildStatus(
-                    row.key, displayStatus,
-                    `/api/google/adgroups/${r.data.id}/action`,
-                    { connectionId: r.campaign.connectionId, accountId: r.campaign.accountId, loginCustomerId: r.campaign.loginCustomerId },
-                  );
-                }}
-              />
-            )}
-            {rowKind === 'google-ad' && (
-              <PauseActivateBtn
-                status={displayStatus}
-                busy={busy}
-                onClick={() => {
-                  const r = row as Extract<ExpandableRow, { kind: 'google-ad' }>;
-                  toggleChildStatus(
-                    row.key, displayStatus,
-                    `/api/google/ads/${r.data.id}/action`,
-                    { connectionId: r.campaign.connectionId, accountId: r.campaign.accountId, loginCustomerId: r.campaign.loginCustomerId, adGroupId: r.data.adGroupId },
-                  );
-                }}
-              />
-            )}
-
-            {/* Campaign-level optimize button */}
-            {rowKind === 'campaign' && (
-              <button
-                type="button"
-                onClick={() => setOptimizeCampaign(row.data as CampaignPerformance)}
-                title="Otimizar público e copy"
-              className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-violet-500/60 bg-violet-500/20 text-violet-300 shadow-[0_0_16px_rgba(139,92,246,0.32)] transition-colors hover:bg-violet-500/30"
-              >
-                <Settings2 className="h-3.5 w-3.5" />
-              </button>
-            )}
-          </div>
-        </td>
       </tr>
     );
   }
@@ -2624,7 +2017,6 @@ function CampaignPerformanceTable({
 
   return (
     <>
-      {optimizeCampaign && <CampaignOptimizeDrawer campaign={optimizeCampaign} onClose={() => setOptimizeCampaign(null)} />}
       {adPreview && <AdCreativePreview ad={adPreview.ad} x={adPreview.x} y={adPreview.y} />}
       <div className="-mx-2">
         <div
@@ -2635,7 +2027,7 @@ function CampaignPerformanceTable({
               12 colunas e passava de 1080px — IS/Perda orç./Topo sumiam à
               direita num notebook de 1440px. O nome da campanha absorve a
               sobra (w-full max-w-0) e trunca com o nome inteiro no title. */}
-          <table className={cn('w-full text-left', mostrarIS ? 'min-w-[840px]' : 'min-w-[680px]')}>
+          <table className={cn('w-full text-left', mostrarIS ? 'min-w-[760px]' : 'min-w-[560px]')}>
             <thead className="sticky top-0 z-10 border-b border-white/[0.08] bg-[#0d1519]">
               <tr className={T.tabelaCab}>
                 <th className="px-2 py-2.5">Nome</th>
@@ -2653,7 +2045,6 @@ function CampaignPerformanceTable({
                     <th className="px-2 py-2.5 text-right" title="Parcela de impressões no topo absoluto">Topo</th>
                   </>
                 )}
-                <th className="px-2 py-2.5 text-center">Ações</th>
               </tr>
             </thead>
             <tbody>
@@ -5048,7 +4439,7 @@ function StatusCplPill({ status, titulo }: { status: StatusCpl; titulo?: string 
 
 type LinhaCanal = {
   channel: string; logo: ReactNode;
-  investment: string; impressions: string; clicks: string; ctr: string; cpc: string;
+  investment: string; impressions: string; clicks: string; ctr: string; cpc: string; cpm: string;
   leads: string; cpl: string; cplNum: number; status: StatusCpl;
 };
 
@@ -5072,6 +4463,10 @@ function ChannelSummaryTable({ rows, total, metaCpl }: {
     { rotulo: 'Cliques', valor: l => l.clicks },
     { rotulo: 'CTR', valor: l => l.ctr },
     { rotulo: 'CPC', valor: l => l.cpc },
+    // CPM logo acima de Leads (pedido do Matheus, 2026-09-24 — veio da tabela
+    // "Resumo de Tráfego", que saiu): CPL subindo com CPM estável é criativo;
+    // com CPM subindo é leilão.
+    { rotulo: 'CPM', valor: l => l.cpm },
     { rotulo: 'Leads', valor: l => l.leads, destaque: true },
     { rotulo: 'CPL', valor: l => <span className={cn('font-bold', TEXTO_STATUS_CPL[l.status])}>{l.cpl}</span> },
   ];
@@ -5178,7 +4573,7 @@ function CompactKeywordTable({ keywords, loading, metaCpl }: { keywords: GoogleK
   if (!rows.length) return <div className="py-8 text-center text-xs text-[#9aa4aa]">Nenhuma palavra-chave encontrada.</div>;
   return (
     <div className="overflow-x-auto">
-      <table className={cn('w-full min-w-[620px] text-left tabular-nums', T.tabelaCel)}>
+      <table className={cn('w-full min-w-[500px] text-left tabular-nums', T.tabelaCel)}>
         <thead className={T.tabelaCab}>
           <tr>
             <th className="py-2">Palavra-chave</th>
@@ -5237,7 +4632,9 @@ function creativeObjectiveMetrics(c: TopCreative): Array<{ label: string; value:
   ];
 }
 
-function HorizontalCreativeCard({ creative, index, onPreview }: {
+function HorizontalCreativeCard({ creative, index, onPreview, fluido = false }: {
+  /** Ocupa a largura da célula da grade (em vez dos 220px fixos da faixa). */
+  fluido?: boolean;
   creative: TopCreative;
   index: number;
   onPreview: (c: TopCreative) => void;
@@ -5266,7 +4663,7 @@ function HorizontalCreativeCard({ creative, index, onPreview }: {
     <button
       type="button"
       onClick={() => onPreview(creative)}
-      className="group w-[220px] shrink-0 overflow-hidden rounded-xl bg-white/[0.03] text-left ring-1 ring-white/[0.05] transition hover:ring-[#6cff2f]/40"
+      className={cn('group overflow-hidden rounded-xl bg-white/[0.03] text-left ring-1 ring-white/[0.05] transition hover:ring-[#6cff2f]/40', fluido ? 'w-full' : 'w-[220px] shrink-0')}
     >
       <div className="relative overflow-hidden bg-[#071014]" style={{ aspectRatio: '4/5' }}>
         {showImage ? (
@@ -5327,16 +4724,18 @@ function HorizontalCreativeCard({ creative, index, onPreview }: {
   );
 }
 
-function CreativeHorizontalStrip({ creatives, loading, onPreview }: {
+function CreativeHorizontalStrip({ creatives, loading, onPreview, grade = false }: {
   creatives: TopCreative[];
   loading: boolean;
   onPreview: (creative: TopCreative) => void;
+  /** Grade que quebra linha (ao lado da tabela de campanhas) em vez da faixa com rolagem. */
+  grade?: boolean;
 }) {
   if (loading) {
     return (
-      <div className="flex gap-3 overflow-x-auto pb-2">
+      <div className={grade ? 'grid grid-cols-[repeat(auto-fill,minmax(170px,1fr))] gap-3' : 'flex gap-3 overflow-x-auto pb-2'}>
         {Array.from({ length: 6 }).map((_, i) => (
-          <div key={i} className="w-[220px] shrink-0 animate-pulse rounded-xl bg-white/[0.06]" style={{ height: 345 }} />
+          <div key={i} className={cn('animate-pulse rounded-xl bg-white/[0.06]', !grade && 'w-[220px] shrink-0')} style={{ height: 345 }} />
         ))}
       </div>
     );
@@ -5354,59 +4753,11 @@ function CreativeHorizontalStrip({ creatives, loading, onPreview }: {
       || (b.spend - a.spend))
     : creatives;
   return (
-    <div className="flex gap-3 overflow-x-auto pb-2 [scrollbar-width:thin] [scrollbar-color:#2a2d3a_transparent]">
-      {ordenados.slice(0, 10).map((creative, index) => (
-        <HorizontalCreativeCard key={creative.adId} creative={creative} index={index} onPreview={onPreview} />
+    <div className={grade ? 'grid grid-cols-[repeat(auto-fill,minmax(170px,1fr))] gap-3' : 'flex gap-3 overflow-x-auto pb-2 [scrollbar-width:thin] [scrollbar-color:#2a2d3a_transparent]'}>
+      {ordenados.slice(0, grade ? 6 : 10).map((creative, index) => (
+        <HorizontalCreativeCard key={creative.adId} creative={creative} index={index} onPreview={onPreview} fluido={grade} />
       ))}
     </div>
-  );
-}
-
-// ── Resumo de Tráfego: uma tabela, as MESMAS colunas nas duas plataformas ──
-// Antes eram dois blocos com métricas diferentes de cada lado (Meta mostrava
-// alcance/CTR, Google impressões/cliques/CPC) — nada era comparável.
-type CelulaTrafego = { valor: string; delta?: number | null; inverso?: boolean; /** sem direção boa/ruim (investimento) */ neutro?: boolean };
-type LinhaTrafego = { plataforma: string; logo: ReactNode; celulas: CelulaTrafego[] };
-
-function TrafegoResumoTable({ linhas, colunas, comparacao }: { linhas: LinhaTrafego[]; colunas: string[]; comparacao: string }) {
-  return (
-    <PremiumPanel className="p-5">
-      <div className="mb-3 flex flex-wrap items-baseline gap-2">
-        <h3 className={T.cardTitulo}>Resumo de Tráfego</h3>
-        <span className={T.cardSub}>variação {comparacao}</span>
-      </div>
-      <div className="overflow-x-auto">
-        <table className={cn('w-full min-w-[900px] text-left tabular-nums', T.tabelaCel)}>
-          <thead className={T.tabelaCab}>
-            <tr>
-              <th className="py-2">Plataforma</th>
-              {colunas.map(c => <th key={c} className="text-right">{c}</th>)}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-white/[0.07]">
-            {linhas.map(linha => (
-              <tr key={linha.plataforma} className="text-[#f4f7f8]">
-                <td className="py-3"><span className="flex items-center gap-2 font-bold">{linha.logo}{linha.plataforma}</span></td>
-                {linha.celulas.map((c, i) => {
-                  const tem = c.delta !== null && c.delta !== undefined && Number.isFinite(c.delta);
-                  const bom = tem && (c.inverso ? c.delta! <= 0 : c.delta! >= 0);
-                  return (
-                    <td key={colunas[i]} className="whitespace-nowrap py-3 text-right align-top">
-                      <span className={T.miniValor}>{c.valor}</span>
-                      {tem && (
-                        <span className={cn('mt-1 block', T.delta, c.neutro ? 'text-[#a7b0b6]' : bom ? 'text-[#6cff2f]' : 'text-red-400')}>
-                          {c.delta! >= 0 ? '+' : ''}{c.delta!.toFixed(1).replace('.', ',')}%
-                        </span>
-                      )}
-                    </td>
-                  );
-                })}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </PremiumPanel>
   );
 }
 
@@ -6536,13 +5887,11 @@ export default function GeneralDashboard() {
   const totalSpend = metaSpend + googleCost;
   const totalCostPerLead = totalLeads > 0 ? totalSpend / totalLeads : 0;
   const avgCpl = metaLeads > 0 ? metaSpend / metaLeads : 0;
-  const avgCpa = googleConv > 0 ? googleCost / googleConv : 0;
   const metaCtr = metaImpressions > 0 ? (metaClicks / metaImpressions) * 100 : 0;
   // CPM = quanto pagamos para APARECER (custo por mil impressões). Pedido do
   // Matheus: ler o preço do leilão do mercado, separado do CPL — CPL subindo com
   // CPM estável é criativo/segmentação; CPL subindo com CPM subindo é o leilão.
   const metaCpm = metaImpressions > 0 ? (metaSpend / metaImpressions) * 1000 : 0;
-  const metaCpc = metaClicks > 0 ? metaSpend / metaClicks : 0;
   let googleImpressions = 0, googleClicks = 0;
   for (const id of selectedIds) {
     const m = metricsByClient[id];
@@ -6559,7 +5908,6 @@ export default function GeneralDashboard() {
   const hasGoogleLink = clientLinks.some(l => selectedIds.has(l.clientId) && l.platform === 'google_ads');
   const googleCpc = googleClicks > 0 ? googleCost / googleClicks : 0;
   const googleCpm = googleImpressions > 0 ? (googleCost / googleImpressions) * 1000 : 0;
-  const googleCtrValue = googleImpressions > 0 ? (googleClicks / googleImpressions) * 100 : 0;
   let googleSearchImprShare = 0, googleSearchBudgetLostIS = 0, googleSearchRankLostIS = 0, googleSearchAbsTopIS = 0, googleSearchTopIS = 0;
   let googleCompetitiveCount = 0;
   for (const id of selectedIds) {
@@ -7186,6 +6534,7 @@ export default function GeneralDashboard() {
       clicks: clicks > 0 ? premiumValue(clicks) : '—',
       ctr: impr > 0 && clicks > 0 ? premiumValue((clicks / impr) * 100, 'percent') : '—',
       cpc: clicks > 0 && spend > 0 ? premiumValue(spend / clicks, 'currency') : '—',
+      cpm: impr > 0 && spend > 0 ? premiumValue((spend / impr) * 1000, 'currency') : '—',
       leads: premiumValue(leads),
       cpl: cpl > 0 ? premiumValue(cpl, 'currency') : '—',
       cplNum: cpl,
@@ -7197,52 +6546,6 @@ export default function GeneralDashboard() {
     linhaCanal('Google Ads', <GoogleAdsMark className="h-4 w-4" />, googleCost, googleImpressions, googleClicks, googleConv),
   ];
   const channelTotal = linhaCanal('Total', null, totalSpend, metaImpressions + googleImpressions, metaClicks + googleClicks, totalLeads);
-
-  // ── Resumo de Tráfego (tabela única) ──────────────────────────────────────
-  // Variação só com base anterior ≥ 10 em contagem/dinheiro: "+6900%" sobre
-  // uma base de 1 não diz nada. Taxas (CTR/CPL/CPC) exigem só base > 0.
-  const deltaBase = (cur: number, prev: number) => prev >= 10 ? pctChange(cur, prev) : null;
-  const deltaTaxa = (cur: number, prev: number) => cur > 0 && prev > 0 ? pctChange(cur, prev) : null;
-  const prevGoogleCtr = prevGoogleImpressions > 0 ? (prevGoogleClicks / prevGoogleImpressions) * 100 : 0;
-  const prevGoogleCpa = prevGoogleConv > 0 ? prevGoogleCost / prevGoogleConv : 0;
-  // CPM logo após Impressões: é o mesmo fato ("quanto pagamos para aparecer"),
-  // lido junto. Pedido do Matheus pra separar leilão do mercado de problema de
-  // criativo: CPL subindo com CPM estável é criativo; com CPM subindo é leilão.
-  const colunasTrafego = ['Saldo', 'Investimento', 'Impressões', 'CPM', 'Cliques', 'CTR', 'Leads / Conv.', 'CPL / CPC'];
-  const linhasTrafego: LinhaTrafego[] = [
-    {
-      plataforma: 'Meta Ads',
-      logo: <MetaAdsMark className="h-4 w-4 text-[#168BFF]" />,
-      celulas: [
-        { valor: metaBalance > 0 ? premiumValue(metaBalance, 'currency') : '—' },
-        { valor: metaSpend > 0 ? premiumValue(metaSpend, 'currency') : '—', delta: deltaBase(metaSpend, prevMetaSpend), neutro: true },
-        { valor: metaImpressions > 0 ? premiumValue(metaImpressions) : '—', delta: deltaBase(metaImpressions, prevMetaImpressions) },
-        { valor: metaCpm > 0 ? premiumValue(metaCpm, 'currency') : '—', delta: deltaTaxa(metaCpm, prevMetaCpm), inverso: true },
-        { valor: metaClicks > 0 ? premiumValue(metaClicks) : '—', delta: deltaBase(metaClicks, prevMetaClicks) },
-        { valor: metaCtr > 0 ? premiumValue(metaCtr, 'percent') : '—', delta: deltaTaxa(metaCtr, prevMetaCtr) },
-        { valor: premiumValue(metaLeads), delta: deltaBase(metaLeads, prevMetaLeads) },
-        avgCpl > 0
-          ? { valor: `${premiumValue(avgCpl, 'currency')} CPL`, delta: deltaTaxa(avgCpl, prevAvgCpl), inverso: true }
-          : { valor: metaCpc > 0 ? `${premiumValue(metaCpc, 'currency')} CPC` : '—', inverso: true },
-      ],
-    },
-    {
-      plataforma: 'Google Ads',
-      logo: <GoogleAdsMark className="h-4 w-4" />,
-      celulas: [
-        { valor: googleBalance > 0 ? premiumValue(googleBalance, 'currency') : '—' },
-        { valor: hasGoogleData && googleCost > 0 ? premiumValue(googleCost, 'currency') : '—', delta: hasGoogleData ? deltaBase(googleCost, prevGoogleCost) : null, neutro: true },
-        { valor: hasGoogleData && googleImpressions > 0 ? premiumValue(googleImpressions) : '—', delta: hasGoogleData ? deltaBase(googleImpressions, prevGoogleImpressions) : null },
-        { valor: hasGoogleData && googleCpm > 0 ? premiumValue(googleCpm, 'currency') : '—', delta: hasGoogleData ? deltaTaxa(googleCpm, prevGoogleCpm) : null, inverso: true },
-        { valor: hasGoogleData && googleClicks > 0 ? premiumValue(googleClicks) : '—', delta: hasGoogleData ? deltaBase(googleClicks, prevGoogleClicks) : null },
-        { valor: googleCtrValue > 0 ? premiumValue(googleCtrValue, 'percent') : '—', delta: deltaTaxa(googleCtrValue, prevGoogleCtr) },
-        { valor: hasGoogleData ? premiumValue(googleConv) : '—', delta: hasGoogleData ? deltaBase(googleConv, prevGoogleConv) : null },
-        avgCpa > 0
-          ? { valor: `${premiumValue(avgCpa, 'currency')} CPL`, delta: deltaTaxa(avgCpa, prevGoogleCpa), inverso: true }
-          : { valor: googleCpc > 0 ? `${premiumValue(googleCpc, 'currency')} CPC` : '—', delta: deltaTaxa(googleCpc, prevGoogleCpc), inverso: true },
-      ],
-    },
-  ];
 
   // ── Ritmo do mês ──────────────────────────────────────────────────────────
   // No mês corrente o eixo vai até o FIM do mês (dias futuros = null) para a
@@ -7489,22 +6792,36 @@ export default function GeneralDashboard() {
     <>
             {/* ── Meta Ads: cards de topo (sem a moldura azul que embrulhava
                 tabela + criativos num "painel dentro do painel"). ── */}
-            <Superficie
-              titulo="Campanhas Meta Ads"
-              icone={<MetaAdsMark className="h-5 w-5 text-[#168BFF]" />}
-              sub="com veiculação no período · clique para abrir conjuntos e anúncios"
-              vazio={!campaignsLoading && metaCampaigns.length === 0}
-              avisoVazio="Nenhuma campanha Meta Ads com veiculação no período."
-            >
-              <CampaignPerformanceTable
-                campaigns={metaCampaigns}
-                loading={campaignsLoading}
-                period={period}
-                dateFrom={customDateFrom}
-                dateTo={customDateTo}
-                metaCpl={cplMetaSel}
-              />
-            </Superficie>
+            {/* Campanhas e melhores criativos LADO A LADO (pedido do Matheus,
+                2026-09-24): a tabela só de leitura ficou estreita e sobrava um
+                vazio enorme à direita; os criativos sobem para ele, em grade. */}
+            <div className="grid items-start gap-4 2xl:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
+              <Superficie
+                titulo="Campanhas Meta Ads"
+                icone={<MetaAdsMark className="h-5 w-5 text-[#168BFF]" />}
+                sub="com veiculação no período · clique para abrir conjuntos e anúncios"
+                vazio={!campaignsLoading && metaCampaigns.length === 0}
+                avisoVazio="Nenhuma campanha Meta Ads com veiculação no período."
+              >
+                <CampaignPerformanceTable
+                  campaigns={metaCampaigns}
+                  loading={campaignsLoading}
+                  period={period}
+                  dateFrom={customDateFrom}
+                  dateTo={customDateTo}
+                  metaCpl={cplMetaSel}
+                />
+              </Superficie>
+              <Superficie
+                titulo="Melhores criativos"
+                icone={<MetaAdsMark className="h-5 w-5 text-[#168BFF]" />}
+                sub="ordenados por leads (e menor CPL no empate); sem leads no período, por investimento"
+                vazio={!creativesLoading && creatives.length === 0}
+                avisoVazio="Nenhum criativo com veiculação no período."
+              >
+                <CreativeHorizontalStrip creatives={creatives} loading={creativesLoading} onPreview={setPreviewCreative} grade />
+              </Superficie>
+            </div>
 
             {/* Faturamento por Criativo — o que o anúncio TROUXE (CRM). Some
                 quando nenhuma venda do período tem criativo identificado:
@@ -7533,15 +6850,6 @@ export default function GeneralDashboard() {
               </Superficie>
             )}
 
-            <Superficie
-              titulo="Melhores criativos"
-              icone={<MetaAdsMark className="h-5 w-5 text-[#168BFF]" />}
-              sub="ordenados por leads (e menor CPL no empate); sem leads no período, por investimento"
-              vazio={!creativesLoading && creatives.length === 0}
-              avisoVazio="Nenhum criativo com veiculação no período."
-            >
-              <CreativeHorizontalStrip creatives={creatives} loading={creativesLoading} onPreview={setPreviewCreative} />
-            </Superficie>
     </>
   );
   const blocoGoogle = (
@@ -7552,7 +6860,9 @@ export default function GeneralDashboard() {
                 inteira (o print 09 do briefing). O investimento em Google, se
                 houver, aparece no capítulo Tráfego da DeliveryView. */}
             {!modoFood && (
-            <>
+            // Campanhas e palavras-chave LADO A LADO (pedido do Matheus,
+            // 2026-09-24), no mesmo desenho do bloco da Meta.
+            <div className="grid items-start gap-4 2xl:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
               <Superficie
                 titulo="Campanhas Google Ads"
                 icone={<GoogleAdsMark className="h-5 w-5" />}
@@ -7578,7 +6888,7 @@ export default function GeneralDashboard() {
               >
                 <CompactKeywordTable keywords={keywords} loading={keywordsLoading} metaCpl={cplMetaSel} />
               </Superficie>
-            </>
+            </div>
             )}
     </>
   );
@@ -8067,7 +7377,6 @@ export default function GeneralDashboard() {
                 {secaoVisivel.midia && (
                   <>
                     <TituloSecao titulo="Mídia paga" sub="Meta Ads e Google Ads" />
-                    <TrafegoResumoTable linhas={linhasTrafego} colunas={colunasTrafego} comparacao={rotuloComp} />
                     {blocoMeta}
                     {blocoGoogle}
                   </>
