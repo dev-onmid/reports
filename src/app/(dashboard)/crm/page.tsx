@@ -20,6 +20,7 @@ import { ChatView } from './chat-view';
 import { LeadChatPanel } from './lead-chat-panel';
 import { PortalLinkModal } from './portal-link-modal';
 import { SeletorModeloFunil } from '@/components/crm/seletor-modelo-funil';
+import { AplicarModeloFunil } from '@/components/crm/aplicar-modelo-funil';
 import { FollowupTab, useActiveFollowups, FollowupBadge } from './followup-tab';
 import Link from 'next/link';
 import { CaptureLinksTab } from '../clientes/[id]/capture-links-tab';
@@ -1927,6 +1928,7 @@ function FunnelEditorModal({
   const [saving, setSaving] = useState(false);
   // "Salvar como modelo": fotografa as etapas que estão NA TELA (não as do
   // banco) — o gestor costuma ajustar e só então decidir guardar o desenho.
+  const [aplicarModelo, setAplicarModelo] = useState(false);
   const [modoModelo, setModoModelo] = useState(false);
   const [nomeModelo, setNomeModelo] = useState('');
   const [salvandoModelo, setSalvandoModelo] = useState(false);
@@ -2167,6 +2169,13 @@ function FunnelEditorModal({
             >
               <BookmarkPlus className="h-3.5 w-3.5" /> Salvar como modelo
             </button>
+            <button
+              onClick={() => setAplicarModelo(true)}
+              title="Trocar as colunas deste funil pelas de um modelo salvo"
+              className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs font-semibold text-muted-foreground transition-colors hover:text-foreground"
+            >
+              <Layers className="h-3.5 w-3.5" /> Aplicar modelo
+            </button>
           </div>
           <div className="flex gap-2">
             <button onClick={onClose}
@@ -2180,6 +2189,23 @@ function FunnelEditorModal({
           </div>
         </div>
       </div>
+
+      {aplicarModelo && (
+        <AplicarModeloFunil
+          funnelId={funnel.id}
+          clientId={clientId}
+          onClose={() => setAplicarModelo(false)}
+          onAplicado={() => {
+            setAplicarModelo(false);
+            // Recarrega as etapas do servidor: o plano pode ter criado, apagado
+            // e reordenado colunas, e o estado local do editor ficou velho.
+            void fetch(`/api/crm/funnels/${funnel.id}/stages`)
+              .then(r => r.ok ? r.json() as Promise<CrmStage[]> : null)
+              .then(novas => { if (novas) onSaved(funnel, novas); })
+              .catch(() => {});
+          }}
+        />
+      )}
     </div>
   );
 }

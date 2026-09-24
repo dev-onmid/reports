@@ -1,6 +1,6 @@
 import { memoizarSchema } from '@/lib/schema-memo';
 import type { makeServerPool } from '@/lib/server-db';
-import { classificarEtapa, type EtapaFunil } from '@/lib/funil-etapas';
+import { classificarEtapa, normalizarEtiqueta, postoDaEtapa, type EtapaFunil } from '@/lib/funil-etapas';
 
 type Pool = ReturnType<typeof makeServerPool>;
 
@@ -154,4 +154,104 @@ export async function aplicarEtapasNoFunil(
       [funnelId, clientId, e.label, e.color, i, e.etapa_funil],
     );
   }
+}
+
+// ─────────────────────────── Aplicar modelo num funil que JÁ EXISTE ──────────
+//
+// ⚠️ O risco aqui é perder lead, não perder coluna: `crm_leads.status` é TEXTO
+// livre, então apagar uma coluna sem levar os leads junto deixa cada um com um
+// status que não existe mais — e o Kanban, que agrupa por rótulo, os esconde.
+// Por isso toda coluna que sai PRECISA de um destino, e o plano é calculado
+// antes (prévia) para o gestor ver quantos leads se mexem.
+
+/** Sentinela: a coluna não está no modelo, mas o gestor quer conservá-la. */
+export const MANTER_COLUNA = '__manter__';
+
+export type StageAtual = {
+  id: string;
+  label: string;
+  position: number;
+  etapa_funil: EtapaFunil | null;
+  leads: number;
+};
+
+export type PlanoAplicacao = {
+  /** Já existe e continua (o modelo tem uma coluna com o mesmo rótulo). */
+  manter: { id: string; label: string; etapa: EtapaFunil; color: string; posicao: number }[];
+  /** Está no modelo e ainda não existe no funil. */
+  criar: { label: string; color: string; etapa: EtapaFunil; posicao: number }[];
+  /** Sai do funil: os leads vão para `destino`. */
+  remover: { id: string; label: string; leads: number; destino: string }[];
+  /** Fora do modelo, conservada por escolha do gestor. */
+  conservar: { id: string; label: string; leads: number; posicao: number }[];
+  /** Rótulos que podem receber leads (as colunas do modelo). */
+  destinosPossiveis: string[];
+  /** Quantos leads mudam de coluna se o plano for aplicado. */
+  leadsAfetados: number;
+};
+
+const chave = (s: string) => normalizarEtiqueta(s);
+
+/**
+ * Destino sugerido para uma coluna que sai: a coluna do modelo com o MESMO
+ * grau. Sem grau igual, a de grau mais próximo na escada — mover um lead de
+ * "Reagendado" para "Oportunidade" preserva a profundidade dele no funil, que
+ * é o que a dashboard conta; jogá-lo no topo apagaria o progresso.
+ */
+export function destinoSugerido(atual: StageAtual, modelo: EtapaModelo[]): string {
+  if (modelo.length === 0) return '';
+  const grau = atual.etapa_funil ?? classificarEtapa(atual.label);
+  const igual = modelo.find(m => m.etapa_funil === grau);
+  if (igual) return igual.label;
+  // `nao_lead` e `perdido` ficam fora da escada; sem correspondente, o lead vai
+  // para a primeira coluna — inventar um posto para ele seria pior.
+  const posto = postoDaEtapa(grau);
+  if (posto < 0) return modelo[0].label;
+  let melhor = modelo[0];
+  let dist = Infinity;
+  for (const m of modelo) {
+    const p = postoDaEtapa(m.etapa_funil);
+    if (p < 0) continue;
+    const d = Math.abs(p - posto);
+    if (d < dist) { dist = d; melhor = m; }
+  }
+  return melhor.label;
+}
+
+export function planejarAplicacaoModelo(
+  atuais: StageAtual[],
+  modelo: EtapaModelo[],
+  destinos: Record<string, string> = {},
+): PlanoAplicacao {
+  const plano: PlanoAplicacao = {
+    manter: [], criar: [], remover: [], conservar: [],
+    destinosPossiveis: modelo.map(m => m.label),
+    leadsAfetados: 0,
+  };
+  const porChaveAtual = new Map(atuais.map(a => [chave(a.label), a]));
+  const chavesModelo = new Set(modelo.map(m => chave(m.label)));
+
+  modelo.forEach((m, i) => {
+    const existente = porChaveAtual.get(chave(m.label));
+    if (existente) {
+      // ⚠️ Mantém o ID e o RÓTULO existentes: trocar o rótulo (mesmo só o
+      // acento) obrigaria a migrar os leads dessa coluna também, de graça.
+      plano.manter.push({ id: existente.id, label: existente.label, etapa: m.etapa_funil, color: m.color, posicao: i });
+    } else {
+      plano.criar.push({ label: m.label, color: m.color, etapa: m.etapa_funil, posicao: i });
+    }
+  });
+
+  let extra = modelo.length;
+  for (const a of atuais) {
+    if (chavesModelo.has(chave(a.label))) continue;
+    if (destinos[a.label] === MANTER_COLUNA) {
+      plano.conservar.push({ id: a.id, label: a.label, leads: a.leads, posicao: extra++ });
+      continue;
+    }
+    const destino = destinos[a.label] || destinoSugerido(a, modelo);
+    plano.remover.push({ id: a.id, label: a.label, leads: a.leads, destino });
+    plano.leadsAfetados += a.leads;
+  }
+  return plano;
 }

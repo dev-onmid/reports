@@ -1,0 +1,13 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "outDir": "build",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "noEmit": false,
+    "declaration": false,
+    "skipLibCheck": true,
+    "rootDir": "../src/lib"
+  },
+  "include": ["../src/lib/crm-funil-modelos.ts", "../src/lib/funil-etapas.ts", "../src/lib/schema-memo.ts"]
+}
