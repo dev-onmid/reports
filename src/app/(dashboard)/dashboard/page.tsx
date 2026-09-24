@@ -5600,6 +5600,14 @@ export default function GeneralDashboard() {
       .then(setDeliveryFlags)
       .catch(() => setDeliveryFlags({}));
   }, []);
+  /** Clientes com integração de leads via SULTS — só eles veem "Desempenho por região". */
+  const [sultsFlags, setSultsFlags] = useState<Record<string, true>>({});
+  useEffect(() => {
+    fetch('/api/clients/sults-flags')
+      .then(r => r.ok ? r.json() as Promise<Record<string, true>> : {})
+      .then(setSultsFlags)
+      .catch(() => setSultsFlags({}));
+  }, []);
   const [campaigns, setCampaigns] = useState<CampaignPerformance[]>([]);
   const [keywords, setKeywords] = useState<GoogleKeyword[]>([]);
   const [keywordsLoading, setKeywordsLoading] = useState(false);
@@ -6146,14 +6154,16 @@ export default function GeneralDashboard() {
   // região nos leads devolve listas vazias e a tabela nem aparece.
   useEffect(() => {
     let cancelado = false;
-    if (selectedIds.size === 0 || !customReady) { setPorRegiao(null); return () => { cancelado = true; }; }
+    // Só para cliente com SULTS (mesma regra da tabela) — sem isso, nem busca.
+    const todosSults = selectedIds.size > 0 && [...selectedIds].every(id => sultsFlags[id]);
+    if (!todosSults || !customReady) { setPorRegiao(null); return () => { cancelado = true; }; }
     const params = new URLSearchParams({ clientIds: [...selectedIds].join(','), from: faixaSel.from, to: faixaSel.to });
     fetch(`/api/crm/por-regiao?${params}`)
       .then(r => (r.ok ? r.json() as Promise<PorRegiaoResposta> : null))
       .then(j => { if (!cancelado) setPorRegiao(j); })
       .catch(() => { if (!cancelado) setPorRegiao(null); });
     return () => { cancelado = true; };
-  }, [selectedIds, period, customDateFrom, customDateTo, customReady, faixaSel.from, faixaSel.to]);
+  }, [selectedIds, period, customDateFrom, customDateTo, customReady, faixaSel.from, faixaSel.to, sultsFlags]);
 
   // Campanhas NACIONAIS/sem região da Meta abertas por estado. Só depois das
   // campanhas carregarem (precisa dos ids); sem nacional, nem chama.
@@ -6162,7 +6172,8 @@ export default function GeneralDashboard() {
     const ids = campaigns
       .filter(c => c.platform === 'meta' && (() => { const r = regiaoDaCampanha(c.name); return !r || r.tipo === 'nacional'; })())
       .map(c => c.id);
-    if (selectedIds.size === 0 || !customReady || campaignsLoading || ids.length === 0) { setNacionalPorUf(null); return () => { cancelado = true; }; }
+    const todosSults = selectedIds.size > 0 && [...selectedIds].every(id => sultsFlags[id]);
+    if (!todosSults || !customReady || campaignsLoading || ids.length === 0) { setNacionalPorUf(null); return () => { cancelado = true; }; }
     const params = new URLSearchParams({ clientIds: [...selectedIds].join(','), campaignIds: ids.join(','), period });
     if (period === 'custom' && customDateFrom && customDateTo) { params.set('dateFrom', customDateFrom); params.set('dateTo', customDateTo); }
     fetch(`/api/meta/regiao-campanhas?${params}`)
@@ -6171,7 +6182,7 @@ export default function GeneralDashboard() {
       .catch(() => { if (!cancelado) setNacionalPorUf(null); });
     return () => { cancelado = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps -- `campaigns` entra pelo join de ids (evita refetch a cada render)
-  }, [selectedIds, period, customDateFrom, customDateTo, customReady, campaignsLoading, campaigns.map(c => c.id).join(',')]);
+  }, [selectedIds, period, customDateFrom, customDateTo, customReady, campaignsLoading, campaigns.map(c => c.id).join(','), sultsFlags]);
 
   // Fetch page/profile insights (Facebook Page + Instagram organic)
   useEffect(() => {
@@ -7767,9 +7778,11 @@ export default function GeneralDashboard() {
                       )}
                       <ChannelSummaryTable rows={channelRows} total={channelTotal} metaCpl={cplMetaSel} />
                     </div>
-                    {/* Só aparece quando há região em algum lugar (campanha com região
-                        no nome ou leads com DDD/cidade). Cliente sem isso não vê nada. */}
-                    {!modoFood && linhasRegiao.length > 0 && (
+                    {/* Só para cliente com integração de leads via SULTS (pedido do
+                        Matheus, 2026-09-24) — é onde origem e região chegam completas.
+                        Com vários selecionados, TODOS precisam ter SULTS, senão a soma
+                        misturaria leads sem origem. E só se há região em algum lugar. */}
+                    {!modoFood && selectedIds.size > 0 && [...selectedIds].every(id => sultsFlags[id]) && linhasRegiao.length > 0 && (
                       <TabelaRegioes linhas={linhasRegiao} semRegiao={porRegiao?.semRegiao ?? 0} total={porRegiao?.total ?? 0} nacionalPorUf={nacionalPorUf} ufs={porRegiao?.ufs ?? []} />
                     )}
                     {blocoCanais}
