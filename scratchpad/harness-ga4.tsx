@@ -40,8 +40,8 @@ const dados: Ga4Consolidado = {
     funil: { visitantes: 1054, formInicio: 60, formErro: 4, leadForm: 41, leadConfirmado: 40 }, videos: [],
   },
   propriedades: [
-    { propertyId: '552899534', nome: 'Cinfel - LP Peças de Lataria', atual: t(700, 60, 20, 120) },
-    { propertyId: '552910041', nome: 'Cinfel - LP Corte a Laser', atual: t(540, 36, 11, 90) },
+    { propertyId: '552899534', nome: 'Cinfel - LP Peças de Lataria', atual: t(700, 60, 20, 120), anterior: t(700, 60, 20, 120) },
+    { propertyId: '552910041', nome: 'Cinfel - LP Corte a Laser', atual: t(540, 36, 11, 90), anterior: t(540, 36, 11, 90) },
   ],
 };
 const vazio: Ga4Consolidado = { ...dados, atual: t(0, 0, 0, 0), origens: [], posicoes: [], detalhes: [], propriedades: [] };

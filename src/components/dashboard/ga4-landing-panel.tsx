@@ -6,7 +6,7 @@
 //
 // Uma rolagem só, de cima para baixo (nada escondido em abas — pedido do
 // Matheus), organizada como painel de analytics e NÃO como planilha:
-//   1. (sem rótulo) 4 KPIs (IndicadorCard) + faixa compacta (IndicadorMini)
+//   1. (sem rótulo) 4 KPIs + 7 mini-cards — layout do mock do Matheus (2026-09-24)
 //   2. Do clique ao contato — funil clique → sessão → engajada → contato, com
 //      o connect rate (sessões ÷ cliques) em destaque, e a evolução diária
 //   3. Campanhas na página — campanhas por custo por contato, palavras-chave
@@ -27,13 +27,16 @@
 // para todos os eventos-chave (`conversoes`). A série `diario` só tem
 // eventos-chave (keyEvents), por isso o gráfico diário diz "eventos-chave".
 
-import { useState, type ReactNode } from 'react';
-import { ChevronDown, Globe, Activity, MessageCircle, Percent } from 'lucide-react';
+import { useMemo, useState, type ElementType, type ReactNode } from 'react';
+import {
+  ArrowDown, ArrowUp, BarChart3, ChevronDown, ChevronRight, ChevronsUpDown, Clock, FileText, Info, MessageCircle, MessageSquare,
+  MousePointerClick, Percent, Phone, Search, UserPlus, Users, Activity,
+} from 'lucide-react';
 import type { Ga4Celula, Ga4Consolidado, Ga4Linha, Ga4Seg, Ga4Totais } from '@/lib/ga4-landing';
-import { EvolucaoDiaria } from './ga4-landing-graficos';
+import { EvolucaoDiaria, type Granularidade } from './ga4-landing-graficos';
 import { Donut } from './donut';
 import { SUPERFICIE, CabecalhoCard, GrupoTitulo, useVerMais } from './superficie';
-import { IndicadorCard, IndicadorMini, FaixaIndicadores } from './indicador-card';
+import { Sparkline } from './indicador-card';
 import { COR_SECUNDARIA } from './grafico-estilo';
 import { T } from '@/lib/dashboard-tipografia';
 
@@ -214,89 +217,6 @@ function Empilhada({ linhas }: { linhas: Ga4Seg[] }) {
  * contatos, com % entre etapas e o connect rate em destaque. Sem Google Ads,
  * cai para sessões → engajadas → contatos do total da LP.
  */
-function FunilClique({ ads, atual }: { ads: Ga4Seg[]; atual: Ga4Totais }) {
-  const cont = contador(ads);
-  const cliques = ads.reduce((t, g) => t + (g.cliques ?? 0), 0);
-  const comAds = ads.length > 0 && cliques > 0;
-  const etapas = comAds
-    ? [
-      { rotulo: 'Cliques nos anúncios', sub: 'cliques Google Ads', n: cliques },
-      { rotulo: 'Sessões pagas', sub: 'chegaram na página', n: ads.reduce((t, g) => t + g.sessoes, 0) },
-      { rotulo: 'Sessões engajadas', sub: '+10s, 2+ páginas ou conversão', n: ads.reduce((t, g) => t + g.engajadas, 0) },
-      { rotulo: 'Contatos', sub: 'WhatsApp + formulário + telefone', n: ads.reduce((t, g) => t + cont(g), 0) },
-    ]
-    : [
-      { rotulo: 'Sessões', sub: 'todas as origens', n: atual.sessoes },
-      { rotulo: 'Sessões engajadas', sub: '+10s, 2+ páginas ou conversão', n: atual.engajadas },
-      { rotulo: 'Contatos', sub: 'WhatsApp + formulário + telefone', n: atual.contatos },
-    ];
-  if (etapas[0].n <= 0) return null;
-  const max = Math.max(...etapas.map(e => e.n), 1);
-  const connect = comAds ? div(etapas[1].n, cliques) : 0;
-  const st = statusConnect(connect);
-  const aCada100 = Math.round(connect * 100);
-
-  return (
-    <Card>
-      <Titulo dica={comAds
-        ? 'Campanhas do Google Ads: do clique pago até o contato. Cliques e custo vêm do Google Ads; o resto, do GA4.'
-        : 'Sem dados do Google Ads vinculados — funil com todas as sessões da página.'}>
-        {comAds ? 'Funil do anúncio (Google Ads)' : 'Funil da página'}
-      </Titulo>
-
-      {/* Connect rate: linha de destaque (fundo leve, sem borda — nada de card dentro do card). */}
-      {comAds && (
-        <div className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-[10px] bg-white/[0.02] px-4 py-3">
-          <div>
-            <p className={T.miniRotulo}>Connect rate</p>
-            <p className={cx('mt-1 tabular-nums', T.kpiValor)} style={{ color: st.cor }}>{fmtPct(connect, 0)}</p>
-          </div>
-          <Chip cor={st.cor}>{st.rotulo}</Chip>
-          <p className="min-w-[200px] flex-1 text-xs leading-snug text-[#c7d0d5]">
-            De cada 100 cliques, <b className="text-[#f4f7f8]">{fmtN(aCada100)}</b> chegaram na página.
-            <span className="mt-0.5 block text-[11px] text-[#7c868c]">Sessões ÷ cliques. Abaixo de 80% costuma ser página lenta, redirecionamento ou tag do GA4 fora do ar.</span>
-          </p>
-        </div>
-      )}
-
-      <ol className="space-y-1">
-        {etapas.map((e, i) => {
-          const passo = i > 0 ? div(e.n, etapas[i - 1].n) : 0;
-          const largura = Math.max(3, Math.min(100, (e.n / max) * 100));
-          const opac = 1 - i * (0.55 / Math.max(1, etapas.length - 1));
-          return (
-            <li key={e.rotulo}>
-              {i > 0 && (
-                <div className="flex items-center gap-2 py-1 pl-1 text-[11px] text-[#7c868c]">
-                  <ChevronDown className="h-3 w-3" />
-                  <span className="font-bold tabular-nums text-[#c7d0d5]">{fmtPct(passo)}</span>
-                  <span>{i === 1 && comAds ? 'connect rate' : 'da etapa anterior'}</span>
-                </div>
-              )}
-              <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-3">
-                <div className="w-full shrink-0 sm:w-[160px]">
-                  <p className={T.listaRotulo}>{e.rotulo}</p>
-                  <p className={T.nota}>{e.sub}</p>
-                </div>
-                <div className="relative h-9 flex-1 rounded-[8px] bg-white/[0.04]">
-                  <div className="flex h-9 items-center rounded-[8px] px-3" style={{ width: `${largura}%`, background: `rgba(108,255,47,${0.18 + 0.6 * opac})` }}>
-                    {largura >= 18 && <span className="font-heading text-lg leading-none text-[#071006] tabular-nums">{fmtN(e.n)}</span>}
-                  </div>
-                  {largura < 18 && (
-                    <span className="absolute top-1/2 -translate-y-1/2 font-heading text-lg leading-none text-[#f4f7f8] tabular-nums" style={{ left: `calc(${largura}% + 8px)` }}>
-                      {fmtN(e.n)}
-                    </span>
-                  )}
-                </div>
-              </div>
-            </li>
-          );
-        })}
-      </ol>
-    </Card>
-  );
-}
-
 /** Campanhas ranqueadas por custo, com connect rate e custo por contato; campanhas UTM (sem custo) abaixo, esmaecidas. */
 function Campanhas({ ads, utm, semCusto }: { ads: Ga4Seg[]; utm: Ga4Seg[]; semCusto: boolean }) {
   const nomesAds = new Set(ads.map(a => a.valor));
@@ -600,6 +520,315 @@ function BlocoContagem({ titulo, dica, linhas, total, rotulo }: { titulo: string
   );
 }
 
+
+// ───────────────────── layout do mock (2026-09-24) ─────────────────────
+// Reprodução do mockup do Matheus para a seção Landing page: 4 KPIs com ícone
+// à esquerda do rótulo, faixa de 7 mini-cards, funil do anúncio em SETAS
+// (chevrons), evolução com seletor Diário/Semanal e a tabela "Desempenho por
+// campanha / página". Só apresentação — mesmos dados de antes.
+
+/** Ícone numa caixa verde à esquerda do rótulo (mock). */
+function CaixaIcone({ icone: Icon, grande = false }: { icone: ElementType; grande?: boolean }) {
+  return (
+    <span
+      className={cx('inline-flex shrink-0 items-center justify-center rounded-lg', grande ? 'h-9 w-9' : 'h-8 w-8')}
+      style={{ background: `${VERDE}22`, color: VERDE, boxShadow: `inset 0 0 0 1px ${VERDE}33` }}
+    >
+      <Icon className={grande ? 'h-[18px] w-[18px]' : 'h-4 w-4'} />
+    </span>
+  );
+}
+
+/** Variação com seta (mock): verde sobe, vermelho desce, cinza sem base. */
+function Delta({ v, unidade = '%', inverso = false }: { v: number | null; unidade?: '%' | ' p.p.'; inverso?: boolean }) {
+  if (v === null || !Number.isFinite(v)) return <span className="text-xs text-[#7c868c]">—</span>;
+  const arred = Math.round(v * 10) / 10;
+  const bom = inverso ? arred <= 0 : arred >= 0;
+  const cor = arred === 0 ? '#a7b0b6' : bom ? VERDE : VERMELHO;
+  const Seta = arred < 0 ? ArrowDown : ArrowUp;
+  return (
+    <span className="inline-flex items-center gap-1 text-xs font-bold tabular-nums" style={{ color: cor }}>
+      {arred !== 0 && <Seta className="h-3 w-3" />}
+      {arred > 0 ? '+' : ''}{arred.toFixed(1).replace('.', ',')}{unidade}
+    </span>
+  );
+}
+
+function KpiLp({ rotulo, icone, valor, variacao: v, unidade, dica, serie }: {
+  rotulo: string; icone: ElementType; valor: string; variacao: number | null; unidade?: '%' | ' p.p.'; dica?: string; serie?: number[];
+}) {
+  return (
+    <div className={cx(SUPERFICIE, 'flex flex-col p-5')}>
+      <div className="flex items-center gap-3">
+        <CaixaIcone icone={icone} grande />
+        <span className="text-sm font-semibold text-[#e6ecef]">{rotulo}</span>
+        {dica && <span title={dica}><Info className="h-3.5 w-3.5 text-[#7c868c]" /></span>}
+      </div>
+      <p className="mt-3 font-heading text-[40px] leading-none text-[#f4f7f8] tabular-nums">{valor}</p>
+      <p className="mt-2 flex items-center gap-2">
+        <Delta v={v} unidade={unidade} />
+        <span className="text-xs text-[#a7b0b6]">vs. período anterior</span>
+      </p>
+      {serie && serie.length > 1 && (
+        <div className="mt-3">
+          <Sparkline valores={serie} cor={VERDE} altura={40} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MiniLp({ rotulo, icone, valor, variacao: v, unidade, dica }: {
+  rotulo: string; icone: ElementType; valor: string; variacao: number | null; unidade?: '%' | ' p.p.'; dica?: string;
+}) {
+  return (
+    <div className={cx(SUPERFICIE, 'flex items-center gap-2.5 px-3 py-3')} title={dica}>
+      <CaixaIcone icone={icone} />
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-[11px] leading-tight text-[#a7b0b6]">{rotulo}</p>
+        <p className="mt-1 font-heading text-[22px] leading-none text-[#f4f7f8] tabular-nums">{valor}</p>
+        <p className="mt-1 leading-none"><Delta v={v} unidade={unidade} /></p>
+      </div>
+    </div>
+  );
+}
+
+/** Funil do anúncio em SETAS (chevrons), como no mock: ícone, rótulo, número; % embaixo. */
+function FunilSetas({ ads, atual }: { ads: Ga4Seg[]; atual: Ga4Totais }) {
+  const [detalhes, setDetalhes] = useState(false);
+  const cont = contador(ads);
+  const cliques = ads.reduce((t, g) => t + (g.cliques ?? 0), 0);
+  const comAds = ads.length > 0 && cliques > 0;
+  const etapas: Array<{ rotulo: string; icone: ElementType; n: number; sub: string }> = comAds
+    ? [
+      { rotulo: 'Cliques no anúncio', icone: MousePointerClick, n: cliques, sub: 'cliques Google Ads' },
+      { rotulo: 'Sessões na página', icone: FileText, n: ads.reduce((t, g) => t + g.sessoes, 0), sub: 'chegaram na página' },
+      { rotulo: 'Sessões engajadas', icone: Users, n: ads.reduce((t, g) => t + g.engajadas, 0), sub: '+10s, 2+ páginas ou conversão' },
+      { rotulo: 'Contatos', icone: MessageSquare, n: ads.reduce((t, g) => t + cont(g), 0), sub: 'WhatsApp + formulário + telefone' },
+    ]
+    : [
+      { rotulo: 'Sessões', icone: FileText, n: atual.sessoes, sub: 'todas as origens' },
+      { rotulo: 'Sessões engajadas', icone: Users, n: atual.engajadas, sub: '+10s, 2+ páginas ou conversão' },
+      { rotulo: 'Contatos', icone: MessageSquare, n: atual.contatos, sub: 'WhatsApp + formulário + telefone' },
+    ];
+  if (etapas[0].n <= 0) return null;
+  const connect = comAds ? div(etapas[1].n, cliques) : 0;
+  const st = statusConnect(connect);
+  const topo = etapas[0].n;
+  // % embaixo de cada seta: da etapa anterior (1ª = conversão do topo até o fim).
+  const pctDe = (i: number) => (i === 0 ? div(etapas[etapas.length - 1].n, topo) : div(etapas[i].n, etapas[i - 1].n));
+  const rotuloPct = (i: number) => (i === 0 ? `do topo até o contato` : i === 1 && comAds ? 'dos cliques (connect rate)' : `da etapa anterior`);
+  const opacidades = [0.62, 0.48, 0.36, 0.26];
+
+  return (
+    <Card>
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <div className="flex items-start gap-3">
+          <CaixaIcone icone={BarChart3} grande />
+          <div>
+            <h4 className="text-[15px] font-bold text-[#f4f7f8]">{comAds ? 'Funil do anúncio (Google Ads)' : 'Funil da página'}</h4>
+            <p className="mt-0.5 text-xs text-[#a7b0b6]">Veja quantas pessoas avançam de cada etapa, do clique no anúncio até o contato.</p>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => setDetalhes(v => !v)}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-white/[0.1] bg-white/[0.03] px-3 py-1.5 text-xs font-semibold text-[#dce4e8] transition-colors hover:bg-white/[0.06]"
+        >
+          {detalhes ? 'Ocultar detalhes' : 'Ver detalhes'} <ChevronRight className={cx('h-3.5 w-3.5 transition-transform', detalhes && 'rotate-90')} />
+        </button>
+      </div>
+
+      <div className="grid gap-0" style={{ gridTemplateColumns: `repeat(${etapas.length}, minmax(0, 1fr))` }}>
+        {etapas.map((e, i) => {
+          const primeira = i === 0;
+          const clip = primeira
+            ? 'polygon(0 0, calc(100% - 18px) 0, 100% 50%, calc(100% - 18px) 100%, 0 100%)'
+            : 'polygon(0 0, calc(100% - 18px) 0, 100% 50%, calc(100% - 18px) 100%, 0 100%, 18px 50%)';
+          const Icone = e.icone;
+          return (
+            <div key={e.rotulo} className={cx('min-w-0', !primeira && '-ml-3')}>
+              <div
+                className="relative flex min-h-[112px] flex-col justify-center pr-7 text-[#f4f7f8]"
+                style={{ clipPath: clip, background: `linear-gradient(90deg, rgba(108,255,47,${opacidades[i] ?? 0.2}), rgba(108,255,47,${(opacidades[i] ?? 0.2) * 0.7}))`, paddingLeft: primeira ? 18 : 30 }}
+                title={e.sub}
+              >
+                <Icone className="h-5 w-5 text-white/90" />
+                <p className="mt-1.5 text-[12px] font-semibold leading-tight text-white/95">{e.rotulo}</p>
+                <p className="font-heading text-[30px] leading-none tabular-nums" style={{ textShadow: '0 1px 2px rgba(0,0,0,0.35)' }}>{fmtN(e.n)}</p>
+              </div>
+              <div className="mt-3" style={{ paddingLeft: primeira ? 18 : 30 }}>
+                <p className="text-base font-bold tabular-nums" style={{ color: VERDE }}>{fmtPct(pctDe(i))}</p>
+                <p className="text-[11px] text-[#a7b0b6]">{rotuloPct(i)}</p>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {detalhes && (
+        <div className="mt-4 space-y-2 rounded-[10px] bg-white/[0.02] px-4 py-3 text-xs text-[#c7d0d5]">
+          {comAds && (
+            <p>
+              <span className={T.miniRotulo}>Connect rate</span>{' '}
+              <b className="tabular-nums text-[#f4f7f8]">{fmtPct(connect, 0)}</b>{' '}
+              <Chip cor={st.cor}>{st.rotulo}</Chip>
+              <span className="ml-2">De cada 100 cliques, <b className="text-[#f4f7f8]">{fmtN(Math.round(connect * 100))}</b> chegaram na página. Abaixo de 80% costuma ser página lenta, redirecionamento ou tag do GA4 fora do ar.</span>
+            </p>
+          )}
+          <ul className="grid gap-1 sm:grid-cols-2">
+            {etapas.map(e => <li key={e.rotulo}><b className="text-[#f4f7f8]">{e.rotulo}</b> — {e.sub}</li>)}
+          </ul>
+          {comAds && <p className="text-[11px] text-[#7c868c]">Cliques vêm do Google Ads; sessões, engajamento e contatos vêm do GA4.</p>}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+type LinhaPagina = {
+  chave: string; nome: string; sub?: string;
+  sessoes: number; sessoesPrev: number | null;
+  contatos: number; contatosPrev: number | null;
+  tempo: number | null; cliques: number | null;
+  whatsapp: number; whatsappPrev: number | null;
+  telefone: number;
+};
+type ColunaPagina = 'sessoes' | 'contatos' | 'taxa' | 'tempo' | 'cliques' | 'whatsapp' | 'telefone';
+
+type OrdemPagina = { col: ColunaPagina; desc: boolean };
+
+/** Cabeçalho ordenável da tabela de páginas (módulo, não dentro do render — regra do compiler). */
+function CabPagina({ col, children, className, ordem, onOrdenar }: {
+  col: ColunaPagina; children: ReactNode; className?: string; ordem: OrdemPagina; onOrdenar: (col: ColunaPagina) => void;
+}) {
+  const ativa = ordem.col === col;
+  return (
+    <th className={cx('py-2.5 pr-3 text-right font-semibold', className)}>
+      <button type="button" onClick={() => onOrdenar(col)}
+        className={cx('inline-flex items-center gap-1 whitespace-nowrap hover:text-[#dce4e8]', ativa && 'text-[#f4f7f8]')}>
+        {children}
+        {ativa ? (ordem.desc ? <ArrowDown className="h-3 w-3" /> : <ArrowUp className="h-3 w-3" />) : <ChevronsUpDown className="h-3 w-3 opacity-50" />}
+      </button>
+    </th>
+  );
+}
+
+/** Célula numérica com a variação ao lado (quando há período anterior). */
+function NumPagina({ v, prev, pp = false, forte = false }: { v: number; prev?: number | null; pp?: boolean; forte?: boolean }) {
+  return (
+    <td className="whitespace-nowrap py-3 pr-3 text-right">
+      <span className={cx('tabular-nums', forte ? 'text-sm font-bold text-[#f4f7f8]' : 'text-sm font-semibold text-[#e6ecef]')}>{pp ? fmtPct(v) : fmtN(v)}</span>
+      {prev !== undefined && prev !== null && (
+        <span className="ml-2 inline-block"><Delta v={variacao(v, prev, pp)} unidade={pp ? ' p.p.' : '%'} /></span>
+      )}
+    </td>
+  );
+}
+
+/** "Desempenho por campanha / página" (mock): uma linha por LP (propriedade GA4) ou, com uma propriedade só, por página de entrada. */
+function DesempenhoPaginas({ linhas }: { linhas: LinhaPagina[] }) {
+  const [busca, setBusca] = useState('');
+  const [ordem, setOrdem] = useState<OrdemPagina>({ col: 'sessoes', desc: true });
+  const ordenar = (col: ColunaPagina) => setOrdem(o => ({ col, desc: o.col === col ? !o.desc : true }));
+  const valorDe = (l: LinhaPagina, c: ColunaPagina): number => {
+    switch (c) {
+      case 'sessoes': return l.sessoes;
+      case 'contatos': return l.contatos;
+      case 'taxa': return div(l.contatos, l.sessoes);
+      case 'tempo': return l.tempo ?? 0;
+      case 'cliques': return l.cliques ?? 0;
+      case 'whatsapp': return l.whatsapp;
+      case 'telefone': return l.telefone;
+    }
+  };
+  const filtradas = useMemo(() => {
+    const q = busca.trim().toLowerCase();
+    const base = q ? linhas.filter(l => `${l.nome} ${l.sub ?? ''}`.toLowerCase().includes(q)) : linhas;
+    return [...base].sort((a, b) => (ordem.desc ? valorDe(b, ordem.col) - valorDe(a, ordem.col) : valorDe(a, ordem.col) - valorDe(b, ordem.col)));
+  }, [linhas, busca, ordem]);
+  if (linhas.length === 0) return null;
+
+  return (
+    <Card>
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <div className="flex items-start gap-3">
+          <CaixaIcone icone={BarChart3} grande />
+          <div>
+            <h4 className="text-[15px] font-bold text-[#f4f7f8]">Desempenho por campanha / página</h4>
+            <p className="mt-0.5 text-xs text-[#a7b0b6]">Compare o desempenho das suas campanhas e páginas de destino.</p>
+          </div>
+        </div>
+        <label className="relative block w-full max-w-[260px]">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#7c868c]" />
+          <input
+            value={busca}
+            onChange={e => setBusca(e.target.value)}
+            placeholder="Buscar campanha ou página…"
+            className="h-9 w-full rounded-lg border border-white/[0.1] bg-white/[0.03] pl-9 pr-3 text-xs text-[#f4f7f8] placeholder:text-[#7c868c] focus:border-[#6cff2f]/50 focus:outline-none"
+          />
+        </label>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[880px] text-left">
+          <thead className="border-b border-white/[0.08] text-[11px] text-[#a7b0b6]">
+            <tr>
+              <th className="py-2.5 pr-3 font-semibold">Campanha / Página</th>
+              <CabPagina col="sessoes" ordem={ordem} onOrdenar={ordenar}>Sessões</CabPagina>
+              <CabPagina col="contatos" ordem={ordem} onOrdenar={ordenar}>Contatos</CabPagina>
+              <CabPagina col="taxa" ordem={ordem} onOrdenar={ordenar}>Taxa de conversão</CabPagina>
+              <CabPagina col="tempo" ordem={ordem} onOrdenar={ordenar}>Tempo médio</CabPagina>
+              <CabPagina col="cliques" ordem={ordem} onOrdenar={ordenar}>Cliques em botões</CabPagina>
+              <CabPagina col="whatsapp" ordem={ordem} onOrdenar={ordenar}>WhatsApp</CabPagina>
+              <CabPagina col="telefone" ordem={ordem} onOrdenar={ordenar}>Telefone</CabPagina>
+              <th className="py-2.5 pr-3 font-semibold">Status</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-white/[0.06]">
+            {filtradas.map(l => {
+              const ativa = l.sessoes > 0;
+              return (
+                <tr key={l.chave} className="hover:bg-white/[0.02]">
+                  <td className="py-3 pr-3">
+                    <div className="flex items-center gap-3">
+                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-white/[0.06] text-[11px] font-black uppercase text-[#dce4e8] ring-1 ring-white/[0.08]">
+                        {l.nome.replace(/^.*?-\s*/, '').slice(0, 2)}
+                      </span>
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-[#f4f7f8]" title={l.nome}>{l.nome}</p>
+                        {l.sub && <p className="truncate text-[11px] text-[#7c868c]">{l.sub}</p>}
+                      </div>
+                    </div>
+                  </td>
+                  <NumPagina v={l.sessoes} prev={l.sessoesPrev} forte />
+                  <NumPagina v={l.contatos} prev={l.contatosPrev} forte />
+                  <NumPagina v={div(l.contatos, l.sessoes)} prev={l.sessoesPrev !== null && l.contatosPrev !== null ? div(l.contatosPrev, l.sessoesPrev) : undefined} pp />
+                  <td className="whitespace-nowrap py-3 pr-3 text-right text-sm text-[#e6ecef] tabular-nums">{l.tempo !== null && l.sessoes > 0 ? fmtTempo(l.tempo) : '—'}</td>
+                  <td className="whitespace-nowrap py-3 pr-3 text-right text-sm text-[#e6ecef] tabular-nums">{l.cliques !== null ? fmtN(l.cliques) : '—'}</td>
+                  <NumPagina v={l.whatsapp} prev={l.whatsappPrev} />
+                  <td className="whitespace-nowrap py-3 pr-3 text-right text-sm text-[#e6ecef] tabular-nums">{fmtN(l.telefone)}</td>
+                  <td className="py-3 pr-3">
+                    <span
+                      className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] font-bold"
+                      style={ativa ? { background: `${VERDE}1f`, color: VERDE } : { background: 'rgba(255,255,255,0.06)', color: '#a7b0b6' }}
+                    >
+                      <span className="h-1.5 w-1.5 rounded-full" style={{ background: ativa ? VERDE : '#7c868c' }} />
+                      {ativa ? 'Ativa' : 'Sem tráfego'}
+                    </span>
+                  </td>
+                </tr>
+              );
+            })}
+            {filtradas.length === 0 && (
+              <tr><td colSpan={9} className="py-6 text-center text-xs text-[#7c868c]">Nada encontrado para &ldquo;{busca}&rdquo;.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </Card>
+  );
+}
+
 export function resumoTotais(t: Ga4Totais) {
   return `${fmtN(t.sessoes)} sessões · ${fmtN(t.contatos)} contatos · ${fmtPct(t.taxaContato)}`;
 }
@@ -610,7 +839,10 @@ export function resumoTotais(t: Ga4Totais) {
  * Devolve os cards de topo da seção "Landing page" — sem moldura externa.
  * Quem chama coloca direto no fluxo da página (flex-col gap-4).
  */
+export type PeriodoLp = { de: string; ate: string; compDe?: string; compAte?: string };
+
 export function Ga4LandingPanel({ dados, loading, aviso }: { dados: Ga4Consolidado | null; loading: boolean; aviso?: string }) {
+  const [granularidade, setGranularidade] = useState<Granularidade>('dia');
   if (loading) return <Card><p className="text-xs text-[#9aa4aa]">Carregando Google Analytics…</p></Card>;
   if (!dados) return <Card><p className="text-xs text-[#9aa4aa]">{aviso ?? 'Sem propriedade GA4 vinculada a este cliente.'}</p></Card>;
   const { atual: a, anterior: b, pago, audiencia: au, comportamento: co } = dados;
@@ -620,8 +852,32 @@ export function Ga4LandingPanel({ dados, loading, aviso }: { dados: Ga4Consolida
 
   const serieSessoes = dados.diario.map(d => d.sessoes);
   const serieContatos = dados.diario.map(d => d.contatos);
+  const serieEngaj = dados.diario.map(d => div(d.engajadas ?? 0, d.sessoes));
+  const serieTaxa = dados.diario.map(d => div(d.contatos, d.sessoes));
   const engajA = div(a.engajadas, a.sessoes);
   const engajB = div(b.engajadas, b.sessoes);
+
+  // Tabela do mock: com mais de uma propriedade, uma linha por LP (com o
+  // período anterior para as variações); com uma só, uma linha por página de
+  // entrada (o GA4 não dá o anterior por página — as variações ficam "—").
+  const linhasPaginas: LinhaPagina[] = dados.propriedades.length > 1
+    ? dados.propriedades.map(p => ({
+      chave: p.propertyId, nome: p.nome,
+      // `anterior` por propriedade nasceu em 2026-09-24 — resposta em cache/JSON antigo não tem.
+      sessoes: p.atual.sessoes, sessoesPrev: p.anterior?.sessoes ?? null,
+      contatos: p.atual.contatos, contatosPrev: p.anterior?.contatos ?? null,
+      tempo: div(p.atual.tempo, p.atual.sessoes), cliques: p.atual.cta,
+      whatsapp: p.atual.whatsapp, whatsappPrev: p.anterior?.whatsapp ?? null,
+      telefone: p.atual.telefone,
+    }))
+    : co.paginasEntrada.map(pg => ({
+      chave: pg.valor, nome: pg.valor.replace(/^https?:\/\/[^/]+/, '') || '/', sub: pg.sub,
+      sessoes: pg.sessoes, sessoesPrev: null,
+      contatos: contatosSeg(pg), contatosPrev: null,
+      tempo: div(pg.tempo, pg.sessoes), cliques: null,
+      whatsapp: pg.whatsapp, whatsappPrev: null,
+      telefone: pg.telefone,
+    }));
 
   // Canais x origens: os dois dizem "de onde vem". Canais tem engajamento e
   // conversão por linha, então fica ele; origem/mídia só entra se não há canal.
@@ -648,59 +904,67 @@ export function Ga4LandingPanel({ dados, loading, aviso }: { dados: Ga4Consolida
   const temComportamento = temOrigem || temEntrada || temRolagem || temExtras;
 
   const rotuloForm = a.leadForm > 0 ? 'Formulário' : 'Cliques em botões';
-  const comp = 'vs período anterior';
 
   return (
     <>
-      {/* KPIs — mesmo IndicadorCard do topo da página */}
+      {/* KPIs (mock): ícone à esquerda do rótulo, número grande, seta + variação, sparkline */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <IndicadorCard rotulo="Sessões" icone={Globe} valor={fmtN(a.sessoes)} variacao={variacao(a.sessoes, b.sessoes)} comparacao={comp}
-          nota={`${fmtN(a.usuarios)} usuários`} serie={serieSessoes} />
-        <IndicadorCard rotulo="Taxa de engajamento" icone={Activity} valor={fmtPct(engajA)} variacao={variacao(engajA, engajB, true)} unidade=" p.p." comparacao={comp}
-          nota="sessões com +10s, 2+ páginas ou conversão" dica="Sessões engajadas ÷ sessões (GA4)." />
-        <IndicadorCard rotulo="Contatos" icone={MessageCircle} valor={fmtN(a.contatos)} variacao={variacao(a.contatos, b.contatos)} comparacao={comp} serie={serieContatos}
-          nota="WhatsApp + telefone + formulário"
+        <KpiLp rotulo="Sessões" icone={Users} valor={fmtN(a.sessoes)} variacao={variacao(a.sessoes, b.sessoes)} serie={serieSessoes}
+          dica={`${fmtN(a.usuarios)} usuários no período`} />
+        <KpiLp rotulo="Taxa de engajamento" icone={Activity} valor={fmtPct(engajA)} variacao={variacao(engajA, engajB, true)} unidade=" p.p." serie={serieEngaj}
+          dica="Sessões engajadas ÷ sessões (GA4): +10s, 2+ páginas ou conversão." />
+        <KpiLp rotulo="Contatos" icone={MessageCircle} valor={fmtN(a.contatos)} variacao={variacao(a.contatos, b.contatos)} serie={serieContatos}
           dica="Soma dos EVENTOS de clique no WhatsApp, no telefone e de envio de formulário. Uma pessoa pode gerar mais de um. A linha mostra os eventos-chave por dia." />
-        <IndicadorCard rotulo="Contatos por sessão" icone={Percent} valor={fmtPct(a.taxaContato)} variacao={variacao(a.taxaContato, b.taxaContato, true)} unidade=" p.p." comparacao={comp}
-          nota="eventos de contato ÷ sessões"
-          dica="Conta EVENTOS, não pessoas: quem clica no WhatsApp duas vezes conta dois — por isso pode passar de 100%." />
+        <KpiLp rotulo="Conversão por sessão" icone={Percent} valor={fmtPct(a.taxaContato)} variacao={variacao(a.taxaContato, b.taxaContato, true)} unidade=" p.p." serie={serieTaxa}
+          dica="Eventos de contato ÷ sessões. Conta EVENTOS, não pessoas: quem clica no WhatsApp duas vezes conta dois — por isso pode passar de 100%." />
       </div>
 
-      <FaixaIndicadores className="grid-cols-2 sm:grid-cols-4 xl:grid-cols-[repeat(auto-fit,minmax(120px,1fr))]">
-        <IndicadorMini rotulo="Usuários" valor={fmtN(a.usuarios)} variacao={variacao(a.usuarios, b.usuarios)} />
-        <IndicadorMini rotulo="Novos" valor={fmtPct(div(a.novos, a.usuarios), 0)} variacao={variacao(div(a.novos, a.usuarios), div(b.novos, b.usuarios), true)} unidade=" p.p."
+      {/* Faixa de mini-cards (mock): um card por métrica, ícone à esquerda */}
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-7">
+        <MiniLp rotulo="Usuários" icone={Users} valor={fmtN(a.usuarios)} variacao={variacao(a.usuarios, b.usuarios)} />
+        <MiniLp rotulo="Novos usuários" icone={UserPlus} valor={fmtPct(div(a.novos, a.usuarios), 0)} variacao={variacao(div(a.novos, a.usuarios), div(b.novos, b.usuarios), true)} unidade=" p.p."
           dica={`${fmtN(a.novos)} visitantes na primeira visita`} />
-        <IndicadorMini rotulo="Páginas vistas" valor={fmtN(a.pageviews)} variacao={variacao(a.pageviews, b.pageviews)}
+        <MiniLp rotulo="Páginas vistas" icone={FileText} valor={fmtN(a.pageviews)} variacao={variacao(a.pageviews, b.pageviews)}
           dica={`${div(a.pageviews, a.sessoes).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} por sessão`} />
-        <IndicadorMini rotulo="Tempo médio" valor={fmtTempo(div(a.tempo, a.sessoes))} variacao={variacao(div(a.tempo, a.sessoes), div(b.tempo, b.sessoes))}
+        <MiniLp rotulo="Tempo médio" icone={Clock} valor={fmtTempo(div(a.tempo, a.sessoes))} variacao={variacao(div(a.tempo, a.sessoes), div(b.tempo, b.sessoes))}
           dica="Tempo de engajamento médio por sessão (userEngagementDuration ÷ sessões)." />
-        <IndicadorMini rotulo="WhatsApp" valor={fmtN(a.whatsapp)} variacao={variacao(a.whatsapp, b.whatsapp)} />
-        <IndicadorMini rotulo={rotuloForm} valor={fmtN(a.leadForm > 0 ? a.leadForm : a.cta)} variacao={variacao(a.leadForm > 0 ? a.leadForm : a.cta, a.leadForm > 0 ? b.leadForm : b.cta)} />
-        <IndicadorMini rotulo="Telefone" valor={fmtN(a.telefone)} variacao={variacao(a.telefone, b.telefone)} />
-        {a.video > 0 && <IndicadorMini rotulo="Vídeos" valor={fmtN(a.video)} variacao={variacao(a.video, b.video)} dica="plays de vídeo" />}
-      </FaixaIndicadores>
+        <MiniLp rotulo="WhatsApp" icone={MessageCircle} valor={fmtN(a.whatsapp)} variacao={variacao(a.whatsapp, b.whatsapp)} />
+        <MiniLp rotulo={rotuloForm} icone={MousePointerClick} valor={fmtN(a.leadForm > 0 ? a.leadForm : a.cta)} variacao={variacao(a.leadForm > 0 ? a.leadForm : a.cta, a.leadForm > 0 ? b.leadForm : b.cta)} />
+        <MiniLp rotulo="Telefone" icone={Phone} valor={fmtN(a.telefone)} variacao={variacao(a.telefone, b.telefone)} />
+      </div>
 
-      {dados.propriedades.length > 1 && (
-        <div className="flex flex-wrap gap-2">
-          {dados.propriedades.map(p => (
-            <span key={p.propertyId} className="rounded-md bg-white/[0.04] px-2 py-1 text-[10px] text-[#a7b0b6]">
-              <span className="font-bold text-[#dce4e8]">{p.nome}</span> · {resumoTotais(p.atual)}
-            </span>
-          ))}
-        </div>
-      )}
-
-      {/* Do clique ao contato + evolução diária, lado a lado */}
-      <GrupoTitulo titulo="Do clique ao contato" />
-      <div className={cx('grid items-stretch gap-4', dados.diario.length > 1 && 'xl:grid-cols-2')}>
-        <FunilClique ads={pago.googleAds} atual={a} />
+      {/* Funil em setas + evolução, lado a lado (mock) */}
+      <div className={cx('grid items-stretch gap-4', dados.diario.length > 1 && 'xl:grid-cols-[1.12fr_1fr]')}>
+        <FunilSetas ads={pago.googleAds} atual={a} />
         {dados.diario.length > 1 && (
           <Card>
-            <Titulo dica="Sessões e contatos (eventos-chave do GA4) por dia no período. Eixos começam em 0.">Evolução diária</Titulo>
-            <EvolucaoDiaria diario={dados.diario} />
+            <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+              <div className="flex items-start gap-3">
+                <CaixaIcone icone={BarChart3} grande />
+                <div>
+                  <h4 className="text-[15px] font-bold text-[#f4f7f8]">Evolução {granularidade === 'dia' ? 'diária' : 'semanal'}</h4>
+                  <p className="mt-0.5 text-xs text-[#a7b0b6]">Sessões e contatos (eventos-chave do GA4) por {granularidade === 'dia' ? 'dia' : 'semana'} no período. Eixos começam em 0.</p>
+                </div>
+              </div>
+              <label className="relative">
+                <select
+                  value={granularidade}
+                  onChange={e => setGranularidade(e.target.value as Granularidade)}
+                  className="h-8 appearance-none rounded-lg border border-white/[0.1] bg-white/[0.03] pl-3 pr-8 text-xs font-semibold text-[#dce4e8] focus:outline-none"
+                >
+                  <option value="dia">Diário</option>
+                  <option value="semana">Semanal</option>
+                </select>
+                <ChevronDown className="pointer-events-none absolute right-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[#a7b0b6]" />
+              </label>
+            </div>
+            <EvolucaoDiaria diario={dados.diario} granularidade={granularidade} />
           </Card>
         )}
       </div>
+
+      {/* Desempenho por campanha / página (mock) */}
+      <DesempenhoPaginas linhas={linhasPaginas} />
 
       {/* Campanhas na página (antes "Tráfego pago") */}
       {temPago && (

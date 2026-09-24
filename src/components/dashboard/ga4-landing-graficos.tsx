@@ -40,9 +40,27 @@ function Legenda({ comContatos }: { comContatos: boolean }) {
  * com o mesmo eixo X (sessões em cima, contatos embaixo), cada um com a própria
  * escala começando em 0 — mesmo estilo nos dois.
  */
-export function EvolucaoDiaria({ diario }: { diario: Ga4Dia[] }) {
-  if (diario.length < 2) return null;
-  const dados = diario.map(d => ({ dia: ddmm(d.date), sessoes: d.sessoes, contatos: d.contatos }));
+/** Soma os dias em semanas (segunda a domingo), rotuladas pelo dia em que começam. */
+function porSemana(diario: Ga4Dia[]): Ga4Dia[] {
+  const semanas = new Map<string, Ga4Dia>();
+  for (const d of diario) {
+    const [y, m, dd] = d.date.split('-').map(Number);
+    const data = new Date(y, (m ?? 1) - 1, dd ?? 1);
+    data.setDate(data.getDate() - ((data.getDay() + 6) % 7));
+    const chave = `${data.getFullYear()}-${String(data.getMonth() + 1).padStart(2, '0')}-${String(data.getDate()).padStart(2, '0')}`;
+    const cur = semanas.get(chave);
+    if (cur) { cur.sessoes += d.sessoes; cur.contatos += d.contatos; cur.engajadas += d.engajadas; }
+    else semanas.set(chave, { ...d, date: chave });
+  }
+  return [...semanas.values()].sort((a, b) => a.date.localeCompare(b.date));
+}
+
+export type Granularidade = 'dia' | 'semana';
+
+export function EvolucaoDiaria({ diario, granularidade = 'dia' }: { diario: Ga4Dia[]; granularidade?: Granularidade }) {
+  const serie = granularidade === 'semana' ? porSemana(diario) : diario;
+  if (serie.length < 2) return null;
+  const dados = serie.map(d => ({ dia: ddmm(d.date), sessoes: d.sessoes, contatos: d.contatos }));
   const maxS = Math.max(0, ...dados.map(d => d.sessoes));
   const maxC = Math.max(0, ...dados.map(d => d.contatos));
   if (maxS + maxC === 0) return null;

@@ -74,7 +74,7 @@ const rel = (id, wa, sess) => ({
   origens: [{ origem: 'google', midia: 'cpc', sessoes: sess, contatos: wa }],
   posicoes: [{ valor: 'nav', n: wa }],
   detalhes: id === '1' ? [{ param: 'peca', rotulo: 'Peças mais pedidas', linhas: [{ valor: 'Caçamba', n: wa }] }] : [{ param: 'material', rotulo: 'Materiais', linhas: [{ valor: 'Aço', n: wa }] }],
-  diario: [{ date: '2026-09-01', sessoes: sess, contatos: wa }],
+  diario: [{ date: '2026-09-01', sessoes: sess, contatos: wa, engajadas: sess / 2 }],
   pago: {
     canais: [{ valor: 'Paid Search', sessoes: sess, engajadas: sess / 2, tempo: sess * 30, conversoes: wa, sessoesConv: wa, whatsapp: wa, formulario: 1, telefone: 0 }],
     campanhas: [], palavras: [], termos: [],
@@ -88,7 +88,7 @@ t('consolidar soma totais, origens, posições e diário; taxa recalculada no to
   assert.equal(c.atual.sessoes, 200); assert.equal(c.atual.contatos, 40); assert.equal(c.atual.taxaContato, 0.2);
   assert.deepEqual(c.origens, [{ origem: 'google', midia: 'cpc', sessoes: 200, contatos: 40 }]);
   assert.deepEqual(c.posicoes, [{ valor: 'nav', n: 40 }]);
-  assert.deepEqual(c.diario, [{ date: '2026-09-01', sessoes: 200, contatos: 40 }]);
+  assert.deepEqual(c.diario, [{ date: '2026-09-01', sessoes: 200, contatos: 40, engajadas: 100 }]);
   assert.equal(c.propriedades.length, 2);
 });
 t('consolidar mantém só os detalhes que alguma LP preencheu, na ordem canônica', () => {

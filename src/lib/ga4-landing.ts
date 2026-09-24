@@ -17,7 +17,7 @@
 
 export type Ga4Linha = { valor: string; n: number };
 export type Ga4Detalhe = { param: string; rotulo: string; linhas: Ga4Linha[] };
-export type Ga4Dia = { date: string; sessoes: number; contatos: number };
+export type Ga4Dia = { date: string; sessoes: number; contatos: number; /** sessões engajadas no dia (sparkline da taxa de engajamento) */ engajadas: number };
 export type Ga4Origem = { origem: string; midia: string; sessoes: number; contatos: number };
 
 /** Uma linha de corte com qualidade: sessões, engajamento, tempo e conversões (+ custo no Google Ads). */
@@ -208,7 +208,7 @@ export function parseLinhas(rep: Ga4Report | null, limite = 10): Ga4Linha[] {
 export function parseDiario(rep: Ga4Report | null): Ga4Dia[] {
   return (rep?.rows ?? []).map(r => {
     const d = r.dimensionValues?.[0]?.value ?? '';
-    return { date: d.length === 8 ? `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}` : d, sessoes: num(r.metricValues?.[0]?.value), contatos: num(r.metricValues?.[1]?.value) };
+    return { date: d.length === 8 ? `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}` : d, sessoes: num(r.metricValues?.[0]?.value), contatos: num(r.metricValues?.[1]?.value), engajadas: num(r.metricValues?.[2]?.value) };
   }).sort((a, b) => a.date.localeCompare(b.date));
 }
 
@@ -363,7 +363,7 @@ function somaCelulas(listas: Ga4Celula[][]): Ga4Celula[] {
   return [...m.values()];
 }
 
-export type Ga4Consolidado = Omit<Ga4Relatorio, 'propertyId' | 'nome'> & { propriedades: Array<{ propertyId: string; nome: string; atual: Ga4Totais }> };
+export type Ga4Consolidado = Omit<Ga4Relatorio, 'propertyId' | 'nome'> & { propriedades: Array<{ propertyId: string; nome: string; atual: Ga4Totais; anterior: Ga4Totais }> };
 
 export function consolidar(rels: Ga4Relatorio[]): Ga4Consolidado {
   const origens = new Map<string, Ga4Origem>();
@@ -374,7 +374,7 @@ export function consolidar(rels: Ga4Relatorio[]): Ga4Consolidado {
   const diario = new Map<string, Ga4Dia>();
   for (const r of rels) for (const d of r.diario) {
     const cur = diario.get(d.date);
-    if (cur) { cur.sessoes += d.sessoes; cur.contatos += d.contatos; } else diario.set(d.date, { ...d });
+    if (cur) { cur.sessoes += d.sessoes; cur.contatos += d.contatos; cur.engajadas += d.engajadas ?? 0; } else diario.set(d.date, { ...d, engajadas: d.engajadas ?? 0 });
   }
   const detalhes: Ga4Detalhe[] = [];
   for (const def of DETALHES) {
@@ -405,7 +405,7 @@ export function consolidar(rels: Ga4Relatorio[]): Ga4Consolidado {
       funil: { visitantes: soma('visitantes'), formInicio: soma('formInicio'), formErro: soma('formErro'), leadForm: soma('leadForm'), leadConfirmado: soma('leadConfirmado') },
       videos: somaLinhas(rels.map(r => r.comportamento.videos)),
     },
-    propriedades: rels.map(r => ({ propertyId: r.propertyId, nome: r.nome, atual: r.atual })),
+    propriedades: rels.map(r => ({ propertyId: r.propertyId, nome: r.nome, atual: r.atual, anterior: r.anterior })),
   };
 }
 
@@ -500,7 +500,7 @@ export async function relatorioLanding(propertyId: string, nome: string, token: 
     ['totais', { dateRanges: duas, metrics: metricas(METRICAS_TOTAIS) }],
     ['eventos', { dateRanges: duas, dimensions: dims('eventName'), metrics: metricas(['eventCount']), dimensionFilter: filtroEvento(EVENTOS_LIDOS) }],
     ['origens', { dateRanges: um, dimensions: dims('sessionSource', 'sessionMedium'), metrics: metricas(['sessions', 'keyEvents']), limit: 12, orderBys: porSessoes }],
-    ['diario', { dateRanges: um, dimensions: dims('date'), metrics: metricas(['sessions', 'keyEvents']), limit: 400 }],
+    ['diario', { dateRanges: um, dimensions: dims('date'), metrics: metricas(['sessions', 'keyEvents', 'engagedSessions']), limit: 400 }],
     ['semanaHora', { dateRanges: um, dimensions: dims('dayOfWeek', 'hour'), metrics: metricas(['sessions', 'keyEvents']), limit: 200 }],
     ['rolagem', { dateRanges: um, dimensions: dims('percentScrolled'), metrics: metricas(['totalUsers']), dimensionFilter: filtroUm('scroll') }],
     ['funil', { dateRanges: um, dimensions: dims('eventName'), metrics: metricas(['totalUsers']), dimensionFilter: filtroEvento(EVENTOS_FUNIL) }],

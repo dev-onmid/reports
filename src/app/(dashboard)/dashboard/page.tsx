@@ -5167,15 +5167,23 @@ function TabelaRegioes({ linhas, semRegiao, total, nacionalPorUf, ufs }: {
 }
 
 /** Título de seção da página única (substitui as abas). */
-function TituloSecao({ titulo, sub }: { titulo: string; sub?: string }) {
+function TituloSecao({ titulo, sub, direita }: { titulo: string; sub?: string; direita?: ReactNode }) {
   return (
     <div className="mt-6 flex items-center gap-3">
       <span className="h-4 w-1 rounded-full bg-[#6cff2f]" />
       <h2 className={T.secao}>{titulo}</h2>
       {sub && <span className={T.cardSub}>{sub}</span>}
       <span className="h-px flex-1 bg-white/[0.08]" />
+      {direita}
     </div>
   );
+}
+
+/** "1 de set. de 2026" a partir de 'YYYY-MM-DD' (data local — nunca UTC, ver period-utils). */
+function dataLonga(iso: string): string {
+  const [y, m, d] = iso.split('-').map(Number);
+  if (!y || !m || !d) return iso;
+  return new Date(y, m - 1, d).toLocaleDateString('pt-BR', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
 // ── Main Dashboard ───────────────────────────────────────────────────────────
@@ -7449,7 +7457,20 @@ export default function GeneralDashboard() {
 
                 {secaoVisivel.lp && (
                   <>
-                    <TituloSecao titulo="Landing page" sub="comportamento de quem chegou pelos anúncios" />
+                    <TituloSecao
+                      titulo="Landing page"
+                      sub="acompanhe o desempenho de quem chegou pelos anúncios e como eles se comportam até o contato"
+                      direita={(
+                        // Caixa de período do mock: o período analisado e com o que está sendo comparado.
+                        <div className="flex items-center gap-3 rounded-lg border border-white/[0.1] bg-[#0d1519]/92 px-3 py-2">
+                          <Calendar className="h-4 w-4 text-[#6cff2f]" />
+                          <div className="leading-tight">
+                            <p className="text-xs font-semibold text-[#f4f7f8]">{dataLonga(faixaSel.from)} – {dataLonga(faixaSel.to)}</p>
+                            {faixaPrev && <p className="text-[11px] text-[#a7b0b6]">Comparado com {dataLonga(faixaPrev.from)} – {dataLonga(faixaPrev.to)}</p>}
+                          </div>
+                        </div>
+                      )}
+                    />
                     {blocoGa4}
                   </>
                 )}
