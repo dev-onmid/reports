@@ -1164,6 +1164,42 @@ function KanbanColumn({
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: status });
   const total = leads.reduce((s, l) => s + toMoneyNumber(l.valor_rs), 0);
+  // Etapa sem lead no período vira uma faixa de 44px: num funil de 10+ colunas
+  // as vazias comiam a largura do board e empurravam pra fora da tela justo as
+  // que têm lead. Clicar abre de novo — a coluna não some, só encolhe.
+  const [expandida, setExpandida] = useState(false);
+  const recolhida = leads.length === 0 && !expandida;
+
+  if (recolhida) {
+    return (
+      <button
+        type="button"
+        ref={setNodeRef}
+        onClick={() => setExpandida(true)}
+        title={`${status} — nenhum lead no período. Clique para abrir.`}
+        className={cn(
+          'flex max-h-full w-[44px] shrink-0 flex-col items-center gap-2 rounded-lg border border-border bg-card/40 py-2 transition-colors hover:bg-card',
+          // ⚠️ Recolhida CONTINUA sendo alvo de drop: arrastar um lead pra uma
+          // etapa vazia é caso normal, e a faixa é estreita mas tem a altura
+          // toda. O realce é o que diz que vai cair ali.
+          isOver && 'border-primary/40 bg-primary/10',
+        )}
+        style={{ borderTop: `3px solid ${color}` }}
+      >
+        <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        <span
+          className="shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-bold leading-none"
+          style={{ background: `${color}25`, color }}
+        >
+          0
+        </span>
+        {/* `vertical-rl` + `rotate-180` faz o nome subir (lê de baixo pra cima) */}
+        <span className="min-h-0 flex-1 truncate text-[11px] font-bold uppercase tracking-wide text-muted-foreground [writing-mode:vertical-rl] rotate-180">
+          {status}
+        </span>
+      </button>
+    );
+  }
 
   return (
     <div className="flex max-h-full w-[232px] shrink-0 flex-col">
@@ -1173,6 +1209,16 @@ function KanbanColumn({
           <span className="shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-bold leading-none" style={{ background: `${color}25`, color }}>
             {leads.length}
           </span>
+          {leads.length === 0 && (
+            <button
+              type="button"
+              onClick={() => setExpandida(false)}
+              title="Recolher etapa vazia"
+              className="shrink-0 text-muted-foreground transition-colors hover:text-foreground"
+            >
+              <ChevronLeft className="h-3.5 w-3.5" />
+            </button>
+          )}
           <span className="ml-auto shrink-0 text-[10px] font-semibold text-muted-foreground">{total > 0 ? formatCurrencyBRL(total) : ''}</span>
         </div>
       </div>
