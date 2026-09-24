@@ -13,6 +13,7 @@ import type { MetaAdAccount } from '@/app/api/meta/ad-accounts/route';
 import type { DashboardType } from '@/lib/mock-data';
 import { cn } from '@/lib/utils';
 import { SeletorModeloFunil } from '@/components/crm/seletor-modelo-funil';
+import { MODELO_PADRAO } from '@/lib/funil-etapas';
 
 // Onboarding obrigatório de cliente novo: enquanto não concluir os 4 passos, o cliente
 // fica em modo rascunho (onboarding_completed=false) e qualquer tentativa de abrir as
@@ -66,7 +67,7 @@ function NovoClienteWizard() {
   const [newCategoryName, setNewCategoryName] = useState('');
   const [showNewCategory, setShowNewCategory] = useState(false);
   const [dashType, setDashType] = useState<DashboardType>('leads');
-  const [modeloFunilId, setModeloFunilId] = useState('');
+  const [modeloFunilId, setModeloFunilId] = useState<string>(MODELO_PADRAO);
   const [gestorId, setGestorId] = useState('');
   const [users, setUsers] = useState<{ id: string; name: string; role: string }[]>([]);
 
@@ -113,7 +114,7 @@ function NovoClienteWizard() {
       body: JSON.stringify({
         clientId: client.id,
         name: 'Funil Principal',
-        modeloId: modeloFunilId || undefined,
+        modeloId: modeloFunilId === MODELO_PADRAO ? undefined : modeloFunilId,
       }),
     }).catch(() => {});
     setClientId(client.id);

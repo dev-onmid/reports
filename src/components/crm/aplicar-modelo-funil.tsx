@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { X, AlertTriangle, ArrowRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { SeletorModeloFunil } from '@/components/crm/seletor-modelo-funil';
+import { MODELO_PADRAO } from '@/lib/funil-etapas';
 
 const MANTER = '__manter__';
 
@@ -32,6 +33,9 @@ export function AplicarModeloFunil({
   onAplicado: () => void;
   onClose: () => void;
 }) {
+  // ⚠️ Abre com NADA marcado. Antes o padrão do sistema valia `''`, então ele
+  // nascia com o ✓ e parecia "já aplicado" — sem prévia nenhuma, porque o
+  // pedido só dispara quando o gestor escolhe.
   const [modeloId, setModeloId] = useState('');
   const [modeloNome, setModeloNome] = useState('');
   const [plano, setPlano] = useState<Plano | null>(null);
@@ -62,7 +66,7 @@ export function AplicarModeloFunil({
 
   function escolher(id: string, nome: string) {
     setModeloId(id);
-    setModeloNome(nome);
+    setModeloNome(nome || (id === MODELO_PADRAO ? 'padrão do sistema' : ''));
     setDestinos({});
     void pedirPrevia(id, {});
   }
@@ -102,6 +106,12 @@ export function AplicarModeloFunil({
 
         <div className="flex-1 space-y-4 overflow-y-auto px-5 py-4">
           <SeletorModeloFunil modeloId={modeloId} onEscolher={escolher} />
+
+          {!modeloId && !carregando && (
+            <p className="text-center text-[11px] text-muted-foreground">
+              Escolha um modelo acima para ver o que muda neste funil.
+            </p>
+          )}
 
           {carregando && <p className="py-2 text-center text-xs text-muted-foreground">Calculando o que muda…</p>}
 

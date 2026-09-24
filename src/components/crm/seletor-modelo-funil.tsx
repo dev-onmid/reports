@@ -3,7 +3,9 @@
 import { useEffect, useState } from 'react';
 import { Check } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { corDaEtapa, ETAPAS_PADRAO, type EtapaFunil } from '@/lib/funil-etapas';
+import { corDaEtapa, ETAPAS_PADRAO, MODELO_PADRAO, type EtapaFunil } from '@/lib/funil-etapas';
+
+export { MODELO_PADRAO };
 
 export type FunilModelo = {
   id: string;
@@ -73,7 +75,7 @@ export function SeletorModeloFunil({
     const res = await fetch(`/api/crm/funil-modelos?id=${encodeURIComponent(m.id)}`, { method: 'DELETE' });
     if (res.ok) {
       setModelos(prev => prev.filter(x => x.id !== m.id));
-      if (modeloId === m.id) onEscolher('', '');
+      if (modeloId === m.id) onEscolher(MODELO_PADRAO, '');
     }
   }
 
@@ -81,14 +83,14 @@ export function SeletorModeloFunil({
     <div className="space-y-2">
       <button
         type="button"
-        onClick={() => onEscolher('', '')}
+        onClick={() => onEscolher(MODELO_PADRAO, '')}
         className={cn(
           'flex w-full flex-col gap-1.5 rounded-lg border p-3 text-left transition-colors',
-          modeloId === '' ? 'border-primary/50 bg-primary/5' : 'border-border hover:border-primary/30',
+          modeloId === MODELO_PADRAO ? 'border-primary/50 bg-primary/5' : 'border-border hover:border-primary/30',
         )}
       >
         <span className="flex items-center gap-2">
-          {modeloId === '' && <Check className="h-3.5 w-3.5 shrink-0 text-primary" />}
+          {modeloId === MODELO_PADRAO && <Check className="h-3.5 w-3.5 shrink-0 text-primary" />}
           <span className="text-xs font-bold text-foreground">Padrão do sistema</span>
           <span className="ml-auto text-[10px] text-muted-foreground">{ETAPAS_PADRAO_PREVIA.length} etapas</span>
         </span>

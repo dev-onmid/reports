@@ -626,6 +626,17 @@ export function rotuloFonteTopo(fontes: ('crm' | 'anuncios')[]): string {
 // grava (importação/webhook). Funis existentes são fundidos pelo saneamento
 // (crm-saneamento.ts); o regex de classificarEtapa segue reconhecendo
 // "Comprou" em dado legado.
+/**
+ * Valor do "Padrão do sistema" na lista.
+ *
+ * ⚠️ NÃO é string vazia. Quando era, `''` significava ao mesmo tempo "padrão do
+ * sistema" e "nada escolhido" — o modal de APLICAR abria com o padrão já
+ * marcado (parecia "já aplicado"), nunca pedia prévia, e a rota recusava o
+ * `modeloId` vazio. Resultado: o padrão era o único modelo impossível de
+ * aplicar num funil existente.
+ */
+export const MODELO_PADRAO = '__padrao__';
+
 export const ETAPAS_PADRAO: { label: string; color: string; position: number; etapa: EtapaFunil }[] = [
   // ⚠️ Padrão GENÉRICO (decisão do Matheus, 2026-09-24). O anterior era de
   // clínica — "Agendado", "Reagendado", "Paciente", "Não Retorna" — e nascia

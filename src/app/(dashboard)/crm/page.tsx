@@ -33,7 +33,7 @@ import { cn, formatCurrencyBRL } from '@/lib/utils';
 import { localDoLead, type RespostaFormulario } from '@/lib/lead-formulario';
 import type { Client } from '@/lib/mock-data';
 import type { AttendanceAudit } from '@/lib/crm-attendance-audit';
-import { classificarEtapa, corDaEtapa, OPCOES_EDITOR, opcaoDoValor, ROTULOS_ETAPA, valorOpcaoEditor, type EtapaFunil, type SituacaoStage } from '@/lib/funil-etapas';
+import { classificarEtapa, corDaEtapa, MODELO_PADRAO, OPCOES_EDITOR, opcaoDoValor, ROTULOS_ETAPA, valorOpcaoEditor, type EtapaFunil, type SituacaoStage } from '@/lib/funil-etapas';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 
 type CrmLead = {
@@ -2227,7 +2227,7 @@ function NovoFunilModal({
 }) {
   const [nome, setNome] = useState('');
   const [nomeTocado, setNomeTocado] = useState(false);
-  const [modeloId, setModeloId] = useState('');
+  const [modeloId, setModeloId] = useState<string>(MODELO_PADRAO);
   const [criando, setCriando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
 
@@ -2247,7 +2247,9 @@ function NovoFunilModal({
       const res = await fetch('/api/crm/funnels', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ clientId, name: limpo, modeloId: modeloId || undefined }),
+        // MODELO_PADRAO não é registro no banco — é o seed do código, e a rota
+        // cai nele quando não recebe modeloId.
+        body: JSON.stringify({ clientId, name: limpo, modeloId: modeloId === MODELO_PADRAO ? undefined : modeloId }),
       });
       if (!res.ok) { setErro('Não foi possível criar o funil.'); return; }
       onCriado(await res.json() as CrmFunnel);

@@ -6,7 +6,9 @@ import {
   buscarModelo,
   planejarAplicacaoModelo,
   type StageAtual,
+  type EtapaModelo,
 } from '@/lib/crm-funil-modelos';
+import { ETAPAS_PADRAO, MODELO_PADRAO } from '@/lib/funil-etapas';
 
 // Aplica um modelo num funil que JÁ EXISTE (o CRM do cliente antigo).
 //
@@ -40,23 +42,32 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const body = await req.json().catch(() => ({})) as {
     clientId?: string; modeloId?: string; destinos?: Record<string, string>; previa?: boolean;
   };
-  if (!body.clientId || !body.modeloId) {
-    return Response.json({ error: 'clientId e modeloId são obrigatórios' }, { status: 400 });
+  if (!body.clientId) {
+    return Response.json({ error: 'clientId é obrigatório' }, { status: 400 });
   }
+  // ⚠️ O padrão do sistema NÃO é um registro em crm_funil_modelos — é o seed do
+  // código. Sem este ramo ele era o único "modelo" impossível de aplicar num
+  // funil existente, porque a rota exigia um id de modelo salvo.
+  const usarPadrao = !body.modeloId || body.modeloId === MODELO_PADRAO;
 
   const pool = makeServerPool();
   try {
     await ensureFunilModelosSchema(pool);
-    const modelo = await buscarModelo(pool, body.modeloId);
-    if (!modelo || modelo.etapas.length === 0) {
+
+    const modelo = usarPadrao ? null : await buscarModelo(pool, body.modeloId!);
+    if (!usarPadrao && (!modelo || modelo.etapas.length === 0)) {
       return Response.json({ error: 'Modelo não encontrado.' }, { status: 404 });
     }
+    const etapas: EtapaModelo[] = usarPadrao
+      ? ETAPAS_PADRAO.map(e => ({ label: e.label, color: e.color, etapa_funil: e.etapa }))
+      : modelo!.etapas;
+    const nomeModelo = usarPadrao ? 'Padrão do sistema' : modelo!.nome;
 
     const atuais = await carregarAtuais(pool, funnelId);
-    const plano = planejarAplicacaoModelo(atuais, modelo.etapas, body.destinos ?? {});
+    const plano = planejarAplicacaoModelo(atuais, etapas, body.destinos ?? {});
 
     if (body.previa !== false) {
-      return Response.json({ plano, modelo: { id: modelo.id, nome: modelo.nome } });
+      return Response.json({ plano, modelo: { id: body.modeloId ?? MODELO_PADRAO, nome: nomeModelo } });
     }
 
     // ── Aplicação ────────────────────────────────────────────────────────────

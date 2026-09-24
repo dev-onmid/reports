@@ -14,6 +14,7 @@ import assert from 'node:assert';
 import {
   planejarAplicacaoModelo, destinoSugerido, MANTER_COLUNA,
 } from './build/crm-funil-modelos.mjs';
+import { ETAPAS_PADRAO } from './build/funil-etapas.mjs';
 
 let n = 0;
 const eq = (a, b, msg) => { assert.deepStrictEqual(a, b, msg); n++; };
@@ -99,5 +100,27 @@ eq(destinoSugerido(st('k', 'Perdido', 'perdido', 1), semPerda), 'Leads', 'sem co
 // ── 7. Coluna sem grau explicito usa a auto-classificacao ───────────────────
 const p7 = planejarAplicacaoModelo([st('w', 'Proposta Enviada', null, 6, 0)], generico, {});
 eq(p7.remover[0].destino, 'Oportunidade', 'sem etapa_funil, classifica pelo rotulo (proposta = agendamento)');
+
+// ── 8. Aplicar o PADRAO DO SISTEMA num funil existente ──────────────────────
+// ⚠️ Regressao: o padrao nao e registro no banco, e a rota exigia um id de
+// modelo salvo — era o unico "modelo" impossivel de aplicar num funil que ja
+// existe. O planejador precisa trata-lo como qualquer outra lista de etapas.
+const padraoComoModelo = ETAPAS_PADRAO.map(e => ({ label: e.label, color: e.color, etapa_funil: e.etapa }));
+const consultivo = [
+  st('c1', 'Entrada', 'contato', 10, 0),
+  st('c2', 'Não Retorna', 'contato', 4, 1),
+  st('c3', 'Engajado', 'qualificado', 936, 2),
+  st('c4', 'Reunião Agendada', 'agendamento', 0, 3),
+  st('c5', 'Proposta Enviada', 'agendamento', 0, 4),
+  st('c6', 'Fechado', 'fechamento', 0, 5),
+  st('c7', 'Sem Interesse', 'perdido', 0, 6),
+];
+const p8 = planejarAplicacaoModelo(consultivo, padraoComoModelo, {});
+ok(p8.criar.length > 0, 'o padrao do sistema cria colunas num funil consultivo');
+ok(p8.remover.every(r => r.destino), 'nenhuma coluna sai sem destino ao aplicar o padrao');
+const d8 = Object.fromEntries(p8.remover.map(r => [r.label, r.destino]));
+eq(d8['Engajado'], 'Engajados (Respondidos)', 'os 936 engajados vao para o degrau de engajamento, nao para o topo');
+ok(p8.leadsAfetados >= 936, 'a previa contabiliza os 936 leads que se mexem');
+ok(p8.manter.some(m => m.label === 'Sem Interesse'), '"Sem Interesse" coincide e continua');
 
 console.log(`OK — ${n} asserts (aplicar modelo)`);
