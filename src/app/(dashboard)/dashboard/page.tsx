@@ -1547,6 +1547,18 @@ function canExpand(r: ExpandableRow): r is Extract<ExpandableRow, { fetchUrl: st
   return 'fetchUrl' in r;
 }
 
+/** URL dos filhos de uma campanha (conjuntos na Meta, grupos no Google). */
+function urlFilhosCampanha(c: CampaignPerformance, periodParams: string): string {
+  return c.platform === 'meta'
+    ? `/api/meta/campaigns/${c.id}/adsets?connectionId=${c.connectionId}&${periodParams}`
+    : `/api/google/campaigns/${c.id}/adgroups?connectionId=${c.connectionId}&accountId=${c.accountId}${c.loginCustomerId ? `&loginCustomerId=${c.loginCustomerId}` : ''}&${periodParams}`;
+}
+
+/** URL dos anúncios de um conjunto da Meta. */
+function urlAnunciosConjunto(adsetId: string, c: CampaignPerformance, periodParams: string): string {
+  return `/api/meta/adsets/${adsetId}/ads?connectionId=${c.connectionId}&${periodParams}`;
+}
+
 const INDENT = ['pl-2', 'pl-8', 'pl-14'] as const;
 
 const CAMPAIGN_ROW_COLORS = [
@@ -1692,6 +1704,8 @@ function CampaignPerformanceTable({
   dateFrom,
   dateTo,
   metaCpl = 0,
+  abrirTudo = false,
+  preencher = false,
 }: {
   campaigns: CampaignPerformance[];
   loading: boolean;
@@ -1700,6 +1714,10 @@ function CampaignPerformanceTable({
   dateTo: string;
   /** Meta de CPL do planejamento — pinta a célula de CPL (0 = neutro). */
   metaCpl?: number;
+  /** Abre sozinho campanhas → conjuntos → anúncios (Meta; pedido do Matheus, 2026-09-24). */
+  abrirTudo?: boolean;
+  /** Em tela larga ocupa a altura do card vizinho, com rolagem interna, sem esticar a linha. */
+  preencher?: boolean;
 }) {
   const [campaigns, setCampaigns] = useState(initialCampaigns);
   // IS%/IS Orç./Topo Abs. só existem no Google Search: numa tabela só de Meta
@@ -1727,6 +1745,50 @@ function CampaignPerformanceTable({
     return params.toString();
   }, [period, dateFrom, dateTo]);
 
+  // Abrir tudo: busca os conjuntos de TODAS as campanhas e, em seguida, os
+  // anúncios de todos os conjuntos, e marca tudo como expandido. Refaz quando
+  // muda o conjunto de campanhas ou o período (senão ficariam números velhos
+  // nas linhas filhas). O usuário ainda pode recolher à mão.
+  const abriuTudoPara = useRef('');
+  useEffect(() => {
+    if (!abrirTudo || campaigns.length === 0) return;
+    const assinatura = `${campaigns.map(c => c.id).join(',')}|${periodParams}`;
+    if (abriuTudoPara.current === assinatura) return;
+    abriuTudoPara.current = assinatura;
+    let cancelado = false;
+    const buscar = async (url: string): Promise<unknown[]> => {
+      try { const r = await fetch(url); const d = await r.json(); return Array.isArray(d) ? d : []; } catch { return []; }
+    };
+    void (async () => {
+      const filhos = await Promise.all(campaigns.map(c => buscar(urlFilhosCampanha(c, periodParams))));
+      if (cancelado) return;
+      const mapa: Record<string, ChildState> = {};
+      const abertos = new Set<string>();
+      const conjuntos: Array<{ key: string; url: string }> = [];
+      campaigns.forEach((c, i) => {
+        mapa[c.id] = { loading: false, data: filhos[i] as ChildState['data'] };
+        abertos.add(c.id);
+        if (c.platform !== 'meta') return;
+        for (const a of filhos[i] as AdSetWithMetrics[]) {
+          const key = `${c.id}:${a.id}`;
+          mapa[key] = { loading: true, data: [] };
+          abertos.add(key);
+          conjuntos.push({ key, url: urlAnunciosConjunto(a.id, c, periodParams) });
+        }
+      });
+      setChildrenMap(mapa);
+      setExpanded(abertos);
+      const anuncios = await Promise.all(conjuntos.map(x => buscar(x.url)));
+      if (cancelado) return;
+      setChildrenMap(prev => {
+        const next = { ...prev };
+        conjuntos.forEach((x, i) => { next[x.key] = { loading: false, data: anuncios[i] as ChildState['data'] }; });
+        return next;
+      });
+    })();
+    return () => { cancelado = true; };
+  }, [abrirTudo, campaigns, periodParams]);
+
   async function toggleExpand(key: string, fetchUrl: string) {
     if (expanded.has(key)) {
       setExpanded(prev => { const s = new Set(prev); s.delete(key); return s; });
@@ -1750,9 +1812,7 @@ function CampaignPerformanceTable({
     for (const campaign of campaigns) {
       const campKey = campaign.id;
       const colorIdx = campaignIdx++ % CAMPAIGN_ROW_COLORS.length;
-      const campUrl = campaign.platform === 'meta'
-        ? `/api/meta/campaigns/${campaign.id}/adsets?connectionId=${campaign.connectionId}&${periodParams}`
-        : `/api/google/campaigns/${campaign.id}/adgroups?connectionId=${campaign.connectionId}&accountId=${campaign.accountId}${campaign.loginCustomerId ? `&loginCustomerId=${campaign.loginCustomerId}` : ''}&${periodParams}`;
+      const campUrl = urlFilhosCampanha(campaign, periodParams);
 
       result.push({ kind: 'campaign', key: campKey, fetchUrl: campUrl, data: campaign, level: 0, colorIdx });
 
@@ -1765,7 +1825,7 @@ function CampaignPerformanceTable({
             if (campaign.platform === 'meta') {
               const adset = child as AdSetWithMetrics;
               const adsetKey = `${campKey}:${adset.id}`;
-              const adsetUrl = `/api/meta/adsets/${adset.id}/ads?connectionId=${campaign.connectionId}&${periodParams}`;
+              const adsetUrl = urlAnunciosConjunto(adset.id, campaign, periodParams);
               result.push({ kind: 'adset', key: adsetKey, fetchUrl: adsetUrl, data: adset, campaign, level: 1, colorIdx });
               if (expanded.has(adsetKey)) {
                 const adChildren = childrenMap[adsetKey];
@@ -2018,10 +2078,10 @@ function CampaignPerformanceTable({
   return (
     <>
       {adPreview && <AdCreativePreview ad={adPreview.ad} x={adPreview.x} y={adPreview.y} />}
-      <div className="-mx-2">
+      <div className={cn('-mx-2', preencher && '2xl:relative 2xl:min-h-[220px] 2xl:flex-1')}>
         <div
-          className="overflow-auto transition-all duration-300"
-          style={{ maxHeight: tableExpanded ? '9999px' : '288px' }}
+          className={cn('overflow-auto transition-all duration-300', preencher && 'max-h-[560px] 2xl:absolute 2xl:inset-0 2xl:max-h-none')}
+          style={preencher ? undefined : { maxHeight: tableExpanded ? '9999px' : '288px' }}
         >
           {/* Cabeçalhos curtos e sem min-width largo: a tabela do Google tinha
               12 colunas e passava de 1080px — IS/Perda orç./Topo sumiam à
@@ -2052,7 +2112,7 @@ function CampaignPerformanceTable({
             </tbody>
           </table>
         </div>
-        {campaignCount > 4 && (
+        {!preencher && campaignCount > 4 && (
           <button
             type="button"
             onClick={() => setTableExpanded(prev => !prev)}
@@ -6795,8 +6855,9 @@ export default function GeneralDashboard() {
             {/* Campanhas e melhores criativos LADO A LADO (pedido do Matheus,
                 2026-09-24): a tabela só de leitura ficou estreita e sobrava um
                 vazio enorme à direita; os criativos sobem para ele, em grade. */}
-            <div className="grid items-start gap-4 2xl:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
+            <div className="grid gap-4 2xl:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
               <Superficie
+                className="2xl:flex 2xl:flex-col"
                 titulo="Campanhas Meta Ads"
                 icone={<MetaAdsMark className="h-5 w-5 text-[#168BFF]" />}
                 sub="com veiculação no período · clique para abrir conjuntos e anúncios"
@@ -6810,6 +6871,8 @@ export default function GeneralDashboard() {
                   dateFrom={customDateFrom}
                   dateTo={customDateTo}
                   metaCpl={cplMetaSel}
+                  abrirTudo
+                  preencher
                 />
               </Superficie>
               <Superficie
@@ -6862,8 +6925,9 @@ export default function GeneralDashboard() {
             {!modoFood && (
             // Campanhas e palavras-chave LADO A LADO (pedido do Matheus,
             // 2026-09-24), no mesmo desenho do bloco da Meta.
-            <div className="grid items-start gap-4 2xl:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
+            <div className="grid gap-4 2xl:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
               <Superficie
+                className="2xl:flex 2xl:flex-col"
                 titulo="Campanhas Google Ads"
                 icone={<GoogleAdsMark className="h-5 w-5" />}
                 sub="com veiculação no período · clique para abrir grupos e anúncios"
@@ -6877,6 +6941,7 @@ export default function GeneralDashboard() {
                   dateFrom={customDateFrom}
                   dateTo={customDateTo}
                   metaCpl={cplMetaSel}
+                  preencher
                 />
               </Superficie>
               <Superficie
