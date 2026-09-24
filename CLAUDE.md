@@ -1,3 +1,15 @@
+## Landing page — palavras, termos e audiência no 2º mock (2026-09-24, noite)
+
+Segundo mock do Matheus ("Quero essa parte da Lp… Seguir a risca"), commit `2d5ba0f` na `main`. Tudo em `ga4-landing-panel.tsx`; nenhuma rota/lib mudou.
+
+- **Componentes novos do mock**: `CabecalhoIcone` (caixa de ícone 44px + título/sub + slot à direita; `CaixaIcone` ganhou `cor`/`redondo`/`tam`), `SeloContagem` (número grande colorido + texto em 2 linhas), `ListaRanking` (posição em caixa, rótulo + sub, `BarraFina`, número + unidade, chevron; `barraEmbaixo` para Cidades) e a legenda do `Empilhada` com o **% grande à direita**.
+- **⚠️ O chevron das linhas TEM destino**: clicar abre o detalhe da palavra (sessões, engajamento, tempo médio, WhatsApp/formulário/telefone). Chevron decorativo que não abre nada seria mentira de UI — se remover o `detalhe`, o chevron esmaece e a linha deixa de ser botão.
+- **⚠️ Selo do card vermelho = SOMA das sessões sem contato** (o mock mostra "35", que é só a 1ª linha; somar é o número honesto para "sessões sem contato").
+- **"Ver mais (N)" ficou** nas listas (o mock só mostra 5 e não tem o botão): esconder as outras 17 palavras sem porta nenhuma perderia dado — mesma decisão de "Ver mais" de 5 itens do resto da dashboard.
+- **Audiência**: cabeçalho com ícone + sub ("Entenda quem visita seu site…"), Dispositivo / Novos × recorrentes / Cidades na MESMA linha (`xl:grid-cols-3`); Idade/Gênero (que o mock não tem) seguem numa 2ª linha só quando o GA4 devolve.
+- **Lições de largura**: em 2 colunas a 1440px o cabeçalho precisa de `md:flex-nowrap` (senão o selo cai pra 2ª linha) e a barra inline ficou em 24% + número `min-w-[84px]` para o rótulo da palavra não truncar; o sub da linha NÃO trunca (quebra em 2), porque "engajamento X · tempo médio Y" cortado não informa nada.
+- ✅ Verificado: tsc limpo; eslint 0 = 0 no arquivo; harness com o payload real da Sorrifácil ingleses (`?json=ingleses.json`) — selos 22/136, ranking com barra, detalhe abrindo, "Ver termos", 3 cards de audiência com % grande. ⚠️ Não visto com o cliente do mock (Cinfel) nem em produção com login.
+
 ## Dashboard — seção Landing page refeita "à risca" no layout do mock (2026-09-24, fim da tarde)
 
 Pedido do Matheus com o mock em anexo: "Quero essa parte da Lp, seja com esse layout que estou enviando em anexo. Seguir a risca". Commit `cf87d69` na `main`.
