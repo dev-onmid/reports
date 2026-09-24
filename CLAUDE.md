@@ -14,6 +14,15 @@ Pergunta do Matheus: "sistema está preparado para enviarmos acesso para cliente
 - **⚠️ `Donut` ganhou `corSuperficie`** (opcional, default inalterado): o `stroke` entre fatias era `#0d1519` fixo (superfície da dashboard interna) e no card do portal (`#17181d`) virava um aro visível em volta do gráfico.
 - ⚠️ **`lucide-react` não exporta ícone de marca** (mordeu de novo no `Instagram`) — o "@" no nome da conta resolve.
 - ✅ **Verificado**: tsc + `next build` limpos; **teste de vazamento** rodando as 7 fontes e procurando o id/nome de outro cliente na resposta — zero; harness no browser com os **payloads REAIS de produção** (CondoStore: R$ 5.506,69 / 153 leads / CPL R$ 35,99, funil 123→6→6→3→0, 5 canais, GA4 839 sessões) a 1280px e 375px sem overflow; **em produção** (imagem `de6b2f3e`) as 8 fontes 200, chave fora da allowlist 404, token inválido 404, `clientId` forçado na URL ignorado, página 200 com `noindex`, e a rota interna equivalente **401 sem sessão**.
+### Só olhar e trocar o período (2026-09-24, mesma rodada)
+
+Correção do Matheus depois de ver a entrega: "ele pode ver, mas não pode ter poder de clique algum. Só visualização, podendo só alterar período."
+
+- **A garantia passou a valer na BORDA, não por convenção**: o proxy recusa qualquer método que não seja `GET`/`HEAD` em `/api/portal/*` (405). As 3 rotas já só tinham `GET`, mas isso é um fato de hoje — bastava alguém acrescentar um `POST` ali um dia para abrir escrita **sem sessão**, e nada gritaria. Quem precisar disso tem de tirar o prefixo do público e pensar na autenticação, que é justamente a conversa que deve acontecer. ✅ Provado em produção com token VÁLIDO: POST/PUT/PATCH/DELETE → 405 nas três rotas; GET segue 200.
+- **Botão de atualizar removido das duas abas** — recarregar é ação, não leitura, e a tela já recarrega ao trocar o período. Em lugar dele, só o sinal "atualizando…". Rodapé agora diz "somente leitura".
+- **Clicáveis que sobraram, e o porquê de cada um**: chips de período (o que foi pedido); troca entre as duas abas — **sem ela a parte de CRM fica inalcançável**, e foi ela que o Matheus pediu junto da dashboard; e o lead que abre a conversa em leitura, que ele **confirmou manter** quando perguntei, por ser leitura e não ação.
+- ⚠️ **O deploy pelo GitHub Actions FALHOU no passo "Publicar na VPS"**: o runner não alcançou a porta 22 (`ssh-keyscan` sem resposta). Não é fail2ban — zero banidos, e a conexão do runner nem aparece no `sshd`. Publicado pelo caminho manual documentado (`gh run download` → `scp` → `bash deploy-recv.sh <tag>`), imagem `27ab81c0`, smoke test verde. Se repetir, é rota de rede entre o GitHub e a Hostinger, não o app.
+
 - ⚠️ **Nunca foi aberto para cliente real**: o sistema está com **0 tokens ativos** (o único era de teste e foi revogado no fim da rodada). Para liberar: CRM → cliente → ⋮ → Portal do cliente → Gerar link.
 - ⚠️ **O cliente passa a ver nome interno de campanha e de criativo** (`[ON] [FORMS] [DIRETO] [JUNH] [VENDA] #3`, `DARK - RAFA 03`) e o orçamento diário por campanha. Foi autorizado ("a dash inteira"), mas se um dia incomodar, o lugar de tratar é o `filtrar` da fonte `campanhas`, não o componente.
 
