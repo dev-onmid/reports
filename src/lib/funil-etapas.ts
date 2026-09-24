@@ -133,7 +133,7 @@ export function classificarEtapa(label: string | null | undefined): EtapaFunil {
   // 1), no mesmo degrau que "Qualificação" — numa board de vendas os dois
   // colapsavam num degrau só. Aqui viram um degrau próprio, depois de qualificado.
   if (/agendad|agendament|remarcad|remarcac|reagendad|marcad|proposta|orcament|orcado|cotacao|negocia/.test(s)) return 'agendamento';
-  if (/em atendimento|qualificad|qualificac|nao retorna|distante/.test(s)) return 'qualificado';
+  if (/em atendimento|qualificad|qualificac|nao retorna|distante|engajad/.test(s)) return 'qualificado';
   return 'contato';
 }
 
@@ -480,10 +480,12 @@ export function rotuloFonteTopo(fontes: ('crm' | 'anuncios')[]): string {
 // "Comprou" em dado legado.
 export const ETAPAS_PADRAO: { label: string; color: string; position: number; etapa: EtapaFunil }[] = [
   { label: 'Em Atendimento', color: '#0ea5e9', position: 0, etapa: 'qualificado' },
-  // ⚠️ Engajado entra como grau `contato`, não `qualificado`: engajar é aprofundar o
-  // TOPO do funil (o lead respondeu), enquanto qualificar é decisão humana no botão do
-  // card — critério de MQL, que muda por cliente. Ver src/lib/lead-qualificacao.ts.
-  { label: 'Engajado',       color: '#22d3ee', position: 1, etapa: 'contato' },
+  // ⚠️ Engajado é o 2º DEGRAU (posto 1), não o topo — decisão do Matheus em
+  // 2026-09-24, revertendo a de 4df6ebb: na dashboard o topo é sempre "Leads"
+  // (todo mundo que entrou) e logo abaixo vem "Engajados" (quem respondeu ou
+  // interagiu). Com Engajado em `contato`, a coluna virava o RÓTULO do topo
+  // no funil real ("351 ENGAJADO") e o degrau de engajamento não existia.
+  { label: 'Engajado',       color: '#22d3ee', position: 1, etapa: 'qualificado' },
   { label: 'Agendado',       color: '#3b82f6', position: 2, etapa: 'agendamento' },
   { label: 'Reagendado',     color: '#7dd3fc', position: 3, etapa: 'agendamento' },
   { label: 'Fechado',        color: '#10b981', position: 4, etapa: 'fechamento' },

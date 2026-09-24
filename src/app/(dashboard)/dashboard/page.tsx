@@ -6883,7 +6883,11 @@ export default function GeneralDashboard() {
           && restante.some(x => x.etapa === 'comparecimento');
         const ehFechamento = d.etapa === 'fechamento' && !restante.some(x => x.etapa === 'fechamento');
         return {
-          label: d.label,
+          // Topo e 2º degrau com rótulo FIXO (pedido do Matheus, 2026-09-24): o topo é
+          // "Leads" (o total — a 1ª coluna do Kanban, ex. "Engajado", não descreve
+          // isso) e o 2º é "Engajados" (quem respondeu/interagiu). Do 3º em diante,
+          // o nome real da coluna do cliente.
+          label: d.etapa === 'contato' ? 'Leads' : d.etapa === 'qualificado' ? 'Engajados' : d.label,
           actual: d.alcancaram,
           planned: 0,
           color: d.color,
@@ -6891,7 +6895,8 @@ export default function GeneralDashboard() {
         };
       })
     : firstPlanningForFunnel.stages.map((stage, i) => ({
-        label: cleanFunnelLabel(stage.name),
+        // Mesmos rótulos fixos do funil real nos dois primeiros degraus.
+        label: i === 0 ? 'Leads' : i === 1 ? 'Engajados' : cleanFunnelLabel(stage.name),
         actual: actualFunnelVolumes[i] ?? 0,
         planned: plannedFunnelAgg[i] ?? 0,
         color: FUNNEL_STEP_COLORS[i % FUNNEL_STEP_COLORS.length],
