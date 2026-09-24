@@ -1,3 +1,11 @@
+## Mídia paga — "Melhores criativos" com altura FIXA de 2 linhas e rolagem lateral (2026-09-24, noite)
+
+Pedido do Matheus: "do jeito e tamanho que está a altura na caixa de melhores criativos da Cinfel, deixa como padrão e fixo; para ver outros criativos só rolando para a lateral". A Cinfel tem 20 criativos e a grade mostrava 6 em 2 linhas — essa é a altura que virou padrão.
+
+- `CreativeHorizontalStrip` em modo `grade`: `grid grid-flow-col grid-rows-2 auto-cols-[200px] overflow-x-auto` — **sempre 2 linhas**, cards de **200px** de largura (imagem 4:5 + texto ≈ 326px cada; caixa ≈ 665px de miolo), **todos os criativos** (a API já limita em 20) entrando coluna a coluna para a direita. A largura fixa do card é o que torna a altura determinística em qualquer tela; a caixa nunca cresce com mais criativos.
+- A tabela "Campanhas Meta Ads" ao lado continua copiando essa altura (`2xl:absolute 2xl:inset-0`); abaixo de `2xl` os dois empilham.
+- ⚠️ Não visto no browser: `CreativeHorizontalStrip` vive dentro do `page.tsx` (não monta em bundle isolado). É CSS de grade padrão (`grid-flow-col` + `grid-rows-2` + coluna fixa + `overflow-x-auto`); conferir na Cinfel que a rolagem lateral aparece e que a caixa tem 2 linhas.
+
 ## Mídia paga — a tabela Meta "abrir tudo" nunca abria em produção: cleanup de efeito cancelava a busca (2026-09-24, noite)
 
 Print do Matheus da tabela de campanhas Meta: "quero que fique assim, campanhas abertas, já mostrando tudo". O `abrirTudo` de `68e0c2c` existia, mas em produção a tabela seguia fechada.

@@ -4793,14 +4793,19 @@ function CreativeHorizontalStrip({ creatives, loading, onPreview, grade = false 
   creatives: TopCreative[];
   loading: boolean;
   onPreview: (creative: TopCreative) => void;
-  /** Grade que quebra linha (ao lado da tabela de campanhas) em vez da faixa com rolagem. */
+  /**
+   * Ao lado da tabela de campanhas: altura FIXA de 2 linhas de cards de 200px
+   * (pedido do Matheus, 24/09: "do jeito e tamanho da Cinfel, padrão e fixo") e
+   * os demais criativos entram rolando para o LADO — a caixa nunca cresce.
+   */
   grade?: boolean;
 }) {
+  const classeGrade = 'grid grid-flow-col grid-rows-2 auto-cols-[200px] gap-3 overflow-x-auto pb-2 [scrollbar-width:thin] [scrollbar-color:#2a2d3a_transparent]';
   if (loading) {
     return (
-      <div className={grade ? 'grid grid-cols-[repeat(auto-fill,minmax(170px,1fr))] gap-3' : 'flex gap-3 overflow-x-auto pb-2'}>
-        {Array.from({ length: 6 }).map((_, i) => (
-          <div key={i} className={cn('animate-pulse rounded-xl bg-white/[0.06]', !grade && 'w-[220px] shrink-0')} style={{ height: 345 }} />
+      <div className={grade ? classeGrade : 'flex gap-3 overflow-x-auto pb-2'}>
+        {Array.from({ length: grade ? 8 : 6 }).map((_, i) => (
+          <div key={i} className={cn('animate-pulse rounded-xl bg-white/[0.06]', !grade && 'w-[220px] shrink-0')} style={{ height: grade ? 326 : 345 }} />
         ))}
       </div>
     );
@@ -4818,8 +4823,8 @@ function CreativeHorizontalStrip({ creatives, loading, onPreview, grade = false 
       || (b.spend - a.spend))
     : creatives;
   return (
-    <div className={grade ? 'grid grid-cols-[repeat(auto-fill,minmax(170px,1fr))] gap-3' : 'flex gap-3 overflow-x-auto pb-2 [scrollbar-width:thin] [scrollbar-color:#2a2d3a_transparent]'}>
-      {ordenados.slice(0, grade ? 6 : 10).map((creative, index) => (
+    <div className={grade ? classeGrade : 'flex gap-3 overflow-x-auto pb-2 [scrollbar-width:thin] [scrollbar-color:#2a2d3a_transparent]'}>
+      {(grade ? ordenados : ordenados.slice(0, 10)).map((creative, index) => (
         <HorizontalCreativeCard key={creative.adId} creative={creative} index={index} onPreview={onPreview} fluido={grade} />
       ))}
     </div>
