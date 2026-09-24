@@ -30,7 +30,7 @@
 import { useMemo, useState, type ElementType, type ReactNode } from 'react';
 import {
   ArrowDown, ArrowUp, BarChart3, ChevronDown, ChevronRight, ChevronsUpDown, Clock, FileText, Info, MessageCircle, MessageSquare,
-  MousePointerClick, Percent, Phone, Search, UserPlus, Users, Activity, Ban, Smartphone, MapPin, User, CalendarDays, ArrowRight, BarChart2,
+  MousePointerClick, Percent, Phone, Search, UserPlus, Users, Activity, Ban, Smartphone, MapPin, User, CalendarDays, ArrowRight, BarChart2, CircleDollarSign, DollarSign, Link2, Calculator, Trophy,
 } from 'lucide-react';
 import type { Ga4Celula, Ga4Consolidado, Ga4Linha, Ga4Seg, Ga4Totais } from '@/lib/ga4-landing';
 import { EvolucaoDiaria, type Granularidade } from './ga4-landing-graficos';
@@ -217,7 +217,53 @@ function Empilhada({ linhas }: { linhas: Ga4Seg[] }) {
  * contatos, com % entre etapas e o connect rate em destaque. Sem Google Ads,
  * cai para sessões → engajadas → contatos do total da LP.
  */
-/** Campanhas ranqueadas por custo, com connect rate e custo por contato; campanhas UTM (sem custo) abaixo, esmaecidas. */
+/** Faixa de grupo do mock ("CAMPANHAS NA PÁGINA | o que o GA4 viu…"): ícone + título verde + divisor + sub, num card fino. */
+function BarraGrupo({ icone: Icone, titulo, sub }: { icone: ElementType; titulo: string; sub?: string }) {
+  return (
+    <div className={cx(SUPERFICIE, 'flex flex-wrap items-center gap-x-4 gap-y-1 px-5 py-3.5')}>
+      <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg" style={{ background: `${VERDE}22`, color: VERDE, boxShadow: `inset 0 0 0 1px ${VERDE}44` }}>
+        <Icone className="h-4 w-4" />
+      </span>
+      <h4 className="text-base font-black uppercase tracking-[0.08em]" style={{ color: VERDE }}>{titulo}</h4>
+      {sub && (
+        <>
+          <span className="hidden h-6 w-px bg-white/[0.12] sm:block" />
+          <span className="text-sm text-[#a7b0b6]">{sub}</span>
+        </>
+      )}
+    </div>
+  );
+}
+
+/** Pílula de valor (connect rate, custo/contato) do mock: fundo colorido suave + borda. */
+function Pilula({ cor, children, contorno = false }: { cor: string; children: ReactNode; contorno?: boolean }) {
+  return (
+    <span
+      className="inline-flex min-w-[76px] items-center justify-center whitespace-nowrap rounded-lg px-3 py-1.5 text-sm font-bold tabular-nums"
+      style={{ color: cor, background: contorno ? 'transparent' : `${cor}1a`, boxShadow: `inset 0 0 0 1px ${cor}${contorno ? '99' : '55'}` }}
+    >
+      {children}
+    </span>
+  );
+}
+
+// 9ª coluna = selo "Melhor desempenho" (só na linha vencedora; vazia nas demais e no cabeçalho).
+const COLS_CAMPANHAS = 'grid-cols-[56px_minmax(220px,1fr)_repeat(6,minmax(104px,auto))_minmax(0,auto)]';
+
+function CabCampanhas({ icone: Icone, children, esquerda = false }: { icone?: ElementType; children: ReactNode; esquerda?: boolean }) {
+  return (
+    <span className={cx('inline-flex items-center gap-1.5 whitespace-nowrap text-[11px] font-black uppercase tracking-[0.08em] text-[#a7b0b6]', esquerda ? 'justify-start' : 'justify-center')}>
+      {Icone && <Icone className="h-3.5 w-3.5 text-[#7c868c]" />}{children}
+    </span>
+  );
+}
+
+/**
+ * Campanhas ranqueadas por custo (mock): cabeçalho com caixa de ícone e título grande,
+ * colunas com ícone, linhas em caixa com a posição, barra de custo, connect e custo por
+ * contato em pílula, a de MENOR custo por contato destacada com troféu; campanhas UTM
+ * (sem custo no GA4) abaixo, esmaecidas, com ponto no lugar da posição.
+ */
 function Campanhas({ ads, utm, semCusto }: { ads: Ga4Seg[]; utm: Ga4Seg[]; semCusto: boolean }) {
   const nomesAds = new Set(ads.map(a => a.valor));
   const outras = utm.filter(c => !/^google\s*\//i.test(c.sub ?? '') && !nomesAds.has(c.valor));
@@ -226,87 +272,122 @@ function Campanhas({ ads, utm, semCusto }: { ads: Ga4Seg[]; utm: Ga4Seg[]; semCu
   const contUtm = contador(outras);
   const ordenadas = [...ads].sort((a, b) => (b.custo ?? 0) - (a.custo ?? 0) || b.sessoes - a.sessoes);
   const maxCusto = Math.max(1, ...ordenadas.map(a => a.custo ?? 0));
-  const th = cx('pb-2 pl-3 text-right whitespace-nowrap', T.tabelaCab);
-  const td = 'py-2.5 pl-3 text-right tabular-nums whitespace-nowrap';
+  // Melhor desempenho = menor custo por contato entre as que têm custo E contato.
+  const custoContato = (c: Ga4Seg) => { const k = contAds(c); const custo = c.custo ?? 0; return k > 0 && custo > 0 ? custo / k : null; };
+  const melhor = ordenadas.reduce<{ chave: string; v: number } | null>((m, c) => {
+    const v = custoContato(c);
+    return v !== null && (m === null || v < m.v) ? { chave: c.valor, v } : m;
+  }, null);
+  const celula = 'flex items-center justify-center text-sm tabular-nums';
 
   return (
     <Card>
-      <Titulo dica={semCusto
-        ? 'Custo vazio: a propriedade GA4 não está vinculada ao Google Ads.'
-        : 'Ordenado por custo. Connect rate = sessões ÷ cliques. Custo por contato = custo ÷ contatos (WhatsApp + formulário + telefone).'}>
-        Campanhas: custo por contato
-      </Titulo>
-      <div className="-mx-1 overflow-x-auto px-1">
-        <table className="w-full min-w-[640px] text-xs">
-          <thead>
-            <tr>
-              <th className={cx('pb-2 pr-2 text-left', T.tabelaCab)}>Campanha</th>
-              <th className={th}>Custo</th>
-              <th className={th}>Cliques</th>
-              <th className={th}>Sessões</th>
-              <th className={th}>Connect</th>
-              <th className={th}>Contatos</th>
-              <th className={th}>Custo/contato</th>
-            </tr>
-          </thead>
-          <tbody>
+      <div className="mb-5 flex items-center gap-4">
+        <span className="inline-flex h-[72px] w-[72px] shrink-0 items-center justify-center rounded-2xl" style={{ background: `${VERDE}14`, color: VERDE, boxShadow: `inset 0 0 0 1px ${VERDE}66, 0 0 22px ${VERDE}22` }}>
+          <CircleDollarSign className="h-8 w-8" />
+        </span>
+        <div className="min-w-0">
+          <h4 className="text-2xl font-black uppercase leading-tight tracking-[0.04em] text-[#f4f7f8]">Campanhas: custo por contato</h4>
+          <p className="mt-1 text-sm text-[#a7b0b6]">
+            {semCusto
+              ? 'Custo vazio: a propriedade GA4 não está vinculada ao Google Ads.'
+              : 'Ordenado por custo. Connect rate = sessões ÷ cliques. Custo por contato = custo ÷ contatos (WhatsApp + formulário + telefone).'}
+          </p>
+        </div>
+      </div>
+
+      <div className="-mx-2 overflow-x-auto px-2">
+        <div className="min-w-[960px]">
+          <div className={cx('grid items-center gap-x-3 px-3 pb-3', COLS_CAMPANHAS)}>
+            <CabCampanhas>#</CabCampanhas>
+            <CabCampanhas esquerda>Campanha</CabCampanhas>
+            <CabCampanhas icone={DollarSign}>Custo</CabCampanhas>
+            <CabCampanhas icone={MousePointerClick}>Cliques</CabCampanhas>
+            <CabCampanhas icone={BarChart3}>Sessões</CabCampanhas>
+            <CabCampanhas icone={Link2}>Connect</CabCampanhas>
+            <CabCampanhas icone={Users}>Contatos</CabCampanhas>
+            <CabCampanhas icone={Calculator}>Custo/contato</CabCampanhas>
+            <span />
+          </div>
+
+          <div className="space-y-2">
             {ordenadas.map((c, i) => {
               const custo = c.custo ?? 0;
               const cliques = c.cliques ?? 0;
               const k = contAds(c);
               const conn = cliques > 0 ? div(c.sessoes, cliques) : null;
               const stc = conn !== null ? statusConnect(conn) : null;
+              const cc = custoContato(c);
+              const ehMelhor = melhor !== null && melhor.chave === c.valor;
               return (
-                <tr key={c.valor} className="border-t border-white/[0.06] align-middle">
-                  <td className="max-w-[280px] py-2.5 pr-2">
-                    <div className="flex items-center gap-2">
-                      <span className="w-4 shrink-0 text-right font-heading text-sm text-[#6c767c]">{i + 1}</span>
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate font-semibold text-[#dce4e8]" title={c.valor}>{c.valor}</div>
-                        {custo > 0 && (
-                          <div className="mt-1 h-1 rounded-full bg-white/[0.05]">
-                            <div className="h-1 rounded-full bg-[#6cff2f]/70" style={{ width: `${(custo / maxCusto) * 100}%` }} />
-                          </div>
-                        )}
-                      </div>
+                <div
+                  key={c.valor}
+                  className={cx('relative grid items-center gap-x-3 rounded-xl border px-3 py-3', COLS_CAMPANHAS, ehMelhor ? 'bg-[#6cff2f]/[0.05]' : 'border-white/[0.06] bg-white/[0.02]')}
+                  style={ehMelhor ? { borderColor: `${VERDE}66`, boxShadow: `0 0 0 1px ${VERDE}22, 0 0 18px ${VERDE}14` } : undefined}
+                >
+                  <span
+                    className={cx('inline-flex h-9 w-9 items-center justify-center rounded-lg text-sm font-bold tabular-nums', ehMelhor ? 'text-black' : 'border border-white/[0.1] bg-white/[0.05] text-[#f4f7f8]')}
+                    style={ehMelhor ? { background: VERDE, boxShadow: `0 0 14px ${VERDE}66` } : undefined}
+                  >
+                    {i + 1}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="truncate text-[15px] font-semibold text-[#f4f7f8]" title={c.valor}>{c.valor}</p>
+                    <div className="mt-2 h-1.5 w-full max-w-[420px] rounded-full bg-white/[0.06]">
+                      <div className="h-1.5 rounded-full" style={{ width: `${custo > 0 ? Math.max(2, (custo / maxCusto) * 100) : 0}%`, background: VERDE }} />
                     </div>
-                  </td>
-                  <td className={cx(td, 'font-bold text-[#f4f7f8]')}>{custo ? fmtBRL(custo) : '—'}</td>
-                  <td className={cx(td, 'text-[#9aa4aa]')}>{cliques ? fmtN(cliques) : '—'}</td>
-                  <td className={cx(td, 'text-[#9aa4aa]')}>{fmtN(c.sessoes)}</td>
-                  <td className={td} title="Connect rate: sessões ÷ cliques">{stc && conn !== null ? <span className="font-bold" style={{ color: stc.cor }}>{fmtPct(conn, 0)}</span> : <span className="text-[#6c767c]">—</span>}</td>
-                  <td className={cx(td, 'font-bold text-[#dce4e8]')}>{fmtN(k)}</td>
-                  <td className={td}>
-                    {k > 0 && custo > 0
-                      ? <span className="font-bold text-[#f4f7f8]">{fmtBRL(custo / k)}</span>
-                      : custo > 0 ? <Chip cor={VERMELHO}>Sem contato</Chip> : <span className="text-[#6c767c]">—</span>}
-                  </td>
-                </tr>
+                  </div>
+                  <span className={cx(celula, 'font-bold text-[#f4f7f8]')}>{custo ? fmtBRL(custo) : '—'}</span>
+                  <span className={cx(celula, 'text-[#a7b0b6]')}>{cliques ? fmtN(cliques) : '—'}</span>
+                  <span className={cx(celula, 'text-[#a7b0b6]')}>{fmtN(c.sessoes)}</span>
+                  <span className={celula} title="Connect rate: sessões ÷ cliques">
+                    {stc && conn !== null ? <Pilula cor={stc.cor}>{fmtPct(conn, 0)}</Pilula> : <span className="text-[#6c767c]">—</span>}
+                  </span>
+                  <span className={cx(celula, 'font-bold text-[#f4f7f8]')}>{fmtN(k)}</span>
+                  <span className={celula}>
+                    {cc !== null
+                      ? <Pilula cor={VERDE} contorno>{fmtBRL(cc)}</Pilula>
+                      : custo > 0 ? <Pilula cor={VERMELHO} contorno><span className="text-[11px] font-black uppercase tracking-[0.06em]">Sem contato</span></Pilula> : <span className="text-[#6c767c]">—</span>}
+                  </span>
+                  <span className="flex items-center">
+                    {ehMelhor && (
+                      <span className="inline-flex items-center gap-1.5 whitespace-nowrap pl-1 text-[10px] font-black uppercase leading-[1.1] tracking-[0.06em]" style={{ color: VERDE }}>
+                        <Trophy className="h-4 w-4" />
+                        <span>Melhor<br />desempenho</span>
+                      </span>
+                    )}
+                  </span>
+                </div>
               );
             })}
-            {outras.length > 0 && (
-              <tr>
-                <td colSpan={7} className="pb-1 pt-4 text-[10px] font-black uppercase tracking-[0.08em] text-[#6c767c]">
-                  Outras campanhas (UTM) · Meta Ads e demais origens, sem custo no GA4
-                </td>
-              </tr>
-            )}
-            {outras.map(c => (
-              <tr key={`${c.valor}|${c.sub ?? ''}`} className="border-t border-white/[0.04] text-[#7c868c]">
-                <td className="max-w-[280px] py-2 pr-2 pl-6">
-                  <div className="truncate" title={c.valor}>{c.valor}</div>
-                  {c.sub && <div className="truncate text-[10px] text-[#5c666c]">{c.sub}</div>}
-                </td>
-                <td className={td}>—</td>
-                <td className={td}>—</td>
-                <td className={td}>{fmtN(c.sessoes)}</td>
-                <td className={td}>—</td>
-                <td className={cx(td, 'text-[#a7b0b6]')}>{fmtN(contUtm(c))}</td>
-                <td className={td}>—</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+          </div>
+
+          {outras.length > 0 && (
+            <>
+              <p className="mb-2 mt-5 px-1 text-[11px] font-black uppercase tracking-[0.08em] text-[#7c868c]">
+                Outras campanhas (UTM) <span className="text-[#5c666c]">·</span> Meta Ads e demais origens, sem custo no GA4
+              </p>
+              <div className="space-y-2">
+                {outras.map(c => (
+                  <div key={`${c.valor}|${c.sub ?? ''}`} className={cx('grid items-center gap-x-3 rounded-xl border border-white/[0.05] bg-white/[0.015] px-3 py-2.5 text-[#7c868c]', COLS_CAMPANHAS)}>
+                    <span className="flex justify-center"><span className="h-2.5 w-2.5 rounded-full bg-[#3b4a55]" /></span>
+                    <div className="min-w-0">
+                      <p className="truncate text-[15px] text-[#c7d0d5]" title={c.valor}>{c.valor}</p>
+                      {c.sub && <p className="truncate text-xs text-[#6c767c]">{c.sub}</p>}
+                    </div>
+                    <span className={celula}>—</span>
+                    <span className={celula}>—</span>
+                    <span className={cx(celula, 'text-[#a7b0b6]')}>{fmtN(c.sessoes)}</span>
+                    <span className={celula}>—</span>
+                    <span className={cx(celula, 'text-[#a7b0b6]')}>{fmtN(contUtm(c))}</span>
+                    <span className={celula}>—</span>
+                    <span />
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
       </div>
     </Card>
   );
@@ -1196,7 +1277,7 @@ export function Ga4LandingPanel({ dados, loading, aviso }: { dados: Ga4Consolida
       {/* Campanhas na página (antes "Tráfego pago") */}
       {temPago && (
         <>
-          <GrupoTitulo titulo="Campanhas na página" sub="o que o GA4 viu de cada campanha e palavra-chave" />
+          <BarraGrupo icone={BarChart3} titulo="Campanhas na página" sub="o que o GA4 viu de cada campanha e palavra-chave" />
           {semVinculoAds && (
             <p className="rounded-lg px-3 py-2 text-[11px]" style={{ background: `${AMBAR}14`, color: AMBAR }}>
               Esta propriedade GA4 não está vinculada ao Google Ads: custo por campanha, palavras-chave e termos pesquisados não aparecem.

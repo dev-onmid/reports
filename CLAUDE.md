@@ -1,3 +1,13 @@
+## Landing page — "Campanhas na página" e "Campanhas: custo por contato" no 4º mock (2026-09-24, noite)
+
+Quarto mock do Matheus ("Quero essa parte da Lp… Seguir a risca"). Só `ga4-landing-panel.tsx`.
+
+- **`BarraGrupo`**: a faixa de grupo virou um card fino com caixa de ícone, título VERDE em caixa alta, divisor vertical e o sub ao lado ("CAMPANHAS NA PÁGINA | o que o GA4 viu…"). Só esse grupo usa; "Comportamento" segue com `GrupoTitulo`.
+- **`Campanhas` refeita como GRADE de linhas em caixa** (não `<table>`): caixa de ícone de 72px (`CircleDollarSign`) com contorno verde, título 24px em caixa alta; cabeçalho com ícone por coluna (`#`, Campanha, Custo, Cliques, Sessões, Connect, Contatos, Custo/contato); cada campanha numa linha `rounded-xl` com a posição em quadrado, nome + barra de custo, connect em **pílula** (verde/âmbar/vermelho pelo `statusConnect`) e custo/contato em pílula de contorno verde ou "SEM CONTATO" em vermelho.
+- **"Melhor desempenho" = menor custo por contato** entre campanhas com custo E contato: linha com borda verde + brilho, quadrado da posição preenchido de verde e o selo com troféu numa **9ª coluna própria** (`minmax(0,auto)`) — a 1ª versão usava `absolute` além da última coluna e o `overflow-x-auto` cortava o selo. Colunas: `56px | minmax(220px,1fr) | 6 × minmax(104px,auto) | auto`, `min-w-[960px]` com rolagem horizontal.
+- "Outras campanhas (UTM)" continuam abaixo, esmaecidas, com ponto no lugar da posição.
+- ✅ Verificado: tsc + eslint limpos; harness com a Sorrifácil ingleses (1600px): MULTIPLAS ESPECIALIDADES vence com R$ 23,72 e recebe o troféu, pílulas de connect 88/82/90%, UTM esmaecidas. ⚠️ Não visto com a Cinfel (o mock) nem em produção logado.
+
 ## Mídia paga — "Melhores criativos" com altura FIXA de 2 linhas e rolagem lateral (2026-09-24, noite)
 
 Pedido do Matheus: "do jeito e tamanho que está a altura na caixa de melhores criativos da Cinfel, deixa como padrão e fixo; para ver outros criativos só rolando para a lateral". A Cinfel tem 20 criativos e a grade mostrava 6 em 2 linhas — essa é a altura que virou padrão.
