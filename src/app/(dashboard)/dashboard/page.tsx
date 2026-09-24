@@ -4096,7 +4096,7 @@ function CanalDonutCard({ titulo, fatiasBrutas, total, semCanal, formato, aviso 
   })();
 
   return (
-    <PremiumPanel className="p-5">
+    <PremiumPanel className="flex flex-col p-5">
       <div className="mb-3 flex items-baseline justify-between gap-2">
         <h3 className={cn('flex items-center gap-2', T.cardTitulo)}>
           <DollarSign className="h-4 w-4 text-[#6cff2f]" /> {titulo}
@@ -4110,9 +4110,11 @@ function CanalDonutCard({ titulo, fatiasBrutas, total, semCanal, formato, aviso 
       {fatias.length === 0 ? (
         <p className={cn('py-6 text-center', T.cardSub)}>Sem dado no período.</p>
       ) : (
-        <div className="grid items-center gap-4 md:grid-cols-[170px_1fr]">
-        <Donut fatias={fatiasDonut} centroValor={premiumValue(total, formato)} formatar={(n) => premiumValue(n, formato)} />
-        <div className="min-w-0 space-y-2">
+        // Corpo ocupa a altura que a grade dá ao card (o vizinho pode ter mais canais):
+        // rosca e legenda centralizadas, legenda espalhada — sem vão embaixo.
+        <div className="grid flex-1 items-center gap-6 md:grid-cols-[190px_1fr]">
+        <Donut tamanho={190} fatias={fatiasDonut} centroValor={premiumValue(total, formato)} formatar={(n) => premiumValue(n, formato)} />
+        <div className="flex min-w-0 flex-col justify-evenly gap-2.5 self-stretch">
           {fatias.map((o) => {
             const marca = marcaDoCanal(o.label);
             const cor = corDe(o.label);

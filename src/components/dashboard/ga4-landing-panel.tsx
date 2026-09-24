@@ -91,9 +91,15 @@ function statusConnect(r: number) {
 // ───────────────────────────── primitivos visuais ─────────────────────────────
 
 /** Card de topo da seção — a MESMA superfície de todo o dashboard. */
+// ⚠️ Card em COLUNA flexível: em grade, o card estica até a altura do vizinho; o corpo
+// (rosca, lista, barras) usa `flex-1` para ocupar essa sobra em vez de deixar um vão
+// embaixo (pedido do Matheus, 24/09 — card de Gênero com metade vazia).
 function Card({ children, className }: { children: ReactNode; className?: string }) {
-  return <section className={cx(SUPERFICIE, 'p-5', className)}>{children}</section>;
+  return <section className={cx(SUPERFICIE, 'flex flex-col p-5', className)}>{children}</section>;
 }
+
+/** Lista que se espalha na altura disponível do card (gap mínimo de 12px). */
+const LISTA_CHEIA = 'flex flex-1 flex-col justify-evenly gap-3';
 
 /** Título de card no padrão do dashboard, com descrição opcional e slot à direita. */
 function Titulo({ children, dica, direita }: { children: ReactNode; dica?: string; direita?: ReactNode }) {
@@ -156,28 +162,6 @@ function ListaBarras({ itens, cor = VERDE, limite = 5 }: { itens: ItemBarra[]; c
   );
 }
 
-/** Segmentos de qualidade (sessões + taxa de contato) como ListaBarras. */
-function barrasSeg(linhas: Ga4Seg[], opts: { engaj?: boolean } = {}): ItemBarra[] {
-  const cont = contador(linhas);
-  return linhas.map(s => ({
-    chave: `${s.valor}|${s.sub ?? ''}`,
-    rotulo: s.valor || '(sem nome)',
-    valor: s.sessoes,
-    direita: (
-      <>
-        <span className="font-bold text-[#f4f7f8]">{fmtN(s.sessoes)}</span>
-        <span className="ml-1 text-[11px] text-[#7c868c]">sessões</span>
-      </>
-    ),
-    extra: (
-      <>
-        {opts.engaj && <>engajamento <b className="text-[#c7d0d5]">{fmtPct(div(s.engajadas, s.sessoes))}</b> · </>}
-        {fmtN(cont(s))} contato(s) · converteu <b className="text-[#c7d0d5]">{fmtPct(div(s.sessoesConv, s.sessoes))}</b>
-      </>
-    ),
-  }));
-}
-
 /** Donut (dispositivo, novos x recorrentes, gênero) com % e taxa de conversão de cada fatia. */
 function Empilhada({ linhas }: { linhas: Ga4Seg[] }) {
   // Donut: parte do todo com 2–3 fatias é o caso ideal do gráfico de rosca.
@@ -186,24 +170,24 @@ function Empilhada({ linhas }: { linhas: Ga4Seg[] }) {
   const fatias = linhas.filter(s => s.sessoes > 0).sort((a, b) => b.sessoes - a.sessoes);
   const cor = (i: number) => PALETA[Math.min(i, PALETA.length - 1)];
   return (
-    <div className="flex flex-col items-center gap-5 sm:flex-row">
+    <div className="flex flex-1 flex-col items-center justify-center gap-6 py-2 sm:flex-row sm:gap-10">
       <Donut
-        tamanho={148}
-        espessura={26}
+        tamanho={196}
+        espessura={32}
         fatias={fatias.map((s, i) => ({ label: s.valor, valor: s.sessoes, cor: cor(i) }))}
         centroTitulo="sessões"
         centroValor={fmtN(total)}
         formatar={(n) => `${fmtN(n)} sessões`}
       />
-      <div className="grid w-full min-w-0 gap-3">
+      <div className="grid w-full min-w-0 max-w-[380px] gap-5">
         {fatias.map((s, i) => (
           <div key={s.valor} className="flex min-w-0 items-center gap-3">
-            <span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ background: cor(i) }} />
+            <span className="h-3 w-3 shrink-0 rounded-sm" style={{ background: cor(i) }} />
             <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-semibold text-[#f4f7f8]">{s.valor}</p>
-              <p className="mt-0.5 text-[11px] text-[#a7b0b6]">{fmtN(s.sessoes)} sessões · converte <b className="text-[#dce4e8]">{fmtPct(div(s.sessoesConv, s.sessoes))}</b></p>
+              <p className="truncate text-[15px] font-semibold text-[#f4f7f8]">{s.valor}</p>
+              <p className="mt-1 text-xs text-[#a7b0b6]">{fmtN(s.sessoes)} sessões · converte <b className="text-[#dce4e8]">{fmtPct(div(s.sessoesConv, s.sessoes))}</b></p>
             </div>
-            <span className="shrink-0 font-heading text-[22px] leading-none text-[#f4f7f8] tabular-nums">{fmtPct(s.sessoes / total, 0)}</span>
+            <span className="shrink-0 font-heading text-[28px] leading-none text-[#f4f7f8] tabular-nums">{fmtPct(s.sessoes / total, 0)}</span>
           </div>
         ))}
       </div>
@@ -579,13 +563,13 @@ function CardCidades({ cidades, totalSessoes }: { cidades: Ga4Seg[]; totalSessoe
     <Card>
       <CabecalhoMini titulo="Cidades" sub="Cidades com mais sessões." verTodas={ord.length > 5 ? { aberto: todas, onClick: () => setTodas(v => !v) } : undefined} />
       {/* Container query: mapa ao lado da lista só quando o card tem largura (≥ 30rem); estreito, mapa em cima. */}
-      <div className={cx('@container grid items-center gap-4', temMapa && '@[30rem]:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]')}>
+      <div className={cx('@container grid flex-1 items-center gap-4', temMapa && '@[30rem]:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]')}>
         {temMapa && (
           <div className="mx-auto w-full max-w-[200px] @[30rem]:max-w-[260px]">
             <MapaBrasil pesos={pesos} titulo={(uf, nome) => `${nome}: ${fmtN(pesos[uf] ?? 0)} sessões`} />
           </div>
         )}
-        <ul className="space-y-3">
+        <ul className="flex flex-col justify-evenly gap-3 self-stretch">
           {vis.map((c, i) => (
             <LinhaCompacta key={`${c.valor}|${c.sub ?? ''}`} esquerda={<Posicao n={i + 1} />} rotulo={c.valor || '(sem nome)'} n={c.sessoes} pct={div(c.sessoes, total)} barra={c.sessoes / max} />
           ))}
@@ -611,9 +595,9 @@ function CardCanalRosca({ canais, totalSessoes }: { canais: Ga4Seg[]; totalSesso
   return (
     <Card>
       <CabecalhoMini titulo="Qualidade por canal" sub="Engajamento e conversão por canal de origem." />
-      <div className="@container flex flex-col items-center gap-5 @[26rem]:flex-row">
-        <Donut tamanho={176} espessura={34} fatias={fatias} centroTitulo="sessões" centroValor={fmtN(total)} formatar={(n) => `${fmtN(n)} sessões`} />
-        <ul className="w-full min-w-0 space-y-3">
+      <div className="@container flex flex-1 flex-col items-center justify-center gap-6 @[26rem]:flex-row">
+        <Donut tamanho={196} espessura={34} fatias={fatias} centroTitulo="sessões" centroValor={fmtN(total)} formatar={(n) => `${fmtN(n)} sessões`} />
+        <ul className="flex w-full min-w-0 flex-col justify-center gap-4">
           {fatias.map(f => (
             <li key={f.label} className="flex items-center gap-3">
               <span className="h-3 w-3 shrink-0 rounded-full" style={{ background: f.cor }} />
@@ -638,7 +622,7 @@ function CardPaginasEntrada({ paginas, totalSessoes }: { paginas: Ga4Seg[]; tota
   return (
     <Card>
       <CabecalhoMini titulo="Página de entrada" sub="Páginas por onde mais gente entrou." verTodas={ord.length > 5 ? { aberto: todas, onClick: () => setTodas(v => !v) } : undefined} />
-      <ul className="space-y-3">
+      <ul className={LISTA_CHEIA}>
         {vis.map(p => (
           <LinhaCompacta key={`${p.valor}|${p.sub ?? ''}`} esquerda={<Tile texto={iniciais(p.valor)} />} rotulo={p.valor || '/'} n={p.sessoes} pct={div(p.sessoes, total)} barra={p.sessoes / max} />
         ))}
@@ -647,18 +631,32 @@ function CardPaginasEntrada({ paginas, totalSessoes }: { paginas: Ga4Seg[]; tota
   );
 }
 
-/** Barras verticais do mock (Onde clicam para falar, Materiais): valor em cima, rótulo embaixo. */
-function BarrasVerticais({ linhas, total, modo }: { linhas: Ga4Linha[]; total: number; modo: 'contagem' | 'pct' }) {
+/**
+ * Barras verticais do mock (Onde clicam para falar, Materiais, Idade): valor em cima,
+ * rótulo (e `sub` opcional) embaixo. A área das barras ESTICA com o card (mín. 230px):
+ * cada coluna é uma grade [1fr auto] e a barra tem altura em % da área útil.
+ */
+function BarrasVerticais({ linhas, total, modo }: { linhas: Array<Ga4Linha & { sub?: string }>; total: number; modo: 'contagem' | 'pct' }) {
   const max = Math.max(1, ...linhas.map(l => l.n));
   return (
-    <div className="flex items-end justify-around gap-2 pt-2" style={{ height: 230 }}>
-      {linhas.map(l => (
-        <div key={l.valor} className="flex h-full min-w-0 flex-1 flex-col items-center justify-end" title={`${l.valor}: ${fmtN(l.n)}${total > 0 ? ` · ${fmtPct(l.n / total)}` : ''}`}>
-          <span className="mb-1.5 text-sm font-bold text-[#f4f7f8] tabular-nums">{modo === 'pct' && total > 0 ? fmtPct(l.n / total) : fmtN(l.n)}</span>
-          <div className="w-full max-w-[52px] rounded-t-md" style={{ height: `${Math.max(4, (l.n / max) * 140)}px`, background: 'linear-gradient(180deg, #8dff5c 0%, #4fcf1f 100%)' }} />
-          <span className="mt-2 w-full break-words text-center text-[11px] leading-tight text-[#dce4e8]" style={{ overflowWrap: 'anywhere' }}>{l.valor}</span>
-        </div>
-      ))}
+    <div className="flex min-h-[230px] flex-1 items-stretch justify-around gap-3 pt-2">
+      {linhas.map(l => {
+        const h = Math.max(3, (l.n / max) * 80);
+        return (
+          <div key={l.valor} className="grid min-w-0 flex-1 grid-rows-[1fr_auto]" title={`${l.valor}: ${fmtN(l.n)}${total > 0 ? ` · ${fmtPct(l.n / total)}` : ''}`}>
+            <div className="relative">
+              <span className="absolute inset-x-0 text-center text-sm font-bold text-[#f4f7f8] tabular-nums" style={{ bottom: `calc(${h}% + 6px)` }}>
+                {modo === 'pct' && total > 0 ? fmtPct(l.n / total) : fmtN(l.n)}
+              </span>
+              <div className="absolute inset-x-0 bottom-0 mx-auto w-full max-w-[56px] rounded-t-md" style={{ height: `${h}%`, background: 'linear-gradient(180deg, #8dff5c 0%, #4fcf1f 100%)' }} />
+            </div>
+            <span className="mt-2 block w-full break-words text-center text-[11px] leading-tight text-[#dce4e8]" style={{ overflowWrap: 'anywhere' }}>
+              {l.valor}
+              {l.sub && <span className="mt-0.5 block text-[10px] text-[#a7b0b6]">{l.sub}</span>}
+            </span>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -691,7 +689,7 @@ function BlocoEventos({ titulo, sub, linhas, total, modo, tile = false, rotulo }
   return (
     <Card>
       <CabecalhoMini titulo={titulo} sub={sub} verTodas={ord.length > 5 ? { aberto: todas, onClick: () => setTodas(v => !v) } : undefined} />
-      <ul className="space-y-3">
+      <ul className={LISTA_CHEIA}>
         {vis.map((l, i) => (
           <LinhaCompacta
             key={l.valor}
@@ -1439,10 +1437,17 @@ export function Ga4LandingPanel({ dados, loading, aviso }: { dados: Ga4Consolida
           {au.idades.length + au.generos.length > 0 && (
             <div className="grid gap-4 md:grid-cols-2">
               {au.idades.length > 0 && (
-                <Card><CabecalhoIcone icone={Users} titulo="Idade" /><ListaBarras itens={barrasSeg(au.idades)} limite={8} /></Card>
+                <Card>
+                  <CabecalhoIcone icone={Users} titulo="Idade" sub="Sessões por faixa etária e % de cada faixa que converteu." />
+                  <BarrasVerticais
+                    modo="pct"
+                    total={au.idades.reduce((t, x) => t + x.sessoes, 0)}
+                    linhas={[...au.idades].sort((x, y) => x.valor.localeCompare(y.valor)).map(x => ({ valor: x.valor, n: x.sessoes, sub: `converte ${fmtPct(div(x.sessoesConv, x.sessoes))}` }))}
+                  />
+                </Card>
               )}
               {au.generos.length > 0 && (
-                <Card><CabecalhoIcone icone={User} titulo="Gênero" /><Empilhada linhas={au.generos.map(traduz(GENEROS))} /></Card>
+                <Card><CabecalhoIcone icone={User} titulo="Gênero" sub="Sessões por gênero e % que converteu." /><Empilhada linhas={au.generos.map(traduz(GENEROS))} /></Card>
               )}
             </div>
           )}

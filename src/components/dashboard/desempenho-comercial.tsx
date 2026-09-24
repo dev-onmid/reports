@@ -161,7 +161,7 @@ export function VendedoresCard({ linhas, loading }: { linhas: LinhaVendedor[]; l
       {loading ? <Esqueleto />
         : ordenadas.length === 0 ? <Vazio texto="Nenhum negócio com responsável no período." />
         : (
-          <div className="space-y-4">
+          <div className="flex flex-1 flex-col justify-evenly gap-4">
             {visiveis.map((l, i) => (
               <div key={l.responsavel} className="flex items-start gap-3">
                 <span className={cn(
@@ -280,8 +280,8 @@ export function CategoriasCard({ linhas, loading }: { linhas: LinhaCategoria[]; 
       {loading ? <Esqueleto />
         : lista.length === 0 ? <Vazio texto="Nenhum produto lançado nos negócios ganhos do período." />
         : (
-          <div className="grid items-center gap-4 sm:grid-cols-[42%_1fr]">
-            <div className="relative mx-auto h-[190px] w-[190px]">
+          <div className="grid flex-1 items-center gap-6 sm:grid-cols-[42%_1fr]">
+            <div className="relative mx-auto h-[210px] w-[210px]">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie

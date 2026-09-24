@@ -1,3 +1,14 @@
+## Dashboard — cards preenchem a altura que a grade dá (fim do vão ocioso) (2026-09-24, noite)
+
+Print do Matheus: card de Gênero com metade vazia ("olha o tanto de espaço ocioso… veja outros cards assim"). Causa: em grade, o card estica até a altura do vizinho (Idade tinha 8 linhas de barras), mas o conteúdo ficava preso no topo.
+
+- **Regra**: card de dashboard é **coluna flexível** (`flex flex-col`) e o corpo usa `flex-1` para ocupar a sobra — rosca e legenda centralizadas, listas com `justify-evenly` (gap mínimo 12px), barras que esticam. No painel GA4 isso mora no `Card` (todos herdam) e na constante `LISTA_CHEIA`.
+- **Roscas maiores e legendas mais espaçadas**: `Empilhada` (Dispositivo, Novos × recorrentes, Gênero) 148 → 196px, legenda com 15px no nome, % em 28px e largura máxima de 380px (o % não fica mais a um palmo do nome); Qualidade por canal 176 → 196px; Faturamento/Leads por canal 170 → 190px; Categorias mais vendidas 190 → 210px.
+- **`BarrasVerticais` estica com o card** (mín. 230px): cada coluna é uma grade `[1fr auto]` e a barra tem altura em % da área útil (até 80%, para o valor caber em cima). Aceita `sub` por barra.
+- **Idade virou barras verticais** (faixas etárias são rótulos curtos, ordenadas 18-24 → 65+, com "converte X%" embaixo) — além de ler melhor, iguala a altura com o card de Gênero. `barrasSeg` saiu (sem uso).
+- Também ajustados: Cidades, Página de entrada e ranking de eventos (lista espalhada), Ranking comercial (espalhado) e Categorias (corpo centralizado).
+- ✅ Verificado: tsc limpo; eslint 0 no painel GA4 e no comercial, 164 = 164 no `page.tsx`; harness com Sorrifácil ingleses (Idade × Gênero lado a lado, mesma altura, sem vão) e Cinfel (Veículos espalhado, barras de Materiais/Espessuras/Botões preenchendo). ⚠️ `CanalDonutCard` e os dois cards comerciais não foram vistos renderizados (vivem no `page.tsx`/precisam de dado de CRM) — mudança só de classes de layout.
+
 ## Dashboard — TRÊS níveis de título, e só três (2026-09-24, noite)
 
 Pedido do Matheus: "cada um com um tamanho e maneira de apresentar; precisa deixar padrão — título de sessão bem maior e o título de dado menor padrão". Levantamento: a seção tinha 16px (quase igual a um card), os grupos da Landing page tinham três desenhos (fio verde de 11px, faixa em card, cabeçalho com ícone de 44px) e os cards dos mocks recentes usavam 15, 18, 20 e 24px, em caixa alta ou normal.
