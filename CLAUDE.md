@@ -1,3 +1,12 @@
+## Landing page — Cidades · Qualidade por canal · Página de entrada numa linha + mapa dia/hora (2026-09-24, noite, 3º pedido)
+
+Terceiro mock do Matheus ("em uma linha só com Cidades, Qualidade por canal e Página de entrada… aí pode jogar embaixo o dia"). Commit `5eb5233` na `main`, só em `ga4-landing-panel.tsx`.
+
+- **`CardRanking` + `linhasRanking`**: card do mock com caixa de ícone com contorno verde (56px, 48px abaixo de `2xl`), título grande em caixa normal (NÃO o `T.cardTitulo` uppercase — o mock é "Cidades", não "CIDADES"), sub, botão **"Ver todas"** (abre a lista inteira no próprio card, vira "Ver menos"; some com ≤5 itens), divisor, linhas com **círculo** da posição (não caixa — é o que diferencia do `ListaRanking` das palavras), nome + sessões, barra e indicadores com ícone. `modo="cidade"` põe a taxa **com seta ao lado da barra** (↑ verde se >0, → cinza se 0); `modo="canal"` põe engajamento na linha de indicadores, em verde.
+- **Reordenação estrutural**: Cidades saiu da linha dos donuts; a linha Dispositivo / Novos × recorrentes voltou a 2 colunas; **Qualidade por canal e Página de entrada saíram do bloco Comportamento** para a linha de 3 (`xl:grid-cols-3`, `items-stretch`) dentro de Audiência, e o mapa de dia/hora vem logo abaixo. Comportamento ficou com o fallback "De onde vêm as conversões/sessões" (só quando o GA4 não devolve canal), rolagem e eventos extras — `temOrigem` agora é `canais.length === 0 && origens.length > 0`, e `temAudiencia` inclui canais/páginas para a linha aparecer mesmo sem dado de audiência.
+- **Mapa "Dia da semana e hora"** no 3º mock: `CabecalhoIcone` com calendário, toggle Conversões/Visitas em **pílula** (`rounded-full`, ativo verde com brilho), **todas as 24 horas** no eixo (antes só de 3 em 3), células `h-5 rounded-[5px]` com `gap-1`, `min-w-[760px]` com rolagem horizontal.
+- ✅ Verificado: tsc limpo; eslint 0 no arquivo; harness (`?json=ingleses.json`, 1440px): 3 cards alinhados, "Ver todas" abrindo 12 cidades, mapa com 24 rótulos. ⚠️ A 1440px os títulos ainda quebram em 2 linhas ("Qualidade por canal") — o mock é a 1916px; acima de `2xl` fica como no mock.
+
 ## Landing page — palavras, termos e audiência no 2º mock (2026-09-24, noite)
 
 Segundo mock do Matheus ("Quero essa parte da Lp… Seguir a risca"), commit `2d5ba0f` na `main`. Tudo em `ga4-landing-panel.tsx`; nenhuma rota/lib mudou.
