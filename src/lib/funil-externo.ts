@@ -55,6 +55,7 @@ const COR: Record<EtapaFunil, string> = {
   comparecimento: '#8b5cf6',
   fechamento: '#10b981',
   perdido: '#ef4444',
+  nao_lead: '#52525b',
 };
 
 /**

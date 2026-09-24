@@ -4763,12 +4763,22 @@ function IgMini({ label, icon, valor, variacao }: {
 
 const FUNNEL_STEP_COLORS = ['#6cff2f', '#0ea5e9', '#7b2cff', '#f97316', '#ec4899', '#f59e0b', '#84cc16'];
 
-function SimpleFunnel({ steps, totalRate, fonteLabel, onStageClick, todosClicaveis }: {
+/**
+ * Semi-degrau entre duas faixas do funil — as linhas cinza da planilha do
+ * Matheus (Perca · Em atendimento · Não compareceram · Faltam comparecer):
+ * quem saiu ou ficou parado entre o degrau `apos` e o seguinte. O % é a fatia
+ * do degrau de cima, para ler "40 dos 121 leads se perderam" de relance.
+ */
+type SemiDegrau = { apos: number; rotulo: string; valor: number; tom: 'ruim' | 'neutro' | 'bom' };
+
+function SimpleFunnel({ steps, totalRate, fonteLabel, onStageClick, todosClicaveis, semiDegraus }: {
   steps: Array<{
     label: string; actual: number; planned: number; color: string;
     /** Quebra explicativa sob o número (ex: quantos ainda vêm × quantos furaram). */
     detalhes?: Array<{ texto: string; tom: 'bom' | 'ruim' | 'neutro' }>;
   }>;
+  /** Linhas intermediárias (planilha) — renderizadas logo abaixo do degrau `apos`. */
+  semiDegraus?: SemiDegrau[];
   totalRate: string;
   /** De onde vem o topo ("fonte: CRM" / "estimado por anúncios" / mistas). */
   fonteLabel?: string;
@@ -4813,9 +4823,10 @@ function SimpleFunnel({ steps, totalRate, fonteLabel, onStageClick, todosClicave
           const baixo = next ? larguraDe(next.actual) : Math.max(PISO * 0.8, cima * 0.82);
           const cor = step.color || FUNNEL_STEP_COLORS[i % FUNNEL_STEP_COLORS.length];
           const clip = `polygon(${50 - cima / 2}% 0, ${50 + cima / 2}% 0, ${50 + baixo / 2}% 100%, ${50 - baixo / 2}% 100%)`;
+          const semis = (semiDegraus ?? []).filter(sd => sd.apos === i);
           return (
+            <Fragment key={step.label}>
             <div
-              key={step.label}
               onClick={clicavel ? () => onStageClick!(i) : undefined}
               role={clicavel ? 'button' : undefined}
               tabIndex={clicavel ? 0 : undefined}
@@ -4884,6 +4895,28 @@ function SimpleFunnel({ steps, totalRate, fonteLabel, onStageClick, todosClicave
                 )}
               </div>
             </div>
+            {/* Semi-degraus (linhas cinza da planilha): faixa estreita e neutra entre
+                as duas faixas coloridas, com a fatia do degrau de cima à direita. */}
+            {semis.map(sd => {
+              const fatia = step.actual > 0 ? (sd.valor / step.actual) * 100 : 0;
+              const larg = Math.max(PISO * 0.9, Math.min(cima, baixo));
+              return (
+                <div key={sd.rotulo} className="grid grid-cols-[1fr_150px] items-center gap-3 sm:grid-cols-[1fr_190px]">
+                  <div className="relative h-[26px]">
+                    <div className="absolute inset-y-0 rounded-sm bg-white/[0.05] ring-1 ring-inset ring-white/[0.08]" style={{ left: `${50 - larg / 2}%`, width: `${larg}%` }} />
+                    <div className="pointer-events-none absolute inset-0 flex items-center justify-center gap-2 leading-none">
+                      <span className={cn('font-heading text-sm', sd.tom === 'ruim' ? 'text-red-300' : sd.tom === 'bom' ? 'text-[#6cff2f]' : 'text-[#c3ccd1]')}>{Math.round(sd.valor).toLocaleString('pt-BR')}</span>
+                      <span className="text-[9px] font-bold uppercase tracking-[0.06em] text-[#9aa4aa]">{sd.rotulo}</span>
+                    </div>
+                  </div>
+                  <p className="whitespace-nowrap text-[11px] text-[#9aa4aa]" title={`${sd.rotulo}: ${Math.round(sd.valor)} de ${Math.round(step.actual)} (${step.label.toLowerCase()})`}>
+                    {step.actual > 0 ? <span className={cn('font-bold', sd.tom === 'ruim' ? 'text-red-300' : sd.tom === 'bom' ? 'text-[#6cff2f]' : 'text-[#c3ccd1]')}>{fatia.toFixed(0)}%</span> : '—'}
+                    <span className="ml-1">de {step.label.toLowerCase()}</span>
+                  </p>
+                </div>
+              );
+            })}
+            </Fragment>
           );
         })}
       </div>
@@ -7050,13 +7083,9 @@ export default function GeneralDashboard() {
   const actualFunnelVolumes = [funnelTopo, qualified, appointments, showUps, conversions];
   // Quebra do degrau de AGENDAMENTOS (índice 2): dos agendados que ainda não
   // compareceram, quantos têm data futura e quantos furaram de fato.
+  // "A comparecer" e "faltaram" viraram SEMI-DEGRAUS (linhas da planilha, abaixo);
+  // aqui ficam só os chips que não têm linha própria.
   const detalhesAgendamento: Array<{ texto: string; tom: 'bom' | 'ruim' | 'neutro' }> = [];
-  if (funilCrm.aComparecer > 0) {
-    detalhesAgendamento.push({ texto: `${funilCrm.aComparecer} a comparecer`, tom: 'bom' });
-  }
-  if (funilCrm.faltaram > 0) {
-    detalhesAgendamento.push({ texto: `${funilCrm.faltaram} faltaram`, tom: 'ruim' });
-  }
   if (funilCrm.agendamentoSemDesfecho > 0) {
     // Nem promessa nem falta: a data passou e o CRM não registrou o desfecho.
     detalhesAgendamento.push({ texto: `${funilCrm.agendamentoSemDesfecho} sem retorno`, tom: 'neutro' });
@@ -7072,11 +7101,19 @@ export default function GeneralDashboard() {
   }
   // Linhas cinza da planilha sob Leads e sob Engajados (situação da coluna).
   const detalhesLeads: Array<{ texto: string; tom: 'bom' | 'ruim' | 'neutro' }> = [];
-  if (funilCrm.perdidos > 0) detalhesLeads.push({ texto: `${funilCrm.perdidos} perdidos`, tom: 'ruim' });
   if (funilCrm.semResposta > 0) detalhesLeads.push({ texto: `${funilCrm.semResposta} sem resposta`, tom: 'neutro' });
+  if (funilCrm.naoLeads > 0) detalhesLeads.push({ texto: `${funilCrm.naoLeads} não-lead (já cliente) fora`, tom: 'neutro' });
   const detalhesEngajados: Array<{ texto: string; tom: 'bom' | 'ruim' | 'neutro' }> = [];
-  if (funilCrm.emAtendimento > 0) detalhesEngajados.push({ texto: `${funilCrm.emAtendimento} em atendimento`, tom: 'neutro' });
   if (funilCrm.pararamResponder > 0) detalhesEngajados.push({ texto: `${funilCrm.pararamResponder} pararam de responder`, tom: 'ruim' });
+  // Os SEMI-DEGRAUS da planilha (Perca · Em atendimento · Não compareceram ·
+  // Faltam comparecer), cada um logo abaixo da faixa a que pertence. Sempre
+  // presentes (zero inclusive) — a leitura da planilha é a linha existir.
+  const semiDegrausSemantico = (idx: { contato: number; qualificado: number; agendamento: number; comparecimento: number }): SemiDegrau[] => ([
+    { apos: idx.contato, rotulo: 'Perca', valor: funilCrm.perdidos, tom: 'ruim' },
+    { apos: idx.qualificado, rotulo: 'Em atendimento', valor: funilCrm.emAtendimento, tom: 'neutro' },
+    { apos: idx.agendamento, rotulo: 'Não compareceram', valor: funilCrm.faltaram, tom: 'ruim' },
+    { apos: idx.comparecimento, rotulo: 'Faltam comparecer', valor: funilCrm.aComparecer, tom: 'bom' },
+  ] as SemiDegrau[]).filter(sd => sd.apos >= 0);
   // Funil pelas ETAPAS REAIS do Kanban do cliente — nome, cor e nº de degraus
   // vêm do CRM dele (pedido do Matheus, 2026-09-14). Só com UM cliente
   // selecionado: Kanbans de clientes diferentes não se somam num funil só, então
@@ -7123,6 +7160,18 @@ export default function GeneralDashboard() {
         // Lei 5 no degrau de vendas (4): de leads do período × de leads anteriores.
         detalhes: i === 0 && detalhesLeads.length ? detalhesLeads : i === 1 && detalhesEngajados.length ? detalhesEngajados : i === 2 ? detalhesAgendamento : i === 4 && detalhesVendas.length ? detalhesVendas : undefined,
       }));
+  // Semi-degraus: no funil semântico os índices são fixos (0..3); no funil real
+  // do Kanban, cada linha vai sob o ÚLTIMO degrau daquela etapa (o mesmo lugar
+  // dos chips) — e só existe se a etapa existir na escada.
+  const ultimoIdx = (etapa: EtapaFunil): number => {
+    if (!usaStageFunil) return -1;
+    const ds = stageFunilSolo!.degraus;
+    for (let i = ds.length - 1; i >= 0; i--) if (ds[i].etapa === etapa) return i;
+    return -1;
+  };
+  const funnelSemiDegraus: SemiDegrau[] = deliverySoloId ? [] : usaStageFunil
+    ? semiDegrausSemantico({ contato: ultimoIdx('contato'), qualificado: ultimoIdx('qualificado'), agendamento: ultimoIdx('agendamento'), comparecimento: ultimoIdx('comparecimento') })
+    : semiDegrausSemantico({ contato: 0, qualificado: 1, agendamento: 2, comparecimento: 3 });
   // Conversão geral do funil real = fechamento (último degrau) sobre o topo dele.
   const funnelTaxaFinal = usaStageFunil && stageFunilSolo!.degraus.length > 1
     ? (stageFunilSolo!.degraus[stageFunilSolo!.degraus.length - 1].alcancaram
@@ -7996,7 +8045,7 @@ export default function GeneralDashboard() {
                       {deliverySoloId ? (
                         <DeliveryResumoCard clientId={deliverySoloId} from={deliveryRange.from} to={deliveryRange.to} />
                       ) : (
-                        <SimpleFunnel steps={funnelStepsNew} totalRate={funnelTaxaFinal > 0 ? premiumValue(funnelTaxaFinal, 'percent') : '—'} fonteLabel={usaStageFunil ? 'fonte: CRM' : fonteTopoLabel} onStageClick={setFunilStageIdx} todosClicaveis={usaStageFunil} />
+                        <SimpleFunnel steps={funnelStepsNew} totalRate={funnelTaxaFinal > 0 ? premiumValue(funnelTaxaFinal, 'percent') : '—'} fonteLabel={usaStageFunil ? 'fonte: CRM' : fonteTopoLabel} onStageClick={setFunilStageIdx} todosClicaveis={usaStageFunil} semiDegraus={funnelSemiDegraus} />
                       )}
                       <ChannelSummaryTable rows={channelRows} total={channelTotal} metaCpl={cplMetaSel} />
                     </div>

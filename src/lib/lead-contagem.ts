@@ -60,10 +60,32 @@ export function rastroPagoSql(alias = ''): string {
     OR COALESCE(lower(${c('utm_source')}) IN ('fb', 'ig', 'facebook', 'instagram', 'google', 'meta'), FALSE))`;
 }
 
+/**
+ * "Não lead" (decisão do Matheus, 2026-09-24): status "Paciente"/"Não lead" é
+ * quem JÁ É cliente da casa — não é lead desta campanha e sai de toda contagem,
+ * salvo se tiver rastro de anúncio (aí virou cliente por causa do anúncio).
+ * ⚠️ Aqui só o STATUS por texto; a coluna do Kanban mapeada como `nao_lead`
+ * é tratada por `contarFunil` (que recebe `rastreado` das rotas).
+ */
+export function naoLeadSql(alias = ''): string {
+  return `(lower(btrim(${col(alias, 'status')})) IN ('paciente', 'não lead', 'nao lead', 'já é cliente', 'ja e cliente'))`;
+}
+
 /** Predicado: o lead CONTA na dashboard. */
 export function leadContaSql(alias = ''): string {
   const p = portaSql(alias);
-  return `((${p}) IN ('planilha', 'crm_externo', 'formulario') OR ((${p}) = 'chat' AND ${rastroPagoSql(alias)}))`;
+  return `(NOT (${naoLeadSql(alias)} AND NOT ${rastroPagoSql(alias)}) AND ((${p}) IN ('planilha', 'crm_externo', 'formulario') OR ((${p}) = 'chat' AND ${rastroPagoSql(alias)})))`;
+}
+
+/**
+ * Predicado: o lead APARECE no CRM (Kanban/lista) — pedido do Matheus,
+ * 2026-09-24: "só os qualificados para o funil, mesmas regras". Difere da
+ * dashboard num ponto, de propósito: lead criado À MÃO no CRM continua
+ * visível (senão o gestor cria e ele some no próximo poll). O que sai é o chat
+ * do Evolution sem rastro pago e o não-lead sem rastro.
+ */
+export function leadVisivelCrmSql(alias = ''): string {
+  return `(NOT ((${portaSql(alias)}) = 'chat' AND NOT ${rastroPagoSql(alias)}) AND NOT (${naoLeadSql(alias)} AND NOT ${rastroPagoSql(alias)}))`;
 }
 
 /** Predicado: porta validada (planilha/CRM externo/formulário) — decide se o topo do funil é o CRM (Lei 1) ou as plataformas (Lei 3). */

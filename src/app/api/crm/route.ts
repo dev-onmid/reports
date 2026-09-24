@@ -2,6 +2,7 @@ import type { NextRequest } from 'next/server';
 import { memoizarSchema } from '@/lib/schema-memo';
 import { makeServerPool } from '@/lib/server-db';
 import { ensureCrmMessagesSchema, ensureDefaultFunnel, getFirstFunnelStageLabel } from '@/lib/crm-conversation-sync';
+import { leadVisivelCrmSql } from '@/lib/lead-contagem';
 
 async function ensureTableInterno(pool: ReturnType<typeof makeServerPool>) {
   await pool.query(`
@@ -109,6 +110,7 @@ export async function GET(req: NextRequest) {
               WHERE m.lead_id = l.id
            ) lm ON true
           WHERE l.client_id = $1 AND l.updated_at > $2
+            AND ${leadVisivelCrmSql('l')}
           ORDER BY l.updated_at DESC`,
         [clientId, since],
       );
@@ -139,6 +141,10 @@ export async function GET(req: NextRequest) {
             NULLIF(regexp_replace(COALESCE(numero, ''), '\\D', '', 'g'), '') IS NULL
             OR regexp_replace(numero, '\\D', '', 'g') ~ '^[0-9]{8,15}$'
           )
+          -- Só quem é lead de verdade (lead-contagem.ts): conversa do Evolution sem
+          -- rastro pago e "Paciente"/"Não lead" sem rastro ficam fora do Kanban e da
+          -- lista. O inbox (chat) continua mostrando todas as conversas.
+          AND ${leadVisivelCrmSql()}
       )
       SELECT ranked.*,
              COALESCE(ranked.whatsapp_last_message_at, lm.last_contact_at, ranked.updated_at, ranked.created_at) AS last_contact_at

@@ -31,7 +31,7 @@ export async function PUT(
     if (color !== undefined) { sets.push(`color = $${n++}`); vals.push(color); }
     if (position !== undefined) { sets.push(`position = $${n++}`); vals.push(position); }
     if (etapa_funil !== undefined) {
-      if (!['contato', 'qualificado', 'agendamento', 'comparecimento', 'fechamento', 'perdido'].includes(etapa_funil)) {
+      if (!['contato', 'qualificado', 'agendamento', 'comparecimento', 'fechamento', 'perdido', 'nao_lead'].includes(etapa_funil)) {
         return Response.json({ error: 'etapa_funil inválida' }, { status: 400 });
       }
       sets.push(`etapa_funil = $${n++}`); vals.push(etapa_funil);

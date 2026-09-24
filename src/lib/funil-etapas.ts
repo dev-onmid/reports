@@ -21,7 +21,10 @@ export type EtapaFunil =
   | 'agendamento'
   | 'comparecimento'
   | 'fechamento'
-  | 'perdido';
+  | 'perdido'
+  /** Não é lead: já é cliente/paciente da casa ("Paciente", "Não lead"). Fora de
+   *  toda contagem — salvo com rastro de anúncio, quando vira fechamento. */
+  | 'nao_lead';
 
 /** Ordem canônica da escada (perdido fica fora — é contagem paralela). */
 export const ETAPAS_FUNIL: EtapaFunil[] = [
@@ -35,6 +38,7 @@ export const ROTULOS_ETAPA: Record<EtapaFunil, string> = {
   comparecimento: 'Comparecimento',
   fechamento: 'Fechamento',
   perdido: 'Perdido',
+  nao_lead: 'Não lead',
 };
 
 /**
@@ -51,6 +55,7 @@ export const ROTULOS_ETAPA_EDITOR: Record<EtapaFunil, string> = {
   comparecimento: 'Comparecimento / Reunião',
   fechamento: 'Fechamento / Ganho',
   perdido: 'Perdido',
+  nao_lead: 'Não lead (já é cliente / paciente)',
 };
 
 /**
@@ -74,6 +79,7 @@ export const CORES_ETAPA: Record<EtapaFunil, string> = {
   comparecimento: '#f59e0b',
   fechamento:     '#10b981',
   perdido:        '#ef4444',
+  nao_lead:       '#52525b',
 };
 
 /** Cor da coluna a partir do degrau escolhido no editor — ou, se ninguém
@@ -118,13 +124,17 @@ export function classificarEtapa(label: string | null | undefined): EtapaFunil {
   // fosse a inversa — o pior erro possível nesta função.
   // "Distante" é perda (decisão do Matheus, 2026-09-24): mora longe, não vai
   // virar paciente — deixá-lo em qualificado inflava "Engajados".
+  // "Paciente"/"Não lead" (decisão do Matheus, 2026-09-24): quem já é cliente da
+  // casa não é lead desta campanha — sai de TODA contagem. Testado antes de tudo
+  // porque 'paciente' antes caía em FECHAMENTO e inflava vendas.
+  if (/\bnao lead\b|nao e lead|paciente|cliente antigo|ja e cliente|ja sou cliente/.test(s)) return 'nao_lead';
   if (/sem interesse|desqualificad|desqualificac|perdid|\bperdas?\b|\bperca\b|\blost\b|descartad|distante/.test(s)) return 'perdido';
   // ⚠️ A regra nasceu só com PARTICÍPIO (fechad, vendid, contratad) e não
   // reconhecia o SUBSTANTIVO que o gestor usa como nome de coluna: "Fechamento",
   // "Vendas" e "Contratação" caíam todos em 'contato'. Medido em 14/09: os 503
   // leads ganhos da Londrigifts contavam como topo de funil no Radar e na
   // dashboard. Mesma família de defeito em agendamento e comparecimento abaixo.
-  if (/efetivad|fechad|fechament|vendid|\bvendas?\b|comprou|contratad|contratac|\bcontrato\b|paciente|ganho|\bwon\b/.test(s)) return 'fechamento';
+  if (/efetivad|fechad|fechament|vendid|\bvendas?\b|comprou|contratad|contratac|\bcontrato\b|ganho|\bwon\b/.test(s)) return 'fechamento';
   // Ausência explícita ANTES de comparecimento: "No-Show" contém "show" mas é
   // o oposto — agendou e faltou.
   if (/no show|nao compareceu|com falta|faltou/.test(s)) return 'agendamento';
@@ -147,6 +157,7 @@ export function postoDaEtapa(etapa: EtapaFunil): number {
     case 'agendamento': return 2;
     case 'qualificado': return 1;
     case 'perdido': return -1;
+    case 'nao_lead': return -1;
     default: return 0;
   }
 }
@@ -176,6 +187,8 @@ export type LeadParaFunil = {
    *  • 'hibrido' → conta no funil E soma receita ao fechar (como sempre foi).
    */
   tipo?: 'lead' | 'venda' | 'hibrido';
+  /** Tem rastro de anúncio (ctwa/gclid/utm paga…) — o que salva um "Paciente" de ser não-lead. */
+  rastreado?: boolean;
 };
 
 export type EtapaDeStage = {
@@ -232,7 +245,7 @@ export function situacaoEfetiva(situacao: SituacaoStage | null | undefined, labe
  * responder". Valor = 'grau' ou 'grau:situacao'.
  */
 export type OpcaoEditor = { valor: string; etapa: EtapaFunil; situacao: SituacaoStage; rotulo: string };
-export const OPCOES_EDITOR: OpcaoEditor[] = ([...ETAPAS_FUNIL, 'perdido'] as EtapaFunil[]).flatMap((etapa): OpcaoEditor[] => {
+export const OPCOES_EDITOR: OpcaoEditor[] = ([...ETAPAS_FUNIL, 'perdido', 'nao_lead'] as EtapaFunil[]).flatMap((etapa): OpcaoEditor[] => {
   const base: OpcaoEditor = { valor: etapa, etapa, situacao: 'nenhuma', rotulo: ROTULOS_ETAPA_EDITOR[etapa] };
   if (etapa === 'contato') return [base, { valor: 'contato:tentativa', etapa, situacao: 'tentativa', rotulo: `${ROTULOS_ETAPA_EDITOR[etapa]} · sem resposta` }];
   if (etapa === 'qualificado') return [base, { valor: 'qualificado:parado', etapa, situacao: 'parado', rotulo: `${ROTULOS_ETAPA_EDITOR[etapa]} · parou de responder` }];
@@ -297,6 +310,8 @@ export type ContagemFunil = {
   emAtendimento: number;
   /** Engajou e sumiu (Não Retorna): chip "pararam de responder" sob Engajados. */
   pararamResponder: number;
+  /** Fora do funil: "Paciente"/"Não lead" sem rastro — não é contato. */
+  naoLeads: number;
 };
 
 export const FUNIL_VAZIO: ContagemFunil = {
@@ -304,6 +319,7 @@ export const FUNIL_VAZIO: ContagemFunil = {
   fechamentos: 0, perdidos: 0, receita: 0,
   aComparecer: 0, faltaram: 0, agendamentoSemData: 0, agendamentoSemDesfecho: 0,
   semResposta: 0, emAtendimento: 0, pararamResponder: 0,
+  naoLeads: 0,
 };
 
 /** Reconhece o rótulo de ausência — a mesma família que `classificarEtapa` já isola. */
@@ -392,6 +408,8 @@ export type PostoDoLead = {
   posto: number;
   /** Contagem paralela: desqualificado segue contando nas etapas que alcançou. */
   perdido: boolean;
+  /** "Paciente"/"Não lead" SEM rastro: não é contato, não conta em nada. */
+  naoLead: boolean;
   /** Dia do agendamento já validado ('YYYY-MM-DD'), ou null. */
   diaAgenda: string | null;
   /**
@@ -428,9 +446,12 @@ export function diaDoAgendamento(lead: LeadParaFunil): string | null {
  */
 export function etapaDoLead(lead: LeadParaFunil, mapa: MapaEtapas): PostoDoLead {
   const label = normalizarEtiqueta(lead.status);
-  const etapaStatus = (lead.funnelId ? mapa.porFunil.get(`${lead.funnelId}:${label}`) : undefined)
+  let etapaStatus = (lead.funnelId ? mapa.porFunil.get(`${lead.funnelId}:${label}`) : undefined)
     ?? mapa.porLabel.get(label)
     ?? classificarEtapa(lead.status);
+  // Não-lead COM rastro de anúncio virou cliente por causa do anúncio: é fechamento.
+  if (etapaStatus === 'nao_lead' && lead.rastreado) etapaStatus = 'fechamento';
+  const naoLead = etapaStatus === 'nao_lead';
 
   const postoStatus = postoDaEtapa(etapaStatus); // perdido → -1: não sobe degrau por si só
   const diaAgenda = diaDoAgendamento(lead);
@@ -446,7 +467,7 @@ export function etapaDoLead(lead: LeadParaFunil, mapa: MapaEtapas): PostoDoLead 
   // da listagem de "Contatos", divergindo do número do card.
   // Não muda contagem alguma: -1 e 0 falham igual nos testes `posto >= 1`.
   return {
-    etapaStatus, posto: Math.max(0, posto), perdido: etapaStatus === 'perdido',
+    etapaStatus, posto: Math.max(0, posto), perdido: etapaStatus === 'perdido', naoLead,
     diaAgenda, agendaSoPelaData,
   };
 }
@@ -472,9 +493,12 @@ export function contarFunil(
       continue;
     }
 
+    const { posto, perdido, diaAgenda, agendaSoPelaData, naoLead } = etapaDoLead(lead, mapa);
+    // "Não lead" sem rastro: fora de TODA contagem — nem contato é. (Com rastro,
+    // etapaDoLead já o promoveu a fechamento.) Contado à parte só para a tela dizer.
+    if (naoLead) { c.naoLeads++; continue; }
     c.contatos++;
 
-    const { posto, perdido, diaAgenda, agendaSoPelaData } = etapaDoLead(lead, mapa);
     if (perdido) c.perdidos++;
 
     // Situação (linhas cinza da planilha): só faz sentido em quem NÃO avançou
@@ -525,6 +549,8 @@ export function contarFunil(
 export function leadNaEtapa(
   p: PostoDoLead, etapa: EtapaFunil, modo: 'alcancou' | 'atual',
 ): boolean {
+  if (etapa === 'nao_lead') return p.naoLead;
+  if (p.naoLead) return false;
   if (etapa === 'perdido') return p.perdido;
   const alvo = postoDaEtapa(etapa);
   return modo === 'atual' ? p.posto === alvo : p.posto >= alvo;
@@ -539,6 +565,7 @@ export function somarFunis(funis: ContagemFunil[]): ContagemFunil {
     total.comparecimentos += f.comparecimentos;
     total.fechamentos += f.fechamentos;
     total.perdidos += f.perdidos;
+    total.naoLeads += f.naoLeads;
     total.receita += f.receita;
     total.aComparecer += f.aComparecer;
     total.faltaram += f.faltaram;
@@ -605,7 +632,7 @@ export const ETAPAS_PADRAO: { label: string; color: string; position: number; et
   { label: 'Agendado',       color: '#3b82f6', position: 2, etapa: 'agendamento' },
   { label: 'Reagendado',     color: '#7dd3fc', position: 3, etapa: 'agendamento' },
   { label: 'Fechado',        color: '#10b981', position: 4, etapa: 'fechamento' },
-  { label: 'Paciente',       color: '#a1a1aa', position: 5, etapa: 'fechamento' },
+  { label: 'Paciente',       color: '#a1a1aa', position: 5, etapa: 'nao_lead' },
   { label: 'Não Retorna',    color: '#71717a', position: 6, etapa: 'qualificado' },
   { label: 'Distante',       color: '#f97316', position: 7, etapa: 'perdido' },
   { label: 'Sem Interesse',  color: '#ef4444', position: 8, etapa: 'perdido' },
@@ -739,7 +766,7 @@ export function construirLadder(stages: StageKanban[], leads: LeadParaFunil[]): 
   const idxPorEtapa = new Map<EtapaFunil, number>();
   for (const s of ordenadas) {
     const etapa = etapaDe(s);
-    if (etapa === 'perdido') continue; // perdido é contagem paralela, não degrau
+    if (etapa === 'perdido' || etapa === 'nao_lead') continue; // paralelo (perdido) ou fora do funil (não-lead): não é degrau
     let index = idxPorEtapa.get(etapa);
     if (index === undefined) {
       index = degraus.length;
@@ -773,8 +800,8 @@ function maiorIndiceAteOPosto(ladder: LadderKanban, alvo: EtapaFunil): number {
  * `perdido` é paralelo (igual ao semântico): quem perdeu segue contando nas
  * etapas que alcançou.
  */
-export function indiceStageDoLead(lead: LeadParaFunil, ladder: LadderKanban): { idx: number; perdido: boolean } {
-  if (ladder.degraus.length === 0) return { idx: 0, perdido: false };
+export function indiceStageDoLead(lead: LeadParaFunil, ladder: LadderKanban): { idx: number; perdido: boolean; naoLead: boolean } {
+  if (ladder.degraus.length === 0) return { idx: 0, perdido: false, naoLead: false };
   // Degrau que representa uma etapa semântica: o MAIOR índice com aquela etapa,
   // ou — se o funil não tiver essa etapa — o maior degrau até aquele posto.
   const indiceDe = (e: EtapaFunil): number => {
@@ -783,12 +810,15 @@ export function indiceStageDoLead(lead: LeadParaFunil, ladder: LadderKanban): { 
   };
 
   const label = normalizarEtiqueta(lead.status);
+  // "Não lead" sem rastro fica fora do funil real também; com rastro é fechamento.
+  const etapaDaColuna = ladder.mapa.porLabel.get(label) ?? classificarEtapa(lead.status);
+  if (etapaDaColuna === 'nao_lead' && !lead.rastreado) return { idx: -1, perdido: false, naoLead: true };
   let idxBase: number;
   let perdido = false;
   if (ladder.idxPorLabel.has(label)) {
     idxBase = ladder.idxPorLabel.get(label)!; // degrau exato (nunca perdido)
   } else {
-    const etapaC = ladder.mapa.porLabel.get(label) ?? classificarEtapa(lead.status);
+    const etapaC = etapaDaColuna === 'nao_lead' ? 'fechamento' : etapaDaColuna;
     if (etapaC === 'perdido') { perdido = true; idxBase = -1; }
     else idxBase = indiceDe(etapaC);
   }
@@ -798,7 +828,7 @@ export function indiceStageDoLead(lead: LeadParaFunil, ladder: LadderKanban): { 
   else if (lead.compareceu) idx = Math.max(idx, indiceDe('comparecimento'));
   else if (lead.agendou || diaDoAgendamento(lead) !== null) idx = Math.max(idx, indiceDe('agendamento'));
 
-  return { idx: Math.max(0, idx), perdido };
+  return { idx: Math.max(0, idx), perdido, naoLead: false };
 }
 
 export type FunilPorStage = {
@@ -825,6 +855,8 @@ export function fracaoStatusReconhecido(ladder: LadderKanban, leads: LeadParaFun
   let casaram = 0;
   for (const l of leads) {
     if (l.tipo === 'venda') continue; // ledger não é lead do funil
+    const et = ladder.mapa.porLabel.get(normalizarEtiqueta(l.status)) ?? classificarEtapa(l.status);
+    if (et === 'nao_lead' && !l.rastreado) continue; // não é lead: nem no denominador
     total++;
     if (ladder.idxPorLabel.has(normalizarEtiqueta(l.status))) casaram++;
   }
@@ -856,7 +888,8 @@ export function contarFunilPorStage(stages: StageKanban[], leads: LeadParaFunil[
   let perdidos = 0;
   for (const lead of leads) {
     if (lead.tipo === 'venda') continue;
-    const { idx, perdido } = indiceStageDoLead(lead, ladder);
+    const { idx, perdido, naoLead } = indiceStageDoLead(lead, ladder);
+    if (naoLead) continue;
     if (perdido) perdidos++;
     for (let k = 0; k <= idx && k < degraus.length; k++) degraus[k].alcancaram++;
     if (idx < degraus.length) degraus[idx].atuais++;

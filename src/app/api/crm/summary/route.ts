@@ -1,6 +1,6 @@
 import type { NextRequest } from 'next/server';
 import { parseRecorte, filtroRegiaoSql, type ContagemRegioes } from '@/lib/regiao-recorte';
-import { ENSURE_COLUNAS_CONTAGEM, leadContaSql, portaValidadaSql } from '@/lib/lead-contagem';
+import { ENSURE_COLUNAS_CONTAGEM, leadContaSql, portaValidadaSql, rastroPagoSql } from '@/lib/lead-contagem';
 import { makeServerPool } from '@/lib/server-db';
 import {
   contarFunil,
@@ -87,7 +87,8 @@ export async function GET(req: NextRequest) {
               compareceu,
               COALESCE(registro_tipo, 'hibrido') AS registro_tipo,
               (fechou OR COALESCE(NULLIF(revenue, 0), valor_rs, 0) > 0) AS fechou,
-              COALESCE(NULLIF(revenue, 0), valor_rs, 0) AS valor_rs
+              COALESCE(NULLIF(revenue, 0), valor_rs, 0) AS valor_rs,
+              ${rastroPagoSql()} AS rastreado
          FROM public.crm_leads
         -- A LEI (lead-contagem.ts): planilha/CRM externo/formulário contam sempre;
         -- chat só com rastro pago; manual não conta.
@@ -217,6 +218,7 @@ export async function GET(req: NextRequest) {
         compareceu: row.compareceu === true,
         fechou: row.fechou === true,
         receita: Number(row.valor_rs) || 0,
+        rastreado: row.rastreado === true,
         tipo: (row.registro_tipo as 'lead' | 'venda' | 'hibrido') ?? 'hibrido',
       });
     }

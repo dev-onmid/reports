@@ -1,6 +1,6 @@
 import type { NextRequest } from 'next/server';
 import { parseRecorte, filtroRegiaoSql } from '@/lib/regiao-recorte';
-import { leadContaSql } from '@/lib/lead-contagem';
+import { leadContaSql, rastroPagoSql } from '@/lib/lead-contagem';
 import { makeServerPool } from '@/lib/server-db';
 import { canalSql, rotularCanal } from '@/lib/canal-lead';
 import {
@@ -103,6 +103,7 @@ export async function GET(req: NextRequest) {
               l.compareceu,
               (l.fechou OR COALESCE(NULLIF(l.revenue, 0), l.valor_rs, 0) > 0) AS fechou,
               COALESCE(NULLIF(l.revenue, 0), l.valor_rs, 0) AS valor_rs,
+              ${rastroPagoSql('l')} AS rastreado,
               COALESCE(l.lead_date, l.data, l.created_at::date) AS data_lead,
               -- Canal derivado pela MESMA expressão do donut de canais: dois
               -- SQLs parecidos divergiriam, e o gestor veria um canal no
@@ -184,6 +185,7 @@ export async function GET(req: NextRequest) {
         compareceu: row.compareceu === true,
         fechou: row.fechou === true,
         receita: Number(row.valor_rs) || 0,
+        rastreado: row.rastreado === true,
       };
       let etapaAtual: string;
       let perdidoLead: boolean;

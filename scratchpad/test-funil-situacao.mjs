@@ -25,7 +25,7 @@ eq([f.contatos, f.perdidos, f.semResposta, f.emAtendimento, f.pararamResponder],
 eq([f.qualificados, f.agendamentos, f.fechamentos], [5, 2, 1], 'escada intocada (Engajado+EmAtend+NãoRetorna+Agendado+Fechado)');
 const s = somarFunis([f, f]);
 eq([s.semResposta, s.emAtendimento, s.pararamResponder], [6, 4, 2], 'somarFunis carrega os três');
-eq(Object.keys(FUNIL_VAZIO).length, 14, 'FUNIL_VAZIO tem os 14 campos');
+eq(Object.keys(FUNIL_VAZIO).length, 15, 'FUNIL_VAZIO tem os 15 campos (com naoLeads)');
 console.log(`OK — ${n} asserts (situação)`);
 
 // ── Fase 3: situação gravada na COLUNA (dropdown composto do editor) ─────────
@@ -48,8 +48,8 @@ const f3 = contarFunil([
   L('Frio', { funnelId: 'f' }), L('Não Atende', { funnelId: 'f' }), L('Ligar Depois', { funnelId: 'f' }),
 ], stagesF3);
 eq([f3.contatos, f3.qualificados, f3.semResposta, f3.pararamResponder, f3.emAtendimento], [3, 1, 1, 1, 0], 'contarFunil lê a situação da coluna (Frio=parado, Não Atende calada, Ligar Depois pela regex)');
-eq(OPCOES_EDITOR.length, 8, '6 graus + 2 compostas');
-eq(OPCOES_EDITOR.map(o => o.valor), ['contato', 'contato:tentativa', 'qualificado', 'qualificado:parado', 'agendamento', 'comparecimento', 'fechamento', 'perdido'], 'ordem das opções');
+eq(OPCOES_EDITOR.length, 9, '6 graus + 2 compostas + Não lead');
+eq(OPCOES_EDITOR.map(o => o.valor), ['contato', 'contato:tentativa', 'qualificado', 'qualificado:parado', 'agendamento', 'comparecimento', 'fechamento', 'perdido', 'nao_lead'], 'ordem das opções');
 eq(valorOpcaoEditor('contato', 'tentativa', 'x'), 'contato:tentativa', 'explícito composto');
 eq(valorOpcaoEditor(null, null, 'Não Atende'), 'contato:tentativa', 'auto: grau e situação pelo nome');
 eq(valorOpcaoEditor(null, null, 'Não Retorna'), 'qualificado:parado', 'auto: Não Retorna = qualificado · parado');
@@ -59,3 +59,29 @@ eq(opcaoDoValor('qualificado:parado'), { etapa: 'qualificado', situacao: 'parado
 eq(opcaoDoValor('fechamento'), { etapa: 'fechamento', situacao: 'nenhuma' }, "grau puro → situação 'nenhuma' (persistida, não NULL)");
 eq(opcaoDoValor('lixo'), { etapa: 'contato', situacao: 'nenhuma' }, 'valor desconhecido cai no padrão');
 console.log(`OK — ${n} asserts (situação + fase 3)`);
+
+// ── "Não lead" (Paciente / já é cliente): fora de toda contagem, salvo com rastro ─
+import { leadNaEtapa, etapaDoLead, contarFunilPorStage, ETAPAS_PADRAO, OPCOES_EDITOR as OPC2 } from './build/funil-etapas.mjs';
+eq(classificarEtapa('Não Lead'), 'nao_lead', 'Não Lead');
+eq(classificarEtapa('Já sou cliente'), 'nao_lead', 'já sou cliente');
+eq(classificarEtapa('Fechado'), 'fechamento', 'Fechado segue fechamento');
+eq(ETAPAS_PADRAO.find(e => e.label === 'Paciente').etapa, 'nao_lead', 'semente Paciente = não lead');
+const fNL = contarFunil([
+  L('Paciente'), L('Paciente', { fechou: true, receita: 500 }),          // sem rastro: fora, mesmo com "fechou"
+  L('Paciente', { rastreado: true, receita: 900 }),                       // com rastro: fechamento
+  L('Entrada do lead'), L('Fechado', { fechou: true, receita: 100 }),
+], []);
+eq([fNL.contatos, fNL.fechamentos, fNL.naoLeads, fNL.receita], [3, 2, 2, 1000], 'Paciente sem rastro fora de tudo (nem receita); com rastro conta como venda');
+eq(leadNaEtapa(etapaDoLead(L('Paciente'), construirMapaEtapas([])), 'contato', 'alcancou'), false, 'modal: não-lead não aparece em Leads');
+eq(leadNaEtapa(etapaDoLead(L('Paciente'), construirMapaEtapas([])), 'nao_lead', 'alcancou'), true, 'modal: aparece só em nao_lead');
+eq(leadNaEtapa(etapaDoLead(L('Paciente', { rastreado: true }), construirMapaEtapas([])), 'fechamento', 'alcancou'), true, 'com rastro é fechamento');
+// Kanban real: coluna "Paciente" não vira degrau e os leads dela não contam
+const kanban = [
+  { funnelId: 'f', label: 'Entrada', etapa: 'contato', position: 0 }, { funnelId: 'f', label: 'Agendado', etapa: 'agendamento', position: 1 },
+  { funnelId: 'f', label: 'Fechado', etapa: 'fechamento', position: 2 }, { funnelId: 'f', label: 'Paciente', etapa: 'nao_lead', position: 3 },
+];
+const fs = contarFunilPorStage(kanban, [L('Entrada', { funnelId: 'f' }), L('Paciente', { funnelId: 'f' }), L('Paciente', { funnelId: 'f', rastreado: true }), L('Fechado', { funnelId: 'f' })]);
+eq(fs.degraus.map(d => d.label), ['Entrada', 'Agendado', 'Fechado'], 'Paciente não é degrau');
+eq(fs.degraus.map(d => d.alcancaram), [3, 2, 2], 'sem rastro fora; com rastro chega ao fechamento');
+eq(OPC2.some(o => o.valor === 'nao_lead'), true, 'dropdown do editor oferece Não lead');
+console.log(`OK — ${n} asserts (situação + fase 3 + não-lead)`);

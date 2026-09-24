@@ -2,7 +2,7 @@ import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { classificarEtapa, SITUACOES_STAGE, type EtapaFunil, type SituacaoStage } from '@/lib/funil-etapas';
 
-const ETAPAS_VALIDAS = new Set<string>(['contato', 'qualificado', 'agendamento', 'comparecimento', 'fechamento', 'perdido']);
+const ETAPAS_VALIDAS = new Set<string>(['contato', 'qualificado', 'agendamento', 'comparecimento', 'fechamento', 'perdido', 'nao_lead']);
 
 export async function GET(
   _req: NextRequest,

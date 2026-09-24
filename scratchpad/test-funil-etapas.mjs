@@ -23,7 +23,7 @@ eq(classificarEtapa('Avaliação Remarcada'), 'agendamento', 'remarcada');
 eq(classificarEtapa('Avaliação Com Falta'), 'agendamento', 'com falta = agendou mas nao compareceu');
 eq(classificarEtapa('Avaliação Realizada'), 'comparecimento', 'realizada = compareceu');
 eq(classificarEtapa('Avaliação Efetivada'), 'fechamento', 'efetivada = vendeu');
-eq(classificarEtapa('Paciente'), 'fechamento', 'paciente');
+eq(classificarEtapa('Paciente'), 'nao_lead', 'paciente = não lead (já é cliente da casa)');
 eq(classificarEtapa('Não Retorna'), 'qualificado', 'nao retorna preserva getStage antigo');
 eq(classificarEtapa('Distante'), 'perdido', 'distante = perda (decisão do Matheus 2026-09-24; antes preservava o getStage antigo)');
 eq(classificarEtapa('Sem Interesse'), 'perdido', 'sem interesse');

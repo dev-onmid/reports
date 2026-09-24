@@ -17,7 +17,7 @@ import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { contarFunil, type ContagemFunil, type EtapaDeStage, type EtapaFunil, type LeadParaFunil } from '@/lib/funil-etapas';
 import { normalizarNome } from '@/lib/regiao-recorte';
-import { leadContaSql } from '@/lib/lead-contagem';
+import { leadContaSql, rastroPagoSql } from '@/lib/lead-contagem';
 
 export type LinhaRegiao = {
   /** Cidade ("Curitiba") ou UF ("PR"). */
@@ -73,6 +73,7 @@ export async function GET(req: NextRequest) {
               COALESCE(registro_tipo, 'hibrido') AS registro_tipo,
               (fechou OR COALESCE(NULLIF(revenue, 0), valor_rs, 0) > 0) AS fechou,
               COALESCE(NULLIF(revenue, 0), valor_rs, 0) AS valor_rs,
+              ${rastroPagoSql()} AS rastreado,
               UPPER(NULLIF(TRIM(regiao_uf), '')) AS uf,
               NULLIF(TRIM(regiao_cidade), '') AS cidade
          FROM public.crm_leads
@@ -119,6 +120,7 @@ export async function GET(req: NextRequest) {
         compareceu: row.compareceu === true,
         fechou: row.fechou === true,
         receita: Number(row.valor_rs) || 0,
+        rastreado: row.rastreado === true,
         tipo: (row.registro_tipo as 'lead' | 'venda' | 'hibrido') ?? 'hibrido',
       };
       total++;
