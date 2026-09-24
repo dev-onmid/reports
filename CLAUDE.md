@@ -1,3 +1,14 @@
+## Dashboard — TRÊS níveis de título, e só três (2026-09-24, noite)
+
+Pedido do Matheus: "cada um com um tamanho e maneira de apresentar; precisa deixar padrão — título de sessão bem maior e o título de dado menor padrão". Levantamento: a seção tinha 16px (quase igual a um card), os grupos da Landing page tinham três desenhos (fio verde de 11px, faixa em card, cabeçalho com ícone de 44px) e os cards dos mocks recentes usavam 15, 18, 20 e 24px, em caixa alta ou normal.
+
+- **Tokens em `dashboard-tipografia.ts`** (a fonte única): `T.secao` = Bebas 34px (nível 1: "Mídia paga", "Landing page", "Social", "Comercial"), `T.secaoSub`; `T.grupo` = 16px black verde em caixa alta (nível 2: "Campanhas na página", "Audiência", "Comportamento", "Instagram"); `T.cardTitulo` = 15px black em caixa alta (nível 3: todo card/dado) + `T.cardSub`.
+- **Um componente por nível**: `TituloSecao` (barra verde de 32px + título + sub + fio), `GrupoTitulo` (título verde + sub + fio, aceita `icone` — usado no Instagram com o logo) e `CabecalhoCard`/`CabecalhoIcone` (caixa de ícone de **32px** à esquerda do bloco título+sub). O `BarraGrupo` (faixa em card do 4º mock) foi apagado — virou `GrupoTitulo`.
+- Cards dos mocks trazidos ao padrão: Funil de performance e Resumo por canal (eram 20px em caixa normal; ganharam `IconeBadge` e sub), Campanhas: custo por contato (24px + caixa de 72px), `CabecalhoMini` das Cidades/Canal/Páginas/eventos (18px), Funil do anúncio / Evolução / Desempenho por página (15px caixa normal). Rótulos dos KPIs da Landing page passaram a `T.kpiRotulo`/`T.miniRotulo`, iguais aos KPIs do resto da página.
+- ⚠️ **Regra para qualquer bloco novo**: cabeçalho usa um desses três componentes/tokens. Tamanho de título escrito à mão num `className` é regressão.
+- Código morto (ChannelCard, MetricSection, AudiencePie, DashboardPerformanceFunnel, "Resumo de Tráfego") não foi tocado — não renderiza.
+- ✅ Verificado: tsc limpo; eslint 0 nos arquivos novos e 164 = 164 no `page.tsx`; harness com seção + grupo + funil/resumo extraídos do `page.tsx` e o painel da Landing page com o payload real da Cinfel.
+
 ## Dashboard — Funil de performance e Resumo por canal no layout novo, acima dos KPIs (2026-09-24, noite)
 
 Referência do Matheus: "tenho melhor visibilidade de ler os dados e está mais dividido". Tudo em `page.tsx`.

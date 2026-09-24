@@ -75,15 +75,13 @@ export function CabecalhoCard({ titulo, sub, icone, direita, className }: {
   titulo?: ReactNode; sub?: ReactNode; icone?: ReactNode; direita?: ReactNode; className?: string;
 }) {
   return (
-    <div className={cn('mb-4 flex flex-wrap items-start justify-between gap-x-3 gap-y-2', className)}>
-      <div className="min-w-0">
-        {titulo && (
-          <h3 className={cn('flex items-center gap-2', T.cardTitulo)}>
-            {icone}
-            <span className="min-w-0">{titulo}</span>
-          </h3>
-        )}
-        {sub && <p className={cn('mt-1 leading-snug', T.cardSub)}>{sub}</p>}
+    <div className={cn('mb-4 flex flex-wrap items-center justify-between gap-x-3 gap-y-2', className)}>
+      <div className="flex min-w-0 items-center gap-3">
+        {icone && <span className="flex shrink-0 items-center">{icone}</span>}
+        <div className="min-w-0">
+          {titulo && <h3 className={T.cardTitulo}>{titulo}</h3>}
+          {sub && <p className={cn('mt-1 leading-snug', T.cardSub)}>{sub}</p>}
+        </div>
       </div>
       {direita && <div className="flex shrink-0 items-center gap-2">{direita}</div>}
     </div>
@@ -95,12 +93,13 @@ export function CabecalhoCard({ titulo, sub, icone, direita, className }: {
  * contato", "Audiência"). Não é card nem seção: só um rótulo com fio, para
  * agrupar cards vizinhos sem criar outra moldura.
  */
-export function GrupoTitulo({ titulo, sub }: { titulo: string; sub?: string }) {
+export function GrupoTitulo({ titulo, sub, icone }: { titulo: string; sub?: ReactNode; icone?: ReactNode }) {
   return (
-    <div className="flex items-center gap-2 pt-1">
-      <h4 className={T.subBloco}>{titulo}</h4>
-      {sub && <span className={T.nota}>{sub}</span>}
-      <span className="h-px flex-1 bg-white/[0.06]" />
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pt-2">
+      {icone && <span className="flex shrink-0 items-center">{icone}</span>}
+      <h4 className={T.grupo}>{titulo}</h4>
+      {sub && <span className={T.cardSub}>{sub}</span>}
+      <span className="h-px min-w-[40px] flex-1 bg-white/[0.08]" />
     </div>
   );
 }

@@ -10,6 +10,7 @@ import { InnerCard, Delta, IconTile, Label, Spark, CLASSE_SUPERFICIE, type Super
 import { CLASSE_TEXTO, type TomGrafico } from '@/types/dashboard';
 import { styleTexto, styleValor, styleFundo, type EstiloElemento } from '@/lib/dashboard-elementos';
 import { cn } from '@/lib/utils';
+import { T } from '@/lib/dashboard-tipografia';
 
 /** Estilo vazio compartilhado — evita criar objeto novo a cada render. */
 const VAZIO: EstiloElemento = {};
@@ -164,7 +165,7 @@ export function Chapter({ icon, titulo, sub, tom = 'primary', right, nivel = 'ca
           {capitulo ? (
             <h2 className="font-heading text-3xl leading-none text-foreground" style={styleTexto(estilo)}>{texto}</h2>
           ) : (
-            <h3 className="text-sm font-black uppercase tracking-[0.07em] text-[#f4f7f8]" style={styleTexto(estilo)}>{texto}</h3>
+            <h3 className={T.cardTitulo} style={styleTexto(estilo)}>{texto}</h3>
           )}
           {sub && <p className="mt-1 text-[11px] text-[#9aa4aa]">{sub}</p>}
         </div>

@@ -218,24 +218,6 @@ function Empilhada({ linhas }: { linhas: Ga4Seg[] }) {
  * contatos, com % entre etapas e o connect rate em destaque. Sem Google Ads,
  * cai para sessões → engajadas → contatos do total da LP.
  */
-/** Faixa de grupo do mock ("CAMPANHAS NA PÁGINA | o que o GA4 viu…"): ícone + título verde + divisor + sub, num card fino. */
-function BarraGrupo({ icone: Icone, titulo, sub }: { icone: ElementType; titulo: string; sub?: string }) {
-  return (
-    <div className={cx(SUPERFICIE, 'flex flex-wrap items-center gap-x-4 gap-y-1 px-5 py-3.5')}>
-      <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg" style={{ background: `${VERDE}22`, color: VERDE, boxShadow: `inset 0 0 0 1px ${VERDE}44` }}>
-        <Icone className="h-4 w-4" />
-      </span>
-      <h4 className="text-base font-black uppercase tracking-[0.08em]" style={{ color: VERDE }}>{titulo}</h4>
-      {sub && (
-        <>
-          <span className="hidden h-6 w-px bg-white/[0.12] sm:block" />
-          <span className="text-sm text-[#a7b0b6]">{sub}</span>
-        </>
-      )}
-    </div>
-  );
-}
-
 /** Pílula de valor (connect rate, custo/contato) do mock: fundo colorido suave + borda. */
 function Pilula({ cor, children, contorno = false }: { cor: string; children: ReactNode; contorno?: boolean }) {
   return (
@@ -283,19 +265,14 @@ function Campanhas({ ads, utm, semCusto }: { ads: Ga4Seg[]; utm: Ga4Seg[]; semCu
 
   return (
     <Card>
-      <div className="mb-5 flex items-center gap-4">
-        <span className="inline-flex h-[72px] w-[72px] shrink-0 items-center justify-center rounded-2xl" style={{ background: `${VERDE}14`, color: VERDE, boxShadow: `inset 0 0 0 1px ${VERDE}66, 0 0 22px ${VERDE}22` }}>
-          <CircleDollarSign className="h-8 w-8" />
-        </span>
-        <div className="min-w-0">
-          <h4 className="text-2xl font-black uppercase leading-tight tracking-[0.04em] text-[#f4f7f8]">Campanhas: custo por contato</h4>
-          <p className="mt-1 text-sm text-[#a7b0b6]">
-            {semCusto
-              ? 'Custo vazio: a propriedade GA4 não está vinculada ao Google Ads.'
-              : 'Ordenado por custo. Connect rate = sessões ÷ cliques. Custo por contato = custo ÷ contatos (WhatsApp + formulário + telefone).'}
-          </p>
-        </div>
-      </div>
+      <CabecalhoIcone
+        className="mb-5"
+        icone={CircleDollarSign}
+        titulo="Campanhas: custo por contato"
+        sub={semCusto
+          ? 'Custo vazio: a propriedade GA4 não está vinculada ao Google Ads.'
+          : 'Ordenado por custo. Connect rate = sessões ÷ cliques. Custo por contato = custo ÷ contatos (WhatsApp + formulário + telefone).'}
+      />
 
       <div className="-mx-2 overflow-x-auto px-2">
         <div className="min-w-[960px]">
@@ -541,8 +518,8 @@ function CabecalhoMini({ titulo, sub, verTodas }: { titulo: ReactNode; sub?: Rea
   return (
     <div className="mb-4 flex items-start justify-between gap-3">
       <div className="min-w-0">
-        <h4 className="text-lg font-black uppercase leading-tight tracking-[0.04em] text-[#f4f7f8]">{titulo}</h4>
-        {sub && <p className="mt-1 text-xs text-[#a7b0b6]">{sub}</p>}
+        <h4 className={T.cardTitulo}>{titulo}</h4>
+        {sub && <p className={cx('mt-1', T.cardSub)}>{sub}</p>}
       </div>
       {verTodas && (
         <button type="button" onClick={verTodas.onClick} className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-xs font-semibold text-[#dce4e8] underline decoration-white/40 underline-offset-4 transition-colors hover:text-[#6cff2f]">
@@ -883,7 +860,7 @@ function CabecalhoIcone({ icone, cor = VERDE, redondo = false, titulo, sub, dire
   return (
     <div className={cx('flex flex-wrap items-center justify-between gap-x-4 gap-y-3 md:flex-nowrap', className ?? 'mb-4')}>
       <div className="flex min-w-0 flex-1 items-center gap-3">
-        <CaixaIcone icone={icone} cor={cor} redondo={redondo} tam={44} />
+        <CaixaIcone icone={icone} cor={cor} redondo={redondo} />
         <div className="min-w-0">
           <h4 className={T.cardTitulo}>{titulo}</h4>
           {sub && <p className={cx('mt-0.5', T.cardSub)}>{sub}</p>}
@@ -1002,8 +979,8 @@ function KpiLp({ rotulo, icone, valor, variacao: v, unidade, dica, serie }: {
   return (
     <div className={cx(SUPERFICIE, 'flex flex-col p-5')}>
       <div className="flex items-center gap-3">
-        <CaixaIcone icone={icone} grande />
-        <span className="text-sm font-semibold text-[#e6ecef]">{rotulo}</span>
+        <CaixaIcone icone={icone} />
+        <span className={T.kpiRotulo}>{rotulo}</span>
         {dica && <span title={dica}><Info className="h-3.5 w-3.5 text-[#7c868c]" /></span>}
       </div>
       <p className="mt-3 font-heading text-[40px] leading-none text-[#f4f7f8] tabular-nums">{valor}</p>
@@ -1027,7 +1004,7 @@ function MiniLp({ rotulo, icone, valor, variacao: v, unidade, dica }: {
     <div className={cx(SUPERFICIE, 'flex items-center gap-2.5 px-3 py-3')} title={dica}>
       <CaixaIcone icone={icone} />
       <div className="min-w-0 flex-1">
-        <p className="truncate text-[11px] leading-tight text-[#a7b0b6]">{rotulo}</p>
+        <p className={cx('truncate leading-tight', T.miniRotulo)}>{rotulo}</p>
         <p className="mt-1 font-heading text-[22px] leading-none text-[#f4f7f8] tabular-nums">{valor}</p>
         <p className="mt-1 leading-none"><Delta v={v} unidade={unidade} /></p>
       </div>
@@ -1065,10 +1042,10 @@ function FunilSetas({ ads, atual }: { ads: Ga4Seg[]; atual: Ga4Totais }) {
     <Card>
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div className="flex items-start gap-3">
-          <CaixaIcone icone={BarChart3} grande />
+          <CaixaIcone icone={BarChart3} />
           <div>
-            <h4 className="text-[15px] font-bold text-[#f4f7f8]">{comAds ? 'Funil do anúncio (Google Ads)' : 'Funil da página'}</h4>
-            <p className="mt-0.5 text-xs text-[#a7b0b6]">Veja quantas pessoas avançam de cada etapa, do clique no anúncio até o contato.</p>
+            <h4 className={T.cardTitulo}>{comAds ? 'Funil do anúncio (Google Ads)' : 'Funil da página'}</h4>
+            <p className={cx('mt-1', T.cardSub)}>Veja quantas pessoas avançam de cada etapa, do clique no anúncio até o contato.</p>
           </div>
         </div>
       </div>
@@ -1186,10 +1163,10 @@ function DesempenhoPaginas({ linhas }: { linhas: LinhaPagina[] }) {
     <Card>
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div className="flex items-start gap-3">
-          <CaixaIcone icone={BarChart3} grande />
+          <CaixaIcone icone={BarChart3} />
           <div>
-            <h4 className="text-[15px] font-bold text-[#f4f7f8]">Desempenho por campanha / página</h4>
-            <p className="mt-0.5 text-xs text-[#a7b0b6]">Compare o desempenho das suas campanhas e páginas de destino.</p>
+            <h4 className={T.cardTitulo}>Desempenho por campanha / página</h4>
+            <p className={cx('mt-1', T.cardSub)}>Compare o desempenho das suas campanhas e páginas de destino.</p>
           </div>
         </div>
         <label className="relative block w-full max-w-[260px]">
@@ -1375,10 +1352,10 @@ export function Ga4LandingPanel({ dados, loading, aviso }: { dados: Ga4Consolida
           <Card>
             <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
               <div className="flex items-start gap-3">
-                <CaixaIcone icone={BarChart3} grande />
+                <CaixaIcone icone={BarChart3} />
                 <div>
-                  <h4 className="text-[15px] font-bold text-[#f4f7f8]">Evolução {granularidade === 'dia' ? 'diária' : 'semanal'}</h4>
-                  <p className="mt-0.5 text-xs text-[#a7b0b6]">Sessões e contatos (eventos-chave do GA4) por {granularidade === 'dia' ? 'dia' : 'semana'} no período. Eixos começam em 0.</p>
+                  <h4 className={T.cardTitulo}>Evolução {granularidade === 'dia' ? 'diária' : 'semanal'}</h4>
+                  <p className={cx('mt-1', T.cardSub)}>Sessões e contatos (eventos-chave do GA4) por {granularidade === 'dia' ? 'dia' : 'semana'} no período. Eixos começam em 0.</p>
                 </div>
               </div>
               <label className="relative">
@@ -1404,7 +1381,7 @@ export function Ga4LandingPanel({ dados, loading, aviso }: { dados: Ga4Consolida
       {/* Campanhas na página (antes "Tráfego pago") */}
       {temPago && (
         <>
-          <BarraGrupo icone={BarChart3} titulo="Campanhas na página" sub="o que o GA4 viu de cada campanha e palavra-chave" />
+          <GrupoTitulo titulo="Campanhas na página" sub="o que o GA4 viu de cada campanha e palavra-chave" />
           {semVinculoAds && (
             <p className="rounded-lg px-3 py-2 text-[11px]" style={{ background: `${AMBAR}14`, color: AMBAR }}>
               Esta propriedade GA4 não está vinculada ao Google Ads: custo por campanha, palavras-chave e termos pesquisados não aparecem.
@@ -1419,7 +1396,7 @@ export function Ga4LandingPanel({ dados, loading, aviso }: { dados: Ga4Consolida
       {/* Audiência */}
       {temAudiencia && (
         <>
-          <CabecalhoIcone className="mb-0 mt-1" icone={Users} titulo="Audiência" sub="Entenda quem visita seu site e como eles se comportam." />
+          <GrupoTitulo titulo="Audiência" sub="Entenda quem visita seu site e como eles se comportam." />
           {(au.dispositivos.length > 0 || au.novosRecorrentes.length > 0) && (
             <div className="grid gap-4 md:grid-cols-2">
               {au.dispositivos.length > 0 && (

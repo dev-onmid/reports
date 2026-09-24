@@ -105,8 +105,8 @@ import { statusCpl, statusCplComGasto, ROTULO_STATUS_CPL, CLASSE_STATUS_CPL, TEX
 import { Donut } from '@/components/dashboard/donut';
 import { BulletMetaCard } from '@/components/dashboard/bullet-meta';
 import { RitmoMesChart, CplDiarioChart } from '@/components/dashboard/ritmo-chart';
-import { SUPERFICIE, Superficie } from '@/components/dashboard/superficie';
-import { IndicadorCard, IndicadorMini, FaixaIndicadores } from '@/components/dashboard/indicador-card';
+import { SUPERFICIE, Superficie, GrupoTitulo } from '@/components/dashboard/superficie';
+import { IndicadorCard, IndicadorMini, FaixaIndicadores, IconeBadge } from '@/components/dashboard/indicador-card';
 
 type Period = 'yesterday' | 'last_7d' | 'last_14d' | 'last_30d' | 'this_month' | 'last_month' | 'last_3m' | 'last_6m' | 'this_year' | 'all_time' | 'custom';
 type VendasCohort = { periodo: number; anteriores: number; semData: number };
@@ -4278,9 +4278,11 @@ function SimpleFunnel({ steps, totalRate, fonteLabel, onStageClick, todosClicave
     <PremiumPanel className="flex flex-col p-5">
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-3">
-          <Funnel className="h-6 w-6 shrink-0 text-[#6cff2f]" style={{ fill: '#6cff2f' }} />
-          <h3 className="text-xl font-bold text-[#f4f7f8]">Funil de performance</h3>
-          {fonteLabel && <span className="text-sm text-[#a7b0b6]">· {fonteLabel}</span>}
+          <IconeBadge icone={Funnel} />
+          <div className="min-w-0">
+            <h3 className={T.cardTitulo}>Funil de performance</h3>
+            {fonteLabel && <p className={cn('mt-1', T.cardSub)}>{fonteLabel}</p>}
+          </div>
         </div>
         <div className="flex items-center gap-3">
           <span className="text-xs text-[#a7b0b6]" title="Último degrau ÷ topo do funil">
@@ -4458,7 +4460,7 @@ function DeliveryResumoCard({ clientId, from, to }: { clientId: string; from: st
     <PremiumPanel className="p-5">
       <div className="mb-4 flex items-center justify-between">
         <div className="flex items-baseline gap-2">
-          <h3 className="text-sm font-black uppercase tracking-[0.07em] text-[#f4f7f8]">Delivery — Resultado</h3>
+          <h3 className={T.cardTitulo}>Delivery — Resultado</h3>
           <span className="text-[10px] text-[#9aa4aa]">· cardápio digital</span>
         </div>
         <Link href={`/clientes/${clientId}?tab=delivery`} className="text-[10px] font-black uppercase text-[#6cff2f] hover:underline">
@@ -4587,8 +4589,11 @@ function ChannelSummaryTable({ rows, total, metaCpl }: {
   return (
     <PremiumPanel className="flex flex-col p-5">
       <div className="mb-5 flex items-center gap-3">
-        <BarChart3 className="h-6 w-6 shrink-0 text-[#6cff2f]" />
-        <h3 className="text-xl font-bold text-[#f4f7f8]">Resumo por canal</h3>
+        <IconeBadge icone={BarChart3} />
+        <div className="min-w-0">
+          <h3 className={T.cardTitulo}>Resumo por canal</h3>
+          <p className={cn('mt-1', T.cardSub)}>Meta Ads, Google Ads e o total no período.</p>
+        </div>
       </div>
       <div className="flex-1 overflow-x-auto">
         <table className="w-full min-w-[440px] text-left text-sm tabular-nums">
@@ -5226,11 +5231,11 @@ function TabelaRegioes({ linhas, semRegiao, total, nacionalPorUf, ufs }: {
 /** Título de seção da página única (substitui as abas). */
 function TituloSecao({ titulo, sub, direita }: { titulo: string; sub?: string; direita?: ReactNode }) {
   return (
-    <div className="mt-6 flex items-center gap-3">
-      <span className="h-4 w-1 rounded-full bg-[#6cff2f]" />
+    <div className="mt-10 flex flex-wrap items-center gap-x-4 gap-y-2">
+      <span className="h-8 w-1.5 rounded-full bg-[#6cff2f]" />
       <h2 className={T.secao}>{titulo}</h2>
-      {sub && <span className={T.cardSub}>{sub}</span>}
-      <span className="h-px flex-1 bg-white/[0.08]" />
+      {sub && <span className={T.secaoSub}>{sub}</span>}
+      <span className="h-px min-w-[40px] flex-1 bg-white/[0.08]" />
       {direita}
     </div>
   );
@@ -6826,13 +6831,11 @@ export default function GeneralDashboard() {
                 // Sem moldura rosa: cards normais direto no fluxo da página,
                 // com o logo + @ numa linha de cabeçalho leve.
                 <>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <IgMark className="h-4 w-4" />
-                    <span className={T.subBloco}>Instagram</span>
-                    {igHandles.length > 0 && (
-                      <span className={T.cardSub}>{igHandles.map(h => `@${h}`).join(', ')}</span>
-                    )}
-                  </div>
+                  <GrupoTitulo
+                    titulo="Instagram"
+                    icone={<IgMark className="h-5 w-5" />}
+                    sub={igHandles.length > 0 ? igHandles.map(h => `@${h}`).join(', ') : undefined}
+                  />
                     <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
                       {/* ⚠️ Seguidores: o valor grande é o TOTAL (snapshot); a
                           variação é a do GANHO no período contra o ganho anterior

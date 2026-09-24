@@ -4,10 +4,16 @@
  * âmbar, cores de marca) são aplicadas à parte, por quem usa.
  */
 export const T = {
-  /** Título de seção da página: "Mídia paga", "Landing page", "Social", "Comercial". */
-  secao: 'text-base font-black uppercase tracking-[0.08em] text-[#f4f7f8]',
-  /** Título de todo painel/card. */
-  cardTitulo: 'text-sm font-black uppercase tracking-[0.07em] text-[#f4f7f8]',
+  // ⚠️ TRÊS níveis de título, e só três (pedido do Matheus, 24/09: "título de sessão bem
+  // maior e o título de dado menor, padrão"). Nada de tamanho solto em cabeçalho.
+  /** Nível 1 — título de seção da página: "Mídia paga", "Landing page", "Social", "Comercial". */
+  secao: 'font-heading text-[34px] leading-none tracking-[0.04em] text-[#f4f7f8]',
+  /** Subtítulo ao lado do título de seção. */
+  secaoSub: 'text-sm text-[#a7b0b6]',
+  /** Nível 2 — grupo dentro de uma seção ("Campanhas na página", "Audiência", "Instagram"). */
+  grupo: 'text-base font-black uppercase tracking-[0.1em] text-[#6cff2f]',
+  /** Nível 3 — título de todo painel/card (o "título do dado"). */
+  cardTitulo: 'text-[15px] font-black uppercase tracking-[0.06em] text-[#f4f7f8]',
   /** Linha curta de descrição sob/ao lado do título do card. */
   cardSub: 'text-xs text-[#9aa4aa]',
   /** Rótulo de sub-bloco dentro de um painel ("VISÃO GERAL", "TOP PALAVRAS-CHAVE"). */
