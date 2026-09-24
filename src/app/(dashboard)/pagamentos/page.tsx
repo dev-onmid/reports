@@ -1,7 +1,7 @@
 "use client";
 
 import Link from 'next/link';
-import { type ElementType, type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
+import { type ElementType, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   BarChart3,
@@ -21,8 +21,10 @@ import {
   Plus,
   PlusCircle,
   RefreshCw,
+  Search,
   Send,
   Trash2,
+  Users,
   WalletCards,
   X,
   Zap,
@@ -36,6 +38,7 @@ import { Input } from '@/components/ui/input';
 import { notificar } from '@/components/ui/toast';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { useClients } from '@/lib/client-store';
+import { normalizeClientName } from '@/lib/client-name';
 import { callerHeaders } from '@/lib/auth-store';
 import {
   type InvestmentPayment,
@@ -1798,11 +1801,231 @@ function WeekChannelSummaryCard({
   );
 }
 
+type OpcaoCliente = { id: string; nome: string; quantidade: number };
+
+/**
+ * Filtro de cliente da tela de Pagamentos.
+ *
+ * ⚠️ Mora na BARRA DO TOPO, ao lado do seletor de período, e não junto do
+ * "Hoje" do calendário: é a única faixa que existe nas três visões (Dia,
+ * Semana e Mês). No cabeçalho do mês, trocar para Dia levaria o controle
+ * embora com o filtro ainda ligado — recorte invisível é indistinguível de
+ * tela quebrada.
+ *
+ * ⚠️ Dropdown escrito à mão (backdrop `fixed inset-0` + `absolute`), NUNCA o
+ * Popover do Base UI: aberto por clique ele mantém o foco no gatilho de
+ * propósito e o que se digita na busca se perde — medido no browser em
+ * 2026-08-31 (ver `client-switcher.tsx`).
+ */
+function FiltroCliente({
+  opcoes,
+  valor,
+  onChange,
+}: {
+  opcoes: OpcaoCliente[];
+  /** '' = todos os clientes. */
+  valor: string;
+  onChange: (clientId: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [busca, setBusca] = useState('');
+  const [cursor, setCursor] = useState(0);
+  const listaRef = useRef<HTMLDivElement>(null);
+
+  const selecionado = opcoes.find((c) => c.id === valor) ?? null;
+
+  const filtrados = useMemo(() => {
+    const q = normalizeClientName(busca);
+    if (!q) return opcoes;
+    return opcoes.filter((c) => normalizeClientName(c.nome).includes(q));
+  }, [opcoes, busca]);
+
+  // Esc fecha de qualquer lugar (o foco pode estar num item da lista).
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [open]);
+
+  function abrir() {
+    // Reabrir com a busca do uso anterior esconderia metade da carteira.
+    setBusca('');
+    setCursor(0);
+    setOpen(true);
+  }
+
+  function escolher(clientId: string) {
+    setOpen(false);
+    onChange(clientId);
+  }
+
+  function mover(delta: number) {
+    setCursor((c) => {
+      const proximo = Math.min(Math.max(c + delta, 0), Math.max(filtrados.length, 0));
+      listaRef.current?.querySelectorAll('[data-opcao]')[proximo]?.scrollIntoView({ block: 'nearest' });
+      return proximo;
+    });
+  }
+
+  // O índice 0 é sempre "Todos os clientes"; os clientes começam em 1.
+  function itemDoCursor(): string | null {
+    if (cursor === 0) return '';
+    return filtrados[cursor - 1]?.id ?? null;
+  }
+
+  return (
+    <div className="relative">
+      <div
+        className={cn(
+          'flex h-11 items-center rounded-[var(--radius)] border bg-card/70 transition-colors',
+          selecionado ? 'border-primary/45 shadow-[0_0_14px_rgba(85,245,47,0.14)]' : 'border-border',
+        )}
+      >
+        <button
+          type="button"
+          onClick={() => (open ? setOpen(false) : abrir())}
+          aria-expanded={open}
+          title={selecionado ? `Mostrando só ${selecionado.nome}` : 'Filtrar os pagamentos por cliente'}
+          className="flex h-full items-center gap-2 px-4 text-sm outline-none"
+        >
+          <Users className={cn('h-4 w-4', selecionado ? 'text-primary' : 'text-muted-foreground')} />
+          <span className={cn('max-w-44 truncate font-bold', selecionado ? 'text-primary' : 'text-foreground')}>
+            {selecionado ? selecionado.nome : 'Todos os clientes'}
+          </span>
+          {selecionado && (
+            <span className="rounded bg-primary/15 px-1.5 py-0.5 text-[10px] font-bold tabular-nums text-primary">
+              {selecionado.quantidade}
+            </span>
+          )}
+          <ChevronDown className="h-4 w-4 text-muted-foreground" />
+        </button>
+        {selecionado && (
+          <button
+            type="button"
+            onClick={() => onChange('')}
+            title="Limpar o filtro e voltar a ver todos os clientes"
+            aria-label="Limpar filtro de cliente"
+            className="flex h-full items-center border-l border-border/70 px-2.5 text-muted-foreground transition-colors hover:text-foreground"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        )}
+      </div>
+
+      {open && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 top-full z-50 mt-2 w-80 overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-lg">
+            <div className="border-b border-border p-2">
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                <input
+                  autoFocus
+                  value={busca}
+                  onChange={(e) => { setBusca(e.target.value); setCursor(0); }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'ArrowDown') { e.preventDefault(); mover(1); }
+                    if (e.key === 'ArrowUp') { e.preventDefault(); mover(-1); }
+                    if (e.key === 'Enter') {
+                      const alvo = itemDoCursor();
+                      if (alvo !== null) { e.preventDefault(); escolher(alvo); }
+                    }
+                  }}
+                  placeholder="Buscar cliente..."
+                  className="h-9 w-full rounded-md border border-border bg-background pl-8 pr-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary/50 focus:outline-none"
+                />
+              </div>
+            </div>
+
+            <div ref={listaRef} className="max-h-72 overflow-y-auto p-1">
+              <button
+                type="button"
+                data-opcao
+                onClick={() => escolher('')}
+                onMouseEnter={() => setCursor(0)}
+                className={cn(
+                  'flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left transition-colors',
+                  cursor === 0 && 'bg-muted/60',
+                  !valor && 'bg-primary/10',
+                )}
+              >
+                <span className={cn('text-sm', !valor ? 'font-bold text-primary' : 'text-foreground')}>
+                  Todos os clientes
+                </span>
+                <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
+                  {opcoes.reduce((soma, c) => soma + c.quantidade, 0)}
+                </span>
+              </button>
+
+              {filtrados.length === 0 ? (
+                <p className="px-2 py-6 text-center text-xs text-muted-foreground">Nenhum cliente encontrado.</p>
+              ) : (
+                filtrados.map((c, i) => (
+                  <button
+                    key={c.id}
+                    type="button"
+                    data-opcao
+                    onClick={() => escolher(c.id)}
+                    onMouseEnter={() => setCursor(i + 1)}
+                    className={cn(
+                      'flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left transition-colors',
+                      cursor === i + 1 && 'bg-muted/60',
+                      c.id === valor && 'bg-primary/10',
+                    )}
+                  >
+                    <span className={cn('min-w-0 flex-1 truncate text-sm', c.id === valor ? 'font-bold text-primary' : 'text-foreground')}>
+                      {c.nome}
+                    </span>
+                    <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">{c.quantidade}</span>
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function PagamentosPage() {
   const { clients } = useClients();
   const { payments, addPayment, updatePayment, updatePaymentStatus, deletePayment, movePaymentDate, togglePaymentExtra } = useInvestmentPayments();
   const [editingPayment, setEditingPayment] = useState<InvestmentPayment | null>(null);
-  const visiblePayments = payments;
+
+  // ── Filtro de cliente ─────────────────────────────────────────────────────
+  // '' = todos. NÃO é persistido de propósito: filtro que sobrevive ao recarregar
+  // esconde pagamento sem ninguém lembrar que ligou.
+  const [clientFilter, setClientFilter] = useState('');
+
+  // Só entra na lista quem TEM pagamento — oferecer cliente sem nenhum daria
+  // uma tela vazia sem explicação. O nome vem do cadastro atual quando existe:
+  // `clientName` é congelado no ato do pagamento e mente depois de um rename.
+  const opcoesCliente = useMemo(() => {
+    const mapa = new Map<string, { id: string; nome: string; quantidade: number }>();
+    for (const p of payments) {
+      const atual = mapa.get(p.clientId);
+      if (atual) { atual.quantidade += 1; continue; }
+      const cadastro = clients.find((c) => c.id === p.clientId);
+      mapa.set(p.clientId, { id: p.clientId, nome: cadastro?.name ?? p.clientName, quantidade: 1 });
+    }
+    return [...mapa.values()].sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
+  }, [payments, clients]);
+
+  // Derivado, não resetado por efeito: se o último pagamento do cliente
+  // filtrado for excluído, ele some da lista e o filtro é simplesmente
+  // ignorado — em vez de deixar a tela vazia sem motivo visível.
+  const clienteFiltrado = clientFilter && opcoesCliente.some((c) => c.id === clientFilter) ? clientFilter : '';
+
+  // ⚠️ O recorte entra AQUI, na fonte que alimenta a tela inteira (KPIs do topo,
+  // os três calendários, a rosca de status e o resumo por cliente). Filtrar só
+  // o calendário deixaria o total do topo brigando com o que está listado
+  // embaixo, que é pior do que não ter filtro nenhum.
+  const visiblePayments = useMemo(
+    () => (clienteFiltrado ? payments.filter((p) => p.clientId === clienteFiltrado) : payments),
+    [payments, clienteFiltrado],
+  );
 
   // ── Lifted balance state ──────────────────────────────────────────────────
   const [balances, setBalances] = useState<AdAccountBalance[]>([]);
@@ -2095,7 +2318,11 @@ export default function PagamentosPage() {
           <h1 className="font-heading font-normal text-xl uppercase leading-none tracking-wide text-foreground">Acompanhamento de Pagamentos</h1>
           <p className="mt-1 text-sm text-muted-foreground">Gerencie investimentos, recorrências e status dos pagamentos dos clientes.</p>
         </div>
-        <div className="flex items-center gap-4">
+        {/* `flex-wrap`: a fileira já passava da largura do celular com 4
+            controles (medido: 619px em 375px de tela) e o filtro de cliente a
+            deixaria mais longa ainda — Pagamentos é uma das telas que abrem no
+            celular. */}
+        <div className="flex flex-wrap items-center gap-4">
           <div className="flex h-11 items-center gap-1 rounded-[var(--radius)] border border-border bg-card/70 p-1">
             {([
               { key: 'dia' as ViewMode, label: 'Dia' },
@@ -2130,6 +2357,7 @@ export default function PagamentosPage() {
             />
             <ChevronDown className="h-4 w-4 text-muted-foreground" />
           </div>
+          <FiltroCliente opcoes={opcoesCliente} valor={clienteFiltrado} onChange={setClientFilter} />
           {(activeBalances.length > 0 || balancesLoading) && (
             <CriticalBalanceButton
               balances={activeBalances}
@@ -2446,7 +2674,17 @@ export default function PagamentosPage() {
               </span>
               <div>
                 <h2 className="text-sm font-bold uppercase tracking-wider">Planejamento de Pagamentos</h2>
-                <p className="text-sm text-muted-foreground">Visualize e gerencie os pagamentos do mês.</p>
+                <p className="text-sm text-muted-foreground">
+                  Visualize e gerencie os pagamentos do mês.
+                  {/* O controle mora na barra do topo; aqui fica só o aviso de
+                      que o calendário está recortado, no campo de visão de quem
+                      está olhando o mês. */}
+                  {clienteFiltrado && (
+                    <span className="ml-1 font-bold text-primary">
+                      Mostrando só {opcoesCliente.find((c) => c.id === clienteFiltrado)?.nome}.
+                    </span>
+                  )}
+                </p>
               </div>
             </div>
             <div className="flex items-center gap-4">
