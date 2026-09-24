@@ -1,3 +1,24 @@
+## Dashboard — seção Landing page refeita "à risca" no layout do mock (2026-09-24, fim da tarde)
+
+Pedido do Matheus com o mock em anexo: "Quero essa parte da Lp, seja com esse layout que estou enviando em anexo. Seguir a risca". Commit `cf87d69` na `main`.
+
+- **Estrutura nova de `ga4-landing-panel.tsx`** (a parte de cima; Campanhas na página / Audiência / Comportamento ficaram como estavam): título + subtítulo com **caixa de período à direita** (`TituloSecao` ganhou `direita`; `dataLonga(iso)` no `page.tsx`, mostra "Comparado com …" da `faixaPrev`); **4 KPIs** (`KpiLp`: caixa de ícone à esquerda do rótulo, número em Bebas 40px, seta + variação "vs. período anterior", sparkline nos quatro); **7 mini-cards** (`MiniLp`: Usuários, Novos usuários, Páginas vistas, Tempo médio, WhatsApp, Formulário, Telefone); **funil em SETAS** (`FunilSetas`, chevrons via `clip-path: polygon(...)`, opacidades decrescentes, % embaixo de cada etapa, botão "Ver detalhes" que abre connect rate + explicações — substituiu o `FunilClique`); **Evolução diária com seletor Diário/Semanal** (`Granularidade` + `porSemana()` em `ga4-landing-graficos.tsx`, semanas começando na segunda); **tabela "Desempenho por campanha / página"** (`DesempenhoPaginas`: busca, colunas ordenáveis, status Ativa/Sem tráfego).
+- **⚠️ Sem screenshot da página**: o mock traz miniatura da LP por linha; não há captura de tela no sistema, então a linha leva um **selo com iniciais** do caminho. Não inventar thumbnail.
+- **⚠️ Período anterior por página só existe em cliente MULTI-propriedade**: `Ga4Consolidado.propriedades[].anterior` (novo) alimenta a variação por linha; em cliente de uma propriedade a tabela usa `paginasEntrada` e a variação sai como "—". Guardas `p.anterior?.sessoes ?? null` são obrigatórias — payload antigo/cacheado não tem o campo.
+- **`Ga4Dia.engajadas`** (novo, 3ª métrica do request diário `engagedSessions`) alimenta a sparkline da taxa de engajamento; `consolidar` soma com `?? 0` (linha diária sem o campo não pode virar `NaN` — pegou no teste).
+- **Lições de layout**: os 7 mini-cards a 1440px só cabem com a variação **embaixo** do valor (lado a lado estourava a borda); os rótulos das setas ("Cliques no anúncio", "Sessões na página") precisam **quebrar em 2 linhas** (`leading-tight`, sem `truncate`) — truncar cortava em "Cliques no a…".
+- ✅ Verificado: 25 asserts da lib (`scratchpad/test-ga4-landing.mjs`); tsc limpo; eslint 164 = 164 (baseline por stash); harness no browser com o payload REAL da Sorrifácil ingleses (`scratchpad/build-ga4/index.html?json=ingleses.json`, servido por `public/__ga4_test/` no dev server — removido depois): KPIs com sparkline, 7 mini-cards sem overflow, setas com rótulo inteiro, Semanal reagrupando a série, busca "onbio" filtrando a tabela para 1 linha. ⚠️ O harness só monta com o dev server do repo PRINCIPAL (`launch.json` roda em `/Users/matheuscampos/Documents/reports`) — copiar o bundle para o `public/` de LÁ, não do worktree.
+
+## Mídia paga — tabelas de campanha só-consulta, Meta+criativos e Google+palavras na mesma linha (2026-09-24, tarde)
+
+Três pedidos do Matheus em sequência (prints), commits `306a646` e `68e0c2c` na `main`:
+
+- **"Resumo de Tráfego" REMOVIDO** da dashboard e o **CPM entrou no "Resumo por canal"**, logo acima da linha de Leads (`LinhaCanal.cpm` em `ChannelSummaryTable`). Os órfãos da remoção (`avgCpa`, `metaCpc`, `googleCtrValue`, `CampaignOptimizeDrawer`, `PauseActivateBtn`, `RowKind`, tipos `AdSet`/`MetaAd`/`CopyVariation`) foram apagados — não reintroduzir edição de campanha na dashboard.
+- **`CampaignPerformanceTable` virou SOMENTE LEITURA** (Meta e Google): sem pausar/ativar, sem editar orçamento, sem "otimizar". Consulta é o papel da dashboard; ação é no painel/Luna.
+- **Meta: campanhas e Melhores criativos na MESMA linha** (`grid gap-4 2xl:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]`, `<Superficie className="2xl:flex 2xl:flex-col">`, `CreativeHorizontalStrip grade`); o card de campanhas tem a **mesma altura** do de criativos e abre **campanha → conjuntos → anúncios** sozinho (`abrirTudo` + `preencher`: efeito busca todos os filhos uma vez, chaveado por `abriuTudoPara`; o scroll interno é `2xl:absolute 2xl:inset-0` dentro de um `2xl:relative 2xl:flex-1` para a altura seguir o vizinho).
+- **Google: campanhas e Palavras-chave na mesma linha**, mesmo mecanismo de altura; tabela de keywords com `min-w-[500px]`.
+- ⚠️ Abaixo de `2xl` os dois voltam a empilhar e o card de campanhas usa `max-h-[560px]` — em notebook não é bug.
+
 ## Portal do cliente — a dashboard entra no link por token (2026-09-24)
 
 Pergunta do Matheus: "sistema está preparado para enviarmos acesso para clientes? Só a parte de CRM e dashboard, tipo um portal do cliente." Metade estava pronta: o portal read-only por token (`/portal/[token]`, Fase D de 16/07) já dava funil, leads com origem e conversas — **a dashboard não existia nele**. Decisão dele: "a dash inteira o cliente pode ver".
