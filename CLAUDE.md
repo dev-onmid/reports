@@ -2227,3 +2227,26 @@ lead que chega de formulário de site/LP também vai para a Meta pelo SERVIDOR.
   Meta CAPI: Pixel ID, token, test event code).
 - Teste: `node scratchpad/test-meta-capi.mjs` (build no cabeçalho do arquivo) —
   9 asserts, incluindo "nada identificável sai em texto puro".
+
+## Google Ads — marcar conversão como secundária pela API (2026-09-24)
+
+`PATCH /api/integrations/google-conversoes` `{cliente, conversao (id ou nome),
+principal?, pausar?}` → `atualizarConversao` em `google-conversion-actions.ts`.
+
+- **Por que existe:** conversão que ficou sem tag continua **principal** e segue
+  guiando o lance automático por algo que não acontece mais. Já aconteceu 3x:
+  SAAC ("Click Telefone | Lead", telefone deixou de ser conversão), Incorpast
+  ("Todos os Orçamentos", de 2021) e CondoStore ("Clicou no botão do WhatsApp",
+  depois que o botão saiu do site).
+- `principal: false` = a "Secundária (nenhuma ação de lance)" do painel: **a ação
+  continua contando** no relatório e o histórico fica. Apagar perderia o
+  histórico — por isso não existe DELETE aqui. `pausar: true` usa `status:
+  REMOVED`, que é como o Google chama "tirar da lista"; usar só quando o
+  Matheus pedir.
+- `updateMask` é obrigatório no mutate: só vai o campo pedido. Resposta traz
+  **antes e depois** para dar para conferir sem abrir o painel.
+- Consumidor: `bin/gtag ads secundaria <cliente> "<nome ou id>"` (e `principal`
+  para voltar) em ~/Documents/lps.
+- Teste: `node scratchpad/test-conversao-atualizar.mjs` (7 asserts — máscara,
+  campos, os dois juntos, nada para alterar, e que a criação segue nascendo
+  principal).

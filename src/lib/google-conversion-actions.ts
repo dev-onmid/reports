@@ -93,6 +93,47 @@ export function operacaoCriar(n: NovaConversao): Record<string, unknown> {
   };
 }
 
+/**
+ * Operação de ALTERAÇÃO (conversionActions:mutate).
+ *
+ * Só mexe no que foi pedido — `updateMask` é obrigatório e o Google recusa
+ * campo que não esteja nele. `primaryForGoal: false` é o que o painel chama de
+ * "Secundária (nenhuma ação de lance)": a ação continua contando e aparecendo
+ * no relatório, mas deixa de guiar o lance automático. É o caminho certo para
+ * conversão que ficou sem tag — apagar some com o histórico.
+ */
+export function operacaoAtualizar(id: string, customerId: string, campos: { principal?: boolean; pausar?: boolean }): Record<string, unknown> {
+  const update: Record<string, unknown> = { resourceName: `customers/${customerId}/conversionActions/${id}` };
+  const mascara: string[] = [];
+  if (campos.principal !== undefined) { update.primaryForGoal = campos.principal; mascara.push('primary_for_goal'); }
+  if (campos.pausar !== undefined) { update.status = campos.pausar ? 'REMOVED' : 'ENABLED'; mascara.push('status'); }
+  return { update, updateMask: mascara.join(',') };
+}
+
+export async function atualizarConversao(
+  access: GoogleAdsAccess, id: string, campos: { principal?: boolean; pausar?: boolean },
+): Promise<{ resourceName: string } | { error: string }> {
+  const op = operacaoAtualizar(id, access.customerId, campos);
+  if (!(op.updateMask as string)) return { error: 'nada para alterar' };
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${access.token}`, 'developer-token': DEV_TOKEN, 'Content-Type': 'application/json',
+  };
+  if (access.loginCustomerId) headers['login-customer-id'] = access.loginCustomerId;
+  const r = await fetch(`https://googleads.googleapis.com/v24/customers/${access.customerId}/conversionActions:mutate`, {
+    method: 'POST', headers, body: JSON.stringify({ operations: [op] }),
+    signal: AbortSignal.timeout(15000),
+  }).catch(() => null);
+  if (!r) return { error: 'sem resposta da Google Ads API' };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const body = await r.json().catch(() => ({})) as any;
+  if (!r.ok) {
+    const msg = body?.error?.details?.[0]?.errors?.[0]?.message ?? body?.error?.message ?? `HTTP ${r.status}`;
+    return { error: String(msg) };
+  }
+  const rn = body?.results?.[0]?.resourceName;
+  return rn ? { resourceName: String(rn) } : { error: 'Google não devolveu o resourceName da ação alterada' };
+}
+
 const GAQL_LISTA =
   `SELECT conversion_action.id, conversion_action.name, conversion_action.status, conversion_action.type,
           conversion_action.category, conversion_action.counting_type, conversion_action.primary_for_goal,

@@ -5,6 +5,11 @@
 //   GET  ?cliente=<id ou nome>            → lista ações de conversão WEB ativas
 //   POST { cliente, nome, categoria?, contagem?, valor? }
 //        → cria a ação (idempotente por nome: se já existe, devolve a existente)
+//   PATCH { cliente, conversao (id ou nome), principal?, pausar? }
+//        → muda a ação que já existe. `principal: false` é a "Secundária
+//          (nenhuma ação de lance)" do painel: continua contando no relatório
+//          mas para de guiar o lance automático — é o certo para conversão que
+//          ficou sem tag (apagar perderia o histórico). Devolve antes/depois.
 //
 // Ambiguidade de nome de cliente → 409 com os candidatos; sem conta Google Ads
 // vinculada → 404. Registrada em INTEGRATION_PREFIXES no proxy.
@@ -13,8 +18,9 @@ import { timingSafeEqual } from 'node:crypto';
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import {
-  CATEGORIAS_ACEITAS, acharPorNome, criarConversao, listarConversoes, resolveGoogleAdsAccess, resolverCliente,
-  type CategoriaConversao, type NovaConversao,
+  CATEGORIAS_ACEITAS, acharPorNome, atualizarConversao, criarConversao, listarConversoes,
+  resolveGoogleAdsAccess, resolverCliente,
+  type CategoriaConversao, type ConversaoGoogle, type NovaConversao,
 } from '@/lib/google-conversion-actions';
 
 export const runtime = 'nodejs';
@@ -98,6 +104,48 @@ export async function POST(req: NextRequest) {
     const depois = (await listarConversoes(ctx.access)) ?? [];
     const conversao = depois.find(c => c.id === idNovo) ?? acharPorNome(depois, nome) ?? null;
     return Response.json({ criada: true, cliente: ctx.cliente, conta: ctx.access.customerId, resourceName: r.resourceName, conversao }, { status: 201 });
+  } finally {
+    await pool.end().catch(() => {});
+  }
+}
+
+export async function PATCH(req: NextRequest) {
+  const neg = autoriza(req); if (neg) return neg;
+  const body = await req.json().catch(() => null) as
+    { cliente?: string; conversao?: string; principal?: boolean; pausar?: boolean } | null;
+  const ref = String(body?.cliente ?? '').trim();
+  const alvo = String(body?.conversao ?? '').trim();
+  if (!ref || !alvo) return Response.json({ erro: 'cliente_e_conversao_obrigatorios' }, { status: 400 });
+  if (body?.principal === undefined && body?.pausar === undefined) {
+    return Response.json({ erro: 'nada_para_alterar', dica: 'mande principal: true|false e/ou pausar: true|false' }, { status: 400 });
+  }
+
+  const pool = makeServerPool();
+  try {
+    const ctx = await contexto(pool, ref);
+    if ('erro' in ctx) return ctx.erro;
+
+    const antes = await listarConversoes(ctx.access);
+    if (!antes) return Response.json({ erro: 'google_ads_sem_resposta', cliente: ctx.cliente }, { status: 502 });
+    // aceita o id numérico ou o nome exato — o id é o que a listagem mostra
+    const atual: ConversaoGoogle | undefined = antes.find(c => c.id === alvo) ?? acharPorNome(antes, alvo);
+    if (!atual) {
+      return Response.json({ erro: 'conversao_nao_encontrada', cliente: ctx.cliente, procurado: alvo,
+        disponiveis: antes.map(c => ({ id: c.id, nome: c.nome, principal: c.principal })) }, { status: 404 });
+    }
+    if (body?.principal !== undefined && atual.principal === body.principal && body?.pausar === undefined) {
+      return Response.json({ alterada: false, motivo: 'ja_estava_assim', cliente: ctx.cliente, conversao: atual });
+    }
+
+    const r = await atualizarConversao(ctx.access, atual.id, { principal: body?.principal, pausar: body?.pausar });
+    if ('error' in r) return Response.json({ erro: 'google_ads_recusou', mensagem: r.error, cliente: ctx.cliente, conversao: atual }, { status: 502 });
+
+    const depois = (await listarConversoes(ctx.access)) ?? [];
+    return Response.json({
+      alterada: true, cliente: ctx.cliente, conta: ctx.access.customerId,
+      antes: { id: atual.id, nome: atual.nome, principal: atual.principal, status: atual.status },
+      depois: depois.find(c => c.id === atual.id) ?? null,
+    });
   } finally {
     await pool.end().catch(() => {});
   }
