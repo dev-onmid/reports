@@ -13,6 +13,7 @@ export type FatiaDonut = { label: string; valor: number; cor: string };
 
 export function Donut({
   fatias, tamanho = 170, espessura = 30, centroTitulo = 'Total', centroValor, formatar,
+  corSuperficie = '#0d1519',
 }: {
   fatias: FatiaDonut[];
   tamanho?: number;
@@ -20,6 +21,10 @@ export function Donut({
   centroTitulo?: string;
   centroValor?: string;
   formatar: (n: number) => string;
+  /** Cor do card onde o donut está. O anel entre as fatias tem que ser a cor da
+   *  superfície: o portal do cliente usa outro fundo e, com a cor fixa, o
+   *  separador virava um aro visível em volta do gráfico. */
+  corSuperficie?: string;
 }) {
   const externo = tamanho / 2 - 4;
   const interno = Math.max(0, externo - espessura);
@@ -37,7 +42,7 @@ export function Donut({
             paddingAngle={0}
             // Anel da própria superfície entre as fatias: sem ele, dois tons
             // vizinhos encostam e a fronteira some.
-            stroke="#0d1519"
+            stroke={corSuperficie}
             strokeWidth={2}
             startAngle={90}
             endAngle={-270}

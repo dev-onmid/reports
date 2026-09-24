@@ -2,6 +2,10 @@
 
 // Modal de gestão do link do Portal do Cliente (read-only por token).
 // Gera/copia/revoga o link público /portal/[token] do cliente selecionado.
+//
+// O link dá acesso às DUAS abas do portal: Resultados (a dashboard do cliente,
+// alimentada pelas mesmas rotas da interna — ver src/lib/portal-dados.ts) e
+// Contatos (funil + conversas). Quem gera o link está liberando as duas.
 
 import { useEffect, useState } from 'react';
 import { Copy, Check, ExternalLink, RefreshCw, Trash2, X, Globe2 } from 'lucide-react';
@@ -83,7 +87,7 @@ export function PortalLinkModal({ clientId, clientName, onClose }: {
             <div>
               <h3 className="text-base font-bold text-foreground">Portal do Cliente</h3>
               <p className="mt-0.5 text-xs text-muted-foreground">
-                Link somente-leitura de <b className="text-foreground">{clientName}</b>: funil, leads com origem de campanha e conversas. Sem login, sem edição.
+                Link somente-leitura de <b className="text-foreground">{clientName}</b>: resultados (investimento, leads, custo por lead, campanhas, landing page, Instagram e faturamento) e a lista de contatos com as conversas. Sem login, sem edição.
               </p>
             </div>
           </div>

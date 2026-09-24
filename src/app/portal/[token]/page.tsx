@@ -9,8 +9,9 @@
 import { use, useEffect, useState, useCallback } from 'react';
 import {
   MessageCircle, TrendingUp, CheckCircle2, BadgeDollarSign, Crosshair,
-  ChevronLeft, RefreshCw, FileText, MapPin, X,
+  ChevronLeft, RefreshCw, FileText, MapPin, X, BarChart3, Users,
 } from 'lucide-react';
+import { DashboardPortal } from './dashboard-view';
 
 type PortalLead = {
   id: string;
@@ -107,6 +108,10 @@ export default function PortalClientePage({ params }: { params: Promise<{ token:
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [days, setDays] = useState(30);
+  // Duas abas: os números do período (Resultados) e a lista de contatos com a
+  // conversa (Contatos). Resultados é a de entrada — é o que o cliente abre o
+  // link para ver; a lista é o detalhe de quem quer olhar contato a contato.
+  const [aba, setAba] = useState<'resultados' | 'contatos'>('resultados');
   const [openLead, setOpenLead] = useState<PortalLead | null>(null);
   const [messages, setMessages] = useState<PortalMessage[] | null>(null);
 
@@ -147,29 +152,52 @@ export default function PortalClientePage({ params }: { params: Promise<{ token:
   }
 
   const maxFunil = Math.max(1, ...(data?.funil.map(f => f.count) ?? [1]));
+  // A dashboard precisa de largura (tabelas e dois gráficos lado a lado); a
+  // lista de contatos é coluna única e fica ilegível esticada.
+  const largura = aba === 'resultados' ? 'max-w-6xl' : 'max-w-3xl';
 
   return (
     <div className="min-h-screen bg-[#0e0f14] pb-16 text-white" style={{ fontFamily: 'Inter, system-ui, sans-serif' }}>
       {/* Header */}
       <header className="border-b border-[#22242a] bg-[#121319]">
-        <div className="mx-auto flex max-w-3xl items-center justify-between gap-3 px-4 py-4">
+        <div className={`mx-auto flex ${largura} items-center justify-between gap-3 px-4 pb-3 pt-4`}>
           <div className="min-w-0">
             <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#55f52f]">Onmid · Acompanhamento</p>
             <h1 className="truncate text-lg font-bold">{data?.clientName ?? 'Carregando…'}</h1>
           </div>
-          <div className="flex shrink-0 items-center gap-1 rounded-lg border border-[#2a2c33] bg-[#17181d] p-0.5">
-            {[7, 30, 90].map(d => (
-              <button key={d} onClick={() => setDays(d)}
-                className={`rounded-md px-2.5 py-1 text-xs font-bold transition-colors ${days === d ? 'bg-[#55f52f] text-black' : 'text-[#9aa1a6]'}`}>
-                {d}d
-              </button>
-            ))}
-          </div>
+          {/* A janela desta barra vale só para a lista de contatos; a aba de
+              Resultados tem o período dela, com mês fechado. Mostrar as duas ao
+              mesmo tempo daria a impressão de que uma manda na outra. */}
+          {aba === 'contatos' && (
+            <div className="flex shrink-0 items-center gap-1 rounded-lg border border-[#2a2c33] bg-[#17181d] p-0.5">
+              {[7, 30, 90].map(d => (
+                <button key={d} onClick={() => setDays(d)}
+                  className={`rounded-md px-2.5 py-1 text-xs font-bold transition-colors ${days === d ? 'bg-[#55f52f] text-black' : 'text-[#9aa1a6]'}`}>
+                  {d}d
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className={`mx-auto flex ${largura} items-center gap-1 px-4`}>
+          {([
+            { id: 'resultados' as const, rotulo: 'Resultados', icone: BarChart3 },
+            { id: 'contatos' as const, rotulo: 'Contatos', icone: Users },
+          ]).map(({ id, rotulo, icone: Icone }) => (
+            <button key={id} onClick={() => setAba(id)}
+              className={`-mb-px flex items-center gap-1.5 border-b-2 px-3 py-2 text-xs font-bold transition-colors ${
+                aba === id ? 'border-[#55f52f] text-white' : 'border-transparent text-[#9aa1a6] hover:text-white'
+              }`}>
+              <Icone className="h-3.5 w-3.5" /> {rotulo}
+            </button>
+          ))}
         </div>
       </header>
 
-      <main className="mx-auto max-w-3xl space-y-6 px-4 pt-6">
-        {loading && !data ? (
+      <main className={`mx-auto ${largura} space-y-6 px-4 pt-6`}>
+        {aba === 'resultados' ? (
+          <DashboardPortal token={token} />
+        ) : loading && !data ? (
           <div className="space-y-3">
             {[1, 2, 3].map(i => <div key={i} className="h-24 animate-pulse rounded-xl bg-[#17181d]" />)}
           </div>
@@ -299,7 +327,7 @@ export default function PortalClientePage({ params }: { params: Promise<{ token:
         </div>
       )}
 
-      <footer className="mx-auto mt-10 max-w-3xl px-4 text-center text-[10px] text-[#5a5f5d]">
+      <footer className={`mx-auto mt-10 ${largura} px-4 text-center text-[10px] text-[#5a5f5d]`}>
         Painel de acompanhamento gerado pela ONMID · atualizado em tempo real
       </footer>
     </div>

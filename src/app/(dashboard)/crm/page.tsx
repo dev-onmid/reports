@@ -3438,7 +3438,7 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
                     </button>
                     <button type="button"
                       onClick={() => { setFunnelMenuOpen(false); setShowPortalModal(true); }}
-                      title="Link somente-leitura pro cliente acompanhar o funil"
+                      title="Link somente-leitura pro cliente ver os resultados e o funil"
                       className="flex w-full items-center gap-2 px-3 py-2 text-xs text-muted-foreground hover:bg-muted hover:text-foreground">
                       <Globe2 className="h-3.5 w-3.5" /> Portal do cliente
                     </button>
