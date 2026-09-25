@@ -57,7 +57,7 @@ type StreamEvent =
   | { type: 'tool_start'; name: string }
   | { type: 'tool_done'; name: string }
   | { type: 'file_attachment'; url: string; filename: string; label: string }
-  | { type: 'report_link'; token: string; url: string; clientName: string; label: string }
+  | { type: 'report_link'; token: string; url: string; clientName: string; label: string; filename?: string }
   | { type: 'render_report_pdf'; mode: 'download' | 'whatsapp'; token: string; filename: string; clientName?: string; phone?: string; zapi_client_id?: string | null; caption?: string | null }
   | { type: 'done'; role?: string; usage?: TokenUsage }
   | { type: 'error'; message: string };
@@ -1039,7 +1039,7 @@ export default function AgentePage() {
             } else if (event.type === 'file_attachment') {
               accAttachments.push({ url: event.url, filename: event.filename, label: event.label });
             } else if (event.type === 'report_link') {
-              accAttachments.push({ url: event.url, filename: `${event.label}.pdf`, label: event.label, token: event.token });
+              accAttachments.push({ url: event.url, filename: event.filename || `${event.label}.pdf`, label: event.label, token: event.token });
             } else if (event.type === 'render_report_pdf') {
               pendingRenders.push({
                 mode: event.mode, token: event.token, filename: event.filename, clientName: event.clientName,
