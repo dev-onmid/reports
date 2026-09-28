@@ -44,6 +44,18 @@ Depois do conserto do nono dígito, Matheus reimportou e cobrou de novo: **Ingle
 - **⚠️ O que explica a unidade bater ou não com a planilha é ter WhatsApp ligado ao CRM**: São José e Valinhos têm **0 instâncias** → 0 lead de chat → batem exato. Bandeirantes (1.178 leads de chat), Londrina (546), Presidente Prudente (309), Ingleses (301), Itapema (233, **2 instâncias**) e Cambé (194) sempre verão mais que o relatório da clínica.
 - **Estado final medido (01–28/09): faturamento idêntico à planilha nas 7 unidades** — Cambé R$ 127.462,10 · Itapema R$ 28.739,04 · Londrina R$ 67.034,35 · Bandeirantes R$ 30.348,96 · Presidente Prudente R$ 24.986,72 · São José R$ 74.417,61 · Ingleses R$ 300.830,17 (planilha R$ 300.361,17 + R$ 469 de duas vendas que entraram depois do download).
 
+### Alerta no topo do funil: leads de anúncio que o cliente não cadastrou (2026-09-28)
+
+Pedido do Matheus, saído da auditoria: *"a regra é a planilha ser o topo do funil, então precisamos de um alerta gritante ali em cima — o volume que está ali não é o real, não é o que chegou no WhatsApp, e a gente consegue comprovar."*
+
+- **`rastreadoForaDoCrmSql`** (`lead-contagem.ts`): conversa nascida no WhatsApp **com prova de tráfego pago** (ctwa_clid, código do link `/r/`, gclid, fbclid, UTM de campanha) **num cliente que TEM porta validada** — ou seja, que manda planilha/CRM e mesmo assim não tem a pessoa lá. `/api/crm/summary` devolve `rastreadosForaDoCrm` por cliente; o card "Funil de performance" abre com banner laranja (`#FF6B35`, a cor de alerta do DS) quando > 0, com a contagem e o **% sobre o topo**.
+- **⚠️ O texto diz o que é VERDADE, e isso importa**: esses leads **CONTAM** na nossa dashboard (Lei 3). O alerta não afirma que estão fora da conta — afirma que **o número que o CLIENTE enxerga no sistema dele é menor que o real**, e que a causa provável é falta de cadastro na ponta. Escrever "não estão contando" seria mentira e o gestor levaria isso para a reunião.
+- **⚠️ Cliente SEM porta validada fica fora por construção**: lá o chat É o CRM (Lei 3), não há planilha com que comparar e o alerta seria ruído puro.
+- **Medido em produção na rota real** (setembro): dispara em **9 clientes** — Incorpast **156 de 253 (62% do topo)**, SorriLeve 52/126 (41%), IGA Barney 22/44 (50%), Itapema 21/44 (48%), Kumon 21/40 (53%), Bandeirantes 16/255, Londrina 3/142, Cambé e Presidente Prudente 1 cada.
+- ⚠️ O caso que motivou (Itapema) é de OPERAÇÃO, não de sistema: as 22 conversas têm `ctwa_clid` e nome de campanha e **todas estão em "Em Atendimento"** — o status que o NOSSO CRM dá. A clínica nunca as cadastrou. O que não é cadastrado dificilmente é trabalhado.
+- Verificado: banner renderizado no browser com o Tailwind REAL do projeto nos três estados (plural, singular, ausente); tsc limpo; eslint 164 antes e 164 depois (zero erro novo).
+- ⚠️ Receita de harness que funcionou aqui: compilar `globals.css` com `@tailwindcss/postcss` **de dentro do worktree** (script em `/tmp` não resolve `node_modules`), servir de `public/` e abrir por `preview_start {url}`. O `resize_window` do pane **continua reportando 980px** mesmo no preset mobile — não dá para medir layout estreito por ali.
+
 ## Fontes de Captura mudou de lugar: CRM → Integrações do cliente (2026-09-24)
 
 Pedido do Matheus: "esse Fontes de Captura tem que ficar dentro da aba do cliente, dentro de integrações igual as demais."
