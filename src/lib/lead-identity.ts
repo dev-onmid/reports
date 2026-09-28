@@ -30,19 +30,58 @@ import type { Pool } from 'pg';
  *
  * A ordem importa: a forma normalizada BR vem primeiro porque é a que casa
  * entre fontes (uma manda 5543..., a outra 43...).
+ *
+ * ⚠️ O NONO DÍGITO também entra como variante (2026-09-28). O WhatsApp entrega
+ * o JID de celular antigo SEM ele (`554384148749`) e a planilha da clínica
+ * grava COM (`5543984148749`): eram duas chaves distintas, então a mesma
+ * pessoa virava dois leads — e a dashboard contava os dois. Medido no dia:
+ * 1.236 linhas duplicadas no sistema, 159 só na Sorrifácil Bandeirantes.
+ * A unique `(client_id, numero)` também não pega, porque as strings diferem.
  */
 export function chavesTelefone(v: unknown): string[] {
   const cru = String(v ?? '').replace(/\D/g, '');
   if (!cru) return [];
   const chaves: string[] = [];
+  const add = (k: string) => { if (k && !chaves.includes(k)) chaves.push(k); };
+
+  let semDdi = '';
   if (cru.length > 11 && cru.startsWith('55')) {
-    const semDdi = cru.slice(2);
-    if (semDdi.length >= 10) chaves.push(semDdi);
+    const s = cru.slice(2);
+    if (s.length >= 10) semDdi = s;
   } else if (cru.length >= 10 && cru.length <= 11) {
-    chaves.push(cru);
+    semDdi = cru;
   }
-  if (!chaves.includes(cru)) chaves.push(cru);
+
+  if (semDdi) {
+    add(semDdi);
+    const outra = semNonoDigito(semDdi) ?? comNonoDigito(semDdi);
+    if (outra) add(outra);
+  }
+  add(cru);
   return chaves;
+}
+
+/** Celular brasileiro: o assinante de 8 dígitos começa em 6–9. Fixo começa em 2–5. */
+const INICIO_CELULAR = /[6-9]/;
+
+/**
+ * O MESMO celular escrito sem o nono dígito (11 → 10 dígitos), ou null.
+ *
+ * ⚠️ Só converte quando o assinante começa em 6–9. Sem essa checagem,
+ * `(43) 9 3333-4444` viraria `(43) 3333-4444`, que é um FIXO válido e
+ * existente — e duas pessoas diferentes virariam um lead só.
+ */
+function semNonoDigito(semDdi: string): string | null {
+  if (semDdi.length !== 11 || semDdi[2] !== '9') return null;
+  if (!INICIO_CELULAR.test(semDdi[3])) return null;
+  return semDdi.slice(0, 2) + semDdi.slice(3);
+}
+
+/** O mesmo celular escrito COM o nono dígito (10 → 11), ou null. Espelho do acima. */
+function comNonoDigito(semDdi: string): string | null {
+  if (semDdi.length !== 10) return null;
+  if (!INICIO_CELULAR.test(semDdi[2])) return null;
+  return semDdi.slice(0, 2) + '9' + semDdi.slice(2);
 }
 
 /**

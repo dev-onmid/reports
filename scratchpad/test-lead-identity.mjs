@@ -13,6 +13,37 @@ let n = 0;
 const eq = (a, b, m) => { assert.deepStrictEqual(a, b, m); n++; };
 const ok = (c, m) => { assert.ok(c, m); n++; };
 
+// ── nono dígito: WhatsApp manda sem, planilha manda com (2026-09-28) ────────
+{
+  // O caso REAL da Sorrifácil Cambé: o mesmo Thiago em duas fontes.
+  const doChat = chavesTelefone('554384148749');      // JID do WhatsApp, 12 dígitos
+  const daPlanilha = chavesTelefone('5543984148749'); // relatório da clínica, 13
+  ok(doChat.some(k => daPlanilha.includes(k)),
+    'chat e planilha do MESMO celular compartilham chave');
+
+  // Simétrico: a variante aparece vindo dos dois lados.
+  ok(chavesTelefone('43984148749').includes('4384148749'), '11 dígitos gera a forma sem o 9');
+  ok(chavesTelefone('4384148749').includes('43984148749'), '10 dígitos gera a forma com o 9');
+
+  // A chave FORTE (primeira) continua sendo a forma como o número chegou —
+  // quem grava não pode ter o número reescrito pela variante.
+  eq(chavesTelefone('5543984148749')[0], '43984148749', 'a 1ª chave segue a forma recebida');
+  eq(chavesTelefone('554384148749')[0], '4384148749', 'idem para o formato curto');
+
+  // ⚠️ FIXO NÃO ENTRA. (43) 9 3333-4444 e (43) 3333-4444 são linhas diferentes:
+  // sem esta trava, um celular viraria o fixo homônimo e dois leads virariam um.
+  ok(!chavesTelefone('43933334444').includes('4333334444'), 'celular não vira o fixo homônimo');
+  ok(!chavesTelefone('4333334444').includes('43933334444'), 'fixo não ganha nono dígito');
+  ok(!chavesTelefone('4322223333').includes('43922223333'), 'fixo começando em 2 idem');
+
+  // 11 dígitos sem o 9 na posição do nono não é celular com nono dígito.
+  ok(!chavesTelefone('43812345678').includes('4312345678'), 'só tira quando o 3º dígito é 9');
+
+  // Estrangeiro segue intocado pela regra brasileira.
+  eq(chavesTelefone('+351912345678').filter(k => k.length === 10), [],
+    'número estrangeiro não ganha variante BR');
+}
+
 // ── telefone: o MESMO número escrito de formas diferentes casa ──────────────
 {
   // BR com e sem DDI produzem a mesma chave forte.
