@@ -48,6 +48,8 @@ type Props = {
   to: string;
   /** Quando o topo não vem do CRM não há lead para listar (é número de anúncio). */
   topoDeAnuncios?: boolean;
+  /** Recorte próprio, fora do funil (hoje: 'fora_do_crm', do alerta da dashboard). */
+  recorte?: 'fora_do_crm';
   onClose: () => void;
 };
 
@@ -65,7 +67,7 @@ function fmtData(iso: string | null): string | null {
 }
 
 export function FunilLeadsModal({
-  etapa, stageIndex, tituloEtapa, totalNoCard, clientIds, from, to, topoDeAnuncios, onClose,
+  etapa, stageIndex, tituloEtapa, totalNoCard, clientIds, from, to, topoDeAnuncios, recorte, onClose,
 }: Props) {
   const stageMode = stageIndex !== undefined;
   const [modo, setModo] = useState<'alcancou' | 'atual'>('alcancou');
@@ -98,7 +100,8 @@ export function FunilLeadsModal({
     setRows(null);
     setErro(false);
     const params = new URLSearchParams({ modo, from, to, limit: '500' });
-    if (stageMode) params.set('stageIndex', String(stageIndex));
+    if (recorte) params.set('recorte', recorte);
+    else if (stageMode) params.set('stageIndex', String(stageIndex));
     else if (etapa) params.set('etapa', etapa);
     if (clientKey) params.set('clientIds', clientKey);
     fetch(`/api/crm/funil-leads?${params}`)
@@ -111,7 +114,7 @@ export function FunilLeadsModal({
       })
       .catch(() => { if (alive) { setRows([]); setErro(true); } });
     return () => { alive = false; };
-  }, [etapa, stageIndex, stageMode, modo, from, to, clientKey, semLista]);
+  }, [etapa, stageIndex, stageMode, modo, from, to, clientKey, semLista, recorte]);
 
   /** Canais presentes na lista, para o filtro só oferecer o que existe. */
   const canais = useMemo(() => {
@@ -183,6 +186,10 @@ export function FunilLeadsModal({
 
         {!semLista && (
           <div className="flex flex-wrap items-center gap-2 border-b border-white/[0.08] px-5 py-3">
+            {/* ⚠️ "Chegaram aqui / Parados aqui" é conversa de DEGRAU. Num recorte
+                próprio (fora do CRM) o conjunto não é um degrau, e o par de
+                botões só confundiria — some em vez de aparecer inerte. */}
+            {!recorte && (
             <div className="flex items-center rounded-lg border border-white/[0.08] bg-[#071014] p-0.5">
               {([
                 { k: 'alcancou' as const, l: 'Chegaram aqui' },
@@ -201,6 +208,7 @@ export function FunilLeadsModal({
                 </button>
               ))}
             </div>
+            )}
             {canais.length > 1 && (
               <select
                 value={canais.some(([c]) => c === canalFiltro) ? canalFiltro : ''}

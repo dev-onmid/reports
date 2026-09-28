@@ -1,6 +1,6 @@
 import type { NextRequest } from 'next/server';
 import { parseRecorte, filtroRegiaoSql } from '@/lib/regiao-recorte';
-import { leadContaSql, rastroPagoSql } from '@/lib/lead-contagem';
+import { leadContaSql, rastroPagoSql, rastreadoForaDoCrmSql } from '@/lib/lead-contagem';
 import { makeServerPool } from '@/lib/server-db';
 import { canalSql, rotularCanal } from '@/lib/canal-lead';
 import {
@@ -46,6 +46,10 @@ export async function GET(req: NextRequest) {
   const limit = Math.min(Math.max(parseInt(sp.get('limit') ?? '200', 10) || 200, 1), 500);
   const clientIds = (sp.get('clientIds') ?? '')
     .split(',').map(s => s.trim()).filter(Boolean);
+  // Recorte "leads de anúncio que o cliente não cadastrou" — o mesmo predicado
+  // que o alerta da dashboard conta, para a lista NUNCA divergir do número
+  // clicado. Aqui a etapa não filtra: o recorte já É o conjunto.
+  const foraDoCrm = sp.get('recorte') === 'fora_do_crm';
 
   // Modo ETAPA REAL do Kanban: a dashboard manda `stageIndex` quando o funil está
   // personalizado pelo CRM (um cliente só). Recomputa a MESMA escada do summary
@@ -114,7 +118,7 @@ export async function GET(req: NextRequest) {
         -- Registro de VENDA é ledger de faturamento, não lead: fica fora da
         -- listagem por etapa (senão apareceria como "contato" fantasma e o modal
         -- divergiria do card, que também o exclui).
-        WHERE COALESCE(l.registro_tipo, 'hibrido') <> 'venda' AND ${leadContaSql('l')} ${dateFilter} ${clientFilter}${regiao.sql}
+        WHERE COALESCE(l.registro_tipo, 'hibrido') <> 'venda' AND ${leadContaSql('l')} ${dateFilter} ${clientFilter}${regiao.sql}${foraDoCrm ? ` AND ${rastreadoForaDoCrmSql('l')}` : ''}
         ORDER BY COALESCE(l.lead_date, l.data, l.created_at::date) DESC NULLS LAST`,
       params,
     );
@@ -189,7 +193,13 @@ export async function GET(req: NextRequest) {
       };
       let etapaAtual: string;
       let perdidoLead: boolean;
-      if (stageMode && ladder) {
+      if (foraDoCrm) {
+        // O conjunto já veio filtrado no SQL. A etapa continua sendo calculada
+        // porque a lista a exibe — ela só não decide quem entra.
+        const posto = etapaDoLead(lead, mapaDe(clientId));
+        etapaAtual = etapaRotuloDoPosto(posto.posto);
+        perdidoLead = posto.perdido;
+      } else if (stageMode && ladder) {
         const s = indiceStageDoLead(lead, ladder);
         // alcancou = chegou nesta etapa ou além; atual = parado exatamente nela.
         const bate = modo === 'atual' ? s.idx === stageIndex : s.idx >= stageIndex;

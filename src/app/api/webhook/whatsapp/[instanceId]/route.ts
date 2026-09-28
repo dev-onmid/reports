@@ -10,7 +10,8 @@ import { fetchEvolutionMediaBase64, uploadBase64ToStorage } from '@/lib/evolutio
 import { logMissingAdTracking } from '@/lib/crm-tracking-debug';
 import { resolveMetaAdHierarchy } from '@/lib/meta-ad-resolver';
 import {
-  extractTrackingFromText, extractClickCode, matchClickByCode, matchClickByWindow, mergeTracking,
+  extractTrackingFromText, extractClickCode, matchClickByCode, matchClickByWindow,
+  DORMENCIA_REENTRADA_DIAS, mergeTracking,
   applyLeadAttribution, linkClickToLead, recordTrackingEvent, originFromTracking,
   type MergedTracking,
 } from '@/lib/lead-tracking';
@@ -343,7 +344,20 @@ export async function POST(
       const jaExiste = await resolverLeadExistente(pool, clientId, {
         telefone: phone, lid: lid ?? undefined,
       }).catch(() => null);
-      if (!jaExiste) {
+      // Lead NOVO entra direto. Lead que JÁ EXISTE entra só se estava em
+      // silêncio — é reentrada (clicou de novo num anúncio meses depois), e não
+      // mensagem no meio de uma conversa que já rola. Ver DORMENCIA_REENTRADA_DIAS.
+      // ⚠️ A leitura acontece ANTES do upsert de propósito: depois dele a coluna
+      // já carrega o carimbo desta mensagem e todo lead pareceria ativo.
+      const reentrada = jaExiste
+        ? await pool.query<{ dormente: boolean }>(
+            `SELECT (whatsapp_last_message_at IS NULL
+                     OR whatsapp_last_message_at < NOW() - ($2 || ' days')::interval) AS dormente
+               FROM public.crm_leads WHERE id = $1`,
+            [jaExiste.id, String(DORMENCIA_REENTRADA_DIAS)],
+          ).then(r => r.rows[0]?.dormente === true).catch(() => false)
+        : false;
+      if (!jaExiste || reentrada) {
         clickJanela = await matchClickByWindow(pool, {
           clientId, quando: messageCreatedAt,
         }).catch(() => null);

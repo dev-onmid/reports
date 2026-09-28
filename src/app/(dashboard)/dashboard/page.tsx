@@ -4234,7 +4234,7 @@ type SemiDegrau = { apos: number; rotulo: string; valor: number; tom: 'ruim' | '
 /** Valores do funil de UM canal, alinhados aos degraus exibidos (mesma ordem de `steps`). */
 type FunilDoCanal = { canal: string; valores: number[] };
 
-function SimpleFunnel({ steps, totalRate, fonteLabel, onStageClick, todosClicaveis, semiDegraus, porCanal, rastreadosForaDoCrm }: {
+function SimpleFunnel({ steps, totalRate, fonteLabel, onStageClick, todosClicaveis, semiDegraus, porCanal, rastreadosForaDoCrm, onVerForaDoCrm }: {
   steps: Array<{
     label: string; actual: number; planned: number; color: string;
     /** Quebra explicativa (ex: quantos ainda vêm × quantos furaram). */
@@ -4250,6 +4250,8 @@ function SimpleFunnel({ steps, totalRate, fonteLabel, onStageClick, todosClicave
    * Vira o alerta no topo do card — ver o comentário do banner abaixo.
    */
   rastreadosForaDoCrm?: number;
+  /** Abre a lista desses leads — é com ela na mão que se pergunta ao cliente o que houve. */
+  onVerForaDoCrm?: () => void;
   /** Abre a lista de leads do degrau. Índice mapeia em ETAPAS_FUNIL (0=contato…4=fechamento). */
   onStageClick?: (index: number) => void;
   /** Funil personalizado pelo Kanban: TODOS os degraus são clicáveis (não só os 5 semânticos). */
@@ -4309,6 +4311,19 @@ function SimpleFunnel({ steps, totalRate, fonteLabel, onStageClick, todosClicave
               na planilha/CRM que o cliente mantém. <b className="text-white">O volume que ele enxerga no sistema dele é menor
               que o real</b>, e a causa provável é falta de cadastro na ponta. O funil abaixo já as inclui.
             </p>
+            {/* ⚠️ O alerta sem a LISTA é uma acusação sem prova: para cobrar o
+                cliente é preciso dizer QUEM ficou de fora, com telefone, data e
+                a campanha que trouxe cada um. */}
+            {onVerForaDoCrm && (
+              <button
+                type="button"
+                onClick={onVerForaDoCrm}
+                className="mt-2.5 inline-flex items-center gap-1.5 rounded-lg border border-[#FF6B35]/50 bg-[#FF6B35]/10 px-3 py-1.5 text-[11px] font-bold text-[#FF6B35] transition-colors hover:bg-[#FF6B35]/20"
+              >
+                Ver {foraDoCrm === 1 ? 'o lead' : `os ${premiumValue(foraDoCrm)} leads`}
+                <ChevronRight className="h-3.5 w-3.5" />
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -5349,6 +5364,8 @@ export default function GeneralDashboard() {
   const [desempenhoLoading, setDesempenhoLoading] = useState(false);
   /** Degrau do Funil de Performance aberto no modal de leads (índice em ETAPAS_FUNIL). */
   const [funilStageIdx, setFunilStageIdx] = useState<number | null>(null);
+  /** Lista dos leads de anúncio que o cliente não cadastrou (alerta do funil). */
+  const [verForaDoCrm, setVerForaDoCrm] = useState(false);
   const [campaignSortBy, setCampaignSortBy] = useState<SortKey>('spend');
   const [sortBy, setSortBy] = useState<SortKey>('spend');
   const [metricsLoading, setMetricsLoading] = useState(false);
@@ -7490,7 +7507,7 @@ export default function GeneralDashboard() {
                       {deliverySoloId ? (
                         <DeliveryResumoCard clientId={deliverySoloId} from={deliveryRange.from} to={deliveryRange.to} />
                       ) : (
-                        <SimpleFunnel steps={funnelStepsNew} totalRate={funnelTaxaFinal > 0 ? premiumValue(funnelTaxaFinal, 'percent') : '—'} fonteLabel={usaStageFunil ? 'fonte: CRM' : fonteTopoLabel} onStageClick={setFunilStageIdx} todosClicaveis={usaStageFunil} semiDegraus={funnelSemiDegraus} porCanal={funilPorCanal} rastreadosForaDoCrm={rastreadosForaDoCrm} />
+                        <SimpleFunnel steps={funnelStepsNew} totalRate={funnelTaxaFinal > 0 ? premiumValue(funnelTaxaFinal, 'percent') : '—'} fonteLabel={usaStageFunil ? 'fonte: CRM' : fonteTopoLabel} onStageClick={setFunilStageIdx} todosClicaveis={usaStageFunil} semiDegraus={funnelSemiDegraus} porCanal={funilPorCanal} rastreadosForaDoCrm={rastreadosForaDoCrm} onVerForaDoCrm={() => setVerForaDoCrm(true)} />
                       )}
                       <ChannelSummaryTable rows={channelRows} total={channelTotal} metaCpl={cplMetaSel} />
                     </div>
@@ -7606,6 +7623,21 @@ export default function GeneralDashboard() {
           // estimativa de anúncio — não existe lista de leads por trás dele.
           topoDeAnuncios={fontesTopo.length > 0 && !fontesTopo.includes('crm')}
           onClose={() => setFunilStageIdx(null)}
+        />
+      )}
+      {/* Leads que o anúncio trouxe e o cliente não cadastrou. Reusa o MESMO
+          modal e a MESMA rota do drill-down do funil — se a lista tivesse
+          consulta própria, ela e o número do alerta divergiriam na primeira
+          mudança de régua. */}
+      {verForaDoCrm && (
+        <FunilLeadsModal
+          recorte="fora_do_crm"
+          tituloEtapa="Leads de anúncio fora do CRM do cliente"
+          totalNoCard={rastreadosForaDoCrm}
+          clientIds={[...selectedIds]}
+          from={periodoISO.from}
+          to={periodoISO.to}
+          onClose={() => setVerForaDoCrm(false)}
         />
       )}
     </div>

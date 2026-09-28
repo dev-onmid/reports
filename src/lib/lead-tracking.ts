@@ -348,6 +348,27 @@ export async function matchClickByCode(pool: Pool, code: string): Promise<ClickT
 export const JANELA_ATRIBUICAO_MIN = 2;
 
 /**
+ * Silêncio a partir do qual um lead ANTIGO volta a ser candidato à janela.
+ *
+ * ⚠️ Lead que volta depois de meses é atribuição legítima — e das mais valiosas
+ * (é o remarketing funcionando). A primeira versão desta janela só aceitava
+ * lead NOVO, o que deixava as duas pontas incoerentes: pelo código o retorno
+ * era atribuído normalmente, pela janela não.
+ *
+ * ⚠️ Mas "voltou" tem de ser silêncio de verdade, não conversa em andamento.
+ * Medido em 28/09 sobre 30 dias de mensagens recebidas: **9.961** são conversa
+ * do mesmo dia, 429 são retomada de 1 a 7 dias e só **18** são retorno de 7+
+ * dias. Aceitar a conversa em andamento poria 9.961 mensagens/mês disputando
+ * clique — é dela que a guarda protege. Aceitar 7+ dias custa 1% a mais de
+ * candidatos (18 sobre 1.852) e resolve o caso real.
+ *
+ * A régua olha a última mensagem em QUALQUER direção, não só as recebidas: se
+ * o atendente falou com a pessoa há 3 dias e ela responde hoje, isso é resposta
+ * a follow-up, não reentrada por anúncio.
+ */
+export const DORMENCIA_REENTRADA_DIAS = 7;
+
+/**
  * Casa clique ↔ lead pela JANELA DE TEMPO, quando o código não chegou (o lead
  * apagou a mensagem pré-preenchida e escreveu a dele).
  *
@@ -399,6 +420,15 @@ export async function matchClickByWindow(
   // Trava 2 — concorrente nascido na mesma janela. O lead desta mensagem ainda
   // não existe (a janela roda ANTES do upsert), então tudo que contar aqui é
   // outro lead disputando o mesmo clique.
+  //
+  // ⚠️ RESÍDUO CONHECIDO: conta lead CRIADO na janela, não lead que VOLTOU da
+  // dormência — depois que a mensagem dele passa pelo upsert, ele fica
+  // indistinguível de quem está no meio de uma conversa. Cobrir isso exigiria
+  // uma régua que não tenho como tornar sólida. O tamanho do resíduo está
+  // medido: reentrada de 7+ dias são 18 mensagens em 30 dias (~0,6/dia), então
+  // duas delas no MESMO cliente dentro de 2 minutos é ruído estatístico. A
+  // combinação perigosa de verdade — um retornante e um lead novo juntos — está
+  // coberta, porque o lead novo é contado aqui.
   const { rows: [{ concorrentes }] } = await pool.query<{ concorrentes: string }>(
     `SELECT COUNT(*)::text AS concorrentes
        FROM public.crm_leads
