@@ -61,7 +61,8 @@ import { useClients } from '@/lib/client-store';
 import { cn, formatCurrencyBRL } from '@/lib/utils';
 import { T } from '@/lib/dashboard-tipografia';
 import { ClientAvatar } from '@/components/client-avatar';
-import { CreativeRevenueStrip, type CriativoReceita } from '@/components/dashboard/creative-revenue-strip';
+import { VendasPorAnuncioPanel, MetricasVenda } from '@/components/dashboard/vendas-por-anuncio';
+import type { VendasPorAnuncio } from '@/app/api/crm/vendas-por-anuncio/route';
 import { VendedoresCard, CategoriasCard, type LinhaVendedor, type LinhaCategoria } from '@/components/dashboard/desempenho-comercial';
 import type { TopCreative } from '@/app/api/meta/top-creatives/route';
 import type { PageInsightsResult, InstagramPageData } from '@/app/api/meta/page-insights/route';
@@ -4751,9 +4752,13 @@ function creativeObjectiveMetrics(c: TopCreative): Array<{ label: string; value:
   ];
 }
 
-function HorizontalCreativeCard({ creative, index, onPreview, fluido = false }: {
+function HorizontalCreativeCard({ creative, index, onPreview, fluido = false, metricas, selo }: {
   /** Ocupa a largura da célula da grade (em vez dos 220px fixos da faixa). */
   fluido?: boolean;
+  /** Troca as métricas de plataforma por outras (ex.: vendas e faturamento do CRM). */
+  metricas?: ReactNode;
+  /** Troca o selo de investimento no canto da imagem (ex.: faturamento). */
+  selo?: string;
   creative: TopCreative;
   index: number;
   onPreview: (c: TopCreative) => void;
@@ -4818,7 +4823,7 @@ function HorizontalCreativeCard({ creative, index, onPreview, fluido = false }: 
         )}
         <span className="absolute bottom-2 left-2 flex h-5 w-5 items-center justify-center rounded-full bg-black/85 text-[10px] font-black text-white">{index + 1}</span>
         <span className="absolute right-2 top-2 rounded bg-[#6cff2f] px-1.5 py-0.5 text-[9px] font-black text-black">
-          {premiumValue(creative.spend, 'currency')}
+          {selo ?? premiumValue(creative.spend, 'currency')}
         </span>
       </div>
       <div className="p-2.5">
@@ -4830,14 +4835,14 @@ function HorizontalCreativeCard({ creative, index, onPreview, fluido = false }: 
         <p className={cn('mb-2 truncate', T.listaRotulo)} title={creative.adName}>{creative.adName}</p>
         {/* Rótulo/valor em LINHAS: três caixinhas lado a lado em 170px
             cortavam o CPL em "R$ 4…". */}
-        <dl className="space-y-1 text-[11px]">
+        {metricas ?? <dl className="space-y-1 text-[11px]">
           {metrics.map(m => (
             <div key={m.label} className="flex items-baseline justify-between gap-2">
               <dt className="font-black uppercase tracking-[0.06em] text-[#9aa4aa]">{m.label}</dt>
               <dd className="whitespace-nowrap font-black tabular-nums text-[#f4f7f8]">{m.value}</dd>
             </div>
           ))}
-        </dl>
+        </dl>}
       </div>
     </button>
   );
@@ -5301,11 +5306,10 @@ export default function GeneralDashboard() {
   const [balances, setBalances] = useState<AdAccountBalance[]>([]);
   const [clientLinks, setClientLinks] = useState<ClientAccountLink[]>([]);
   const [previewCreative, setPreviewCreative] = useState<TopCreative | null>(null);
-  /** Faturamento por criativo no período — vem do CRM, não do Meta. */
-  const [criativosReceita, setCriativosReceita] = useState<CriativoReceita[]>([]);
-  const [criativosReceitaLoading, setCriativosReceitaLoading] = useState(false);
-  /** Receita atribuída a TODOS os criativos do período (a faixa mostra só os 12 maiores). */
-  const [criativosReceitaTotal, setCriativosReceitaTotal] = useState(0);
+  /** Vendas e faturamento por anúncio (CRM × rastreio) + o preview Meta de cada criativo que vendeu. */
+  const [vendasAnuncio, setVendasAnuncio] = useState<VendasPorAnuncio | null>(null);
+  const [vendasAnuncioLoading, setVendasAnuncioLoading] = useState(false);
+  const [previewsVenda, setPreviewsVenda] = useState<Record<string, TopCreative>>({});
   /** Quem vendeu mais e o que mais se vendeu — CRM externo (Agendor). */
   const [vendedores, setVendedores] = useState<LinhaVendedor[]>([]);
   const [categorias, setCategorias] = useState<LinhaCategoria[]>([]);
@@ -6356,82 +6360,33 @@ export default function GeneralDashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedKey, periodoISO.from, periodoISO.to]);
 
-  // ── Faturamento por criativo (CRM) ────────────────────────────────────────
-  // Uma busca por cliente selecionado — a rota da biblioteca é por cliente, e
-  // pedir sem cliente traria a carteira inteira só pra descartar quase tudo.
+  // ── Vendas e faturamento por anúncio (CRM) ────────────────────────────────
+  // Mesma faixa de datas do Faturamento por canal; depois busca o preview EXATO
+  // (o mesmo de "Melhores criativos") só dos anúncios Meta que venderam.
   useEffect(() => {
     let cancelado = false;
-    const ids = [...selectedIds];
-    if (ids.length === 0) { setCriativosReceita([]); return () => { cancelado = true; }; }
-    setCriativosReceitaLoading(true);
-    // Zera na troca de período/cliente: sem isso a faixa mostra o recorte
-    // anterior enquanto o novo carrega.
-    setCriativosReceita([]);
-    setCriativosReceitaTotal(0);
-    const dias = Math.max(1, Math.round(
-      (new Date(periodoISO.to).getTime() - new Date(periodoISO.from).getTime()) / 86400000) + 1);
-
+    setVendasAnuncio(null);
+    setPreviewsVenda({});
+    if (selectedIds.size === 0 || !customReady) { setVendasAnuncioLoading(false); return () => { cancelado = true; }; }
+    setVendasAnuncioLoading(true);
+    const clientIds = [...selectedIds].join(',');
     (async () => {
-      type Linha = {
-        client_id: string; client_name: string | null; ad_key: string; source_id: string | null;
-        ad_name: string | null; creative_name: string | null; campaign_name: string | null;
-        leads: number; vendas: number; receita: number;
-      };
-      const lotes = await Promise.all(ids.map(async id => {
-        const qs = new URLSearchParams({ clientId: id, from: periodoISO.from, to: periodoISO.to });
-        const r = await fetch(`/api/creative-library?${qs}`).catch(() => null);
-        if (!r?.ok) return [] as Linha[];
-        const j = await r.json().catch(() => null) as { creatives?: Linha[] } | null;
-        return j?.creatives ?? [];
-      }));
+      const qs = new URLSearchParams({ clientIds, from: faixaSel.from, to: faixaSel.to });
+      const r = await fetch(`/api/crm/vendas-por-anuncio?${qs}`).catch(() => null);
+      const j = r?.ok ? await r.json().catch(() => null) as VendasPorAnuncio | null : null;
       if (cancelado) return;
-
-      const comReceita = lotes.flat().filter(l => Number(l.receita) > 0);
-      setCriativosReceitaTotal(comReceita.reduce((s, l) => s + (Number(l.receita) || 0), 0));
-      const linhas = comReceita
-        .sort((a, b) => Number(b.receita) - Number(a.receita))
-        .slice(0, 12);
-
-      const monta = (thumbs: Record<string, { thumbnail_url: string | null }>): CriativoReceita[] =>
-        linhas.map(l => ({
-          adKey: `${l.client_id}:${l.ad_key}`,
-          adId: l.source_id,
-          adName: l.ad_name || l.creative_name || 'Criativo sem nome',
-          campaignName: l.campaign_name,
-          clientName: ids.length > 1 ? l.client_name : null,
-          leads: Number(l.leads) || 0,
-          vendas: Number(l.vendas) || 0,
-          receita: Number(l.receita) || 0,
-          thumbnail: l.source_id ? thumbs[l.source_id]?.thumbnail_url ?? null : null,
-        }));
-
-      setCriativosReceita(monta({}));
-      setCriativosReceitaLoading(false);
-
-      // Thumbnail vem da Graph, depois da lista — best-effort, não segura a faixa.
-      const porCliente = new Map<string, string[]>();
-      for (const l of linhas) {
-        if (!l.source_id) continue;
-        const atual = porCliente.get(l.client_id) ?? [];
-        atual.push(l.source_id);
-        porCliente.set(l.client_id, atual);
-      }
-      if (porCliente.size === 0) return;
-      const e = await fetch('/api/creative-library/enrich', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          days: dias,
-          items: [...porCliente.entries()].map(([cid, adIds]) => ({ clientId: cid, adIds })),
-        }),
-      }).catch(() => null);
-      if (cancelado || !e?.ok) return;
-      const j = await e.json().catch(() => null) as { enrich?: Record<string, { thumbnail_url: string | null }> } | null;
-      if (!cancelado && j?.enrich) setCriativosReceita(monta(j.enrich));
-    })().catch(() => { if (!cancelado) setCriativosReceitaLoading(false); });
-
+      setVendasAnuncio(j);
+      setVendasAnuncioLoading(false);
+      const adIds = (j?.criativos ?? []).map(c => c.adId).filter((id): id is string => !!id);
+      if (adIds.length === 0) return;
+      const params = buildPeriodParams({ clientIds, adIds: adIds.join(',') });
+      const p = await fetch(`/api/meta/top-creatives?${params.toString()}`).catch(() => null);
+      const lista = p?.ok ? await p.json().catch(() => []) as TopCreative[] : [];
+      if (!cancelado) setPreviewsVenda(Object.fromEntries(lista.map(c => [c.adId, c])));
+    })().catch(() => { if (!cancelado) setVendasAnuncioLoading(false); });
     return () => { cancelado = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedKey, periodoISO.from, periodoISO.to]);
+  }, [selectedKey, faixaSel.from, faixaSel.to, customReady]);
 
   // ── Modo Food / Delivery ──────────────────────────────────────────────────
   // O segmento vem de `clients.dashboard_type` (coluna que já existia). O perfil
@@ -6969,34 +6924,36 @@ export default function GeneralDashboard() {
               </Superficie>
             </div>
 
-            {/* Faturamento por Criativo — o que o anúncio TROUXE (CRM). Some
-                quando nenhuma venda do período tem criativo identificado:
-                caixa vazia aqui seria pior que ausência, porque parece número
-                zerado em vez de dado que ainda não existe. */}
-            {(criativosReceitaLoading || criativosReceita.length > 0) && (
-              <Superficie
-                titulo="Faturamento por criativo"
-                icone={<MetaAdsMark className="h-5 w-5 text-[#168BFF]" />}
-                sub={<>
-                  Vendas do período que dá para rastrear até o anúncio que trouxe o lead
-                  {criativosReceita.length > 0 && (
-                    <> · total atribuído {premiumValue(criativosReceitaTotal || criativosReceita.reduce((s, c) => s + c.receita, 0), 'currency')}</>
-                  )}
-                </>}
-                direita={(
-                  <span
-                    className="rounded-[4px] bg-[#172027] px-1.5 py-0.5 text-[10px] font-semibold text-[#87929B]"
-                    title="Receita das vendas cujo lead foi rastreado até este anúncio"
-                  >
-                    CRM
-                  </span>
-                )}
-              >
-                <CreativeRevenueStrip criativos={criativosReceita} loading={criativosReceitaLoading} totalAtribuido={criativosReceitaTotal || undefined} />
-              </Superficie>
-            )}
-
     </>
+  );
+  // Investimento da campanha no período, pelo NOME (Meta/Google) — ou pelo id,
+  // quando o rastreio do Google gravou o {campaignid} no lugar do nome.
+  const investimentoPorCampanha = new Map<string, number>();
+  for (const c of campaigns) {
+    for (const chave of [c.name.trim().toLowerCase(), c.id]) {
+      investimentoPorCampanha.set(chave, (investimentoPorCampanha.get(chave) ?? 0) + (c.spend || 0));
+    }
+  }
+  const blocoVendasAnuncio = (
+    <VendasPorAnuncioPanel
+      dados={vendasAnuncio}
+      loading={vendasAnuncioLoading}
+      investimentoDaCampanha={nome => investimentoPorCampanha.get(nome.trim().toLowerCase()) ?? investimentoPorCampanha.get(nome.trim()) ?? null}
+      renderCriativo={(c, i) => {
+        const preview = c.adId ? previewsVenda[c.adId] : undefined;
+        if (!preview) return null;
+        return (
+          <HorizontalCreativeCard
+            key={c.chave}
+            creative={preview}
+            index={i}
+            onPreview={setPreviewCreative}
+            selo={c.receita > 0 ? formatCurrencyBRL(c.receita) : 'sem valor'}
+            metricas={<MetricasVenda c={c} investimento={preview.spend} />}
+          />
+        );
+      }}
+    />
   );
   const blocoGoogle = (
     <>
@@ -7444,6 +7401,7 @@ export default function GeneralDashboard() {
                 {secaoVisivel.comercial && <TituloSecao titulo="Comercial" sub="CRM" />}
                 {blocoComercial}
                 {blocoMeta}
+                {blocoVendasAnuncio}
                 {blocoResumoCliente}
               </>
             ) : (
@@ -7548,6 +7506,7 @@ export default function GeneralDashboard() {
                 {secaoVisivel.midia && (
                   <>
                     <TituloSecao titulo="Mídia paga" sub="Meta Ads e Google Ads" />
+                    {blocoVendasAnuncio}
                     {blocoMeta}
                     {blocoGoogle}
                   </>

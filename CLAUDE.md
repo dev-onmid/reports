@@ -1379,6 +1379,17 @@ Reforma de densidade da tela `clientes/[id]` (pedido do Matheus: "ao clicar em c
 - ⚠️ **Lição do modal**: o `DialogContent` do projeto tem default `sm:max-w-sm` (responsivo) que VENCE um `max-w-5xl` base via twMerge (prefixos `sm:` não deduplicam com base) — para alargar o modal use o MESMO prefixo (`sm:max-w-4xl`). Também: a linha do header da "Forma de cobrança" precisou de `flex-wrap` + `self-start` no toggle pra não cortar "Cartão / faturado" na largura menor do modal.
 - ✅ Verificado no preview (dev server de outra sessão na :3000, mesmo folder = HMR pegou as edições): botão Configurar, 5 abas + Mais (dropdown com as 4 de referência), modal com as 4 seções renderizando (conexões + Links & Senhas no fim), selinho de cobrança na aba Pagamentos, largura corrigida (896px). tsc limpo.
 
+## Dashboard — "Vendas e faturamento por anúncio" dentro de Mídia paga (2026-09-28)
+
+Pedido do Matheus: uma caixa em Mídia paga com os principais criativos, campanhas e conjuntos com VENDAS e FATURAMENTO, e o criativo do Meta com o preview igual ao de "Melhores criativos".
+
+- **`GET /api/crm/vendas-por-anuncio?clientIds=&from=&to=`**: régua de data e valor COPIADAS de `/api/clients/[id]/metrics` (receita pelo mês do GANHO, `COALESCE(NULLIF(revenue,0), valor_rs, 0)`, `leadContaSql()`), então o "faturamento atribuído" nunca passa do card de Faturamento. Leads pela régua de CRIAÇÃO (denominador da conversão).
+- **⚠️ VENDA = PESSOA, não linha**: a mesma compra aparece como lead fechado E como linha do ledger (que aponta `origem_lead_id`), e entrada + parcela são duas linhas. Vendas contam `COUNT(DISTINCT COALESCE(origem_lead_id, id))` (Sets no JS por nível); a receita soma todas as linhas. É a mesma dupla contagem que ainda existe no card de Vendas do topo — aqui ela não entra.
+- **Preview EXATO**: `/api/meta/top-creatives` ganhou `?adIds=` — busca o criativo DO PRÓPRIO ANÚNCIO (mesma resolução de imagem/vídeo), porque o anúncio que vendeu pode nem ter veiculado no período. Insights do período entram por `filtering ad.id IN`; sem veiculação, métricas zeradas. `?ids=` do Graph falha inteiro se um anúncio foi apagado → cai para um a um. O card é o MESMO `HorizontalCreativeCard` (ganhou `metricas`/`selo` opcionais) e o clique abre o mesmo modal de preview.
+- **Tela** (`src/components/dashboard/vendas-por-anuncio.tsx`): abas Criativos | Campanhas | Conjuntos; resumo com faturamento atribuído (% do total), vendas atribuídas e ticket. Campanhas com Investimento/ROAS casando o nome (ou o id do Google) com `campaigns`. Anúncio sem preview (Google/nome só) vira card do mesmo tamanho. Venda fechada sem valor mostra "sem valor", nunca "R$ 0,00". Sem venda atribuída → caixa minimizada. Fica logo abaixo do título "Mídia paga" (e depois do Meta no modo food).
+- **Substituiu** a antiga "Faturamento por criativo" (`CreativeRevenueStrip`, régua de criação do lead e só miniatura) — componente e harness removidos.
+- ✅ Verificado: rota compilada rodando no container contra produção (Cambé, setembro: R$ 36.399,69 atribuídos de R$ 128.412,10; Presidente Prudente R$ 26.134,11; Incorpast R$ 948,50 — "AD4 ANDREIA 2"); `adIds` devolveu 6/6 previews com imagem para Cambé em 3,2s; harness no browser com os dados reais (3 abas, fallback sem preview, "sem valor lançado"); tsc limpo, lint da página no baseline (164). ⚠️ `videoUrl` veio vazio nos 6 (vídeo `source` depende de permissão da Página) — igual ao "Melhores criativos", o modal mostra imagem + link.
+
 # ONMID Reports — Guia de Contexto
 
 ## O que é este projeto

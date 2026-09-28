@@ -112,6 +112,13 @@ export async function GET(request: NextRequest) {
     .map((id) => id.trim())
     .filter(Boolean);
   const shouldFilterByClient = requestedClientIds.length > 0;
+  // Modo "anúncios específicos": a caixa de Vendas por anúncio precisa do
+  // preview EXATO dos anúncios que venderam — que podem nem ter veiculado no
+  // período (venda de hoje, anúncio de mês passado). Aí o criativo vem do
+  // próprio anúncio e as métricas do período entram só se existirem.
+  const requestedAdIds = [...new Set((request.nextUrl.searchParams.get('adIds') ?? '')
+    .split(',').map((id) => id.trim()).filter((id) => /^\d{6,}$/.test(id)))].slice(0, 50);
+  const adIdsMode = requestedAdIds.length > 0;
 
   const pool = makeServerPool();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -204,32 +211,60 @@ export async function GET(request: NextRequest) {
           insightsUrl.searchParams.set('fields', 'ad_id,ad_name,campaign_id,campaign_name,adset_id,adset_name,spend,impressions,clicks,actions');
           applyMetaDateToUrl(insightsUrl, metaPeriod);
           insightsUrl.searchParams.set('sort', 'spend_descending');
-          insightsUrl.searchParams.set('limit', String(limit));
+          insightsUrl.searchParams.set('limit', String(adIdsMode ? 50 : limit));
+          if (adIdsMode) {
+            insightsUrl.searchParams.set('filtering', JSON.stringify([{ field: 'ad.id', operator: 'IN', value: requestedAdIds }]));
+          }
           insightsUrl.searchParams.set('access_token', token);
 
           const insightsRes = await fetch(insightsUrl.toString());
-          if (!insightsRes.ok) return;
+          if (!insightsRes.ok && !adIdsMode) return;
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const insightsData = await insightsRes.json() as { data?: any[] };
+          const insightsData = (insightsRes.ok ? await insightsRes.json() : {}) as { data?: any[] };
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const adsInsights: any[] = insightsData.data ?? [];
-          if (adsInsights.length === 0) return;
+          let adsInsights: any[] = insightsData.data ?? [];
+          if (adsInsights.length === 0 && !adIdsMode) return;
 
           // Batch-fetch creative details
           // video_id is the direct reference on the creative object (used for Reels and boosted posts).
           // object_type distinguishes VIDEO/REELS/PHOTO/LINK for badge rendering.
-          const adIds = adsInsights.map(a => a.ad_id as string).filter(Boolean);
+          const adIds = adIdsMode ? requestedAdIds : adsInsights.map(a => a.ad_id as string).filter(Boolean);
           const creativeFields = [
             'body', 'title', 'image_url', 'thumbnail_url',
             'video_id', 'object_type',
             'object_story_spec', 'asset_feed_spec',
             'instagram_permalink_url', 'effective_object_story_id',
           ].join(',');
+          const adFields = `name,effective_status${adIdsMode ? ',account_id,campaign{id,name},adset{id,name}' : ''},creative{${creativeFields}}`;
           const batchRes = await fetch(
-            `https://graph.facebook.com/v21.0/?ids=${adIds.join(',')}&fields=name,effective_status,creative{${creativeFields}}&access_token=${token}`
+            `https://graph.facebook.com/v21.0/?ids=${adIds.join(',')}&fields=${adFields}&access_token=${token}`
           );
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const batchData: Record<string, any> = batchRes.ok ? await batchRes.json() : {};
+          let batchData: Record<string, any> = batchRes.ok ? await batchRes.json() : {};
+          if (adIdsMode && !batchRes.ok) {
+            // `?ids=` falha INTEIRO se um único anúncio foi apagado — cai para um a um.
+            const um = await Promise.all(adIds.map(async (id) => {
+              const r = await fetch(`https://graph.facebook.com/v21.0/${id}?fields=${adFields}&access_token=${token}`).catch(() => null);
+              return r?.ok ? [id, await r.json()] as const : null;
+            }));
+            batchData = Object.fromEntries(um.filter((x): x is NonNullable<typeof x> => !!x));
+          }
+          if (adIdsMode) {
+            // Só os anúncios DESTA conta; quem não veiculou no período entra com métricas zeradas.
+            const porId = new Map(adsInsights.map(a => [String(a.ad_id), a]));
+            adsInsights = adIds
+              .filter(id => batchData[id] && accountMatches(String(batchData[id].account_id ?? ''), account.id))
+              .map(id => porId.get(id) ?? {
+                ad_id: id,
+                ad_name: batchData[id].name,
+                campaign_id: batchData[id].campaign?.id,
+                campaign_name: batchData[id].campaign?.name,
+                adset_id: batchData[id].adset?.id,
+                adset_name: batchData[id].adset?.name,
+                spend: '0', impressions: '0', clicks: '0', actions: [],
+              });
+            if (adsInsights.length === 0) return;
+          }
 
           // Collect all unique video IDs from every ad in this batch
           const allVideoIds = [...new Set(
@@ -370,5 +405,10 @@ export async function GET(request: NextRequest) {
     return bv - av;
   });
 
+  if (adIdsMode) {
+    // A mesma conta pode estar em duas conexões — um anúncio, um card.
+    const vistos = new Set<string>();
+    return Response.json(allCreatives.filter(c => !vistos.has(c.adId) && !!vistos.add(c.adId)));
+  }
   return Response.json(allCreatives.slice(0, limit));
 }
