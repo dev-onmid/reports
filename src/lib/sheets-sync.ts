@@ -141,7 +141,9 @@ export async function sincronizarSheets(
   const cabecalhos: Record<string, string[]> = {};
   for (const aba of escolha.abas) {
     const linha = XLSX.utils.sheet_to_json<unknown[]>(wb.Sheets[aba], { header: 1, defval: '' })[0] ?? [];
-    cabecalhos[aba] = (linha as unknown[]).map(c => String(c ?? '').trim());
+    // Cru, sem trim: quem tolera espaço sobrando é `abasCompativeis`, e o de-para
+    // guarda o nome EXATO da coluna como a rota de importação vai procurá-la.
+    cabecalhos[aba] = (linha as unknown[]).map(c => String(c ?? ''));
   }
   const { ok: abasOk, incompativeis } = abasCompativeis(cabecalhos, escolha.abas, cfg.mapeamento);
   if (!abasOk.length) {

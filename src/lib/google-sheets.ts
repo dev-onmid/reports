@@ -241,7 +241,12 @@ export function abasCompativeis(
   const incompativeis: { aba: string; faltam: string[] }[] = [];
   for (const aba of abas) {
     const headers = cabecalhoPorAba[aba] ?? [];
-    const faltam = exigidas.filter(c => !headers.includes(c));
+    // ⚠️ Compara com trim dos DOIS lados. Cabeçalho de planilha de cliente vem
+    // com espaço sobrando (" Data de agendamento " é real), e o de-para guarda o
+    // nome EXATO da coluna. Comparar um trimado contra o outro cru reprovava uma
+    // aba perfeitamente boa — foi o que derrubou a importação de um cliente que
+    // já rodava, assim que a checagem entrou.
+    const faltam = exigidas.filter(c => !headers.some(h => h === c || h.trim() === c.trim()));
     if (faltam.length) incompativeis.push({ aba, faltam });
     else ok.push(aba);
   }

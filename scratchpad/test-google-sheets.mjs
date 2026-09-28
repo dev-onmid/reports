@@ -162,6 +162,17 @@ eq(abasCompativeis({ A: ['Nome', 'Número', 'Valor R$', 'Fechou?'] }, ['A'], MAP
 // sem mapeamento, nada a exigir
 eq(abasCompativeis({ A: [] }, ['A'], null).ok, ['A'], 'sem de-para, toda aba passa');
 
+// ⚠️ Cabeçalho de planilha de cliente vem com espaço sobrando. Caso REAL que
+// derrubou a importação de um cliente que já rodava: o de-para guardava
+// " Data de agendamento " (com espaços) e a comparação reprovava a aba.
+eq(abasCompativeis({ A: [' Data de agendamento ', 'Nome'] }, ['A'], { scheduledDate: ' Data de agendamento ', name: 'Nome' }).ok,
+  ['A'], 'coluna com espaço nas pontas casa consigo mesma');
+eq(abasCompativeis({ A: ['Data de agendamento'] }, ['A'], { scheduledDate: ' Data de agendamento ' }).ok,
+  ['A'], 'de-para com espaço casa cabeçalho sem espaço');
+eq(abasCompativeis({ A: [' Nome '] }, ['A'], { name: 'Nome' }).ok, ['A'], 'e o contrário também');
+eq(abasCompativeis({ A: ['Nome'] }, ['A'], { name: 'Telefone' }).incompativeis[0].faltam, ['Telefone'],
+  'coluna de verdade ausente continua reprovando');
+
 
 // ---------------------------------------------------------------------------
 // ⚠️⚠️ A ORDEM das abas é cronológica crescente, não a da planilha.
