@@ -7,6 +7,15 @@ Pedido do Matheus: "esse Fontes de Captura tem que ficar dentro da aba do client
 - `'capture'` saiu de `CrmTab`/`ABAS_CRM`: quem tiver esse valor salvo no localStorage cai no fallback `'leads'`, não numa aba inexistente. `'captura'` saiu de `AcaoConfigCrm` e do modal Configurações (a grade da seção CRM voltou de 4 para 3 colunas) — integração se configura em Integrações, não em dois lugares.
 - ✅ Verificado: tsc + build limpos; harness no browser com a barra renderizada — as 10 sub-abas na ordem (WhatsApp · **Fontes de Captura** · Sites e LPs · Conversões · Webhooks · Agendor · SULTS · Delivery · Mapa de Calor · Log), sem quebra de linha a 1440px, clique acendendo a aba certa, conteúdo montando e a URL virando `?sub=captura`. Produção em `2d555929`.
 
+## Landing page sem sessão vira caixa MINIMIZADA (caso Tapeçaria Chic) (2026-09-28)
+
+Print do Matheus: seção Landing page da Tapeçaria Chic inteira em zeros (KPIs, mini-cards, "sem eventos configurados") — "lembra da regra de quando não houver dados é para ficar com a box minimizada?".
+
+- **Medido**: a Tapeçaria TEM propriedade GA4 vinculada (`ga4:514338956` em `client_account_links`) e a rota devolve o consolidado normalmente, só que com **0 sessões e 0 dias** no mês — tag fora do ar, LP sem o GA4 ou propriedade errada. Como `secaoVisivel.lp` só olha se existe `ga4`, a seção aparecia com o painel inteiro zerado.
+- **Correção** (`blocoGa4` no `page.tsx`): propriedade com `atual.sessoes === 0` renderiza `<Superficie vazio>` com "Nenhuma sessão registrada na landing page no período." — a MESMA caixa minimizada dos cards Google Ads sem veiculação. O título "Landing page" com o período continua (igual a "Mídia paga" com os cards do Google minimizados). ⚠️ Nunca durante o carregamento (`!ga4Loading`), senão a caixa pisca antes dos dados chegarem.
+- ⚠️ A regra vale por CLIENTE: com vários selecionados, cada um com sessão zero vira sua própria caixa minimizada; os demais seguem com o painel completo.
+- ⚠️ Vale conferir por que a propriedade da Tapeçaria não recebe sessão — é dado real faltando, não só apresentação.
+
 ## Dashboard — cards preenchem a altura que a grade dá (fim do vão ocioso) (2026-09-24, noite)
 
 Print do Matheus: card de Gênero com metade vazia ("olha o tanto de espaço ocioso… veja outros cards assim"). Causa: em grade, o card estica até a altura do vizinho (Idade tinha 8 linhas de barras), mas o conteúdo ficava preso no topo.

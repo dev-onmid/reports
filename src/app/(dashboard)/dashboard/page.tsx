@@ -7057,7 +7057,20 @@ export default function GeneralDashboard() {
                     <span className={T.cardSub}>Google Analytics 4</span>
                   </div>
                 )}
-                <Ga4LandingPanel dados={ga4ByClient[client.id]?.ga4 ?? null} loading={ga4Loading} aviso={ga4ByClient[client.id]?.aviso} />
+                {/* Mesma regra dos cards de mídia sem veiculação: propriedade GA4 vinculada
+                    mas SEM sessão no período (tag fora do ar, LP nova, propriedade errada)
+                    vira caixa MINIMIZADA com o aviso, em vez de um painel inteiro de zeros
+                    (pedido do Matheus, 28/09 — caso Tapeçaria Chic). Nunca enquanto carrega. */}
+                {!ga4Loading && (ga4ByClient[client.id]?.ga4?.atual.sessoes ?? 0) === 0 ? (
+                  <Superficie
+                    vazio
+                    titulo="Landing page · Google Analytics 4"
+                    icone={<Monitor className="h-4 w-4" />}
+                    avisoVazio="Nenhuma sessão registrada na landing page no período."
+                  />
+                ) : (
+                  <Ga4LandingPanel dados={ga4ByClient[client.id]?.ga4 ?? null} loading={ga4Loading} aviso={ga4ByClient[client.id]?.aviso} />
+                )}
               </Fragment>
             ))}
     </>
