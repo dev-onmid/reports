@@ -616,6 +616,15 @@ async function upsertPorTelefone(
          data_agendada = COALESCE($9, data_agendada),
          observacao = COALESCE(NULLIF($10, ''), observacao),
          negocio_externo_id = COALESCE(negocio_externo_id, $14),
+         -- ⚠️ A DATA DO LEAD AVANÇA com a planilha (decisão do Matheus, 2026-09-28).
+         -- A clínica recadastra em setembro quem já era lead em janeiro, e a
+         -- planilha dela traz a data NOVA. Mantendo só a primeira, o lead ficava
+         -- no mês antigo e a dashboard mostrava menos que o relatório da clínica
+         -- (38 leads da Sorrifácil, 23 só em Ingleses).
+         -- GREATEST e não COALESCE: nunca RECUA. Reimportar um export antigo não
+         -- pode puxar o lead de volta para o mês passado.
+         lead_date = GREATEST(public.crm_leads.lead_date, $17::date),
+         data      = GREATEST(public.crm_leads.data, $17::date),
          updated_at_external = GREATEST(public.crm_leads.updated_at_external, $15::date),
          upload_id = $11
        WHERE id = $1::uuid`,
@@ -636,6 +645,8 @@ async function upsertPorTelefone(
         r.negocioExternoId ?? null,
         r.updatedAtExternal ?? null,
         r.escreveReceita !== false,
+        // $17 — a data de cadastro que a planilha informa para ESTE lead.
+        r.leadDate ?? null,
       ],
     );
   }
@@ -643,6 +654,60 @@ async function upsertPorTelefone(
   for (let i = 0; i < novos.length; i += 150) {
     await insertLeadBatch(pool, novos.slice(i, i + 150));
   }
+}
+
+/**
+ * Reconcilia o ledger de faturamento com o arquivo que acabou de ser importado.
+ *
+ * ⚠️ A importação de Vendas era ADITIVA: quando a clínica RETIFICA um lançamento
+ * já importado (muda o valor, a data ou desmembra em parcelas), `sintetizarIdVenda`
+ * — que é hash de paciente+data+valor+tratamento — produz uma chave NOVA, a linha
+ * nova entra e **a antiga fica**. O faturamento então some duas vezes. Medido em
+ * 2026-09-28 contra o relatório do cliente: 5 linhas fantasma, R$ 20.980,02, sendo
+ * R$ 9.104,98 num único paciente da Ingleses cujo lançamento foi corrigido de
+ * R$ 9.104,98 para R$ 8.705,00.
+ *
+ * A régua: o relatório é a VERDADE dos dias que ele cobre. Para cada dia de
+ * faturamento presente no arquivo, some a venda daquele cliente/dia que não veio
+ * no arquivo.
+ *
+ * ⚠️ Três travas, porque isto APAGA:
+ *  1. só `registro_tipo = 'venda'` — lead e híbrido nunca são tocados;
+ *  2. só os DIAS que o arquivo cobre — arquivo de um mês não apaga outro mês;
+ *  3. só linha com `external_id` de `sintetizarIdVenda` (prefixo `venda:`) — venda
+ *     vinda do Agendor/SULTS/webhook tem outro dono e não é reconciliada aqui;
+ *  4. só linha criada ANTES desta importação, para o caso de outro processo
+ *     inserir no mesmo instante.
+ *
+ * ⚠️ Consequência aceita: reimportar um relatório ANTIGO remove a venda que a
+ * clínica lançou depois dele, nos dias que ele cobre. É o preço de "o arquivo é a
+ * verdade" — a automação diária sempre manda o mais recente, e o relatório da
+ * importação informa quantas linhas saíram (`vendas_removidas`).
+ *
+ * ✅ Validado contra produção em 2026-09-28 antes de entrar: simulada sobre o
+ * último upload de cada unidade da Sorrifácil, removeria exatamente as 5 linhas
+ * (R$ 20.980,02) que a conferência manual contra o relatório do cliente apontou —
+ * e nenhuma a mais. Londrina, Presidente Prudente e São José: nada a remover.
+ */
+async function reconciliarVendasDoPeriodo(
+  pool: ReturnType<typeof makeServerPool>,
+  clientId: string,
+  dias: string[],
+  idsImportados: string[],
+  desde: Date,
+): Promise<number> {
+  if (dias.length === 0 || idsImportados.length === 0) return 0;
+  const { rowCount } = await pool.query(
+    `DELETE FROM public.crm_leads
+      WHERE client_id = $1
+        AND COALESCE(registro_tipo, 'hibrido') = 'venda'
+        AND data_fechamento = ANY($2::date[])
+        AND external_id LIKE 'venda:%'
+        AND NOT (external_id = ANY($3::text[]))
+        AND created_at < $4`,
+    [clientId, dias, idsImportados, desde],
+  );
+  return rowCount ?? 0;
 }
 
 async function upsertLeadBatch(
@@ -724,8 +789,15 @@ async function upsertLeadBatch(
        -- criativo — sobrescrever com o "canal" do CRM da clínica apagaria a
        -- única informação que liga a venda ao anúncio. Mesmo COALESCE que o
        -- caminho do WhatsApp já usa em crm-conversation-sync.
-       lead_date = COALESCE(public.crm_leads.lead_date, EXCLUDED.lead_date),
-       data      = COALESCE(public.crm_leads.data, EXCLUDED.data),
+       -- ⚠️ A data do lead AVANÇA com a planilha (ver upsertPorTelefone) — mas só
+       -- para lead. No ledger de VENDA a data é a do faturamento daquela linha:
+       -- avançá-la moveria a receita de mês e quebraria o fechamento já entregue.
+       lead_date = CASE WHEN EXCLUDED.registro_tipo = 'venda'
+                        THEN COALESCE(public.crm_leads.lead_date, EXCLUDED.lead_date)
+                        ELSE GREATEST(public.crm_leads.lead_date, EXCLUDED.lead_date) END,
+       data      = CASE WHEN EXCLUDED.registro_tipo = 'venda'
+                        THEN COALESCE(public.crm_leads.data, EXCLUDED.data)
+                        ELSE GREATEST(public.crm_leads.data, EXCLUDED.data) END,
        lead_name = COALESCE(NULLIF(public.crm_leads.lead_name, ''), EXCLUDED.lead_name),
        nome      = COALESCE(NULLIF(public.crm_leads.nome, ''), EXCLUDED.nome),
        phone     = COALESCE(NULLIF(public.crm_leads.phone, ''), EXCLUDED.phone),
@@ -986,6 +1058,12 @@ export async function POST(req: NextRequest) {
     const aplicaFiltroOrigem = true;
 
     const results: Record<string, number> = {};
+    // Linhas do ledger que a clínica retificou/cancelou e saíram nesta importação.
+    // Vai pra resposta pelo mesmo motivo de `data_trocada`: apagar em silêncio é
+    // tão ruim quanto descartar em silêncio.
+    let removidasPorReconciliacao = 0;
+    // Carimbo do início: a reconciliação não toca no que entrou depois dela.
+    const inicioDaImportacao = new Date();
     // Relatório do que foi cortado. Vai pra resposta de propósito: descarte
     // silencioso faria o usuário achar que a importação perdeu linhas.
     const resumoOrigem = channelCol && aplicaFiltroOrigem
@@ -1150,6 +1228,12 @@ export async function POST(req: NextRequest) {
           for (let i = 0; i < batchVendas.length; i += 150) {
             await upsertLeadBatch(pool, batchVendas.slice(i, i + 150));
           }
+          // Só DEPOIS de tudo gravado: o que sobrou naqueles dias e não veio no
+          // arquivo é lançamento que a clínica retificou ou cancelou.
+          const diasDoArquivo = [...new Set(batchVendas.map(v => v.dataFechamento).filter((d): d is string => !!d))];
+          removidasPorReconciliacao += await reconciliarVendasDoPeriodo(
+            pool, clientId, diasDoArquivo, batchVendas.map(v => v.externalId), inicioDaImportacao,
+          );
         } else if (dealIdCol) {
           // Upsert path — preserves deals from earlier imports (different
           // months) and only updates a deal if this row is at least as
@@ -1238,6 +1322,9 @@ export async function POST(req: NextRequest) {
       // Troca de coluna de data no ledger de Vendas. Vai pra resposta porque
       // corrigir em silêncio é a mesma doença de descartar em silêncio.
       data_trocada: dataTrocada,
+      // Vendas que existiam no banco, estão num dia que este arquivo cobre e não
+      // vieram nele — lançamento retificado ou cancelado pela clínica.
+      vendas_removidas: removidasPorReconciliacao,
     });
     } finally {
       await pool.end();
