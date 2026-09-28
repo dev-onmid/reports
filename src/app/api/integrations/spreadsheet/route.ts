@@ -2,7 +2,7 @@ import type { NextRequest } from 'next/server';
 import { createHash } from 'node:crypto';
 import { makeServerPool } from '@/lib/server-db';
 
-import { origemIntegravel, resumirOrigens, dedupLote, dedupPorTelefone, idExterno, parseFechou, sinaisDoStatus, indexarOcorrencias } from '@/lib/importacao-origem';
+import { origemIntegravel, resumirOrigens, dedupLote, dedupPorTelefone, idExterno, decidirFechou, sinaisDoStatus, indexarOcorrencias } from '@/lib/importacao-origem';
 import { chavesTelefone } from '@/lib/lead-identity';
 
 /** Tipo da planilha, escolhido na importação. Ver comentário em LeadParaFunil. */
@@ -1228,13 +1228,18 @@ export async function POST(req: NextRequest) {
             // manter as duas evita quebrar quem já importava com outro texto.
             // No ledger de Vendas toda linha É uma venda concluída. Usa o valor
             // BRUTO no heurístico (o revenue já pode ter sido zerado no tipo Leads).
-            // ⚠️ A coluna de "Fechou?" da planilha VENCE, quando existe e diz algo:
-            // é o que o cliente declarou, não o que a gente deduziu. `null` (célula
-            // vazia) cai nos sinais de sempre — vazio não é "não fechou".
-            closed: tipoPlanilha === 'venda'
-              ? true
-              : (closedCol ? parseFechou(row[closedCol]) : null)
-                ?? (sinais.fechou || (statusCol ? isWonStatus(statusRaw) : revenueBruto > 0)),
+            // A regra mora em `decidirFechou` (pura, testada): a coluna de
+            // fechamento da planilha vence o tipo e os sinais, e célula vazia
+            // nela significa "não fechou".
+            closed: decidirFechou({
+              celula: closedCol ? row[closedCol] : undefined,
+              temColuna: Boolean(closedCol),
+              tipo: tipoPlanilha,
+              sinaisFechou: sinais.fechou,
+              temStatus: Boolean(statusCol),
+              statusGanho: statusCol ? isWonStatus(statusRaw) : false,
+              revenueBruto,
+            }),
             // Chave de NEGÓCIO da fonte (nº do orçamento/proposta). É a ponte
             // entre o relatório de Leads e o de Faturamento: o mesmo número
             // aparece nos dois, e é por ele que a venda encontra o lead que

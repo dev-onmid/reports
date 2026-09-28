@@ -260,6 +260,41 @@ export function parseFechou(v: unknown): boolean | null {
 }
 
 /**
+ * Decide se a linha da planilha representa uma venda FECHADA.
+ *
+ * ⚠️⚠️ A coluna de fechamento ("Fechou?", "Ganhou?") é a AUTORIDADE quando
+ * existe — acima do tipo de planilha e acima de qualquer sinal derivado. Ela é
+ * a qualificação de venda que o próprio cliente mantém à mão, e célula em
+ * branco ali É a resposta "não fechou": medido na Odonto First (setembro/2026),
+ * 117 de 140 linhas em branco, todas em "Desqualificado"/"Em Atendimento"/"Sem
+ * Interesse", contra 11 ✅. Deduzir fechamento por status ou por existir valor
+ * numa planilha que DECLARA o fechamento seria contradizer o cliente — foi
+ * assim que 104 leads da Odonto First entraram todos como fechados.
+ *
+ * Sem a coluna nada muda: o ledger de Vendas fecha toda linha (cada linha É uma
+ * venda concluída) e a planilha de Leads segue nos sinais de sempre.
+ */
+export function decidirFechou(o: {
+  /** Valor CRU da célula de fechamento. Só é lido quando `temColuna`. */
+  celula?: unknown;
+  /** A coluna de fechamento foi mapeada nesta importação? */
+  temColuna: boolean;
+  tipo: 'lead' | 'venda' | 'hibrido';
+  /** `sinaisDoStatus(...).fechou` — o status já diz que fechou. */
+  sinaisFechou: boolean;
+  /** Existe coluna de status mapeada? Sem ela, o valor vira o sinal. */
+  temStatus: boolean;
+  /** `isWonStatus(status)` da coluna de status. */
+  statusGanho: boolean;
+  /** Valor BRUTO da linha (antes de o tipo Leads zerar a receita). */
+  revenueBruto: number;
+}): boolean {
+  if (o.temColuna) return parseFechou(o.celula) ?? false;
+  if (o.tipo === 'venda') return true;
+  return o.sinaisFechou || (o.temStatus ? o.statusGanho : o.revenueBruto > 0);
+}
+
+/**
  * Numera as repetições de uma mesma chave, na ORDEM do arquivo.
  *
  * Existe para o ledger de faturamento, onde duas linhas podem ser idênticas em

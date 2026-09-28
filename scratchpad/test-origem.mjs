@@ -8,7 +8,7 @@
 
 import assert from 'node:assert';
 import { origemIntegravel, normalizarOrigem, resumirOrigens, dedupLote, dedupPorTelefone, ORIGENS_INTEGRAVEIS,
-  idExterno, chaveTelefone, sinaisDoStatus, indexarOcorrencias }
+  idExterno, chaveTelefone, sinaisDoStatus, indexarOcorrencias, parseFechou, decidirFechou }
   from './build/importacao-origem.mjs';
 let n=0; const eq=(a,b,m)=>{assert.deepStrictEqual(a,b,m);n++;}; const ok=(c,m)=>{assert.ok(c,m);n++;};
 
@@ -256,3 +256,60 @@ eq(dedupLote([{id:1},{id:2}], l => String(l.id)).duplicadas, 0, 'sem duplicata')
 }
 
 console.log(`✓ ${n} asserts de origem/dedupe passaram`);
+
+// ---------------------------------------------------------------------------
+// decidirFechou — a coluna de fechamento da planilha é a AUTORIDADE.
+// Caso que motivou: Odonto First, SETEMBRO 2026. Medido na planilha real:
+// 140 linhas com nome, coluna "Fechou?" com 11 ✅, 11 ❌, 1 🕒 e 117 em branco;
+// 11 linhas com "Valor R$" > 0 (exatamente as ✅), somando R$ 139.624,09.
+// A importação anterior gravou 104 leads e marcou TODOS como fechados.
+// ---------------------------------------------------------------------------
+const sem = { temColuna: false, tipo: 'hibrido', sinaisFechou: false, temStatus: false, statusGanho: false, revenueBruto: 0 };
+const com = { ...sem, temColuna: true };
+
+// o vocabulário real da planilha
+eq(parseFechou('✅'), true, '✅ fecha');
+eq(parseFechou('❌'), false, '❌ não fecha');
+eq(parseFechou('🕒'), null, '🕒 (em espera) é indefinido, não é um "sim"');
+eq(parseFechou(''), null, 'vazio é indefinido na leitura crua');
+
+// com a coluna mapeada, vazio é "não fechou" — e nem status nem valor derrubam isso
+eq(decidirFechou({ ...com, celula: '' }), false, 'coluna mapeada + vazio = não fechou');
+eq(decidirFechou({ ...com, celula: undefined }), false, 'coluna mapeada + célula ausente = não fechou');
+eq(decidirFechou({ ...com, celula: '🕒' }), false, 'em espera não conta como fechado');
+eq(decidirFechou({ ...com, celula: '✅' }), true, 'declarado fechado');
+eq(decidirFechou({ ...com, celula: '❌' }), false, 'declarado não fechado');
+
+// as três formas de contradizer o cliente que existiam antes
+eq(decidirFechou({ ...com, celula: '', revenueBruto: 41940 }), false,
+  'ter valor na linha NÃO fecha quando a planilha declara que não fechou');
+eq(decidirFechou({ ...com, celula: '', temStatus: true, statusGanho: true }), false,
+  'status de ganho NÃO vence a coluna de fechamento');
+eq(decidirFechou({ ...com, celula: '', sinaisFechou: true }), false,
+  'sinal do status NÃO vence a coluna de fechamento');
+// ⚠️ o bug medido: 19 "Desqualificado" e 10 "Sem Interesse" fecharam porque a
+// planilha foi importada com tipo 'venda'. Com a coluna, o tipo não manda mais.
+eq(decidirFechou({ ...com, celula: '', tipo: 'venda' }), false,
+  'tipo Venda NÃO fecha linha que a coluna diz que não fechou');
+eq(decidirFechou({ ...com, celula: '✅', tipo: 'venda' }), true, 'tipo Venda + ✅ fecha');
+
+// sem a coluna, nada mudou: é o comportamento que a Sorrifácil usa hoje
+eq(decidirFechou({ ...sem, tipo: 'venda' }), true, 'ledger de Vendas sem coluna: toda linha fecha');
+eq(decidirFechou({ ...sem, revenueBruto: 100 }), true, 'sem coluna e sem status, valor > 0 fecha');
+eq(decidirFechou({ ...sem, revenueBruto: 0 }), false, 'sem coluna, sem status e sem valor: não fecha');
+eq(decidirFechou({ ...sem, temStatus: true, statusGanho: true, revenueBruto: 0 }), true,
+  'sem coluna, status de ganho fecha');
+eq(decidirFechou({ ...sem, temStatus: true, statusGanho: false, revenueBruto: 999 }), false,
+  'sem coluna, com status: o status manda e o valor não fecha sozinho');
+eq(decidirFechou({ ...sem, sinaisFechou: true, temStatus: true, statusGanho: false }), true,
+  'sem coluna, sinal do status fecha');
+
+// a planilha inteira: 11 ✅ de 140 linhas, o resto não fecha
+{
+  const celulas = [...Array(11).fill('✅'), ...Array(11).fill('❌'), '🕒', ...Array(117).fill('')];
+  eq(celulas.length, 140, 'a amostra reproduz as 140 linhas medidas');
+  const fechados = celulas.filter(c => decidirFechou({ ...com, celula: c, revenueBruto: c === '✅' ? 12000 : 0 })).length;
+  eq(fechados, 11, 'a planilha da Odonto First tem 11 fechados, não 140');
+}
+
+console.log(`OK ${n} asserts`);

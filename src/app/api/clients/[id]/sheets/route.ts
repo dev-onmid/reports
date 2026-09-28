@@ -54,11 +54,14 @@ export async function PUT(req: NextRequest, { params }: Ctx) {
   // essa escolha EXPLÍCITA do gestor, em vez de depender do tipo padrão.
   const fonte = body.fonteFaturamento === true;
   // ⚠️ Faturamento NÃO muda o tipo. O tipo 'venda' força `closed = true` em toda
-  // linha (é um ledger de faturamento, onde cada linha É uma venda) — numa base
-  // de LEADS isso transformaria o mês inteiro em vendas. Medido no primeiro teste
-  // com a planilha real: 108 leads viraram 108 fechados. Quem manda a receita
-  // entrar é a flag `escreveReceita`, declarada separadamente.
-  const tipo = body.tipoPlanilha === 'venda' ? 'venda' : 'lead';
+  // linha (é um ledger: cada linha É uma venda concluída) — foi o que marcou os
+  // 104 leads da Odonto First como fechados, inclusive "Desqualificado". Quem
+  // manda a receita entrar é `fonte_faturamento`, sozinha.
+  // ⚠️ E o padrão é 'hibrido', NUNCA 'lead': `registro_tipo = 'lead'` faz
+  // `contarFunil` PULAR a receita da linha (funil-etapas.ts), então a planilha
+  // apareceria no funil com faturamento zero. 'hibrido' conta nos dois lados —
+  // é o default do sistema e o caso normal de uma planilha de CRM.
+  const tipo = body.tipoPlanilha === 'venda' ? 'venda' : 'hibrido';
 
   const pool = makeServerPool();
   try {
