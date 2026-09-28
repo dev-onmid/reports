@@ -1,3 +1,29 @@
+## Janela de atribuição aceita lead que VOLTA + o alerta abre a lista (2026-09-28, mesma rodada)
+
+Duas correções que o Matheus apontou olhando o que tinha acabado de subir.
+
+### 1. Reentrada — buraco meu na janela
+
+Pergunta dele: "e se for um lead que já passou pelo sistema algum período do ano e cai novamente depois de um tempo?". Estava certo: a janela só aceitava lead **NOVO**, então quem voltava ficava de fora — e as duas pontas ficavam **incoerentes**, porque pelo CÓDIGO esse retorno era atribuído normalmente (`matchClickByCode` não olha se o lead existe).
+
+- **`DORMENCIA_REENTRADA_DIAS = 7`**: lead antigo volta a ser candidato se estava em silêncio. O corte veio da medição, não de palpite — 30 dias de mensagens RECEBIDAS: **conversa em andamento (<1d) 9.961** · primeira mensagem 1.852 · **voltou 1–7d 429** · **voltou 7+d 18**. Aceitar 7+ dias custa **1% a mais de candidatos** (18 sobre 1.852) e resolve o caso real; aceitar conversa em andamento poria ~10 mil mensagens/mês disputando clique — **é dela que a guarda protege**. Dos candidatos, **85,4% ficam sem concorrente** na janela de 2 min.
+- **⚠️ A régua olha a última mensagem em QUALQUER direção**, não só as recebidas: se o atendente falou há 3 dias e a pessoa responde hoje, isso é resposta a follow-up, não reentrada por anúncio.
+- **⚠️ A leitura acontece ANTES do upsert** — depois dele `whatsapp_last_message_at` já carrega o carimbo desta mensagem e TODO lead pareceria ativo.
+- **⚠️ RESÍDUO DOCUMENTADO na trava 2**: ela conta lead **CRIADO** na janela, não lead que **voltou** da dormência (depois do upsert ele fica indistinguível de quem está no meio de uma conversa). Cobrir isso exigiria uma régua que não consigo tornar sólida. Tamanho medido: 0,6 reentrada/dia, então duas no MESMO cliente dentro de 2 minutos é ruído estatístico — e a combinação perigosa de verdade (retornante + lead novo juntos) **segue coberta**, porque o lead novo é contado.
+
+### 2. O alerta "N leads de anúncio não estão no CRM" virou clicável
+
+Pedido do Matheus (print): "tinha que ser possível clicar em algum 'Saiba mais' para vermos quais são esses leads, e questionar o cliente o que houve". **Alerta sem a lista é acusação sem prova** — para cobrar o cliente é preciso nome, telefone, data e a campanha de cada um.
+
+- Botão **"Ver os N leads"** abre o **MESMO** `FunilLeadsModal` pela **MESMA** rota (`/api/crm/funil-leads`), agora com **`recorte=fora_do_crm`**, que aplica o **MESMO predicado** (`rastreadoForaDoCrmSql`) que o alerta conta. ⚠️ Lista com consulta própria divergiria do número na primeira mudança de régua — foi por isso que não criei rota nova.
+- ⚠️ Nesse recorte **a etapa não filtra** (o conjunto já É o recorte, e a etapa segue sendo calculada só para exibir) e o par **"Chegaram aqui / Parados aqui" SOME** — é conversa de degrau, e aqui não há degrau.
+- **⚠️ Bug pego pelo teste em produção**: a rota validava `etapa` **ANTES** de olhar o recorte e devolvia `400 etapa inválida` para a chamada legítima do alerta (commit `269729b`). Sem o teste com sessão real, o botão iria para produção morto.
+- A linha da lista traz nome/telefone/canal/data/etapa; **campanha, conjunto e anúncio aparecem ao clicar no lead** (o detalhe já existia, `GET /api/crm/[id]`).
+- ✅ Verificado em produção (`269729b7`, sessão forjada): `recorte=fora_do_crm` na Sorrifácil Londrina Bandeirantes devolve **16 leads — exatamente os 16 do alerta do print** (Madalena, Yasmim, Sandra… com telefone e canal Meta Ads/WhatsApp).
+- ⚠️ **Não visto renderizado**: a dashboard não monta em bundle isolado e o dev não tem banco. O botão é markup simples com dados provados pela rota, mas o primeiro clique real é do Matheus.
+
+⚠️ Receita de teste que vale registrar: a sessão forjada falha com **401 silencioso se o `uid` não existir na tabela `users`** — o primeiro script usou um filtro de status que devolveu vazio e o 401 parecia erro de assinatura. Conferir o uid ANTES de culpar o HMAC.
+
 ## Rastreio do `/r/` — código invisível, mensagem na URL e atribuição por janela (2026-09-28)
 
 Pedido do Matheus: tirar o atrito do rastreio ("o código precisa ser invisível") e, se o lead apagar a mensagem pré-preenchida, "calibrar por meio da janela de tempo".
