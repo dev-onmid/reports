@@ -2,7 +2,7 @@ import type { NextRequest } from 'next/server';
 import { createHash } from 'node:crypto';
 import { makeServerPool } from '@/lib/server-db';
 
-import { origemIntegravel, resumirOrigens, dedupLote, dedupPorTelefone, idExterno, sinaisDoStatus, indexarOcorrencias } from '@/lib/importacao-origem';
+import { origemIntegravel, resumirOrigens, dedupLote, dedupPorTelefone, idExterno, parseFechou, sinaisDoStatus, indexarOcorrencias } from '@/lib/importacao-origem';
 import { chavesTelefone } from '@/lib/lead-identity';
 
 /** Tipo da planilha, escolhido na importação. Ver comentário em LeadParaFunil. */
@@ -995,6 +995,8 @@ export async function POST(req: NextRequest) {
     const dealIdColumnOverride = formData.get('dealIdColumn') as string | null;
     const stageColumnOverride = formData.get('stageColumn') as string | null;
     const updatedDateColumnOverride = formData.get('updatedDateColumn') as string | null;
+    // Coluna de "Fechou?" (✅/❌, Sim/Não) — ver parseFechou.
+    const closedColumnOverride = formData.get('closedColumn') as string | null;
 
     if (!mappingsRaw) return Response.json({ error: 'mappings obrigatório.' }, { status: 400 });
 
@@ -1024,6 +1026,7 @@ export async function POST(req: NextRequest) {
     const dealIdCol = dealIdColumnOverride || null;
     const stageCol = stageColumnOverride || null;
     const updatedDateCol = updatedDateColumnOverride || null;
+    const closedCol = closedColumnOverride || null;
     const specialtiesCol = findHeader(headers, [/especialidades/i]);
     const treatmentsCol = findHeader(headers, [/tratamentos/i]);
     const saleTypeCol = findHeader(headers, [/tipo\s+venda/i]);
@@ -1044,6 +1047,7 @@ export async function POST(req: NextRequest) {
     if (dealIdCol && !headers.includes(dealIdCol)) return Response.json({ error: `Coluna de ID não encontrada: ${dealIdCol}` }, { status: 400 });
     if (stageCol && !headers.includes(stageCol)) return Response.json({ error: `Coluna de etapa não encontrada: ${stageCol}` }, { status: 400 });
     if (updatedDateCol && !headers.includes(updatedDateCol)) return Response.json({ error: `Coluna de última atualização não encontrada: ${updatedDateCol}` }, { status: 400 });
+    if (closedCol && !headers.includes(closedCol)) return Response.json({ error: `Coluna de fechamento não encontrada: ${closedCol}` }, { status: 400 });
 
     const pool = makeServerPool();
     await ensureTables(pool);
@@ -1203,9 +1207,13 @@ export async function POST(req: NextRequest) {
             // manter as duas evita quebrar quem já importava com outro texto.
             // No ledger de Vendas toda linha É uma venda concluída. Usa o valor
             // BRUTO no heurístico (o revenue já pode ter sido zerado no tipo Leads).
+            // ⚠️ A coluna de "Fechou?" da planilha VENCE, quando existe e diz algo:
+            // é o que o cliente declarou, não o que a gente deduziu. `null` (célula
+            // vazia) cai nos sinais de sempre — vazio não é "não fechou".
             closed: tipoPlanilha === 'venda'
               ? true
-              : sinais.fechou || (statusCol ? isWonStatus(statusRaw) : revenueBruto > 0),
+              : (closedCol ? parseFechou(row[closedCol]) : null)
+                ?? (sinais.fechou || (statusCol ? isWonStatus(statusRaw) : revenueBruto > 0)),
             // Chave de NEGÓCIO da fonte (nº do orçamento/proposta). É a ponte
             // entre o relatório de Leads e o de Faturamento: o mesmo número
             // aparece nos dois, e é por ele que a venda encontra o lead que

@@ -809,81 +809,160 @@ function MetaPagesContent({
   );
 }
 
+type SheetsCfg = {
+  sheetUrl: string; tipoPlanilha: string; fonteFaturamento: boolean; ativo: boolean;
+  abaExemplo: string | null; ultimaSync: string | null; ultimoErro: string | null;
+  mapeamento: Record<string, string | null> | null;
+};
+
+/**
+ * Vincular a planilha do Google Sheets de um cliente e deixar a rotina diária
+ * importá-la (pedido do Matheus, 2026-09-28).
+ *
+ * ⚠️ A IA de mapeamento roda UMA vez, aqui — a rotina diária reusa o de-para
+ * salvo. Se ela rodasse todo dia, seria custo de IA por cliente por dia para
+ * responder sempre a mesma coisa.
+ */
 function GoogleSheetsContent({ clientId, onDone, onCancel }: { clientId: string; onDone: () => void; onCancel: () => void }) {
   const [url, setUrl] = useState('');
-  const [status, setStatus] = useState<'idle' | 'saving' | 'analyzing'>('idle');
+  const [cfg, setCfg] = useState<SheetsCfg | null>(null);
+  const [status, setStatus] = useState<'idle' | 'saving' | 'analyzing' | 'importing'>('idle');
   const [error, setError] = useState('');
-  const [hasResult, setHasResult] = useState<boolean | null>(null);
+  const [aviso, setAviso] = useState('');
+  const [abas, setAbas] = useState<string[]>([]);
+  const [abaDoMes, setAbaDoMes] = useState<string | null>(null);
+  const [colunas, setColunas] = useState<Record<string, string | null> | null>(null);
+  const [fatura, setFatura] = useState(false);
+  const [ativo, setAtivo] = useState(false);
+  const [resumo, setResumo] = useState('');
 
   useEffect(() => {
     fetch(`/api/clients/${clientId}/sheets`)
-      .then(r => r.ok ? r.json() as Promise<{ sheetsUrl: string | null; sheetsResult: unknown }> : null)
+      .then(r => r.ok ? r.json() as Promise<{ sheetsUrl: string | null; config: SheetsCfg | null }> : null)
       .then(d => {
         if (d?.sheetsUrl) setUrl(d.sheetsUrl);
-        setHasResult(!!d?.sheetsResult);
+        if (d?.config) {
+          setCfg(d.config);
+          setFatura(d.config.fonteFaturamento);
+          setAtivo(d.config.ativo);
+          setColunas(d.config.mapeamento);
+          setAbaDoMes(d.config.abaExemplo);
+        }
       });
   }, [clientId]);
 
-  async function handleSave() {
-    if (!url.trim()) return;
-    if (!url.includes('docs.google.com/spreadsheets')) {
-      setError('Cole uma URL válida do Google Sheets.');
-      return;
-    }
-    setStatus('saving');
-    const putRes = await fetch(`/api/clients/${clientId}/sheets`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sheetsUrl: url.trim() }),
+  async function salvar(extra: Partial<{ ativo: boolean; mapeamento: Record<string, string | null> }> = {}) {
+    const res = await fetch(`/api/clients/${clientId}/sheets`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sheetsUrl: url.trim(), fonteFaturamento: fatura, ativo, ...extra }),
     });
-    if (!putRes.ok) { setStatus('idle'); setError('Erro ao salvar.'); return; }
+    if (!res.ok) { const d = await res.json() as { error?: string }; throw new Error(d.error ?? 'Erro ao salvar.'); }
+  }
+
+  async function handleAnalisar() {
+    setError(''); setAviso(''); setResumo('');
+    if (!url.includes('docs.google.com/spreadsheets')) { setError('Cole uma URL válida do Google Sheets.'); return; }
+    setStatus('saving');
+    try { await salvar(); } catch (e) { setStatus('idle'); setError((e as Error).message); return; }
 
     setStatus('analyzing');
-    const postRes = await fetch(`/api/clients/${clientId}/sheets`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sheetsUrl: url.trim() }),
+    const res = await fetch(`/api/clients/${clientId}/sheets`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ acao: 'analisar' }),
     });
+    const d = await res.json() as {
+      error?: string; abas?: string[]; abaDoMes?: string | null; analisada?: string;
+      analise?: { mapping?: Record<string, string | null>; rowCount?: number };
+    };
     setStatus('idle');
-    if (!postRes.ok) {
-      const data = await postRes.json() as { error?: string };
-      setError(data.error ?? 'Erro ao analisar planilha.');
-      return;
-    }
+    if (!res.ok) { setError(d.error ?? 'Erro ao analisar a planilha.'); return; }
+    setAbas(d.abas ?? []);
+    setAbaDoMes(d.abaDoMes ?? null);
+    const m = d.analise?.mapping ?? null;
+    setColunas(m);
+    if (m) { try { await salvar({ mapeamento: m }); } catch { /* o de-para reaparece na próxima análise */ } }
+    // ⚠️ Sem a aba do mês a rotina NÃO inventa outra: avisa aqui, na configuração,
+    // em vez de deixar o gestor descobrir por um número errado na dashboard.
+    if (!d.abaDoMes) setAviso(`A aba do mês atual ainda não existe na planilha. Analisei "${d.analisada}" só para descobrir as colunas — a rotina diária vai esperar a aba do mês nascer.`);
+    setResumo(`${d.analise?.rowCount ?? 0} linhas lidas em "${d.analisada}".`);
+  }
+
+  async function handleImportar() {
+    setError(''); setAviso(''); setResumo(''); setStatus('importing');
+    try { await salvar({ ativo: true }); } catch (e) { setStatus('idle'); setError((e as Error).message); return; }
+    const res = await fetch(`/api/clients/${clientId}/sheets`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ acao: 'importar' }),
+    });
+    const d = await res.json() as { ok?: boolean; erro?: string; aba?: string; linhas?: number };
+    setStatus('idle');
+    if (!d.ok) { setError(d.erro ?? 'Erro ao importar.'); return; }
+    setAtivo(true);
+    setResumo(`Importado de "${d.aba}" — ${d.linhas ?? 0} linhas.`);
     onDone();
   }
 
   const busy = status !== 'idle';
-  const btnLabel = status === 'analyzing' ? 'Analisando...' : status === 'saving' ? 'Salvando...' : hasResult === false && url ? 'Analisar agora' : 'Vincular Planilha';
+  const temMapa = !!colunas && Object.values(colunas).some(Boolean);
 
   return (
     <>
       <div className="space-y-4 py-2">
         <p className="text-sm text-muted-foreground">
-          Cole o link da planilha do Google Sheets. Ela precisa estar como <strong>"qualquer pessoa com o link pode visualizar"</strong>.
+          Cole o link da planilha. Ela precisa estar como <strong>&quot;qualquer pessoa com o link pode visualizar&quot;</strong>.
+          Uma vez configurada, a rotina importa <strong>1× por dia</strong>, sozinha.
         </p>
         <div className="space-y-1.5">
           <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">URL da Planilha</label>
           <input
-            type="url"
-            placeholder="https://docs.google.com/spreadsheets/d/..."
-            value={url}
-            onChange={e => { setUrl(e.target.value); setError(''); }}
+            type="url" placeholder="https://docs.google.com/spreadsheets/d/..."
+            value={url} onChange={e => { setUrl(e.target.value); setError(''); }}
             className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
           />
-          {error && <p className="text-xs text-destructive">{error}</p>}
         </div>
-        {hasResult === false && url && status === 'idle' && (
-          <p className="text-xs text-amber-400/80">Planilha vinculada mas ainda não analisada. Clique em &quot;Analisar agora&quot; para buscar os dados de faturamento.</p>
+
+        <label className="flex items-start gap-2.5 rounded-lg border border-border bg-muted/20 p-3 cursor-pointer">
+          <input type="checkbox" checked={fatura} onChange={e => setFatura(e.target.checked)} className="mt-0.5" />
+          <span className="text-xs">
+            <b>Esta planilha é a fonte de faturamento do cliente</b>
+            <span className="block text-muted-foreground mt-0.5">
+              Marque só se o valor fechado dela for a receita real. Se o cliente já tem
+              outro relatório de vendas, deixe desmarcado — senão o mesmo faturamento conta duas vezes.
+            </span>
+          </span>
+        </label>
+
+        {abaDoMes && (
+          <p className="text-xs text-muted-foreground">
+            Aba do mês: <b className="text-foreground">{abaDoMes}</b>
+            {abas.length > 0 && <span className="text-muted-foreground/70"> · {abas.length} abas na planilha</span>}
+          </p>
         )}
-        {status === 'analyzing' && (
-          <p className="text-xs text-muted-foreground/70">A IA está lendo as abas da planilha. Isso pode levar alguns segundos...</p>
+        {temMapa && (
+          <div className="rounded-lg border border-border bg-muted/20 p-3">
+            <p className="text-xs font-semibold mb-1.5">Colunas reconhecidas</p>
+            <div className="flex flex-wrap gap-1.5">
+              {Object.entries(colunas!).filter(([, v]) => v).map(([k, v]) => (
+                <span key={k} className="rounded bg-background px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                  {k}: <b className="text-foreground">{v}</b>
+                </span>
+              ))}
+            </div>
+          </div>
         )}
+        {resumo && <p className="text-xs text-emerald-400">{resumo}</p>}
+        {aviso && <p className="text-xs text-amber-400/90">{aviso}</p>}
+        {error && <p className="text-xs text-destructive">{error}</p>}
+        {cfg?.ultimoErro && !error && <p className="text-xs text-amber-400/80">Última rodada: {cfg.ultimoErro}</p>}
+        {cfg?.ultimaSync && <p className="text-xs text-muted-foreground/70">Última importação: {new Date(cfg.ultimaSync).toLocaleString('pt-BR')}</p>}
+        {status === 'analyzing' && <p className="text-xs text-muted-foreground/70">A IA está lendo as colunas da planilha...</p>}
+        {status === 'importing' && <p className="text-xs text-muted-foreground/70">Importando a aba do mês...</p>}
       </div>
-      <DialogFooter>
+      <DialogFooter className="flex-wrap gap-2">
         <Button variant="outline" onClick={onCancel} disabled={busy}>Cancelar</Button>
-        <Button onClick={handleSave} disabled={busy || !url.trim()} className="bg-[#0F9D58] text-white hover:bg-[#0F9D58]/90">
-          {btnLabel}
+        <Button variant="outline" onClick={handleAnalisar} disabled={busy || !url.trim()}>
+          {status === 'analyzing' ? 'Analisando...' : temMapa ? 'Reanalisar colunas' : 'Analisar colunas'}
+        </Button>
+        <Button onClick={handleImportar} disabled={busy || !temMapa} className="bg-[#0F9D58] text-white hover:bg-[#0F9D58]/90">
+          {status === 'importing' ? 'Importando...' : ativo ? 'Importar agora' : 'Importar e ativar rotina'}
         </Button>
       </DialogFooter>
     </>

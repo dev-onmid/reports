@@ -94,6 +94,7 @@ const CRON_PREFIXES = [
   '/api/otimizacoes/resumo-diario-cron',
   '/api/relatorio-diario/cron',
   '/api/anotaai/sync-cron',
+  '/api/sheets/sync-cron',
   '/api/crm/backfill-ctwa',
   '/api/crm/sanear-kanban',
   '/api/crm/disparos/worker',

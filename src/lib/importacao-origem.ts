@@ -230,6 +230,36 @@ export function dedupPorTelefone<T extends {
 }
 
 /**
+ * Coluna de "fechou?" da planilha do cliente → booleano.
+ *
+ * Pedido do Matheus (2026-09-28), olhando o CRM em planilha da Odonto First:
+ * *"existem planilhas em que o lead tem uma certa qualificação de venda, então
+ * tem que contar com isso"*. Lá a venda mora em três colunas — `Orçam.` (o que
+ * foi proposto), `Fechou?` (✅/❌) e `Valor R$` (o que virou faturamento).
+ *
+ * ⚠️ Antes disso, a importação deduzia o fechamento de `revenue > 0`. Na planilha
+ * medida isso acerta por coincidência (9 fechadas, 9 com valor, nenhuma sem), mas
+ * quebra no primeiro ✅ lançado antes do valor — a venda existiria na planilha do
+ * cliente e não na dashboard.
+ *
+ * ⚠️ Vazio devolve `null`, não `false`: "a coluna não diz nada" é diferente de
+ * "não fechou", e quem chama precisa poder cair no sinal seguinte (status,
+ * receita) em vez de ter um `false` apagando o que já se sabia.
+ */
+export function parseFechou(v: unknown): boolean | null {
+  const s = String(v ?? '').trim();
+  if (!s) return null;
+  // Emoji primeiro: é o vocabulário real dessas planilhas (✅/❌), e o ❌ tem de
+  // ser lido ANTES de qualquer heurística de texto — ele é um "não" explícito.
+  if (/[✅✔☑🟢]/u.test(s)) return true;
+  if (/[❌✖✗🔴]/u.test(s)) return false;
+  const t = s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  if (/^(sim|s|yes|y|true|1|x|fechou|fechado|ganho|vendido)$/.test(t)) return true;
+  if (/^(nao|n|no|false|0|-|perdido|perdeu)$/.test(t)) return false;
+  return null;
+}
+
+/**
  * Numera as repetições de uma mesma chave, na ORDEM do arquivo.
  *
  * Existe para o ledger de faturamento, onde duas linhas podem ser idênticas em
