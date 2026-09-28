@@ -1497,6 +1497,7 @@ const SPREADSHEET_FIELD_GROUPS: Array<{
       { key: 'dealId', label: 'ID do negócio', hint: 'Identificador único — permite reimportar meses diferentes sem duplicar.' },
       { key: 'stage', label: 'Etapa do funil', hint: 'Ex: Abordagem D1, Reunião Agendada — diferente do status final.' },
       { key: 'updatedDate', label: 'Última atualização', hint: 'Data da última mudança no negócio — usada para resolver duplicados entre planilhas.' },
+      { key: 'closed', label: 'Fechou?', hint: 'Coluna que DIZ se a venda fechou (✅/❌, Sim/Não). Vence o que o sistema deduziria do valor ou do status.' },
     ],
   },
 ];
@@ -1527,6 +1528,7 @@ function SpreadsheetImportPanel() {
     dealId: '',
     stage: '',
     updatedDate: '',
+    closed: '',
   });
   /**
    * Um de-para de colunas POR FORMATO, indexado pela assinatura do cabeçalho.
@@ -1684,6 +1686,7 @@ function SpreadsheetImportPanel() {
             scheduledDate: f.mapping.scheduledDate ?? '', status: f.mapping.status ?? '',
             dealId: f.mapping.dealId ?? '', stage: f.mapping.stage ?? '',
             updatedDate: f.mapping.updatedDate ?? '',
+            closed: f.mapping.closed ?? '',
           };
         }
         setPorFormato(inicial);
@@ -1715,6 +1718,7 @@ function SpreadsheetImportPanel() {
         dealId: data.mapping.dealId ?? '',
         stage: data.mapping.stage ?? '',
         updatedDate: data.mapping.updatedDate ?? '',
+        closed: data.mapping.closed ?? '',
       }));
       const initialMappings: SpreadsheetMapping[] = data.clinicValues.map(v => ({ clinicValue: v, clientId: '', clientName: '' }));
       setMappings(initialMappings);
@@ -1846,6 +1850,7 @@ function SpreadsheetImportPanel() {
       dealId: '',
       stage: '',
       updatedDate: '',
+      closed: '',
     });
     setImportResults(null);
     setPorFormato({});

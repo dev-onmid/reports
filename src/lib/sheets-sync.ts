@@ -125,8 +125,12 @@ export async function sincronizarSheets(
   fd.append('clientId', cfg.clientId);
   fd.append('tipoPlanilha', cfg.tipoPlanilha);
   fd.append('mappings', JSON.stringify([{ file: `${aba}.xlsx`, clientId: cfg.clientId }]));
+  // O de-para da IA usa `revenue`/`name`/…; a rota de importação lê os overrides
+  // como `revenueColumn`/`nameColumn`/…. `clinic` fica de fora: aqui a planilha
+  // é de UM cliente só, e mandar a coluna de clínica faria a rota tentar o
+  // de-para clínica→cliente que não existe neste caminho.
   for (const [campo, coluna] of Object.entries(cfg.mapeamento ?? {})) {
-    if (coluna) fd.append(campo, coluna);
+    if (coluna && campo !== 'clinic') fd.append(`${campo}Column`, coluna);
   }
 
   const base = (process.env.APP_URL ?? process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000').replace(/\/$/, '');

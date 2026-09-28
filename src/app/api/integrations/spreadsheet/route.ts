@@ -160,6 +160,8 @@ export type SpreadsheetColumnMapping = {
   dealId?: string | null;
   stage?: string | null;
   updatedDate?: string | null;
+  /** Coluna que DECLARA o fechamento (✅/❌, Sim/Não) — ver parseFechou. */
+  closed?: string | null;
 };
 
 export type SpreadsheetMapping = {
@@ -256,6 +258,7 @@ Identifique:
 - "dealId": coluna de ID único do negócio/lead (se existir — usado pra cruzar a mesma planilha exportada em meses diferentes)
 - "stage": coluna de etapa do funil (ex: "Etapa", "Estágio", "Fase" — diferente de "status", representa em que ponto do funil o lead está, não o resultado final)
 - "updatedDate": coluna de última atualização/última modificação do negócio (diferente de "date", que é a data de criação)
+- "closed": coluna que DIZ se a venda foi fechada, marcada com ✅/❌ ou Sim/Não (ex.: "Fechou?", "Fechado", "Ganhou?"). É a DECLARAÇÃO do fechamento — não confunda com "revenue" (o valor) nem com "status" (a etapa).
 
 Retorne APENAS JSON (sem markdown):
 {
@@ -273,7 +276,8 @@ Retorne APENAS JSON (sem markdown):
   "status": "nome exato da coluna de status (null se não existir)",
   "dealId": "nome exato da coluna de ID do negócio (null se não existir)",
   "stage": "nome exato da coluna de etapa do funil (null se não existir)",
-  "updatedDate": "nome exato da coluna de última atualização (null se não existir)"
+  "updatedDate": "nome exato da coluna de última atualização (null se não existir)",
+  "closed": "nome exato da coluna de fechou sim/não (null se não existir)"
 }`;
 
   const res = await fetch('https://api.anthropic.com/v1/messages', {
@@ -1026,7 +1030,7 @@ export async function POST(req: NextRequest) {
     const dealIdCol = dealIdColumnOverride || null;
     const stageCol = stageColumnOverride || null;
     const updatedDateCol = updatedDateColumnOverride || null;
-    const closedCol = closedColumnOverride || null;
+    const closedCol = closedColumnOverride || null;  // ver parseFechou
     const specialtiesCol = findHeader(headers, [/especialidades/i]);
     const treatmentsCol = findHeader(headers, [/tratamentos/i]);
     const saleTypeCol = findHeader(headers, [/tipo\s+venda/i]);
