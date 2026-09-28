@@ -24,7 +24,7 @@ type MetaConn = { id: string; label: string; userName: string; userPicture?: str
 const PLATFORM_LABEL = (p: PlatformId) => PLATFORM_INFO[p].label;
 
 const COMING_SOON_PLATFORMS: PlatformId[] = [];
-const LINKABLE_PLATFORMS: PlatformId[] = ['meta_ads', 'google_ads', 'google_business', 'ga4'];
+const LINKABLE_PLATFORMS: PlatformId[] = ['meta_ads', 'google_ads', 'google_business', 'ga4', 'google_sheets'];
 
 type SortDirection = 'az' | 'za';
 
@@ -992,6 +992,12 @@ function ComingSoonContent({ platform, onCancel }: { platform: PlatformId; onCan
   );
 }
 
+// A descrição genérica do chooser fala de "ativos e contas", que não descreve
+// uma planilha — o Sheets é um link, não uma conta de anúncio com ativos dentro.
+const DESCRICAO_PLATAFORMA: Partial<Record<PlatformId, string>> = {
+  google_sheets: 'Ler a planilha do cliente todo dia, como se fosse uma importação.',
+};
+
 function PlatformChooser({
   onSelect,
   onCancel,
@@ -1026,7 +1032,7 @@ function PlatformChooser({
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-bold">{info.label}</p>
                 <p className="text-xs text-muted-foreground">
-                  Escolher ativos e contas vinculadas deste canal.
+                  {DESCRICAO_PLATAFORMA[platform] ?? 'Escolher ativos e contas vinculadas deste canal.'}
                 </p>
               </div>
               <Link2 className="h-4 w-4 text-muted-foreground" />
@@ -1292,6 +1298,8 @@ export function LinkAccountsDialog({
           <MetaPagesContent platform="instagram" clientId={clientId} onDone={closeDialog} onCancel={closeDialog} />
         ) : activePlatform === 'ga4' ? (
           <Ga4Content clientId={clientId} onDone={closeDialog} onCancel={closeDialog} />
+        ) : activePlatform === 'google_sheets' ? (
+          <GoogleSheetsContent clientId={clientId} onDone={closeDialog} onCancel={closeDialog} />
         ) : (
           <GoogleAdsContent clientId={clientId} onDone={closeDialog} onCancel={closeDialog} />
         )}
