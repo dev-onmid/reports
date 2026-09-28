@@ -100,6 +100,20 @@ Pedido do Matheus, saído da auditoria: *"a regra é a planilha ser o topo do fu
 - Verificado: banner renderizado no browser com o Tailwind REAL do projeto nos três estados (plural, singular, ausente); tsc limpo; eslint 164 antes e 164 depois (zero erro novo).
 - ⚠️ Receita de harness que funcionou aqui: compilar `globals.css` com `@tailwindcss/postcss` **de dentro do worktree** (script em `/tmp` não resolve `node_modules`), servir de `public/` e abrir por `preview_start {url}`. O `resize_window` do pane **continua reportando 980px** mesmo no preset mobile — não dá para medir layout estreito por ali.
 
+### O alerta exige prova de ANÚNCIO, e o post orgânico ganha canal próprio (2026-09-28)
+
+Matheus abriu a lista do alerta e achou conversa orgânica lá dentro: *"só pode realmente aqueles que a gente tem informação de anúncio — vai ter a campanha, o conjunto, vai ter alguma coisa ali"*. Estava certo.
+
+- **⚠️ `rastroPagoSql` é LARGA de propósito** (governa quais leads a dashboard conta, decisão de 23–24/09) e **três dos sinais dela não provam mídia paga**. Para o alerta — que vai à reunião com o cliente, onde uma linha orgânica derruba a credibilidade do número inteiro — nasceu **`provaDeAnuncioSql`**, mais estrita. Ficam: `ctwa_clid`, `click_code` do nosso `/r/`, click ids do Google, `campaign_name` (hierarquia RESOLVIDA) e `utm_medium` de mídia paga. **Saem**:
+  - **`source_id` sozinho** — ⚠️⚠️ o `externalAdReply` do WhatsApp vem **TAMBÉM quando a pessoa chega por um POST orgânico** do Facebook/Instagram; só o anúncio traz `ctwa_clid`. O caso que ele pegou: "Nathalia Claudia" (Bandeirantes) com `source_id`, `ad_name` "Sorrir é uma conquista!" e `source_url` fb.me, **sem ctwa e sem campanha**.
+  - **`fbclid`** — o Facebook carimba QUALQUER link clicado dentro dele, inclusive de publicação.
+  - **`utm_source` = instagram/facebook** — link na bio é orgânico.
+- ⚠️ **`rastroPagoSql` NÃO foi tocada.** Apertá-la tiraria leads da contagem da dashboard, que é outra decisão. Efeito do alerta estrito: saem 4 (Kumon 3, Bandeirantes 1); os outros 15 de Bandeirantes têm campanha real (`[ON] [ENGAJAMENTO] [AMPLO] 4.0`, `[ON] [IMPLANTES] [ANTIGO]`) e continuam.
+- **A informação orgânica estava sendo JOGADA FORA.** Pergunta dele na sequência: *"conseguimos saber se veio da rede social então, mesmo não sendo de anúncio?"* — conseguimos. Medido: **327 leads** com `source_url` e sem prova de anúncio, **311 deles parados como "Whatsapp" genérico**. A URL diz de onde vieram: **163 site do cliente, 126 post do Instagram, 37 post do Facebook** (domínios: dominos.com.br 136, instagram.com 126, fb.me 37, goomer.app 21…).
+- **`canalSql` passa a derivar `Instagram (post)`, `Facebook (post)` e `Site`** a partir de `source_url` — ⚠️ **só quando o canal gravado é GENÉRICO** (`whatsapp`/`chatwoot - whatsapp`/vazio). Canal que o cliente informou ('Indicação', 'TV', 'Facebook - WhatsApp') continua mandando; sobrescrevê-lo apagaria o que o CRM dele sabe. Simulado contra produção antes de subir: 137 → Site, 49 → Instagram (post), 48 → Facebook (post); **235 leads ganham origem real, nenhum a menos**.
+- **`fbclid` deixou de significar "Meta Ads"** no canal, pelo mesmo motivo — inflava o pago com clique em post. Medido antes: 1 lead no sistema inteiro tinha `fbclid` sozinho. `ROTULO_CANAL` ganhou `ig`/`fb` para ele não cair como "ig" cru.
+- ✅ Conferido na rota real depois do deploy: Bandeirantes 16 → **15** no alerta e **"Facebook (post)" com 14 leads** no resumo por canal; Kumon 22 → 19.
+
 ## Fontes de Captura mudou de lugar: CRM → Integrações do cliente (2026-09-24)
 
 Pedido do Matheus: "esse Fontes de Captura tem que ficar dentro da aba do cliente, dentro de integrações igual as demais."
