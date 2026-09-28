@@ -7,7 +7,7 @@
 //   node scratchpad/test-google-sheets.mjs
 import assert from 'node:assert';
 import { extrairSheetId, urlExportXlsx, normalizarNomeAba, resolverAbaDoMes,
-  escolherAbas, abasCompativeis, MAX_ABAS_POR_RODADA } from './build/google-sheets.mjs';
+  escolherAbas, abasCompativeis, MAX_ABAS_POR_RODADA, periodoDaAba } from './build/google-sheets.mjs';
 import { parseFechou } from './build/importacao-origem.mjs';
 let n = 0;
 const eq = (a, b, m) => { assert.deepStrictEqual(a, b, m); n++; };
@@ -104,8 +104,8 @@ eq(escolherAbas(ABAS, { fixas: null, seguirMes: true }, SET).abas, ['SETEMBRO 20
 
 // ⚠️ UNIÃO, não "ou": marcar histórico não pode fazer o mês corrente sumir
 eq(escolherAbas(ABAS, { fixas: ['JULHO 2026', 'AGOSTO 2026'], seguirMes: true }, SET).abas,
-  ['SETEMBRO 2026', 'AGOSTO 2026', 'JULHO 2026'],
-  'histórico escolhido SOMA ao mês atual, e sai na ordem da planilha');
+  ['JULHO 2026', 'AGOSTO 2026', 'SETEMBRO 2026'],
+  'histórico SOMA ao mês atual e sai da mais ANTIGA para a mais nova');
 
 // só as escolhidas, quando o gestor desliga o acompanhamento do mês
 eq(escolherAbas(ABAS, { fixas: ['JULHO 2026'], seguirMes: false }, SET).abas, ['JULHO 2026'],
@@ -133,7 +133,7 @@ eq(escolherAbas(['Setembro 2026', 'agosto  2026'], { fixas: ['AGOSTO 2026'], seg
   const r = escolherAbas(muitas, { fixas: muitas, seguirMes: false }, SET);
   eq(r.abas.length, MAX_ABAS_POR_RODADA, 'corta no teto');
   eq(r.cortadas.length, 20 - MAX_ABAS_POR_RODADA, 'diz o que ficou de fora');
-  eq(r.abas[0], 'ABA 0', 'mantém a ordem da planilha no corte');
+  eq(r.abas[0], 'ABA 0', 'aba sem mês no nome mantém a ordem da planilha');
 }
 
 // aba de resumo marcada por engano continua sendo escolha do gestor — quem a
@@ -161,5 +161,38 @@ eq(abasCompativeis({ A: ['Nome', 'Número', 'Valor R$', 'Fechou?'] }, ['A'], MAP
   'a coluna de clínica não é exigida (o sync não a envia)');
 // sem mapeamento, nada a exigir
 eq(abasCompativeis({ A: [] }, ['A'], null).ok, ['A'], 'sem de-para, toda aba passa');
+
+
+// ---------------------------------------------------------------------------
+// ⚠️⚠️ A ORDEM das abas é cronológica crescente, não a da planilha.
+// Medido em produção: importando SETEMBRO e depois AGOSTO da Odonto First, o
+// paciente que fechou em setembro (R$ 19.423,70) aparecia em agosto ainda sem
+// valor — e a linha de agosto, por ser a última a escrever, ZEROU a receita.
+// ---------------------------------------------------------------------------
+eq(periodoDaAba('SETEMBRO 2026'), { ano: 2026, mes: 8 }, 'mês por extenso com ano de 4');
+eq(periodoDaAba('MAI26'), { ano: 2026, mes: 4 }, 'mês curto com ano de 2');
+eq(periodoDaAba('JUNHO 26'), { ano: 2026, mes: 5 }, 'extenso com ano de 2');
+eq(periodoDaAba('SET'), { ano: 0, mes: 8 }, 'sem ano: mês conhecido, ano não');
+eq(periodoDaAba('RESUMO'), null, 'aba que não é de mês');
+eq(periodoDaAba('TIKTOK'), null, 'aba de outro assunto');
+eq(periodoDaAba('FUNIL ATUAL'), null, '"FUNIL ATUAL" não casa com nenhum mês');
+
+// o caso exato que perdeu a receita em produção
+eq(escolherAbas(['SETEMBRO 2026', 'AGOSTO 2026'], { fixas: ['AGOSTO 2026'], seguirMes: true }, SET).abas,
+  ['AGOSTO 2026', 'SETEMBRO 2026'],
+  'agosto entra ANTES de setembro, para a versão mais nova do lead escrever por último');
+
+// vira o ano corretamente
+eq(escolherAbas(['JANEIRO 2026', 'DEZEMBRO 2025', 'NOVEMBRO 2025'],
+  { fixas: ['JANEIRO 2026', 'DEZEMBRO 2025', 'NOVEMBRO 2025'], seguirMes: false }, SET).abas,
+  ['NOVEMBRO 2025', 'DEZEMBRO 2025', 'JANEIRO 2026'], 'ordena atravessando a virada do ano');
+
+// aba sem ano fica antes das datadas (não dá para saber de quando é)
+eq(escolherAbas(['SETEMBRO 2026', 'SET'], { fixas: ['SETEMBRO 2026', 'SET'], seguirMes: false }, SET).abas,
+  ['SET', 'SETEMBRO 2026'], 'mês sem ano perde para o mês datado');
+
+// aba que não é de mês vai primeiro — se for de leads, perde para qualquer mês
+eq(escolherAbas(['SETEMBRO 2026', 'RESUMO'], { fixas: ['SETEMBRO 2026', 'RESUMO'], seguirMes: false }, SET).abas,
+  ['RESUMO', 'SETEMBRO 2026'], 'aba sem data entra antes das datadas');
 
 console.log(`✓ ${n} asserts de Google Sheets / Fechou? passaram`);

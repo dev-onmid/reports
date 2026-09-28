@@ -111,6 +111,28 @@ export function resolverAbaDoMes(abas: string[], ref: Date): AbaResolvida {
 }
 
 
+/**
+ * Ano e mês que o nome da aba representa, quando dá para saber.
+ *
+ * Reusa o mesmo vocabulário de `resolverAbaDoMes` (mês por extenso ou em 3
+ * letras, ano de 4, de 2 ou ausente). Null quando o nome não é de mês —
+ * "RESUMO", "TIKTOK", "FUNIL ATUAL" e afins.
+ */
+export function periodoDaAba(nome: string): { ano: number; mes: number } | null {
+  const n = normalizarNomeAba(nome);
+  for (let i = 0; i < MESES.length; i++) {
+    const cheio = MESES[i];
+    const curto = cheio.slice(0, 3);
+    const pref = n.startsWith(cheio) ? cheio : n.startsWith(curto) ? curto : null;
+    if (!pref) continue;
+    const resto = n.slice(pref.length);
+    if (/^\d{4}$/.test(resto)) return { ano: Number(resto), mes: i };
+    if (/^\d{2}$/.test(resto)) return { ano: 2000 + Number(resto), mes: i };
+    if (resto === '') return { ano: 0, mes: i };  // sem ano: não dá para datar
+  }
+  return null;
+}
+
 /** Teto de abas por rodada — ver `escolherAbas`. */
 export const MAX_ABAS_POR_RODADA = 12;
 
@@ -170,9 +192,24 @@ export function escolherAbas(
     else sumidas.push(p);
   }
 
-  // Ordem da planilha, não a da escolha: a importação concatena as linhas, e ler
-  // na ordem em que a pasta as apresenta é o que o gestor espera ver.
-  const naOrdem = todas.filter(a => escolhidas.has(a));
+  // ⚠️⚠️ ORDEM CRONOLÓGICA CRESCENTE, não a da planilha (que lista o mês mais
+  // novo primeiro). A importação concatena as abas num lote só e o upsert casa a
+  // MESMA pessoa entre elas — então a última linha a escrever é a que fica.
+  // Medido com dado real: importando SETEMBRO e depois AGOSTO, um paciente que
+  // fechou em setembro (R$ 19.423,70) aparecia em agosto ainda sem valor, e a
+  // linha de agosto ZEROU a receita dele. Da mais antiga para a mais nova, a
+  // versão mais recente do lead é a última — que é o que a régua de recência
+  // pede em todo o resto do sistema.
+  // Aba sem nome de mês ("RESUMO", "TIKTOK") não dá para datar e vai primeiro:
+  // se ela for de leads, perde para qualquer mês; normalmente nem passa na
+  // checagem de cabeçalho.
+  const naOrdem = todas.filter(a => escolhidas.has(a)).sort((x, y) => {
+    const px = periodoDaAba(x), py = periodoDaAba(y);
+    if (!px && !py) return todas.indexOf(x) - todas.indexOf(y);
+    if (!px) return -1;
+    if (!py) return 1;
+    return px.ano - py.ano || px.mes - py.mes;
+  });
   return {
     abas: naOrdem.slice(0, MAX_ABAS_POR_RODADA),
     cortadas: naOrdem.slice(MAX_ABAS_POR_RODADA),
