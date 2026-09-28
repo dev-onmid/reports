@@ -5,11 +5,12 @@ import { markLeadResponded } from '@/lib/followup-send';
 import { analisarConversa } from '@/lib/crm-ai-analysis';
 import { enviarEventoMeta, enviarEventoGoogle, hasSuccessfulConversion } from '@/lib/conversions';
 import { upsertLeadFromConversation, ensureCrmMessagesSchema } from '@/lib/crm-conversation-sync';
+import { resolverLeadExistente } from '@/lib/lead-identity';
 import { fetchEvolutionMediaBase64, uploadBase64ToStorage } from '@/lib/evolution-media';
 import { logMissingAdTracking } from '@/lib/crm-tracking-debug';
 import { resolveMetaAdHierarchy } from '@/lib/meta-ad-resolver';
 import {
-  extractTrackingFromText, extractClickCode, matchClickByCode, mergeTracking,
+  extractTrackingFromText, extractClickCode, matchClickByCode, matchClickByWindow, mergeTracking,
   applyLeadAttribution, linkClickToLead, recordTrackingEvent, originFromTracking,
   type MergedTracking,
 } from '@/lib/lead-tracking';
@@ -317,7 +318,39 @@ export async function POST(
     const textTracking = extractTrackingFromText(rawMessageText);
     const clickCode = fromMe ? null : extractClickCode(rawMessageText);
     const clickMatch = clickCode ? await matchClickByCode(pool, clickCode).catch(() => null) : null;
-    const tracking = mergeTracking(textTracking, clickMatch);
+
+    // 3) Rede de segurança: o lead APAGOU a mensagem pré-preenchida e escreveu a
+    //    dele, então não há código nenhum para ler. Aí o clique é casado pela
+    //    JANELA DE TEMPO — mas só quando a conversa está NASCENDO agora, porque
+    //    mensagem de lead que já existe roubaria a atribuição dele.
+    //    ⚠️ A régua de "já existe" é a MESMA do upsert (resolverLeadExistente):
+    //    duas réguas de identidade divergentes aqui fariam a janela disparar em
+    //    lead antigo que a régua boa reconheceria. E `matchClickByWindow` recusa
+    //    qualquer ambiguidade — ver as travas lá.
+    //    ⚠️⚠️ E só quando a mensagem NÃO traz identificador melhor. Um lead que
+    //    chega por CTWA (anúncio da Meta, direto no WhatsApp) não tem código
+    //    nenhum — sem esta guarda, a janela penduraria nele o clique de OUTRA
+    //    pessoa que passou pelo /r/ no mesmo minuto, trocando uma atribuição
+    //    certa (Meta) por uma inventada. Prova sempre vence inferência.
+    const temSinalMelhor = Boolean(
+      ctwaClid || sourceId
+      || textTracking.utm_source || textTracking.utm_campaign
+      || textTracking.gclid || textTracking.wbraid || textTracking.gbraid
+      || textTracking.fbclid || textTracking.ttclid,
+    );
+    let clickJanela: Awaited<ReturnType<typeof matchClickByCode>> = null;
+    if (!clickMatch && !fromMe && !temSinalMelhor) {
+      const jaExiste = await resolverLeadExistente(pool, clientId, {
+        telefone: phone, lid: lid ?? undefined,
+      }).catch(() => null);
+      if (!jaExiste) {
+        clickJanela = await matchClickByWindow(pool, {
+          clientId, quando: messageCreatedAt,
+        }).catch(() => null);
+      }
+    }
+    const click = clickMatch ?? clickJanela;
+    const tracking = mergeTracking(textTracking, click);
     const origin = detectOrigin(ctwaClid, sourceUrl ?? tracking.source_url, tracking, rawMessageText, fromMe);
 
     // When fromMe=true the pushName is the instance owner's name, not the contact's.
@@ -333,7 +366,7 @@ export async function POST(
     // there's no other record of it once this request ends.
     const AD_ORIGINS = ['meta', 'instagram', 'google', 'tiktok', 'youtube'];
     const hasAnyTracking = Boolean(
-      ctwaClid || sourceId || clickMatch
+      ctwaClid || sourceId || click
       || tracking.utm_source || tracking.utm_campaign
       || tracking.gclid || tracking.wbraid || tracking.gbraid || tracking.fbclid || tracking.ttclid,
     );
@@ -388,8 +421,8 @@ export async function POST(
     // Região: prioriza a geolocalização do clique (localização real via headers
     // da Vercel); sem clique, deriva do DDD do telefone (sempre disponível p/ BR).
     const dddInfo = regiaoFromPhone(phone);
-    const regiao = (clickMatch?.geo_region || clickMatch?.geo_city)
-      ? { uf: clickMatch?.geo_region ?? null, cidade: clickMatch?.geo_city ?? null, fonte: 'ip' as const }
+    const regiao = (click?.geo_region || click?.geo_city)
+      ? { uf: click?.geo_region ?? null, cidade: click?.geo_city ?? null, fonte: 'ip' as const }
       : dddInfo
         ? { uf: dddInfo.uf, cidade: dddInfo.regiao, fonte: 'ddd' as const }
         : null;
@@ -400,11 +433,11 @@ export async function POST(
       regiaoUf: regiao?.uf ?? null,
       regiaoCidade: regiao?.cidade ?? null,
       regiaoFonte: regiao?.fonte ?? null,
-      hasClickMatch: Boolean(clickMatch),
+      hasClickMatch: Boolean(click),
       clientId,
     });
     // Elo permanente clique ↔ lead (o clique deixa de ser anônimo)
-    if (clickMatch) await linkClickToLead(pool, clickMatch.id, leadId);
+    if (click) await linkClickToLead(pool, click.id, leadId);
 
     const { rows: [crmLead] } = await pool.query<{ id: string; time_interno: boolean }>(
       `SELECT id, time_interno FROM public.crm_leads WHERE id = $1`,
@@ -477,12 +510,18 @@ export async function POST(
     // de rastreio (ctwa/código/utm). Mensagens orgânicas do meio da conversa não
     // geram evento — o histórico é de TOQUES DE ATRIBUIÇÃO, não de mensagens.
     if (crmLead && !fromMe) {
+      // ⚠️ 'link_click_janela' é tipo PRÓPRIO de propósito: atribuição por
+      // janela é inferência, e o histórico tem de dizer isso — auditar depois
+      // "quais leads foram atribuídos no chute" precisa ser uma consulta, não
+      // uma arqueologia.
       const eventType = ctwaClid ? 'ctwa'
         : clickMatch ? 'link_click'
+        : clickJanela ? 'link_click_janela'
         : (textTracking.utm_source || textTracking.gclid || textTracking.fbclid || textTracking.ttclid) ? 'utm_texto'
         : origin !== 'organic' && origin !== 'cliente' ? 'contexto'
         : 'organico';
-      const carriesIdentifier = eventType === 'ctwa' || eventType === 'link_click' || eventType === 'utm_texto';
+      const carriesIdentifier = eventType === 'ctwa' || eventType === 'link_click'
+        || eventType === 'link_click_janela' || eventType === 'utm_texto';
       if (isFirstInbound || carriesIdentifier) {
         await recordTrackingEvent(pool, {
           leadId: crmLead.id,

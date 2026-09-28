@@ -1,6 +1,6 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
-import { ensureLeadTrackingSchema, generateClickCode, geoFromHeaders } from '@/lib/lead-tracking';
+import { ensureLeadTrackingSchema, generateClickCode, encodeClickCodeInvisible, geoFromHeaders } from '@/lib/lead-tracking';
 
 export const dynamic = 'force-dynamic';
 
@@ -112,10 +112,24 @@ export async function GET(
     ).catch(() => null).finally(() => pool.end());
 
     const waNumber = (link.whatsapp as string).replace(/\D/g, '');
-    // O código substitui a URL crua de antes: mais curto, menos "spam" e a
-    // atribuição completa fica gravada server-side no clique — mesmo que o lead
-    // edite o resto da mensagem, basta a linha do código sobreviver.
-    const messageWithTracking = `${link.message as string}\n\nCód: ${clickCode}`;
+
+    // ⚠️ A mensagem pode vir na PRÓPRIA URL (`?text=`), e ela vence a cadastrada
+    // no link. É o que permite um único `/r/` servir vários contextos — o
+    // portfólio, cada peça do Adriano, cada produto da Romanza — sem cadastrar
+    // um link por mensagem. O parâmetro já era capturado em `extra_params` (não
+    // está em KNOWN_PARAMS) e continua sendo: fica o registro de qual texto
+    // aquele clique carregava.
+    const textoDaUrl = (sp.get('text') ?? '').trim().slice(0, 1000);
+    const baseMessage = textoDaUrl || (link.message as string);
+
+    // O código de rastreio vai INVISÍVEL (largura zero) no fim da mensagem: o
+    // lead não vê nada, e o webhook lê os bits de volta. Antes ia como texto
+    // ("Cód: A7X2K9") — o que funcionava, mas punha um código estranho na
+    // mensagem que a pessoa está prestes a mandar para o cliente.
+    // ⚠️ Se `encodeClickCodeInvisible` devolver vazio (código fora do
+    // alfabeto), a mensagem sai LIMPA em vez de sair quebrada — a atribuição
+    // fica com a janela de tempo, que existe exatamente para isso.
+    const messageWithTracking = `${baseMessage}${encodeClickCodeInvisible(clickCode)}`;
     const waText = encodeURIComponent(messageWithTracking);
     const waUrl = `https://wa.me/${waNumber}?text=${waText}`;
 

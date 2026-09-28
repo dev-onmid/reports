@@ -215,7 +215,7 @@ function SetupResult({ webhook, sourceName, sourceKind, clientId }: { webhook: W
 
 function UseInstructions({ link, onClose }: { link: RedirectLink; onClose: () => void }) {
   const [mode, setMode] = useState<'direct' | 'site' | 'custom'>('direct');
-  const [custom, setCustom] = useState({ source: '', medium: '', campaign: '', content: '' });
+  const [custom, setCustom] = useState({ source: '', medium: '', campaign: '', content: '', text: '' });
   const baseLink = `${publicBase()}/r/${link.slug}`;
   const metaLink = `${baseLink}?${META_UTM}`;
   const googleLink = `${baseLink}?${GOOGLE_UTM}`;
@@ -225,6 +225,9 @@ function UseInstructions({ link, onClose }: { link: RedirectLink; onClose: () =>
   if (custom.medium) customParams.set('utm_medium', custom.medium);
   if (custom.campaign) customParams.set('utm_campaign', custom.campaign);
   if (custom.content) customParams.set('utm_content', custom.content);
+  // `text` troca a mensagem só neste link, sem cadastrar um link novo — é o que
+  // deixa um único /r/ servir portfólio, peça a peça, produto a produto.
+  if (custom.text) customParams.set('text', custom.text);
   const customLink = customParams.toString() ? `${baseLink}?${customParams.toString()}` : baseLink;
 
   return (
@@ -326,6 +329,19 @@ function UseInstructions({ link, onClose }: { link: RedirectLink; onClose: () =>
                 </Field>
               ))}
             </div>
+            <Field label="Mensagem (opcional)">
+              <input
+                value={custom.text}
+                onChange={e => setCustom(prev => ({ ...prev, text: e.target.value }))}
+                placeholder="Olá! Vi o item 12 do portfólio e quero saber o preço"
+                className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm outline-none focus:border-primary"
+              />
+              <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">
+                Substitui a mensagem cadastrada SÓ neste link. Serve para usar o mesmo link em
+                contextos diferentes — cada peça do portfólio, cada produto — sem criar um link
+                para cada um. O rastreio do clique continua o mesmo.
+              </p>
+            </Field>
             <CodeLine text={customLink} />
           </div>
         )}

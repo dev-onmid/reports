@@ -32,8 +32,79 @@ export function generateClickCode(): string {
   return code;
 }
 
+// ── Código INVISÍVEL ─────────────────────────────────────────────────────────
+//
+// O código ia na mensagem como texto ("Cód: A7X2K9"). Funciona, mas o lead vê
+// — e mensagem pré-preenchida com um código estranho é atrito na hora exata em
+// que ele decidiu falar com o cliente. Agora o mesmo código viaja como bits em
+// caracteres de largura zero, colados no fim da mensagem: some da tela e chega
+// inteiro do outro lado.
+//
+// ⚠️ Dois caracteres só, e de propósito: ZWSP (U+200B) = 0 e ZWNJ (U+200C) = 1.
+// O ZWJ (U+200D) ficou de fora porque é o que une sequências de emoji — um
+// código que caísse no meio de um emoji seria remontado pelo cliente de
+// WhatsApp e voltaria corrompido.
+//
+// ⚠️ Isto é BEST-EFFORT, não garantia: o lead pode apagar a mensagem inteira e
+// escrever a dele, e aí não há código nenhum para ler. Quem cobre esse caso é
+// `matchClickByWindow` (a janela de tempo), não este código.
+const ZW_ZERO = '\u200B';
+const ZW_UM = '\u200C';
+const BITS_POR_SIMBOLO = 5; // 31 símbolos no alfabeto cabem em 5 bits
+const BITS_TOTAIS = CODE_LENGTH * BITS_POR_SIMBOLO;
+
+/** Converte o código legível na sequência invisível que vai na mensagem. */
+export function encodeClickCodeInvisible(code: string): string {
+  let bits = '';
+  for (const ch of String(code ?? '').toUpperCase()) {
+    const idx = CODE_ALPHABET.indexOf(ch);
+    if (idx < 0) return ''; // código fora do alfabeto: não inventa bits
+    bits += idx.toString(2).padStart(BITS_POR_SIMBOLO, '0');
+  }
+  if (bits.length !== BITS_TOTAIS) return '';
+  return [...bits].map(b => (b === '1' ? ZW_UM : ZW_ZERO)).join('');
+}
+
+/**
+ * Lê o código invisível de volta.
+ *
+ * ⚠️ Varre TODAS as sequências candidatas, não só a primeira: se o cliente de
+ * WhatsApp inserir um caractere de largura zero por conta própria (acontece em
+ * emoji e em texto bidirecional), a primeira sequência pode ser lixo e a boa
+ * estar logo adiante. Código decodificado errado não faz estrago — ele
+ * simplesmente não casa com clique nenhum, e a janela de tempo assume.
+ */
+function decodeClickCodeInvisible(texto: string): string | null {
+  const candidatos = texto.match(new RegExp(`[${ZW_ZERO}${ZW_UM}]{${BITS_TOTAIS},}`, 'g'));
+  if (!candidatos) return null;
+  // ⚠️ Do FIM para o começo, e dentro da sequência os ÚLTIMOS bits: o código é
+  // colado no fim da mensagem. Ler do começo erraria se o cliente de WhatsApp
+  // grudasse um caractere de largura zero antes dele (a sequência viraria 31
+  // caracteres e o recorte sairia deslocado em um bit).
+  for (const bruto of [...candidatos].reverse()) {
+    const bits = [...bruto].slice(-BITS_TOTAIS).map(c => (c === ZW_UM ? '1' : '0')).join('');
+    let code = '';
+    let valido = true;
+    for (let i = 0; i < CODE_LENGTH; i++) {
+      const idx = parseInt(bits.slice(i * BITS_POR_SIMBOLO, (i + 1) * BITS_POR_SIMBOLO), 2);
+      if (!(idx >= 0 && idx < CODE_ALPHABET.length)) { valido = false; break; }
+      code += CODE_ALPHABET[idx];
+    }
+    if (valido) return code;
+  }
+  return null;
+}
+
+/**
+ * Extrai o código da mensagem. Tenta o invisível (formato atual) e cai no
+ * texto "Cód: XXXXXX" — que o `/r/` não escreve mais, mas ainda pode chegar de
+ * quem clicou antes do deploy e só foi mandar a mensagem depois.
+ */
 export function extractClickCode(text: string | null | undefined): string | null {
-  const match = String(text ?? '').match(CLICK_CODE_REGEX);
+  const s = String(text ?? '');
+  const invisivel = decodeClickCodeInvisible(s);
+  if (invisivel) return invisivel;
+  const match = s.match(CLICK_CODE_REGEX);
   return match ? match[1].toUpperCase() : null;
 }
 
@@ -266,6 +337,78 @@ export async function matchClickByCode(pool: Pool, code: string): Promise<ClickT
     [code],
   );
   return click ?? null;
+}
+
+/**
+ * Janela padrão da atribuição por tempo. Dois minutos porque é o intervalo real
+ * entre clicar no botão de WhatsApp e mandar a primeira mensagem — e porque o
+ * risco de dois leads caírem na mesma janela cresce com ela (medido em 28/09:
+ * 2 min ≈ 1,2% de colisão no cliente de 9 leads/dia e 8,4% no de 63/dia).
+ */
+export const JANELA_ATRIBUICAO_MIN = 2;
+
+/**
+ * Casa clique ↔ lead pela JANELA DE TEMPO, quando o código não chegou (o lead
+ * apagou a mensagem pré-preenchida e escreveu a dele).
+ *
+ * ⚠️⚠️ Isto é INFERÊNCIA, não prova — e por isso recusa qualquer ambiguidade
+ * em vez de escolher a mais provável. Atribuir errado é PIOR que não atribuir:
+ * a Biblioteca de Criativos, o funil por canal e a decisão de verba saem todos
+ * daqui, e um palpite silencioso contamina os três sem deixar rastro. As duas
+ * travas:
+ *
+ *  1. Exatamente UM clique sem dono na janela. Dois cliques = dois candidatos,
+ *     e não há como saber qual é este lead.
+ *  2. Nenhum OUTRO lead do mesmo cliente nascido na janela. Se dois leads
+ *     entram juntos, o clique pode ser do outro.
+ *
+ * Quem decide que a conversa é NOVA é o chamador (com a régua de identidade de
+ * lead-identity.ts) — mensagem de lead que já existe nunca chega aqui, senão a
+ * janela roubaria a atribuição de um lead antigo.
+ */
+export async function matchClickByWindow(
+  pool: Pool,
+  opts: { clientId: string; quando: Date | string; janelaMin?: number },
+): Promise<ClickTracking | null> {
+  await ensureLeadTrackingSchema(pool);
+  const janela = Math.max(1, Math.min(opts.janelaMin ?? JANELA_ATRIBUICAO_MIN, 60));
+  // Aceita Date ou ISO porque o webhook normaliza o carimbo do provedor em
+  // string (parseProviderTimestamp). Carimbo ilegível cai no relógio atual em
+  // vez de virar um intervalo inválido no SQL.
+  const bruto = opts.quando instanceof Date ? opts.quando : new Date(String(opts.quando ?? ''));
+  const fim = Number.isNaN(bruto.getTime()) ? new Date() : bruto;
+
+  // Trava 1 — LIMIT 2 de propósito: só precisamos saber se é exatamente um.
+  const { rows: cliques } = await pool.query<ClickTracking>(
+    `SELECT k.id, k.redirect_id, k.click_code, k.url,
+            k.utm_source, k.utm_medium, k.utm_campaign, k.utm_content, k.utm_term,
+            k.gclid, k.wbraid, k.gbraid, k.fbclid, k.ttclid, k.msclkid,
+            k.keyword, k.matchtype, k.device, k.network, k.placement, k.loc_physical,
+            k.geo_country, k.geo_region, k.geo_city, k.created_at
+       FROM public.link_redirect_clicks k
+       JOIN public.link_redirects r ON r.id = k.redirect_id
+      WHERE r.client_id = $1
+        AND k.lead_id IS NULL
+        AND k.created_at BETWEEN $2::timestamptz - ($3 || ' minutes')::interval AND $2::timestamptz
+      ORDER BY k.created_at DESC
+      LIMIT 2`,
+    [opts.clientId, fim.toISOString(), String(janela)],
+  );
+  if (cliques.length !== 1) return null;
+
+  // Trava 2 — concorrente nascido na mesma janela. O lead desta mensagem ainda
+  // não existe (a janela roda ANTES do upsert), então tudo que contar aqui é
+  // outro lead disputando o mesmo clique.
+  const { rows: [{ concorrentes }] } = await pool.query<{ concorrentes: string }>(
+    `SELECT COUNT(*)::text AS concorrentes
+       FROM public.crm_leads
+      WHERE client_id = $1
+        AND created_at BETWEEN $2::timestamptz - ($3 || ' minutes')::interval AND $2::timestamptz`,
+    [opts.clientId, fim.toISOString(), String(janela)],
+  );
+  if (Number(concorrentes) > 0) return null;
+
+  return cliques[0];
 }
 
 /** Marca o clique como convertido em lead (elo permanente clique↔lead). */
