@@ -13,13 +13,31 @@
  *
  * ⚠️ A expressão pressupõe que a tabela `crm_leads` esteja sem alias (ou que o
  * caller passe o alias em `pre`).
+ *
+ * ⚠️ `fbclid` NÃO é mais sinal de Meta Ads (2026-09-28): o Facebook carimba esse
+ * parâmetro em QUALQUER link clicado dentro dele, inclusive de publicação
+ * orgânica, então ele inflava o canal pago. Quem prova anúncio de WhatsApp é o
+ * `ctwa_clid`. Impacto medido antes de tirar: 1 lead no sistema inteiro tinha
+ * `fbclid` sozinho.
  */
 export function canalSql(pre = ''): string {
   const c = pre ? `${pre}.` : '';
   return `CASE
-  WHEN NULLIF(${c}ctwa_clid, '') IS NOT NULL OR NULLIF(${c}fbclid, '') IS NOT NULL THEN 'Meta Ads'
+  WHEN NULLIF(${c}ctwa_clid, '') IS NOT NULL THEN 'Meta Ads'
   WHEN NULLIF(${c}gclid, '') IS NOT NULL OR NULLIF(${c}wbraid, '') IS NOT NULL
     OR NULLIF(${c}gbraid, '') IS NOT NULL THEN 'Google Ads'
+  -- ⚠️ O WhatsApp entrega a URL de ORIGEM (externalAdReply) mesmo quando a pessoa
+  -- veio de uma PUBLICAÇÃO, não de anúncio — e nesse caso não há ctwa_clid. Sem
+  -- esta regra, 311 leads que sabemos terem vindo do Instagram, do Facebook ou do
+  -- site do cliente ficavam no balaio 'Whatsapp' (medido em 2026-09-28).
+  -- Só atua quando o canal gravado é GENÉRICO: canal que o cliente informou
+  -- ('Indicação', 'TV', 'Facebook - WhatsApp') continua mandando.
+  WHEN NULLIF(${c}source_url, '') IS NOT NULL
+   AND COALESCE(lower(btrim(${c}canal)), '') IN ('', 'whatsapp', 'chatwoot - whatsapp')
+    THEN CASE
+      WHEN ${c}source_url ILIKE '%instagram.com%' OR ${c}source_url ILIKE '%ig.me%' THEN 'Instagram (post)'
+      WHEN ${c}source_url ILIKE '%fb.me%' OR ${c}source_url ILIKE '%facebook.com%' THEN 'Facebook (post)'
+      ELSE 'Site' END
   WHEN NULLIF(btrim(${c}canal), '') IS NOT NULL
    AND lower(btrim(${c}canal)) NOT IN ('agendor', 'datalytics', 'planilha', 'importacao', 'crm')
     THEN btrim(${c}canal)
@@ -41,7 +59,9 @@ export const ROTULO_CANAL: Record<string, string> = {
   meta: 'Meta Ads',
   google: 'Google Ads',
   instagram: 'Instagram',
+  ig: 'Instagram',
   facebook: 'Facebook',
+  fb: 'Facebook',
   whatsapp: 'WhatsApp',
   tiktok: 'TikTok',
   organic: 'Orgânico / Direto',

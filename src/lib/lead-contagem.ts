@@ -121,22 +121,59 @@ export function leadVisivelCrmSql(alias = ''): string {
  * Predicado: lead que o ANÚNCIO comprovadamente trouxe e que o cliente NÃO
  * cadastrou (pedido do Matheus, 2026-09-28).
  *
- * É a conversa que nasceu no WhatsApp com prova de tráfego pago (CTWA, código do
- * link /r/, gclid, fbclid, UTM de campanha) **num cliente que TEM porta validada**
- * — ou seja, que manda planilha/CRM e, mesmo assim, não tem essa pessoa lá.
+ * É a conversa que nasceu no WhatsApp com **prova de anúncio** num cliente que
+ * TEM porta validada — ou seja, que manda planilha/CRM e, mesmo assim, não tem
+ * essa pessoa lá.
  *
  * ⚠️ Estes leads CONTAM na dashboard (Lei 3). O que o alerta diz não é "estão
  * fora da conta", e sim que **o número que o cliente enxerga no sistema dele é
  * menor que o real** — a diferença é falta de cadastro na ponta, e nós temos o
  * rastreio para provar. Medido na Sorrifácil Itapema: 23 na planilha da clínica
- * contra 44 aqui, sendo 22 conversas com `ctwa_clid` e nome de campanha.
+ * contra 44 aqui, sendo 21 conversas com `ctwa_clid` e nome de campanha.
  *
  * ⚠️ Cliente SEM porta validada fica fora por construção: lá o chat É o CRM
  * (Lei 3), não há planilha com que comparar e o alerta seria ruído.
  */
 export function rastreadoForaDoCrmSql(alias = ''): string {
-  return `((${portaSql(alias)}) = 'chat' AND ${rastroPagoSql(alias)}
+  return `((${portaSql(alias)}) = 'chat' AND ${provaDeAnuncioSql(alias)}
     AND ${col(alias, 'client_id')} IN ${clientesComPortaValidadaSql()})`;
+}
+
+/**
+ * Prova de ANÚNCIO — mais estrito que `rastroPagoSql`, e de propósito.
+ *
+ * ⚠️ O alerta vai para a reunião com o cliente ("o anúncio trouxe mais gente do
+ * que está no seu sistema"). Uma única linha orgânica ali derruba a credibilidade
+ * do número inteiro, então aqui só entra o que PROVA mídia paga. Três sinais do
+ * `rastroPagoSql` ficaram de fora depois que o Matheus abriu a lista e achou
+ * conversa orgânica (2026-09-28):
+ *
+ *  · `source_id` sozinho — o `externalAdReply` do WhatsApp vem TAMBÉM quando a
+ *    pessoa chega por um POST orgânico do Facebook/Instagram. O caso que ele
+ *    pegou: "Nathalia Claudia" (Bandeirantes) com `source_id`, `ad_name`
+ *    "Sorrir é uma conquista!" e `source_url` fb.me — sem `ctwa_clid` e sem
+ *    campanha nenhuma. Era post, não anúncio.
+ *  · `fbclid` — o Facebook carimba QUALQUER link clicado dentro dele, inclusive
+ *    de publicação orgânica.
+ *  · `utm_source` = instagram/facebook/… — link na bio é orgânico.
+ *
+ * O que fica prova de verdade: `ctwa_clid` (clique em anúncio de WhatsApp), o
+ * `click_code` do nosso `/r/`, os click ids do Google, `campaign_name` (a
+ * hierarquia do anúncio foi RESOLVIDA, então existe campanha de verdade) e
+ * `utm_medium` de mídia paga.
+ *
+ * ⚠️ NÃO usar isto na lei de contagem: lá `rastroPagoSql` continua valendo, e
+ * apertá-la tiraria leads da dashboard — decisão de 2026-09-23/24, que não está
+ * em jogo aqui.
+ */
+export function provaDeAnuncioSql(alias = ''): string {
+  const c = (n: string) => col(alias, n);
+  return `(NULLIF(${c('ctwa_clid')}, '') IS NOT NULL
+    OR NULLIF(${c('click_code')}, '') IS NOT NULL
+    OR NULLIF(${c('gclid')}, '') IS NOT NULL
+    OR NULLIF(${c('wbraid')}, '') IS NOT NULL OR NULLIF(${c('gbraid')}, '') IS NOT NULL
+    OR NULLIF(${c('campaign_name')}, '') IS NOT NULL
+    OR COALESCE(lower(${c('utm_medium')}) IN ('cpc', 'paid', 'paid_social', 'ppc'), FALSE))`;
 }
 
 /** Predicado: porta validada (planilha/CRM externo/formulário) — decide se o topo do funil é o CRM (Lei 1) ou as plataformas (Lei 3). */
