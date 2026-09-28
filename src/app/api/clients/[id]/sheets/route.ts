@@ -44,6 +44,7 @@ export async function PUT(req: NextRequest, { params }: Ctx) {
   const body = await req.json().catch(() => ({})) as {
     sheetsUrl?: string; tipoPlanilha?: string; fonteFaturamento?: boolean;
     ativo?: boolean; mapeamento?: Record<string, string | null>;
+    abas?: string[]; seguirMes?: boolean;
   };
   const sheetId = extrairSheetId(body.sheetsUrl);
   if (!sheetId) return Response.json({ error: 'Cole o link de uma planilha do Google Sheets.' }, { status: 400 });
@@ -68,8 +69,8 @@ export async function PUT(req: NextRequest, { params }: Ctx) {
     await ensureSheetsSchema(pool);
     await pool.query(
       `INSERT INTO public.client_sheets
-         (client_id, sheet_id, sheet_url, tipo_planilha, fonte_faturamento, ativo, mapeamento)
-       VALUES ($1, $2, $3, $4, $5, COALESCE($6, FALSE), $7::jsonb)
+         (client_id, sheet_id, sheet_url, tipo_planilha, fonte_faturamento, ativo, mapeamento, abas, seguir_mes)
+       VALUES ($1, $2, $3, $4, $5, COALESCE($6, FALSE), $7::jsonb, $8::jsonb, COALESCE($9, TRUE))
        ON CONFLICT (client_id) DO UPDATE SET
          sheet_id = EXCLUDED.sheet_id,
          sheet_url = EXCLUDED.sheet_url,
@@ -79,10 +80,16 @@ export async function PUT(req: NextRequest, { params }: Ctx) {
          -- Mapeamento só é sobrescrito quando vem preenchido: salvar a URL de
          -- novo não pode apagar o de-para de colunas que a IA já resolveu.
          mapeamento = COALESCE($7::jsonb, public.client_sheets.mapeamento),
+         abas = COALESCE($8::jsonb, public.client_sheets.abas),
+         seguir_mes = COALESCE($9, public.client_sheets.seguir_mes),
          atualizado_em = NOW()`,
       [id, sheetId, String(body.sheetsUrl), tipo, fonte,
        body.ativo === undefined ? null : body.ativo,
-       body.mapeamento ? JSON.stringify(body.mapeamento) : null]
+       body.mapeamento ? JSON.stringify(body.mapeamento) : null,
+       // ⚠️ Lista VAZIA é uma escolha ("nenhuma aba fixa, só o mês") e precisa
+       // gravar `[]`; `undefined` é "não mexi nisso" e preserva o que está lá.
+       body.abas === undefined ? null : JSON.stringify(body.abas.filter(a => typeof a === 'string').slice(0, 60)),
+       body.seguirMes === undefined ? null : body.seguirMes]
     );
     return Response.json({ ok: true });
   } catch (e) {
@@ -149,9 +156,10 @@ export async function POST(req: NextRequest, { params }: Ctx) {
     await pool.query(
       `UPDATE public.client_sheets
           SET aba_exemplo = $2, mapeamento = COALESCE($3::jsonb, mapeamento),
+              abas_vistas = $4::jsonb,
               ultimo_erro = NULL, atualizado_em = NOW()
         WHERE client_id = $1`,
-      [id, alvo, mapa ? JSON.stringify(mapa) : null]
+      [id, alvo, mapa ? JSON.stringify(mapa) : null, JSON.stringify(wb.SheetNames)]
     );
     return Response.json({ ok: true, abas: wb.SheetNames, abaDoMes: aba, motivoAba: motivo, analisada: alvo, analise });
   } catch (e) {

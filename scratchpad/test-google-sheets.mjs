@@ -6,7 +6,8 @@
 //   for f in google-sheets importacao-origem; do mv scratchpad/build/$f.js scratchpad/build/$f.mjs; done
 //   node scratchpad/test-google-sheets.mjs
 import assert from 'node:assert';
-import { extrairSheetId, urlExportXlsx, normalizarNomeAba, resolverAbaDoMes } from './build/google-sheets.mjs';
+import { extrairSheetId, urlExportXlsx, normalizarNomeAba, resolverAbaDoMes,
+  escolherAbas, abasCompativeis, MAX_ABAS_POR_RODADA } from './build/google-sheets.mjs';
 import { parseFechou } from './build/importacao-origem.mjs';
 let n = 0;
 const eq = (a, b, m) => { assert.deepStrictEqual(a, b, m); n++; };
@@ -88,5 +89,77 @@ const ok = (c, m) => { assert.ok(c, m); n++; };
   eq(parseFechou('Fechado'), true, 'fechado');
   eq(parseFechou('perdido'), false, 'perdido');
 }
+
+
+// ---------------------------------------------------------------------------
+// escolherAbas — o gestor escolhe as abas (pedido do Matheus, 2026-09-28).
+// Abas reais da Odonto First, na ordem em que a planilha as lista.
+// ---------------------------------------------------------------------------
+const ABAS = ['RESUMO', 'SETEMBRO 2026', 'AGOSTO 2026', 'JULHO 2026', 'JUNHO 26', 'MAI26', 'FUNIL ATUAL'];
+const SET = new Date(2026, 8, 15); // setembro/2026
+
+// padrão (config antiga, sem escolha): só o mês — é o comportamento de antes
+eq(escolherAbas(ABAS, {}, SET).abas, ['SETEMBRO 2026'], 'sem escolha, só a aba do mês');
+eq(escolherAbas(ABAS, { fixas: null, seguirMes: true }, SET).abas, ['SETEMBRO 2026'], 'fixas null = só o mês');
+
+// ⚠️ UNIÃO, não "ou": marcar histórico não pode fazer o mês corrente sumir
+eq(escolherAbas(ABAS, { fixas: ['JULHO 2026', 'AGOSTO 2026'], seguirMes: true }, SET).abas,
+  ['SETEMBRO 2026', 'AGOSTO 2026', 'JULHO 2026'],
+  'histórico escolhido SOMA ao mês atual, e sai na ordem da planilha');
+
+// só as escolhidas, quando o gestor desliga o acompanhamento do mês
+eq(escolherAbas(ABAS, { fixas: ['JULHO 2026'], seguirMes: false }, SET).abas, ['JULHO 2026'],
+  'sem seguirMes, só as escolhidas');
+eq(escolherAbas(ABAS, { fixas: [], seguirMes: false }, SET).abas, [], 'nada escolhido e sem mês = nada');
+
+// a mesma aba marcada e sendo a do mês não entra duas vezes
+eq(escolherAbas(ABAS, { fixas: ['SETEMBRO 2026'], seguirMes: true }, SET).abas, ['SETEMBRO 2026'],
+  'a aba do mês marcada à mão não duplica');
+
+// ⚠️ a clínica renomeia a aba: a escolha casa sem acento/caixa/espaço
+eq(escolherAbas(['Setembro 2026', 'agosto  2026'], { fixas: ['AGOSTO 2026'], seguirMes: false }, SET).abas,
+  ['agosto  2026'], 'casa a escolha mesmo com caixa e espaço diferentes');
+
+// aba escolhida que sumiu não derruba o resto
+{
+  const r = escolherAbas(ABAS, { fixas: ['MARÇO 2026', 'JULHO 2026'], seguirMes: false }, SET);
+  eq(r.abas, ['JULHO 2026'], 'a que existe entra');
+  eq(r.sumidas, ['MARÇO 2026'], 'a que sumiu é reportada, não vira erro');
+}
+
+// teto por rodada
+{
+  const muitas = Array.from({ length: 20 }, (_, i) => `ABA ${i}`);
+  const r = escolherAbas(muitas, { fixas: muitas, seguirMes: false }, SET);
+  eq(r.abas.length, MAX_ABAS_POR_RODADA, 'corta no teto');
+  eq(r.cortadas.length, 20 - MAX_ABAS_POR_RODADA, 'diz o que ficou de fora');
+  eq(r.abas[0], 'ABA 0', 'mantém a ordem da planilha no corte');
+}
+
+// aba de resumo marcada por engano continua sendo escolha do gestor — quem a
+// barra é a checagem de cabeçalho, não esta função
+eq(escolherAbas(ABAS, { fixas: ['RESUMO'], seguirMes: false }, SET).abas, ['RESUMO'],
+  'escolher uma aba fora do padrão de mês é permitido aqui');
+
+// ---------------------------------------------------------------------------
+// abasCompativeis — impede que UMA aba com layout diferente derrube o lote todo
+// ---------------------------------------------------------------------------
+const MAPA = { name: 'Nome', phone: 'Número', revenue: 'Valor R$', closed: 'Fechou?', clinic: 'Unidade' };
+const CAB = {
+  'SETEMBRO 2026': ['Data', 'Nome', 'Número', 'Valor R$', 'Fechou?'],
+  'JULHO 2026': ['Data', 'Nome', 'Número'],            // sem valor nem fechou
+  'RESUMO': ['Indicador', 'Total'],                     // aba de resumo
+};
+{
+  const r = abasCompativeis(CAB, ['SETEMBRO 2026', 'JULHO 2026', 'RESUMO'], MAPA);
+  eq(r.ok, ['SETEMBRO 2026'], 'só a aba com todas as colunas entra');
+  eq(r.incompativeis.map(i => i.aba), ['JULHO 2026', 'RESUMO'], 'as outras são separadas');
+  eq(r.incompativeis[0].faltam, ['Valor R$', 'Fechou?'], 'diz QUAIS colunas faltam');
+}
+// ⚠️ `clinic` fica de fora da exigência: o sync não manda essa coluna
+eq(abasCompativeis({ A: ['Nome', 'Número', 'Valor R$', 'Fechou?'] }, ['A'], MAPA).ok, ['A'],
+  'a coluna de clínica não é exigida (o sync não a envia)');
+// sem mapeamento, nada a exigir
+eq(abasCompativeis({ A: [] }, ['A'], null).ok, ['A'], 'sem de-para, toda aba passa');
 
 console.log(`✓ ${n} asserts de Google Sheets / Fechou? passaram`);

@@ -1,3 +1,16 @@
+## Google Sheets — o gestor escolhe as abas (2026-09-28, mesma rodada)
+
+Cobrança do Matheus: *"está puxando só o mês atual, quero poder escolher as abas"*. A rotina resolvia a aba sozinha pelo nome do mês e não havia como pedir histórico.
+
+- **⚠️ É UNIÃO, não "ou"** (`escolherAbas`, pura): `seguirMes` (padrão, ligado) continua acompanhando a virada do mês, e as abas marcadas à mão **somam** a ele. Marcar histórico e perder o mês corrente em silêncio seria o pior desfecho — a tela do cliente pararia no passado e ninguém notaria até o mês seguinte. Quem quer só as escolhidas desliga o acompanhamento; desligar tudo é **bloqueado na tela**, senão a rotina fica sem nada para importar.
+- **⚠️ Uma aba com layout diferente derrubaria o lote INTEIRO**: a rota de importação responde 400 ("Coluna X não encontrada") quando uma coluna mapeada falta no arquivo. Numa planilha com uma aba por mês, basta um mês antigo sem a coluna `Valor R$` — ou a aba `RESUMO` marcada por engano — para o mês corrente também não entrar. `abasCompativeis` separa essas abas ANTES do envio, com o nome das colunas que faltam, e a tela mostra "a aba JUNHO 26 ficou de fora: não tem Valor R$, Fechou?".
+- **Uma aba por arquivo, num POST só**: a rota agrupa por **assinatura de cabeçalho**, então meses diferentes do mesmo relatório caem num lote e o dedupe enxerga tudo de uma vez.
+- **⚠️ Teto de `MAX_ABAS_POR_RODADA` (12)**: cada aba é um arquivo a mais no mesmo POST, dentro do orçamento do cron. Quem marcar as 21 abas leva as 12 primeiras **e é avisado do corte** — melhor que a rodada estourar o tempo e não importar nada.
+- **⚠️ Aba escolhida que sumiu não é erro** (a clínica renomeou): volta em `sumidas` para a tela avisar e o resto importa. A escolha casa por nome **normalizado**, então "SETEMBRO 2026" → "Setembro 2026" não se perde.
+- **`abas_vistas` é CACHE só da tela**: a lista de abas é gravada na análise para as caixinhas aparecerem ao reabrir sem rebaixar 2 MB de planilha. A rotina diária **nunca** lê esse cache — sempre olha a planilha de verdade.
+- **⚠️ `abas: []` é uma escolha, `undefined` é "não mexi"**: o PUT grava lista vazia e preserva o que está lá quando o campo não vem. Colunas `abas`/`seguir_mes` também entram no INSERT, senão a escolha se perdia na PRIMEIRA gravação (a linha nasceria com o default).
+- ✅ Verificado: **18 asserts** novos (união, dedupe da aba do mês marcada à mão, nome renomeado, aba sumida, teto e ordem no corte, incompatível com o nome das colunas que faltam, `clinic` fora da exigência) em 54; tsc limpo; eslint sem erro novo; **browser** — lista das 9 abas com o mês marcado e travado, marcar AGOSTO+JULHO gravando `abas:["AGOSTO 2026","JULHO 2026"], seguirMes:true`, "Importado de 3 abas … 420 linhas" com o aviso âmbar da aba incompatível, desligar o mês liberando a caixinha dele, desmarcar tudo desabilitando o botão com a frase, e 375px sem overflow.
+
 ## Google Sheets — importar a planilha do cliente 1× por dia, sem baixar nada (2026-09-28)
 
 Pedido do Matheus: "conseguimos interpretar google sheets online sem precisar ficar baixando?" → "1 vez por dia pegar as infos do google sheets como se fosse importar uma planilha", configurável dentro do cliente. Decisões dele: aba resolvida **pelo nome do mês atual** e a planilha da Odonto First **é a fonte de faturamento** dele.

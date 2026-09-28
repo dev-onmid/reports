@@ -109,3 +109,104 @@ export function resolverAbaDoMes(abas: string[], ref: Date): AbaResolvida {
 
   return melhor ? { aba: melhor.aba, motivo: melhor.motivo } : { aba: null, motivo: 'nao_encontrada' };
 }
+
+
+/** Teto de abas por rodada — ver `escolherAbas`. */
+export const MAX_ABAS_POR_RODADA = 12;
+
+export type EscolhaAbas = {
+  /** As abas que vão para a importação, na ordem em que a planilha as lista. */
+  abas: string[];
+  /** Abas pedidas que não existem mais na planilha (renomeadas/apagadas). */
+  sumidas: string[];
+  /** Abas cortadas pelo teto. */
+  cortadas: string[];
+  /** A aba do mês, quando `seguirMes` — separada porque a tela a mostra. */
+  abaDoMes: string | null;
+  motivoAbaDoMes: AbaResolvida['motivo'];
+};
+
+/**
+ * Quais abas a rotina importa nesta rodada.
+ *
+ * Pedido do Matheus (2026-09-28): *"está puxando só o mês atual, quero poder
+ * escolher as abas"*. São duas coisas somadas, não uma escolha entre elas:
+ *
+ * - `seguirMes` (padrão) acompanha a virada do mês sozinho — é o que mantém a
+ *   rotina útil sem ninguém mexer nela todo dia 1º.
+ * - `fixas` são abas escolhidas à mão, para trazer histórico ou uma aba com nome
+ *   fora do padrão de mês.
+ *
+ * ⚠️ O resultado é a UNIÃO das duas, não uma OU outra. Marcar abas de histórico
+ * e perder o mês corrente em silêncio seria o pior desfecho: a tela do cliente
+ * pararia no passado e ninguém notaria até o mês seguinte.
+ *
+ * ⚠️ Aba pedida que não existe mais NÃO é erro: a clínica renomeou ou apagou.
+ * Volta em `sumidas` para a tela avisar, e o resto importa.
+ *
+ * ⚠️ Teto de `MAX_ABAS_POR_RODADA`: a rotina roda dentro do orçamento do cron e
+ * cada aba é um arquivo a mais no mesmo POST. Quem marcar as 21 abas de uma
+ * planilha inteira leva as primeiras e é avisado do corte, em vez de a rodada
+ * estourar o tempo e não importar NADA.
+ */
+export function escolherAbas(
+  todas: string[],
+  cfg: { fixas?: string[] | null; seguirMes?: boolean },
+  hoje = new Date(),
+): EscolhaAbas {
+  const { aba: abaDoMes, motivo } = resolverAbaDoMes(todas, hoje);
+  const seguirMes = cfg.seguirMes !== false;
+  const pedidas = cfg.fixas ?? [];
+
+  // Casa pelo nome normalizado: a clínica muda "SETEMBRO 2026" para
+  // "Setembro 2026" e a escolha do gestor não pode se perder por causa disso.
+  const porNome = new Map(todas.map(a => [normalizarNomeAba(a), a]));
+  const sumidas: string[] = [];
+  const escolhidas = new Set<string>();
+  if (seguirMes && abaDoMes) escolhidas.add(abaDoMes);
+  for (const p of pedidas) {
+    const real = porNome.get(normalizarNomeAba(p));
+    if (real) escolhidas.add(real);
+    else sumidas.push(p);
+  }
+
+  // Ordem da planilha, não a da escolha: a importação concatena as linhas, e ler
+  // na ordem em que a pasta as apresenta é o que o gestor espera ver.
+  const naOrdem = todas.filter(a => escolhidas.has(a));
+  return {
+    abas: naOrdem.slice(0, MAX_ABAS_POR_RODADA),
+    cortadas: naOrdem.slice(MAX_ABAS_POR_RODADA),
+    sumidas,
+    abaDoMes,
+    motivoAbaDoMes: motivo,
+  };
+}
+
+/**
+ * As abas cujo cabeçalho comporta o de-para já salvo.
+ *
+ * ⚠️ Existe porque a rota de importação RECUSA a planilha inteira (HTTP 400,
+ * "Coluna X não encontrada") quando uma coluna mapeada não existe no arquivo.
+ * Numa planilha com uma aba por mês, basta um mês antigo com layout diferente —
+ * ou uma aba de resumo marcada por engano — para derrubar a rodada inteira e
+ * não importar mês nenhum. Aqui a aba incompatível é separada COM o nome das
+ * colunas que faltam, e a tela diz qual é o problema.
+ */
+export function abasCompativeis(
+  cabecalhoPorAba: Record<string, string[]>,
+  abas: string[],
+  mapeamento: Record<string, string | null> | null,
+): { ok: string[]; incompativeis: { aba: string; faltam: string[] }[] } {
+  const exigidas = Object.entries(mapeamento ?? {})
+    .filter(([campo, col]) => col && campo !== 'clinic')
+    .map(([, col]) => String(col));
+  const ok: string[] = [];
+  const incompativeis: { aba: string; faltam: string[] }[] = [];
+  for (const aba of abas) {
+    const headers = cabecalhoPorAba[aba] ?? [];
+    const faltam = exigidas.filter(c => !headers.includes(c));
+    if (faltam.length) incompativeis.push({ aba, faltam });
+    else ok.push(aba);
+  }
+  return { ok, incompativeis };
+}

@@ -16,6 +16,7 @@ import { type PlatformId, PLATFORM_INFO, PlatformIconButton } from '@/components
 import type { MetaAdAccount } from '@/app/api/meta/ad-accounts/route';
 import type { MetaPage } from '@/app/api/meta/pages/route';
 import type { Ga4Property } from '@/app/api/google/ga4-properties/route';
+import { MAX_ABAS_POR_RODADA } from '@/lib/google-sheets';
 
 type AdsAccount = { id: string; name: string; status: string; isManager: boolean; mccId?: string; currency?: string };
 type GmbLocation = { locationId: string; accountId: string; name: string; address?: string; phone?: string };
@@ -813,6 +814,7 @@ type SheetsCfg = {
   sheetUrl: string; tipoPlanilha: string; fonteFaturamento: boolean; ativo: boolean;
   abaExemplo: string | null; ultimaSync: string | null; ultimoErro: string | null;
   mapeamento: Record<string, string | null> | null;
+  abas: string[] | null; abasVistas: string[] | null; seguirMes: boolean;
 };
 
 /**
@@ -835,6 +837,10 @@ function GoogleSheetsContent({ clientId, onDone, onCancel }: { clientId: string;
   const [fatura, setFatura] = useState(false);
   const [ativo, setAtivo] = useState(false);
   const [resumo, setResumo] = useState('');
+  // Escolha de abas (2026-09-28). `seguirMes` começa ligado: é o padrão de quem
+  // não mexe em nada, e é o que faz a rotina acompanhar a virada do mês.
+  const [abasFixas, setAbasFixas] = useState<string[]>([]);
+  const [seguirMes, setSeguirMes] = useState(true);
 
   useEffect(() => {
     fetch(`/api/clients/${clientId}/sheets`)
@@ -847,6 +853,9 @@ function GoogleSheetsContent({ clientId, onDone, onCancel }: { clientId: string;
           setAtivo(d.config.ativo);
           setColunas(d.config.mapeamento);
           setAbaDoMes(d.config.abaExemplo);
+          setAbasFixas(d.config.abas ?? []);
+          setSeguirMes(d.config.seguirMes !== false);
+          if (d.config.abasVistas?.length) setAbas(d.config.abasVistas);
         }
       });
   }, [clientId]);
@@ -854,7 +863,7 @@ function GoogleSheetsContent({ clientId, onDone, onCancel }: { clientId: string;
   async function salvar(extra: Partial<{ ativo: boolean; mapeamento: Record<string, string | null> }> = {}) {
     const res = await fetch(`/api/clients/${clientId}/sheets`, {
       method: 'PUT', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sheetsUrl: url.trim(), fonteFaturamento: fatura, ativo, ...extra }),
+      body: JSON.stringify({ sheetsUrl: url.trim(), fonteFaturamento: fatura, ativo, abas: abasFixas, seguirMes, ...extra }),
     });
     if (!res.ok) { const d = await res.json() as { error?: string }; throw new Error(d.error ?? 'Erro ao salvar.'); }
   }
@@ -892,16 +901,24 @@ function GoogleSheetsContent({ clientId, onDone, onCancel }: { clientId: string;
     const res = await fetch(`/api/clients/${clientId}/sheets`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ acao: 'importar' }),
     });
-    const d = await res.json() as { ok?: boolean; erro?: string; aba?: string; linhas?: number };
+    const d = await res.json() as { ok?: boolean; erro?: string; aba?: string; abas?: string[]; linhas?: number; avisos?: string[] };
     setStatus('idle');
     if (!d.ok) { setError(d.erro ?? 'Erro ao importar.'); return; }
     setAtivo(true);
-    setResumo(`Importado de "${d.aba}" — ${d.linhas ?? 0} linhas.`);
-    onDone();
+    const quantas = d.abas?.length ?? 1;
+    setResumo(`Importado de ${quantas > 1 ? `${quantas} abas (${d.aba})` : `"${d.aba}"`} — ${d.linhas ?? 0} linhas.`);
+    // ⚠️ Aba que ficou de fora aparece aqui: sem isso o gestor marca 6 abas, vê
+    // "importado" e não descobre que 2 não entraram.
+    if (d.avisos?.length) setAviso(d.avisos.join(' '));
+    else onDone();
   }
 
   const busy = status !== 'idle';
   const temMapa = !!colunas && Object.values(colunas).some(Boolean);
+  // ⚠️ Desmarcar o mês E não escolher aba nenhuma deixaria a rotina sem nada
+  // para importar. Bloqueia aqui, com a frase, em vez de deixar o gestor sair
+  // achando que configurou e descobrir pelo dado que parou de chegar.
+  const semAba = abas.length > 0 && !seguirMes && abasFixas.length === 0;
 
   return (
     <>
@@ -930,10 +947,54 @@ function GoogleSheetsContent({ clientId, onDone, onCancel }: { clientId: string;
           </span>
         </label>
 
-        {abaDoMes && (
+        {abas.length > 0 ? (
+          <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs font-semibold">Abas que a rotina importa</p>
+              <span className="text-[10px] text-muted-foreground/70">{abas.length} na planilha</span>
+            </div>
+            <label className="flex items-start gap-2.5 cursor-pointer">
+              <input type="checkbox" checked={seguirMes} onChange={e => setSeguirMes(e.target.checked)} className="mt-0.5" />
+              <span className="text-xs">
+                <b>Acompanhar o mês atual</b>
+                {abaDoMes ? <span className="text-muted-foreground"> — hoje é <b className="text-foreground">{abaDoMes}</b></span>
+                          : <span className="text-amber-400/90"> — a aba deste mês ainda não existe na planilha</span>}
+                <span className="block text-muted-foreground mt-0.5">
+                  Vira o mês, a rotina troca de aba sozinha. Desmarque só se quiser importar
+                  exatamente as abas escolhidas abaixo, e mais nenhuma.
+                </span>
+              </span>
+            </label>
+            <div className="max-h-44 overflow-y-auto rounded border border-border/60 bg-background/40 p-1.5">
+              {abas.map(a => {
+                const marcada = abasFixas.includes(a);
+                const ehDoMes = seguirMes && a === abaDoMes;
+                return (
+                  <label key={a} className="flex items-center gap-2 rounded px-1.5 py-1 text-xs cursor-pointer hover:bg-muted/40">
+                    <input
+                      type="checkbox"
+                      checked={marcada || ehDoMes}
+                      disabled={ehDoMes}
+                      onChange={e => setAbasFixas(prev => e.target.checked ? [...prev, a] : prev.filter(x => x !== a))}
+                    />
+                    <span className={ehDoMes ? 'text-muted-foreground' : ''}>{a}</span>
+                    {ehDoMes && <span className="text-[10px] text-muted-foreground/70">(mês atual)</span>}
+                  </label>
+                );
+              })}
+            </div>
+            <p className="text-[10px] text-muted-foreground/70">
+              Marque abas de meses anteriores para trazer o histórico. Até {MAX_ABAS_POR_RODADA} abas por rodada.
+            </p>
+            {semAba && (
+              <p className="text-xs text-destructive">
+                Escolha ao menos uma aba, ou marque &quot;acompanhar o mês atual&quot; — do jeito que está, a rotina não tem o que importar.
+              </p>
+            )}
+          </div>
+        ) : abaDoMes && (
           <p className="text-xs text-muted-foreground">
             Aba do mês: <b className="text-foreground">{abaDoMes}</b>
-            {abas.length > 0 && <span className="text-muted-foreground/70"> · {abas.length} abas na planilha</span>}
           </p>
         )}
         {temMapa && (
@@ -961,7 +1022,7 @@ function GoogleSheetsContent({ clientId, onDone, onCancel }: { clientId: string;
         <Button variant="outline" onClick={handleAnalisar} disabled={busy || !url.trim()}>
           {status === 'analyzing' ? 'Analisando...' : temMapa ? 'Reanalisar colunas' : 'Analisar colunas'}
         </Button>
-        <Button onClick={handleImportar} disabled={busy || !temMapa} className="bg-[#0F9D58] text-white hover:bg-[#0F9D58]/90">
+        <Button onClick={handleImportar} disabled={busy || !temMapa || semAba} className="bg-[#0F9D58] text-white hover:bg-[#0F9D58]/90">
           {status === 'importing' ? 'Importando...' : ativo ? 'Importar agora' : 'Importar e ativar rotina'}
         </Button>
       </DialogFooter>
