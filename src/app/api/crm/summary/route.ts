@@ -1,6 +1,6 @@
 import type { NextRequest } from 'next/server';
 import { parseRecorte, filtroRegiaoSql, type ContagemRegioes } from '@/lib/regiao-recorte';
-import { ENSURE_COLUNAS_CONTAGEM, leadContaSql, rastroPagoSql } from '@/lib/lead-contagem';
+import { ENSURE_COLUNAS_CONTAGEM, leadContaSql, rastreadoForaDoCrmSql, rastroPagoSql } from '@/lib/lead-contagem';
 import { makeServerPool } from '@/lib/server-db';
 import {
   contarFunil,
@@ -100,20 +100,23 @@ export async function GET(req: NextRequest) {
     // quantos leads têm porta validada — a tela mostra o primeiro e usa o
     // segundo para decidir o topo do funil (Lei 3: sem porta validada, topo
     // vem das plataformas). Ambos na janela, sem o recorte de região.
-    const contagemPorCliente = new Map<string, { fora: number; validados: number }>();
+    const contagemPorCliente = new Map<string, { fora: number; validados: number; naoCadastrados: number }>();
     try {
       const { rows: cont } = await pool.query(
         `SELECT client_id,
                 COUNT(*) FILTER (WHERE NOT ${leadContaSql()})::int AS fora,
                 -- "validados" = leads que CONTAM (Lei 3): decide se o topo do funil é o CRM.
                 -- Cliente só-chat (sem importação) tem contatos > 0 aqui e o topo é o CRM dele.
-                COUNT(*) FILTER (WHERE ${leadContaSql()})::int AS validados
+                COUNT(*) FILTER (WHERE ${leadContaSql()})::int AS validados,
+                -- Lead que o anúncio trouxe e o cliente não cadastrou: alimenta o
+                -- alerta no topo do Funil de performance.
+                COUNT(*) FILTER (WHERE ${rastreadoForaDoCrmSql()})::int AS nao_cadastrados
            FROM public.crm_leads
           WHERE COALESCE(registro_tipo, 'hibrido') <> 'venda' ${dateFilter}
           GROUP BY client_id`,
         params
       );
-      for (const r of cont) contagemPorCliente.set(String(r.client_id), { fora: r.fora, validados: r.validados });
+      for (const r of cont) contagemPorCliente.set(String(r.client_id), { fora: r.fora, validados: r.validados, naoCadastrados: r.nao_cadastrados });
     } catch (e) { console.error('[crm summary] contagem fora/validados', e); }
 
     // Lei 5: vendas fechadas NA JANELA, separadas por quando o lead COMEÇOU
@@ -253,6 +256,12 @@ export async function GET(req: NextRequest) {
           conversasFora: contagemPorCliente.get(clientId)?.fora ?? 0,
           /** Leads com porta validada (planilha/CRM externo/formulário) na janela — 0 ⇒ topo vem das plataformas. */
           leadsValidados: contagemPorCliente.get(clientId)?.validados ?? 0,
+          /**
+           * Leads que o ANÚNCIO trouxe e o cliente não tem no CRM/planilha dele.
+           * Eles CONTAM aqui (Lei 3) — o alerta existe para dizer que o número do
+           * sistema DO CLIENTE é menor que o real, por falta de cadastro na ponta.
+           */
+          rastreadosForaDoCrm: contagemPorCliente.get(clientId)?.naoCadastrados ?? 0,
           /** Lei 5: vendas fechadas na janela por quando o lead começou. */
           vendasCohort: cohortPorCliente.get(clientId) ?? null,
         };

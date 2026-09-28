@@ -111,7 +111,7 @@ import { IndicadorCard, IndicadorMini, FaixaIndicadores, IconeBadge } from '@/co
 
 type Period = 'yesterday' | 'last_7d' | 'last_14d' | 'last_30d' | 'this_month' | 'last_month' | 'last_3m' | 'last_6m' | 'this_year' | 'all_time' | 'custom';
 type VendasCohort = { periodo: number; anteriores: number; semData: number };
-type ClientSheetsSummary = { leads: number; funil: ContagemFunil; total: number; funilStages: FunilPorStage | null; conversasFora: number; leadsValidados: number; vendasCohort: VendasCohort | null };
+type ClientSheetsSummary = { leads: number; funil: ContagemFunil; total: number; funilStages: FunilPorStage | null; conversasFora: number; leadsValidados: number; rastreadosForaDoCrm: number; vendasCohort: VendasCohort | null };
 type ApiMetrics = {
   meta: { spend: number; reach?: number; impressions: number; clicks: number; leads: number; formLeads?: number; siteLeads?: number; conversations?: number; cpl: number } | null;
   google: { cost: number; impressions: number; clicks: number; cpc: number; conversions: number; cpa: number;
@@ -4234,7 +4234,7 @@ type SemiDegrau = { apos: number; rotulo: string; valor: number; tom: 'ruim' | '
 /** Valores do funil de UM canal, alinhados aos degraus exibidos (mesma ordem de `steps`). */
 type FunilDoCanal = { canal: string; valores: number[] };
 
-function SimpleFunnel({ steps, totalRate, fonteLabel, onStageClick, todosClicaveis, semiDegraus, porCanal }: {
+function SimpleFunnel({ steps, totalRate, fonteLabel, onStageClick, todosClicaveis, semiDegraus, porCanal, rastreadosForaDoCrm }: {
   steps: Array<{
     label: string; actual: number; planned: number; color: string;
     /** Quebra explicativa (ex: quantos ainda vêm × quantos furaram). */
@@ -4245,6 +4245,11 @@ function SimpleFunnel({ steps, totalRate, fonteLabel, onStageClick, todosClicave
   totalRate: string;
   /** De onde vem o topo ("fonte: CRM" / "estimado por anúncios" / mistas). */
   fonteLabel?: string;
+  /**
+   * Leads que o ANÚNCIO trouxe e o cliente não tem no CRM/planilha dele.
+   * Vira o alerta no topo do card — ver o comentário do banner abaixo.
+   */
+  rastreadosForaDoCrm?: number;
   /** Abre a lista de leads do degrau. Índice mapeia em ETAPAS_FUNIL (0=contato…4=fechamento). */
   onStageClick?: (index: number) => void;
   /** Funil personalizado pelo Kanban: TODOS os degraus são clicáveis (não só os 5 semânticos). */
@@ -4277,8 +4282,36 @@ function SimpleFunnel({ steps, totalRate, fonteLabel, onStageClick, todosClicave
     ...steps.flatMap((st, i) => (alvo(i) === t ? st.detalhes ?? [] : [])),
   ];
 
+  // ⚠️ O topo do funil é o que o CLIENTE manda (planilha/CRM). Quando o rastreio
+  // prova que o anúncio trouxe MAIS gente do que aparece lá, o gestor precisa ver
+  // isso ANTES de ler qualquer número — senão apresenta ao cliente um volume que
+  // não é o real e discute CPL em cima de uma base incompleta.
+  // Pedido do Matheus (2026-09-28), a partir da Sorrifácil Itapema: 23 leads na
+  // planilha da clínica contra 44 aqui, sendo 22 conversas com ctwa_clid e nome
+  // de campanha que a unidade nunca cadastrou.
+  const totalTopo = steps[0]?.actual ?? 0;
+  const foraDoCrm = rastreadosForaDoCrm ?? 0;
+  // % sobre o topo: "22 de 44" é o que dá a dimensão do buraco.
+  const pctForaDoCrm = totalTopo > 0 ? Math.round((foraDoCrm / totalTopo) * 100) : 0;
+
   return (
     <PremiumPanel className="flex flex-col p-5">
+      {foraDoCrm > 0 && (
+        <div className="mb-4 flex items-start gap-3 rounded-lg border border-[#FF6B35]/40 bg-[#FF6B35]/[0.09] p-3.5">
+          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-[#FF6B35]" />
+          <div className="min-w-0">
+            <p className="text-sm font-bold text-[#FF6B35]">
+              {premiumValue(foraDoCrm)} {foraDoCrm === 1 ? 'lead de anúncio não está' : 'leads de anúncio não estão'} no CRM do cliente
+              {pctForaDoCrm > 0 && <span className="font-semibold text-[#FF6B35]/80"> · {pctForaDoCrm}% do topo do funil</span>}
+            </p>
+            <p className="mt-1 text-xs leading-relaxed text-[#dce4e8]">
+              Temos o rastreio dessas conversas — clique no anúncio até o WhatsApp — mas elas não vieram
+              na planilha/CRM que o cliente mantém. <b className="text-white">O volume que ele enxerga no sistema dele é menor
+              que o real</b>, e a causa provável é falta de cadastro na ponta. O funil abaixo já as inclui.
+            </p>
+          </div>
+        </div>
+      )}
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-3">
           <IconeBadge icone={Funnel} />
@@ -5799,7 +5832,7 @@ export default function GeneralDashboard() {
   useEffect(() => {
     const params = new URLSearchParams({ from: faixaSel.from, to: faixaSel.to });
     fetch(`/api/crm/summary?${params}`)
-      .then(r => r.ok ? r.json() as Promise<{ clientId: string; leads: number; funil: ContagemFunil; total: number; funilStages: FunilPorStage | null; ultimaAtualizacao?: string | null; conversasFora?: number; leadsValidados?: number; vendasCohort?: VendasCohort | null }[]> : [])
+      .then(r => r.ok ? r.json() as Promise<{ clientId: string; leads: number; funil: ContagemFunil; total: number; funilStages: FunilPorStage | null; ultimaAtualizacao?: string | null; conversasFora?: number; leadsValidados?: number; rastreadosForaDoCrm?: number; vendasCohort?: VendasCohort | null }[]> : [])
       .then(data => {
         const map: Record<string, ClientSheetsSummary> = {};
         // Guarda a última entrada de lead POR cliente: o selo de frescor deriva
@@ -5807,7 +5840,7 @@ export default function GeneralDashboard() {
         // refazer este fetch (que já é da carteira inteira) ao trocar de cliente.
         const ultimas: Record<string, string> = {};
         for (const item of data) {
-          map[item.clientId] = { leads: item.leads, funil: item.funil, total: item.total, funilStages: item.funilStages ?? null, conversasFora: item.conversasFora ?? 0, leadsValidados: item.leadsValidados ?? 0, vendasCohort: item.vendasCohort ?? null };
+          map[item.clientId] = { leads: item.leads, funil: item.funil, total: item.total, funilStages: item.funilStages ?? null, conversasFora: item.conversasFora ?? 0, leadsValidados: item.leadsValidados ?? 0, rastreadosForaDoCrm: item.rastreadosForaDoCrm ?? 0, vendasCohort: item.vendasCohort ?? null };
           if (item.ultimaAtualizacao) ultimas[item.clientId] = item.ultimaAtualizacao;
         }
         setCrmSummary(map);
@@ -6315,6 +6348,8 @@ export default function GeneralDashboard() {
   // O que a lei deixou fora (chat sem rastro + manuais) e a quebra de vendas
   // por coorte (Lei 5), somados dos clientes selecionados.
   const conversasFora = [...selectedIds].reduce((s, id) => s + (crmSummary[id]?.conversasFora ?? 0), 0);
+  // Leads que o anúncio trouxe e o cliente não cadastrou — alerta no topo do funil.
+  const rastreadosForaDoCrm = [...selectedIds].reduce((s, id) => s + (crmSummary[id]?.rastreadosForaDoCrm ?? 0), 0);
   const vendasCohort = [...selectedIds].reduce<VendasCohort>((a, id) => {
     const v = crmSummary[id]?.vendasCohort; if (!v) return a;
     return { periodo: a.periodo + v.periodo, anteriores: a.anteriores + v.anteriores, semData: a.semData + v.semData };
@@ -7455,7 +7490,7 @@ export default function GeneralDashboard() {
                       {deliverySoloId ? (
                         <DeliveryResumoCard clientId={deliverySoloId} from={deliveryRange.from} to={deliveryRange.to} />
                       ) : (
-                        <SimpleFunnel steps={funnelStepsNew} totalRate={funnelTaxaFinal > 0 ? premiumValue(funnelTaxaFinal, 'percent') : '—'} fonteLabel={usaStageFunil ? 'fonte: CRM' : fonteTopoLabel} onStageClick={setFunilStageIdx} todosClicaveis={usaStageFunil} semiDegraus={funnelSemiDegraus} porCanal={funilPorCanal} />
+                        <SimpleFunnel steps={funnelStepsNew} totalRate={funnelTaxaFinal > 0 ? premiumValue(funnelTaxaFinal, 'percent') : '—'} fonteLabel={usaStageFunil ? 'fonte: CRM' : fonteTopoLabel} onStageClick={setFunilStageIdx} todosClicaveis={usaStageFunil} semiDegraus={funnelSemiDegraus} porCanal={funilPorCanal} rastreadosForaDoCrm={rastreadosForaDoCrm} />
                       )}
                       <ChannelSummaryTable rows={channelRows} total={channelTotal} metaCpl={cplMetaSel} />
                     </div>

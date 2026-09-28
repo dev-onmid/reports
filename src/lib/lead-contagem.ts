@@ -117,6 +117,28 @@ export function leadVisivelCrmSql(alias = ''): string {
   return `(NOT ((${portaSql(alias)}) = 'chat' AND NOT ${chatContaSql(alias)}) AND NOT (${naoLeadSql(alias)} AND NOT ${rastroPagoSql(alias)}))`;
 }
 
+/**
+ * Predicado: lead que o ANÚNCIO comprovadamente trouxe e que o cliente NÃO
+ * cadastrou (pedido do Matheus, 2026-09-28).
+ *
+ * É a conversa que nasceu no WhatsApp com prova de tráfego pago (CTWA, código do
+ * link /r/, gclid, fbclid, UTM de campanha) **num cliente que TEM porta validada**
+ * — ou seja, que manda planilha/CRM e, mesmo assim, não tem essa pessoa lá.
+ *
+ * ⚠️ Estes leads CONTAM na dashboard (Lei 3). O que o alerta diz não é "estão
+ * fora da conta", e sim que **o número que o cliente enxerga no sistema dele é
+ * menor que o real** — a diferença é falta de cadastro na ponta, e nós temos o
+ * rastreio para provar. Medido na Sorrifácil Itapema: 23 na planilha da clínica
+ * contra 44 aqui, sendo 22 conversas com `ctwa_clid` e nome de campanha.
+ *
+ * ⚠️ Cliente SEM porta validada fica fora por construção: lá o chat É o CRM
+ * (Lei 3), não há planilha com que comparar e o alerta seria ruído.
+ */
+export function rastreadoForaDoCrmSql(alias = ''): string {
+  return `((${portaSql(alias)}) = 'chat' AND ${rastroPagoSql(alias)}
+    AND ${col(alias, 'client_id')} IN ${clientesComPortaValidadaSql()})`;
+}
+
 /** Predicado: porta validada (planilha/CRM externo/formulário) — decide se o topo do funil é o CRM (Lei 1) ou as plataformas (Lei 3). */
 export function portaValidadaSql(alias = ''): string {
   return `((${portaSql(alias)}) IN ('planilha', 'crm_externo', 'formulario'))`;
