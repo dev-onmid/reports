@@ -58,7 +58,10 @@ export async function GET(req: NextRequest) {
   const stageMode = stageIndexRaw !== null;
   const stageIndex = stageMode ? parseInt(stageIndexRaw, 10) : -1;
 
-  if (stageMode) {
+  if (foraDoCrm) {
+    // Recorte próprio: quem entra é o predicado, não o degrau — exigir `etapa`
+    // aqui recusaria a chamada legítima do alerta da dashboard.
+  } else if (stageMode) {
     if (!Number.isInteger(stageIndex) || stageIndex < 0 || clientIds.length !== 1) {
       return Response.json({ error: 'stageIndex exige exatamente um cliente' }, { status: 400 });
     }
