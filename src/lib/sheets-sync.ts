@@ -124,6 +124,8 @@ export async function sincronizarSheets(
   fd.append('file', new Blob([new Uint8Array(bytes)]), `${aba}.xlsx`);
   fd.append('clientId', cfg.clientId);
   fd.append('tipoPlanilha', cfg.tipoPlanilha);
+  // Faturamento é escolha declarada, não consequência do tipo — ver a rota.
+  if (cfg.fonteFaturamento) fd.append('escreveReceita', '1');
   fd.append('mappings', JSON.stringify([{ file: `${aba}.xlsx`, clientId: cfg.clientId }]));
   // O de-para da IA usa `revenue`/`name`/…; a rota de importação lê os overrides
   // como `revenueColumn`/`nameColumn`/…. `clinic` fica de fora: aqui a planilha

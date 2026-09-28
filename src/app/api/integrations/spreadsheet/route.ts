@@ -1001,6 +1001,23 @@ export async function POST(req: NextRequest) {
     const updatedDateColumnOverride = formData.get('updatedDateColumn') as string | null;
     // Coluna de "Fechou?" (✅/❌, Sim/Não) — ver parseFechou.
     const closedColumnOverride = formData.get('closedColumn') as string | null;
+    /**
+     * ⚠️ "Esta planilha traz faturamento", dito EXPLICITAMENTE por quem configurou.
+     *
+     * A régua "só o tipo Venda escreve receita" nasceu hoje de manhã para matar a
+     * dupla contagem da Sorrifácil, onde o `R$ FECHADO` de um relatório de LEADS
+     * virava receita por cima do ledger. Ela continua valendo como DEFAULT.
+     *
+     * Mas existe o caso legítimo do CRM em planilha (Odonto First): uma base de
+     * LEADS que também carrega a venda em `Fechou?` + `Valor R$`, e que é a única
+     * fonte de faturamento daquele cliente. Marcá-la como 'venda' seria pior —
+     * o tipo Venda força `closed = true` em TODA linha, e os 108 leads do mês
+     * virariam 108 vendas (medido: foi exatamente o que aconteceu no teste).
+     *
+     * Então a receita deixa de ser consequência do tipo e passa a ser uma escolha
+     * declarada, que a tela mostra e o gestor liga.
+     */
+    const receitaExplicita = formData.get('escreveReceita') === '1';
 
     if (!mappingsRaw) return Response.json({ error: 'mappings obrigatório.' }, { status: 400 });
 
@@ -1179,7 +1196,7 @@ export async function POST(req: NextRequest) {
           // CondoStore, Cinfel, Incorpast, Cost Odonto, R$ 2,9 mi): medido em
           // produção, a receita deles vem de Agendor/SULTS/webhook, com R$ 0,00
           // vindo de planilha. Esta linha só governa a importação.
-          const revenue = tipoPlanilha === 'venda' ? revenueBruto : 0;
+          const revenue = (tipoPlanilha === 'venda' || receitaExplicita) ? revenueBruto : 0;
           const statusRaw = statusCol ? String(row[statusCol] ?? '').trim() || null : null;
           // O funil de performance lê os BOOLEANOS `compareceu`/`fechou`, não o
           // texto. Sem traduzir aqui, "Avaliação Realizada" nunca vira
@@ -1227,7 +1244,7 @@ export async function POST(req: NextRequest) {
             // Planilha de Leads não é fonte de faturamento — ver revenue acima.
             // Só o relatório de Vendas tem autoridade sobre a receita de um lead
             // que já existe (mesma razão de `revenue` acima).
-            escreveReceita: tipoPlanilha === 'venda',
+            escreveReceita: tipoPlanilha === 'venda' || receitaExplicita,
             registroTipo: tipoPlanilha,
             // Data de fechamento = a data mapeada no relatório de Vendas
             // (ex.: DATA FATURAMENTO). Só o tipo Venda janela a receita por ela.

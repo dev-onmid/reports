@@ -53,7 +53,12 @@ export async function PUT(req: NextRequest, { params }: Ctx) {
   // Sorrifácil). Marcar "esta planilha traz faturamento" na tela é o que torna
   // essa escolha EXPLÍCITA do gestor, em vez de depender do tipo padrão.
   const fonte = body.fonteFaturamento === true;
-  const tipo = fonte ? 'venda' : (body.tipoPlanilha === 'venda' ? 'venda' : 'lead');
+  // ⚠️ Faturamento NÃO muda o tipo. O tipo 'venda' força `closed = true` em toda
+  // linha (é um ledger de faturamento, onde cada linha É uma venda) — numa base
+  // de LEADS isso transformaria o mês inteiro em vendas. Medido no primeiro teste
+  // com a planilha real: 108 leads viraram 108 fechados. Quem manda a receita
+  // entrar é a flag `escreveReceita`, declarada separadamente.
+  const tipo = body.tipoPlanilha === 'venda' ? 'venda' : 'lead';
 
   const pool = makeServerPool();
   try {
@@ -134,9 +139,16 @@ export async function POST(req: NextRequest, { params }: Ctx) {
       await registrarErroSheets(pool, id, msg);
       return Response.json({ error: msg }, { status: 422 });
     }
+    // ⚠️ Grava o de-para AQUI, não só na tela. Sem isto, a rotina diária rodava
+    // com `mapeamento` nulo e a importação caía na detecção automática de coluna:
+    // no teste com a planilha real entraram 108 leads sem nome e sem telefone.
+    const mapa = (analise as { mapping?: Record<string, string | null> }).mapping ?? null;
     await pool.query(
-      `UPDATE public.client_sheets SET aba_exemplo = $2, ultimo_erro = NULL, atualizado_em = NOW() WHERE client_id = $1`,
-      [id, alvo]
+      `UPDATE public.client_sheets
+          SET aba_exemplo = $2, mapeamento = COALESCE($3::jsonb, mapeamento),
+              ultimo_erro = NULL, atualizado_em = NOW()
+        WHERE client_id = $1`,
+      [id, alvo, mapa ? JSON.stringify(mapa) : null]
     );
     return Response.json({ ok: true, abas: wb.SheetNames, abaDoMes: aba, motivoAba: motivo, analisada: alvo, analise });
   } catch (e) {
