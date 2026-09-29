@@ -1,6 +1,7 @@
 // Recompilar: npx esbuild src/lib/lead-aviso.ts --bundle --format=esm --platform=node \
 //   --alias:@=./src --external:pg --outfile=scratchpad/build/lead-aviso.mjs
-import { fonteDoEvento, parseFontes, formatarTelefone, montarMensagem, FONTES_AVISO } from './build/lead-aviso.mjs';
+import { fonteDoEvento, parseFontes, formatarTelefone, montarMensagem, FONTES_AVISO,
+  respostasDoFormulario, humanizarPergunta, humanizarValor, emailDoFormulario } from './build/lead-aviso.mjs';
 
 let n = 0, f = 0;
 const ok = (c, nome) => { n++; if (!c) { f++; console.log('  ✗', nome); } };
@@ -67,6 +68,86 @@ const canalIgual = montarMensagem({
   canal: 'Formulário Meta', campanha: null, anuncio: null, cidade: null, uf: null,
 });
 ok((canalIgual.match(/Formulário Meta/g) || []).length === 1, 'não repete o rótulo quando canal == fonte');
+
+
+// ── Criativo e respostas do formulário ─────────────────────────────────────
+// Os dois `raw` abaixo são cópias LITERAIS de eventos reais de produção
+// (medidos em 29/09/2026) — se o formato mudar, o teste cai antes do grupo ver.
+const RAW_META = {
+  ad_id: '120269711352900362', form_id: '2247926169369287', page_id: '109261071624305',
+  adset_id: '120267261156750362',
+  field_data: [
+    { name: 'full_name', values: ['Gessica'] },
+    { name: 'email', values: ['gessica.mb@hotmail.com'] },
+    { name: 'email_profissional' },
+    { name: 'phone_number', values: ['14996358710'] },
+    { name: 'quantas_unidades_está_pensando_em_adquirir?', values: ['10'] },
+    { name: 'qual_nome_da_empresa?', values: ['Nexxon solar'] },
+  ],
+  is_organic: false, leadgen_id: '1013737745011285', campaign_id: '120261293401350362',
+};
+const RAW_LP = {
+  nome: 'Walmir Rosário', cidade: 'Guarapuava pr', telefone: '42984347502',
+  page_url: 'https://www.condostore.com.br/?utm_source=google',
+  observacao: 'Capital disponível: R$ 65 mil a R$ 100 mil\nSimulação: unidades: 150 · investimento: 65000 · lucroAnual: 49680 · paybackMeses: 16',
+};
+
+const rMeta = respostasDoFormulario(RAW_META, 'meta_forms');
+ok(rMeta.length === 2, 'Meta: só as PERGUNTAS viram resposta (nome/telefone/email ficam de fora)');
+ok(rMeta[0].pergunta === 'Quantas unidades está pensando em adquirir?', 'slug do Meta humanizado');
+ok(rMeta[0].resposta === '10', 'valor da resposta');
+ok(!rMeta.some(r => /_/.test(r.pergunta)), 'nenhum underscore chega no grupo');
+ok(!rMeta.some(r => r.pergunta.toLowerCase().includes('email_profissional')), 'campo em branco não vira linha vazia');
+ok(humanizarPergunta('qual_procedimento_você_está_interessado_') === 'Qual procedimento você está interessado', 'underscore pendurado no fim');
+ok(humanizarPergunta('materia_desejada_para_o_curso:_') === 'Materia desejada para o curso', 'dois-pontos pendurado não vira "::"');
+ok(emailDoFormulario(RAW_META, null) === 'gessica.mb@hotmail.com', 'e-mail vem do field_data');
+ok(emailDoFormulario({}, ' fulano@x.com ') === 'fulano@x.com', 'sem raw, cai no e-mail do cadastro');
+ok(emailDoFormulario({}, '') === null, 'sem e-mail em lugar nenhum → null, não string vazia');
+
+const rLp = respostasDoFormulario(RAW_LP, 'landing_page');
+ok(rLp.some(r => r.pergunta === 'Cidade' && r.resposta === 'Guarapuava pr'), 'LP: cidade é campo próprio');
+ok(rLp.some(r => r.pergunta === 'Capital disponível'), 'LP: pergunta da observação');
+ok(rLp.some(r => r.pergunta === 'Simulação' && r.resposta.includes('unidades: 150')), 'LP: valor com ":" dentro não é cortado');
+ok(respostasDoFormulario(null, 'meta_forms').length === 0, 'raw nulo não quebra');
+ok(respostasDoFormulario('texto', 'landing_page').length === 0, 'raw que não é objeto não quebra');
+ok(respostasDoFormulario({ field_data: 'nao-e-array' }, 'meta_forms').length === 0, 'field_data corrompido não quebra');
+
+const comTudo = montarMensagem({
+  nome: 'Gessica Barbosa', numero: '5514996358710', fonte: 'meta_forms',
+  canal: 'Formulário Meta', campanha: '[ON] [FORMS] [MAIO]',
+  conjunto: '[AMPLO] [+25]', anuncio: 'AD4 ANDREIA 2',
+  cidade: 'Bauru', uf: 'SP',
+  email: emailDoFormulario(RAW_META, null), respostas: rMeta,
+});
+ok(comTudo.includes('Conjunto: [AMPLO] [+25]'), 'conjunto na mensagem');
+ok(comTudo.includes('Criativo: AD4 ANDREIA 2'), 'criativo na mensagem');
+ok(comTudo.includes('gessica.mb@hotmail.com'), 'e-mail na mensagem');
+ok(comTudo.includes('*Respostas do formulário*'), 'bloco de respostas');
+ok(comTudo.includes('• Qual nome da empresa?: Nexxon solar'), 'resposta formatada');
+ok(!/https?:\/\//.test(comTudo), 'segue sem link nenhum');
+
+const semRespostas = montarMensagem({
+  nome: 'João', numero: '5543999998888', fonte: 'landing_page', canal: 'LP | CondoStore',
+  campanha: null, conjunto: null, anuncio: null, cidade: null, uf: null,
+});
+ok(!semRespostas.includes('Respostas do formulário'), 'sem respostas, o bloco não aparece vazio');
+ok(!semRespostas.includes('Conjunto:') && !semRespostas.includes('Criativo:'), 'LP sem criativo não ganha linha em branco');
+
+
+// ── Valor também vem como slug no Meta (caso real da SorriLeve) ────────────
+ok(humanizarValor('implante_unitário_') === 'Implante unitário', 'opção de múltipla escolha vira texto');
+ok(humanizarValor('tarde_—_das_14h_às_18h') === 'Tarde — das 14h às 18h', 'travessão e horas preservados');
+ok(humanizarValor('Nexxon solar') === 'Nexxon solar', 'texto digitado pela pessoa não é tocado');
+ok(humanizarValor('10') === '10', 'número intacto');
+ok(humanizarValor('joao_silva@x.com') === 'joao_silva@x.com', 'e-mail com underscore NÃO é estragado');
+ok(humanizarValor('/lp-sorrifacil/') === '/lp-sorrifacil/', 'caminho de url intacto');
+ok(humanizarValor('https://x.com/a_b') === 'https://x.com/a_b', 'url intacta');
+const rSorri = respostasDoFormulario({ field_data: [
+  { name: 'qual_procedimento_você_está_interessado_', values: ['implante_unitário_'] },
+  { name: 'qual_o_melhor_horário_para_você_realizar_sua_avaliação?', values: ['tarde_—_das_14h_às_18h'] },
+]}, 'meta_forms');
+ok(rSorri[0].resposta === 'Implante unitário', 'caso real SorriLeve: resposta legível');
+ok(rSorri[1].resposta === 'Tarde — das 14h às 18h', 'caso real SorriLeve: horário legível');
 
 console.log(f === 0 ? `\n✅ ${n} asserts OK` : `\n❌ ${f} de ${n} falharam`);
 process.exit(f === 0 ? 0 : 1);

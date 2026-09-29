@@ -104,10 +104,128 @@ export type LeadDoAviso = {
   fonte: FonteAviso;
   canal: string | null;
   campanha: string | null;
+  conjunto: string | null;
   anuncio: string | null;
   cidade: string | null;
   uf: string | null;
+  email?: string | null;
+  respostas?: Resposta[];
 };
+
+export type Resposta = { pergunta: string; resposta: string };
+
+// Campos que JÁ aparecem no topo da mensagem (ou que não são pergunta). Repeti-los
+// no bloco de respostas só faria o aviso crescer sem dizer nada novo.
+const CAMPOS_DE_IDENTIDADE = new Set([
+  'full_name', 'first_name', 'last_name', 'nome', 'nome_completo',
+  'phone_number', 'telefone', 'whatsapp', 'numero_do_whatsapp', 'número_do_whatsapp',
+  'email', 'e-mail',
+]);
+
+const MAX_RESPOSTAS = 8;
+const MAX_PERGUNTA = 60;
+const MAX_RESPOSTA = 140;
+
+/**
+ * "qual_procedimento_você_está_interessado_" → "Qual procedimento você está interessado"
+ *
+ * ⚠️ O Meta entrega o nome do campo como SLUG, do jeito que o gestor digitou a
+ * pergunta no criador de formulário — com underscore, e frequentemente com um
+ * `_` ou `:` pendurado no fim. Jogar isso cru no grupo do cliente pareceria
+ * defeito do sistema, não pergunta do formulário.
+ */
+export function humanizarPergunta(bruto: string): string {
+  const limpo = bruto.replace(/_/g, ' ').replace(/\s+/g, ' ').trim().replace(/[:\s]+$/, '').trim();
+  if (!limpo) return '';
+  return limpo.charAt(0).toUpperCase() + limpo.slice(1);
+}
+
+/**
+ * "implante_unitário_" → "Implante unitário"; "tarde_—_das_14h_às_18h" → "Tarde — das 14h às 18h"
+ *
+ * ⚠️ O Meta entrega as OPÇÕES de múltipla escolha como slug, igual às perguntas
+ * (medido na SorriLeve). Mas só desfaz o slug quando o valor PARECE um —
+ * underscore e nenhum espaço. Texto que a pessoa digitou ("Nexxon solar"),
+ * e-mail e url passam intactos: trocar `_` por espaço em "a_b@x.com" estragaria
+ * um dado que a equipe vai copiar.
+ */
+export function humanizarValor(bruto: string): string {
+  const v = bruto.trim();
+  if (!v || /\s/.test(v) || !v.includes('_')) return v;
+  if (v.includes('@') || v.includes('/') || /^https?:/i.test(v)) return v;
+  const limpo = v.replace(/_/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!limpo) return v;
+  return limpo.charAt(0).toUpperCase() + limpo.slice(1);
+}
+
+function pushResposta(fora: Resposta[], pergunta: string, resposta: string) {
+  const p = pergunta.trim().slice(0, MAX_PERGUNTA);
+  const r = resposta.trim().replace(/\s*\n\s*/g, ' ').slice(0, MAX_RESPOSTA);
+  if (!p || !r) return;
+  if (fora.some(x => x.pergunta.toLowerCase() === p.toLowerCase())) return;
+  fora.push({ pergunta: p, resposta: r });
+}
+
+/**
+ * O que a pessoa RESPONDEU, lido do evento — não do cadastro do lead.
+ *
+ * ⚠️ A fonte é o `raw` do evento, de propósito: `crm_leads.observacao` é
+ * fill-blanks, então quem já era lead mantém a observação da PRIMEIRA vez e o
+ * aviso descreveria um formulário antigo. O evento é o que acabou de acontecer.
+ *
+ * Dois formatos, porque as duas portas gravam diferente:
+ *  - Meta Lead Ads: `field_data: [{ name, values }]` (medido nas 253 entradas);
+ *  - landing page: `observacao` em texto, "Pergunta: resposta" separado por
+ *    quebra de linha ou " | ", mais `cidade` em campo próprio.
+ */
+export function respostasDoFormulario(raw: unknown, fonte: FonteAviso): Resposta[] {
+  const out: Resposta[] = [];
+  if (!raw || typeof raw !== 'object') return out;
+  const obj = raw as Record<string, unknown>;
+
+  if (fonte === 'meta_forms' && Array.isArray(obj.field_data)) {
+    for (const campo of obj.field_data as Array<Record<string, unknown>>) {
+      const nome = String(campo?.name ?? '');
+      if (!nome || CAMPOS_DE_IDENTIDADE.has(nome.toLowerCase())) continue;
+      const valores = Array.isArray(campo?.values) ? campo.values : [];
+      const valor = valores
+        .map(v => humanizarValor(String(v ?? '')))
+        .filter(Boolean)
+        .join(', ');
+      if (!valor) continue; // campo em branco no formulário não vira linha vazia
+      pushResposta(out, humanizarPergunta(nome), valor);
+      if (out.length >= MAX_RESPOSTAS) break;
+    }
+    return out;
+  }
+
+  if (typeof obj.cidade === 'string') pushResposta(out, 'Cidade', obj.cidade);
+  if (typeof obj.observacao === 'string') {
+    for (const pedaco of obj.observacao.split(/\n|\s\|\s/)) {
+      const i = pedaco.indexOf(':');
+      if (i <= 0) continue;
+      pushResposta(out, pedaco.slice(0, i), pedaco.slice(i + 1));
+      if (out.length >= MAX_RESPOSTAS) break;
+    }
+  }
+  return out.slice(0, MAX_RESPOSTAS);
+}
+
+export function emailDoFormulario(raw: unknown, fallback: string | null | undefined): string | null {
+  if (raw && typeof raw === 'object') {
+    const obj = raw as Record<string, unknown>;
+    if (Array.isArray(obj.field_data)) {
+      for (const campo of obj.field_data as Array<Record<string, unknown>>) {
+        if (String(campo?.name ?? '').toLowerCase() !== 'email') continue;
+        const v = Array.isArray(campo?.values) ? String(campo.values[0] ?? '').trim() : '';
+        if (v) return v;
+      }
+    }
+    if (typeof obj.email === 'string' && obj.email.trim()) return obj.email.trim();
+  }
+  const f = String(fallback ?? '').trim();
+  return f || null;
+}
 
 /** +55 (14) 99635-8710 — o grupo é de gente, não de máquina. */
 export function formatarTelefone(bruto: string | null | undefined): string | null {
@@ -139,16 +257,27 @@ export function montarMensagem(lead: LeadDoAviso): string {
 
   const tel = formatarTelefone(lead.numero);
   if (tel) linhas.push(tel);
+  const email = lead.email?.trim();
+  if (email) linhas.push(email);
 
   const local = [lead.cidade, lead.uf].filter(Boolean).join(' · ');
   const detalhe: string[] = [];
   if (lead.campanha) detalhe.push(`Campanha: ${lead.campanha}`);
-  if (lead.anuncio) detalhe.push(`Anúncio: ${lead.anuncio}`);
+  if (lead.conjunto) detalhe.push(`Conjunto: ${lead.conjunto}`);
+  // ⚠️ "Criativo", não "Anúncio": é como a equipe chama, e é a pergunta que o
+  // grupo realmente faz ao ver o lead ("qual criativo trouxe esse?").
+  if (lead.anuncio) detalhe.push(`Criativo: ${lead.anuncio}`);
   if (!lead.campanha && lead.canal && lead.canal !== ROTULO_FONTE[lead.fonte]) {
     detalhe.push(`Origem: ${lead.canal}`);
   }
   if (local) detalhe.push(`Região: ${local}`);
   if (detalhe.length) { linhas.push(''); linhas.push(...detalhe); }
+
+  const respostas = lead.respostas ?? [];
+  if (respostas.length) {
+    linhas.push('', '*Respostas do formulário*');
+    for (const r of respostas) linhas.push(`• ${r.pergunta}: ${r.resposta}`);
+  }
 
   return linhas.join('\n');
 }
@@ -198,13 +327,22 @@ export async function processarAvisos(
     // garantia real (dois ticks cruzados leem a mesma lista).
     const { rows: eventos } = await pool.query<{
       id: string; lead_id: string | null; external_id: string | null; canal: string | null;
-      campaign_name: string | null; ad_name: string | null;
-      regiao_cidade: string | null; regiao_uf: string | null;
-      nome: string | null; numero: string | null;
+      campaign_name: string | null; adset_name: string | null; ad_name: string | null;
+      regiao_cidade: string | null; regiao_uf: string | null; raw: unknown;
+      nome: string | null; numero: string | null; email: string | null;
     }>(
+      // ⚠️ COALESCE evento → lead, nesta ordem. Medido em 29/09: no lead de
+      // landing page o nome da campanha É resolvido (ids do Google viram nome
+      // pelo google-ad-resolver) e gravado em crm_leads, mas NÃO no evento —
+      // lendo só o evento, 18 de 37 leads de LP sairiam sem campanha nenhuma.
+      // O evento vem primeiro porque descreve ESTA submissão; o lead é
+      // first-touch e, em quem já era lead, guarda a campanha da primeira vez.
       `SELECT e.id, e.lead_id, e.external_id, e.canal,
-              e.campaign_name, e.ad_name, e.regiao_cidade, e.regiao_uf,
-              l.nome, l.numero
+              COALESCE(e.campaign_name, l.campaign_name) AS campaign_name,
+              COALESCE(e.adset_name,    l.adset_name)    AS adset_name,
+              COALESCE(e.ad_name,       l.ad_name)       AS ad_name,
+              e.regiao_cidade, e.regiao_uf, e.raw,
+              l.nome, l.numero, l.email
          FROM public.lead_tracking_events e
          LEFT JOIN public.crm_leads l ON l.id = e.lead_id
          LEFT JOIN public.lead_aviso_envios v
@@ -224,8 +362,10 @@ export async function processarAvisos(
 
       const texto = montarMensagem({
         nome: ev.nome, numero: ev.numero, fonte, canal: ev.canal,
-        campanha: ev.campaign_name, anuncio: ev.ad_name,
+        campanha: ev.campaign_name, conjunto: ev.adset_name, anuncio: ev.ad_name,
         cidade: ev.regiao_cidade, uf: ev.regiao_uf,
+        email: emailDoFormulario(ev.raw, ev.email),
+        respostas: respostasDoFormulario(ev.raw, fonte),
       });
 
       // ⚠️ RESERVA ANTES DE ENVIAR. Gravar depois deixaria a janela em que um

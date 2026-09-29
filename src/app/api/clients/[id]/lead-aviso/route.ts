@@ -60,10 +60,18 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       if (!c?.group_id) {
         return Response.json({ ok: false, error: 'Escolha o grupo e salve antes de testar.' });
       }
+      // ⚠️ O exemplo mostra TUDO que um lead real carrega — conjunto, criativo e
+      // respostas. A versão anterior mandava `anuncio: null` e sem respostas, e
+      // o teste passou a impressão de que o aviso não trazia essas partes.
       const exemplo = montarMensagem({
         nome: 'Maria de Teste', numero: '5543999998888', fonte: 'meta_forms',
         canal: 'Formulário Meta', campanha: '[EXEMPLO] Campanha de teste',
-        anuncio: null, cidade: 'Londrina', uf: 'PR',
+        conjunto: '[EXEMPLO] Conjunto amplo', anuncio: '[EXEMPLO] Criativo 01',
+        cidade: 'Londrina', uf: 'PR', email: 'maria@exemplo.com.br',
+        respostas: [
+          { pergunta: 'Qual procedimento você está interessado', resposta: 'Implante' },
+          { pergunta: 'Qual o melhor horário para você', resposta: 'Manhã' },
+        ],
       });
       const r = await sendTextOnmid(pool, c.group_id,
         `${exemplo}\n\n_(mensagem de teste enviada pelo painel)_`);
