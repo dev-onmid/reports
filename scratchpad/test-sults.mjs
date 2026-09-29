@@ -66,6 +66,14 @@ eq(origemSults({ ...LEAD, canal: 'LP | CondoStore Mercado', origin: 'google' }, 
 eq(origemSults({ ...LEAD, canal: 'LP - Outra', origin: '' }, MAPA_LP), 12, 'separador hífen também');
 eq(origemSults({ ...LEAD, canal: 'Facebook', origin: '' }, MAPA_LP), 2, 'canal exato continua valendo');
 eq(origemSults({ ...LEAD, canal: 'Whatsapp', origin: 'organic' }, MAPA_LP), null, 'canal fora do mapa segue sem origem');
+// ⚠️ O canal de ENTRADA vence a origem do tráfego: LP que veio de anúncio do
+// Instagram é Landing Page, não Instagram (decisão do Matheus, 29/09/2026).
+eq(origemSults({ ...LEAD, canal: 'LP | CondoStore', origin: 'instagram' }, MAPA_LP), 12,
+  'LP vinda do Instagram continua Landing Page');
+eq(origemSults({ ...LEAD, canal: 'LP | CondoStore', origin: 'facebook' }, MAPA_LP), 12,
+  'LP vinda do Facebook continua Landing Page');
+eq(origemSults({ ...LEAD, canal: null, origin: 'instagram' }, MAPA_LP), 1,
+  'sem canal, o origin ainda decide');
 // ⚠️ O exato tem que vencer a família, senão mapear UMA lp específica seria
 // impossível depois que a regra geral existisse.
 eq(origemSults({ ...LEAD, canal: 'LP | CondoStore' }, { ...MAPA_LP, mapaOrigem: { lp: 12, 'lp | condostore': 7 } }), 7,

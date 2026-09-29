@@ -131,8 +131,14 @@ function familiaDoCanal(canal: string): string {
 /**
  * origemId pelo canal/origin do lead; cai no padrão da conexão quando não há mapa.
  *
- * Ordem: canal exato → origin exato → FAMÍLIA do canal. O exato vem primeiro
- * para que mapear uma LP específica continue vencendo a regra geral.
+ * Ordem: canal exato → FAMÍLIA do canal → origin. Quem decide é o canal por
+ * onde o lead ENTROU, não de onde veio o tráfego.
+ *
+ * ⚠️ O `origin` vem por último de propósito (decisão do Matheus, 29/09/2026):
+ * lead de landing page que chegou por anúncio do Instagram tem `canal="LP | …"`
+ * e `origin="instagram"`. Testando origin antes, ele virava "Instagram" no
+ * SULTS e o funil do cliente perdia a landing page de vista. O origin segue
+ * valendo para lead SEM canal mapeado, que é o caso que ele cobre bem.
  */
 export function origemSults(lead: LeadParaSults, conf: ConfigSults): number | null {
   const mapa = conf.mapaOrigem ?? {};
@@ -141,8 +147,8 @@ export function origemSults(lead: LeadParaSults, conf: ConfigSults): number | nu
     return k && Number.isInteger(mapa[k]) ? mapa[k] : null;
   };
   return achar(lead.canal)
-    ?? achar(lead.origin)
     ?? achar(familiaDoCanal(String(lead.canal ?? '')))
+    ?? achar(lead.origin)
     ?? conf.origemId ?? null;
 }
 
