@@ -79,6 +79,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const resposta: Ga4Resposta = validos.length
     ? { ga4: consolidar(validos) }
     : { ga4: null, aviso: 'Token do Google Analytics expirado — reconecte a conta em Integrações.' };
-  setCached(cacheKey, resposta);
+  // ⚠️ Só guarda SUCESSO: com a falha em cache, reconectar a conta em
+  // Integrações não surtia efeito por 15 min e o painel seguia vazio (caso
+  // Romanza, 29/09 — token revogado, reconectado, e a tela continuou sem GA4).
+  if (validos.length) setCached(cacheKey, resposta);
   return cachedJson(resposta, false);
 }
