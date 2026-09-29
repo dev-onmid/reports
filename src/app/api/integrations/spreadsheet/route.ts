@@ -614,6 +614,10 @@ async function upsertPorTelefone(
          -- de Leads zera o valor de propósito (o faturamento mora no ledger de
          -- Vendas) — sem esta guarda, importá-la APAGAVA a receita já gravada.
          -- ⚠️⚠️ E valor ZERO nunca apaga valor já gravado (NULLIF do valor novo).
+         -- ⚠️ O cast ::numeric é OBRIGATÓRIO: sem ele o Postgres infere o tipo do
+         -- parâmetro pelo literal 0 do NULLIF (integer) e recusa qualquer valor
+         -- com centavos — "invalid input syntax for type integer: 249.99", que
+         -- derrubou a importação inteira da Odonto First.
          -- Numa planilha de CRM a célula de valor vazia significa "ainda não
          -- fechou", não "a venda foi cancelada" — e a MESMA pessoa aparece em
          -- várias abas de mês. Caso real (Odonto First, 2026-09-29): EDNA
@@ -623,8 +627,8 @@ async function upsertPorTelefone(
          -- R$ 3.690. Apagar faturamento real é destrutivo e não se recupera
          -- sem reimportar; deixar de zerar uma venda cancelada, não (quem
          -- retifica o ledger e a reconciliacao de vendas do periodo, que APAGA).
-         revenue  = CASE WHEN $16 AND ${maisNovo} THEN COALESCE(NULLIF($6, 0), public.crm_leads.revenue) ELSE public.crm_leads.revenue END,
-         valor_rs = CASE WHEN $16 AND ${maisNovo} THEN COALESCE(NULLIF($6, 0), public.crm_leads.valor_rs) ELSE public.crm_leads.valor_rs END,
+         revenue  = CASE WHEN $16 AND ${maisNovo} THEN COALESCE(NULLIF($6::numeric, 0), public.crm_leads.revenue) ELSE public.crm_leads.revenue END,
+         valor_rs = CASE WHEN $16 AND ${maisNovo} THEN COALESCE(NULLIF($6::numeric, 0), public.crm_leads.valor_rs) ELSE public.crm_leads.valor_rs END,
          orcamento = CASE WHEN ${maisNovo} THEN COALESCE($7, orcamento) ELSE orcamento END,
          pagamento = COALESCE($8, pagamento),
          data_agendada = COALESCE($9, data_agendada),
