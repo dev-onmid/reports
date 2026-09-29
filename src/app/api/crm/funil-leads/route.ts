@@ -76,6 +76,7 @@ export async function GET(req: NextRequest) {
     await pool.query(`
       ALTER TABLE public.crm_leads
         ADD COLUMN IF NOT EXISTS registro_tipo TEXT DEFAULT 'hibrido',
+        ADD COLUMN IF NOT EXISTS engajou BOOLEAN DEFAULT FALSE,
         ADD COLUMN IF NOT EXISTS data_fechamento DATE
     `).catch(() => {});
 
@@ -108,6 +109,7 @@ export async function GET(req: NextRequest) {
               l.agendou,
               l.data_agendada,
               l.compareceu,
+              l.engajou,
               (l.fechou OR COALESCE(NULLIF(l.revenue, 0), l.valor_rs, 0) > 0) AS fechou,
               COALESCE(NULLIF(l.revenue, 0), l.valor_rs, 0) AS valor_rs,
               ${rastroPagoSql('l')} AS rastreado,
@@ -172,6 +174,7 @@ export async function GET(req: NextRequest) {
           dataAgendada: r.data_agendada ? String(r.data_agendada) : null,
           dataLead: r.data_lead ? String(r.data_lead) : null,
           compareceu: r.compareceu === true,
+          engajou: r.engajou === true,
           fechou: r.fechou === true,
           receita: Number(r.valor_rs) || 0,
         }));
@@ -190,6 +193,7 @@ export async function GET(req: NextRequest) {
         // agendamentos impossíveis que a contagem e os dois divergiriam.
         dataLead: row.data_lead ? String(row.data_lead) : null,
         compareceu: row.compareceu === true,
+        engajou: row.engajou === true,
         fechou: row.fechou === true,
         receita: Number(row.valor_rs) || 0,
         rastreado: row.rastreado === true,

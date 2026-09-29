@@ -2,7 +2,7 @@ import type { NextRequest } from 'next/server';
 import { createHash } from 'node:crypto';
 import { makeServerPool } from '@/lib/server-db';
 
-import { origemIntegravel, resumirOrigens, dedupLote, dedupPorTelefone, idExterno, decidirFechou, sinaisDoStatus, indexarOcorrencias } from '@/lib/importacao-origem';
+import { origemIntegravel, resumirOrigens, dedupLote, dedupPorTelefone, idExterno, decidirFechou, parseFechou, colunaEhBooleana, sinaisDoStatus, indexarOcorrencias } from '@/lib/importacao-origem';
 import { chavesTelefone } from '@/lib/lead-identity';
 
 /** Tipo da planilha, escolhido na importação. Ver comentário em LeadParaFunil. */
@@ -162,6 +162,10 @@ export type SpreadsheetColumnMapping = {
   updatedDate?: string | null;
   /** Coluna que DECLARA o fechamento (✅/❌, Sim/Não) — ver parseFechou. */
   closed?: string | null;
+  /** Coluna que DIZ se o lead compareceu (✅/❌) — "Comp", "compareceu". */
+  attended?: string | null;
+  /** Fileira de tentativas de contato ("1º DIA".."4º DIA", "1º Lig"…). ✅ = falou. */
+  contact?: string[] | null;
 };
 
 export type SpreadsheetMapping = {
@@ -259,6 +263,8 @@ Identifique:
 - "stage": coluna de etapa do funil (ex: "Etapa", "Estágio", "Fase" — diferente de "status", representa em que ponto do funil o lead está, não o resultado final)
 - "updatedDate": coluna de última atualização/última modificação do negócio (diferente de "date", que é a data de criação)
 - "closed": coluna que DIZ se a venda foi fechada, marcada com ✅/❌ ou Sim/Não (ex.: "Fechou?", "Fechado", "Ganhou?"). É a DECLARAÇÃO do fechamento — não confunda com "revenue" (o valor) nem com "status" (a etapa).
+- "attended": coluna que DIZ se o lead COMPARECEU na consulta/reunião, marcada com ✅/❌ (ex.: "Comp", "compareceu", "Compareceu?"). É a presença, não o agendamento nem o fechamento.
+- "contact": LISTA das colunas de tentativa de contato, uma por dia/ligação (ex.: ["1º DIA","2º DIA","3º DIA","4º DIA"] ou ["1º Lig","2º Lig"]). ✅ nelas significa que conseguiram falar com a pessoa. [] se não existirem.
 
 Retorne APENAS JSON (sem markdown):
 {
@@ -277,7 +283,9 @@ Retorne APENAS JSON (sem markdown):
   "dealId": "nome exato da coluna de ID do negócio (null se não existir)",
   "stage": "nome exato da coluna de etapa do funil (null se não existir)",
   "updatedDate": "nome exato da coluna de última atualização (null se não existir)",
-  "closed": "nome exato da coluna de fechou sim/não (null se não existir)"
+  "closed": "nome exato da coluna de fechou sim/não (null se não existir)",
+  "attended": "nome exato da coluna de comparecimento (null se não existir)",
+  "contact": ["nomes exatos das colunas de tentativa de contato, em ordem"]
 }`;
 
   const res = await fetch('https://api.anthropic.com/v1/messages', {
@@ -317,6 +325,12 @@ Retorne APENAS JSON (sem markdown):
       dealId: headers.find(h => /^id$/i.test(h.trim())) ?? null,
       stage: headers.find(h => /etapa|est[aá]gio|fase\s+do\s+funil/i.test(h)) ?? null,
       updatedDate: headers.find(h => /[uú]ltima\s+(atualiza[cç][aã]o|modifica[cç][aã]o|cria[cç][aã]o)/i.test(h)) ?? null,
+      // ⚠️ `^comp` com âncora: "Comp" é o nome real na planilha da Odonto First,
+      // e um /comp/ solto casaria "Complemento", "Compra" e "Comprou".
+      attended: headers.find(h => /^comp(areceu|arecimento|\.?)$|compareceu\?/i.test(h.trim())) ?? null,
+      // Fileira de tentativas: "1º DIA".."4º DIA" (Odonto First), "1º Lig".."4º Lig"
+      // (SorriLeve). Ordinal + dia/ligação/tentativa/contato.
+      contact: headers.filter(h => /^\d+\s*[ºo°]?\s*(dia|lig|liga[cç][aã]o|tentativa|contato)/i.test(h.trim())),
     };
   }
 }
@@ -374,6 +388,9 @@ async function ensureTables(pool: ReturnType<typeof makeServerPool>) {
       ADD COLUMN IF NOT EXISTS numero TEXT,
       ADD COLUMN IF NOT EXISTS canal TEXT,
       ADD COLUMN IF NOT EXISTS compareceu BOOLEAN DEFAULT FALSE,
+      -- Alguém CONSEGUIU falar com o lead (a fileira de "1º DIA"/"1º Lig" da
+      -- planilha de clínica). Sobe para ENGAJADO no funil — ver funil-etapas.
+      ADD COLUMN IF NOT EXISTS engajou BOOLEAN DEFAULT FALSE,
       ADD COLUMN IF NOT EXISTS agendou BOOLEAN DEFAULT FALSE,
       ADD COLUMN IF NOT EXISTS observacao TEXT,
       ADD COLUMN IF NOT EXISTS orcamento NUMERIC,
@@ -435,6 +452,7 @@ async function insertLeadBatch(
     revenue: number;
     closed: boolean;
     compareceu?: boolean;
+    engajou?: boolean;
     agendou?: boolean;
     registroTipo?: TipoPlanilha;
     dataFechamento?: string | null;
@@ -445,7 +463,7 @@ async function insertLeadBatch(
 ) {
   if (rows.length === 0) return;
 
-  const COLS = 28;
+  const COLS = 29;  // ⚠️ igual ao nº de colunas do INSERT abaixo — engajou entrou em 2026-09-29
   const values: unknown[] = [];
   const placeholders = rows.map((row, index) => {
     const base = index * COLS;
@@ -475,6 +493,7 @@ async function insertLeadBatch(
       row.raw,
       // Booleanos que o funil de performance lê (Comparecimentos/Agendamentos).
       row.compareceu ?? false,
+      row.engajou ?? false,
       row.agendou ?? false,
       row.registroTipo ?? 'hibrido',
       row.dataFechamento ?? null,
@@ -487,7 +506,7 @@ async function insertLeadBatch(
     `INSERT INTO public.crm_leads
       (upload_id, client_id, lead_date, lead_name, phone, source, city, status_raw,
        data, nome, numero, canal, observacao, orcamento, pagamento, bairro, data_agendada,
-       revenue, valor_rs, fechou, status_category, status, raw, compareceu, agendou,
+       revenue, valor_rs, fechou, status_category, status, raw, compareceu, engajou, agendou,
        registro_tipo, data_fechamento, negocio_externo_id)
      VALUES ${placeholders}
      -- SEM alvo de propósito: a producao tem uma unique (client_id, numero)
@@ -536,7 +555,7 @@ async function upsertPorTelefone(
     updatedAtExternal?: string | null;
     /** Planilha de Leads não escreve receita (o valor mora no ledger de Vendas). */
     escreveReceita?: boolean;
-    compareceu?: boolean; agendou?: boolean;
+    compareceu?: boolean; engajou?: boolean; agendou?: boolean;
     registroTipo?: TipoPlanilha; dataFechamento?: string | null;
   }>,
 ) {
@@ -609,6 +628,9 @@ async function upsertPorTelefone(
          status_category = CASE WHEN ${maisNovo} THEN COALESCE($4, status_category) ELSE status_category END,
          fechou = public.crm_leads.fechou OR $5,
          compareceu = COALESCE(public.crm_leads.compareceu, false) OR $12,
+         -- Só avança, como compareceu/agendou: um mês sem contato não apaga a
+         -- conversa que houve no mês anterior.
+         engajou = COALESCE(public.crm_leads.engajou, false) OR $18,
          agendou = COALESCE(public.crm_leads.agendou, false) OR $13,
          -- ⚠️ Receita só é escrita por quem tem receita pra escrever. A planilha
          -- de Leads zera o valor de propósito (o faturamento mora no ledger de
@@ -665,6 +687,8 @@ async function upsertPorTelefone(
         r.escreveReceita !== false,
         // $17 — a data de cadastro que a planilha informa para ESTE lead.
         r.leadDate ?? null,
+        // $18 — houve conversa (a fileira de tentativas da planilha).
+        r.engajou ?? false,
       ],
     );
   }
@@ -749,6 +773,7 @@ async function upsertLeadBatch(
     revenue: number;
     closed: boolean;
     compareceu?: boolean;
+    engajou?: boolean;
     agendou?: boolean;
     registroTipo?: TipoPlanilha;
     dataFechamento?: string | null;
@@ -759,7 +784,7 @@ async function upsertLeadBatch(
 ) {
   if (rows.length === 0) return;
 
-  const COLS = 31;
+  const COLS = 32;  // ⚠️ igual ao nº de colunas do INSERT abaixo — engajou entrou em 2026-09-29
   const values: unknown[] = [];
   const placeholders = rows.map((row, index) => {
     const base = index * COLS;
@@ -774,6 +799,7 @@ async function upsertLeadBatch(
       row.statusRaw || (row.closed ? 'Fechado' : null),
       row.raw,
       row.compareceu ?? false,
+      row.engajou ?? false,
       row.agendou ?? false,
       row.registroTipo ?? 'hibrido',
       row.dataFechamento ?? null,
@@ -789,7 +815,7 @@ async function upsertLeadBatch(
        data, nome, numero, canal, bairro, data_agendada,
        stage, updated_at_external,
        orcamento, pagamento, observacao,
-       revenue, valor_rs, fechou, status_category, status, raw, compareceu, agendou,
+       revenue, valor_rs, fechou, status_category, status, raw, compareceu, engajou, agendou,
        registro_tipo, data_fechamento, negocio_externo_id)
      VALUES ${placeholders}
      -- ATENCAO: o WHERE abaixo e OBRIGATORIO. O indice unico de
@@ -845,6 +871,7 @@ async function upsertLeadBatch(
        -- compareceu e agendou só AVANÇAM: quem já compareceu/agendou não deixa
        -- de ter feito isso porque um export posterior veio com status diferente.
        compareceu = public.crm_leads.compareceu OR EXCLUDED.compareceu,
+       engajou = COALESCE(public.crm_leads.engajou, false) OR EXCLUDED.engajou,
        agendou = COALESCE(public.crm_leads.agendou, false) OR EXCLUDED.agendou,
        raw = EXCLUDED.raw
      WHERE public.crm_leads.updated_at_external IS NULL
@@ -1015,6 +1042,11 @@ export async function POST(req: NextRequest) {
     const updatedDateColumnOverride = formData.get('updatedDateColumn') as string | null;
     // Coluna de "Fechou?" (✅/❌, Sim/Não) — ver parseFechou.
     const closedColumnOverride = formData.get('closedColumn') as string | null;
+    // Coluna de comparecimento (✅/❌) — ver decidirFechou, mesma família.
+    const attendedColumnOverride = formData.get('attendedColumn') as string | null;
+    // ⚠️ VÁRIAS colunas: em planilha de clínica o contato é uma fileira de
+    // tentativas ("1º DIA".."4º DIA" / "1º Lig"..), uma por dia. Chega como CSV.
+    const contactColumnsRaw = formData.get('contactColumns') as string | null;
     /**
      * ⚠️ "Esta planilha traz faturamento", dito EXPLICITAMENTE por quem configurou.
      *
@@ -1062,6 +1094,8 @@ export async function POST(req: NextRequest) {
     const stageCol = stageColumnOverride || null;
     const updatedDateCol = updatedDateColumnOverride || null;
     const closedCol = closedColumnOverride || null;  // ver parseFechou
+    const attendedCol = attendedColumnOverride || null;
+    const contactCols = (contactColumnsRaw ?? '').split(',').map(c => c.trim()).filter(Boolean);
     const specialtiesCol = findHeader(headers, [/especialidades/i]);
     const treatmentsCol = findHeader(headers, [/tratamentos/i]);
     const saleTypeCol = findHeader(headers, [/tipo\s+venda/i]);
@@ -1083,6 +1117,24 @@ export async function POST(req: NextRequest) {
     if (stageCol && !headers.includes(stageCol)) return Response.json({ error: `Coluna de etapa não encontrada: ${stageCol}` }, { status: 400 });
     if (updatedDateCol && !headers.includes(updatedDateCol)) return Response.json({ error: `Coluna de última atualização não encontrada: ${updatedDateCol}` }, { status: 400 });
     if (closedCol && !headers.includes(closedCol)) return Response.json({ error: `Coluna de fechamento não encontrada: ${closedCol}` }, { status: 400 });
+    if (attendedCol && !headers.includes(attendedCol)) return Response.json({ error: `Coluna de comparecimento não encontrada: ${attendedCol}` }, { status: 400 });
+    // ⚠️ Coluna de contato que não existe é IGNORADA, não derruba a importação:
+    // a fileira varia de mês para mês na mesma planilha (um mês tem 4 dias de
+    // tentativa, outro tem 3), e recusar o arquivo inteiro por isso pararia a
+    // rotina diária por uma coluna a menos.
+    const contactColsOk = contactCols.filter(c => headers.includes(c));
+
+    // ⚠️ Coluna de sim/não apontada para uma coluna de VALOR zeraria tudo — ver
+    // `colunaEhBooleana`. Reprovada, ela é IGNORADA (cai nos sinais de sempre) e
+    // o motivo vai no relatório, em vez de a importação mentir em silêncio.
+    const avisosColuna: string[] = [];
+    const amostra = (col: string) => rows.slice(0, 200).map(r => r[col]);
+    const closedColOk = closedCol && !colunaEhBooleana(amostra(closedCol))
+      ? (avisosColuna.push(`A coluna "${closedCol}" não parece de sim/não — o fechamento seguiu pelo status.`), null)
+      : closedCol;
+    const attendedColOk = attendedCol && !colunaEhBooleana(amostra(attendedCol))
+      ? (avisosColuna.push(`A coluna "${attendedCol}" não parece de sim/não — o comparecimento seguiu pelo status.`), null)
+      : attendedCol;
 
     const pool = makeServerPool();
     await ensureTables(pool);
@@ -1217,7 +1269,14 @@ export async function POST(req: NextRequest) {
           // comparecimento e a etapa fica zerada mesmo com o CRM correto.
           const sinais = sinaisDoStatus(statusRaw);
           return {
-            compareceu: sinais.compareceu,
+            // A coluna de comparecimento da planilha manda quando existe — mesma
+            // regra de `decidirFechou`: é o que o cliente declarou. Sem ela,
+            // segue o sinal derivado do status.
+            compareceu: attendedColOk ? (parseFechou(row[attendedColOk]) ?? false) : sinais.compareceu,
+            // ⚠️ UM por lead, não a contagem de ✅: quatro dias marcados são o
+            // mesmo lead engajado (decisão do Matheus, 2026-09-29). `some`, não
+            // `filter().length`. ❌ é tentativa sem sucesso e não conta.
+            engajou: contactColsOk.length ? contactColsOk.some(c => parseFechou(row[c]) === true) : undefined,
             agendou: sinais.agendou,
             uploadId: upload.id as string,
             clientId,
@@ -1246,8 +1305,8 @@ export async function POST(req: NextRequest) {
             // fechamento da planilha vence o tipo e os sinais, e célula vazia
             // nela significa "não fechou".
             closed: decidirFechou({
-              celula: closedCol ? row[closedCol] : undefined,
-              temColuna: Boolean(closedCol),
+              celula: closedColOk ? row[closedColOk] : undefined,
+              temColuna: Boolean(closedColOk),
               tipo: tipoPlanilha,
               sinaisFechou: sinais.fechou,
               temStatus: Boolean(statusCol),
@@ -1380,6 +1439,8 @@ export async function POST(req: NextRequest) {
       origem_descartadas: resumoOrigem.descartadas,
       origens_fora: resumoOrigem.origens.slice(0, 10),
       receita_descartada: receitaDescartada,
+      // Coluna de sim/não recusada por não parecer booleana — ver colunaEhBooleana.
+      avisos_coluna: avisosColuna.length ? avisosColuna : undefined,
       duplicadas_no_lote: duplicadasNoLote,
       vendas_ligadas: vendasLigadas,
       // Troca de coluna de data no ledger de Vendas. Vai pra resposta porque

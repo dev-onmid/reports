@@ -194,6 +194,21 @@ export type LeadParaFunil = {
   tipo?: 'lead' | 'venda' | 'hibrido';
   /** Tem rastro de anúncio (ctwa/gclid/utm paga…) — o que salva um "Paciente" de ser não-lead. */
   rastreado?: boolean;
+  /**
+   * Alguém FALOU com este lead — não é "tentou", é "conseguiu".
+   *
+   * Existe porque em planilha de clínica o contato não mora no status: mora
+   * numa fileira de colunas de tentativa ("1º DIA", "2º DIA"… / "1º Lig"…),
+   * cada uma ✅ quando atenderam e ❌ quando não. O status pode continuar
+   * "Não Retorna" e ainda assim ter havido conversa no 1º dia.
+   *
+   * ⚠️ É UM por lead, não a contagem de ✅ (decisão do Matheus, 2026-09-29):
+   * quatro dias marcados são o mesmo lead engajado, não quatro.
+   *
+   * Sobe o lead para ENGAJADO (posto 1) sem mexer em grau nenhum acima: quem já
+   * agendou, compareceu ou fechou continua onde está.
+   */
+  engajou?: boolean;
 };
 
 export type EtapaDeStage = {
@@ -464,6 +479,11 @@ export function etapaDoLead(lead: LeadParaFunil, mapa: MapaEtapas): PostoDoLead 
   if (lead.fechou) posto = Math.max(posto, 4);
   else if (lead.compareceu) posto = Math.max(posto, 3);
   else if (lead.agendou || diaAgenda !== null) posto = Math.max(posto, 2);
+  // Contato confirmado na planilha = ENGAJADO, mesmo que o status não diga.
+  // ⚠️ Não vale para PERDIDO nem para NÃO-LEAD: falar com alguém que disse não
+  // ter interesse não o traz de volta ao funil, e o piso do perdido (-1) existe
+  // justamente para ele não subir degrau sozinho.
+  if (lead.engajou && !naoLead && etapaStatus !== 'perdido') posto = Math.max(posto, 1);
   const agendaSoPelaData = posto === 2 && !lead.agendou && postoStatus < 2;
   // (else if de propósito: fechou já implica os anteriores pela cumulatividade)
 

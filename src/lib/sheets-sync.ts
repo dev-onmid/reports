@@ -22,7 +22,7 @@ export type SheetsConfig = {
   sheetId: string;
   sheetUrl: string;
   /** Mapeamento de colunas que a IA resolveu na configuração — reusado todo dia. */
-  mapeamento: Record<string, string | null> | null;
+  mapeamento: Record<string, string | string[] | null> | null;
   /** Nome da aba escolhida na última configuração (só informativo). */
   abaExemplo: string | null;
   /** Abas escolhidas à mão pelo gestor. Vazio = só o mês, como era antes. */
@@ -180,7 +180,15 @@ export async function sincronizarSheets(
   // é de UM cliente só, e mandar a coluna de clínica faria a rota tentar o
   // de-para clínica→cliente que não existe neste caminho.
   for (const [campo, coluna] of Object.entries(cfg.mapeamento ?? {})) {
-    if (coluna && campo !== 'clinic') fd.append(`${campo}Column`, coluna);
+    // ⚠️ `contact` é LISTA (a fileira de tentativas) e vai como CSV num campo
+    // próprio; os demais são 1:1. Sem este desvio, um array viraria a string
+    // "1º DIA,2º DIA" num `contactColumn` que a rota não conhece.
+    if (campo === 'contact') {
+      const cols = Array.isArray(coluna) ? coluna : [];
+      if (cols.length) fd.append('contactColumns', cols.join(','));
+      continue;
+    }
+    if (typeof coluna === 'string' && coluna && campo !== 'clinic') fd.append(`${campo}Column`, coluna);
   }
 
   const avisos = [

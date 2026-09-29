@@ -232,10 +232,13 @@ export function escolherAbas(
 export function abasCompativeis(
   cabecalhoPorAba: Record<string, string[]>,
   abas: string[],
-  mapeamento: Record<string, string | null> | null,
+  mapeamento: Record<string, string | string[] | null> | null,
 ): { ok: string[]; incompativeis: { aba: string; faltam: string[] }[] } {
+  // ⚠️ `contact` (a fileira de tentativas) fica FORA da exigência: ela varia de
+  // mês para mês na mesma planilha — um mês tem 4 dias de tentativa, outro tem
+  // 3 — e exigi-la reprovaria abas boas. A importação já ignora a que faltar.
   const exigidas = Object.entries(mapeamento ?? {})
-    .filter(([campo, col]) => col && campo !== 'clinic')
+    .filter(([campo, col]) => col && campo !== 'clinic' && campo !== 'contact')
     .map(([, col]) => String(col));
   const ok: string[] = [];
   const incompativeis: { aba: string; faltam: string[] }[] = [];

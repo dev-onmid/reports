@@ -8,7 +8,7 @@
 
 import assert from 'node:assert';
 import { origemIntegravel, normalizarOrigem, resumirOrigens, dedupLote, dedupPorTelefone, ORIGENS_INTEGRAVEIS,
-  idExterno, chaveTelefone, sinaisDoStatus, indexarOcorrencias, parseFechou, decidirFechou }
+  idExterno, chaveTelefone, sinaisDoStatus, indexarOcorrencias, parseFechou, decidirFechou, colunaEhBooleana }
   from './build/importacao-origem.mjs';
 let n=0; const eq=(a,b,m)=>{assert.deepStrictEqual(a,b,m);n++;}; const ok=(c,m)=>{assert.ok(c,m);n++;};
 
@@ -311,5 +311,25 @@ eq(decidirFechou({ ...sem, sinaisFechou: true, temStatus: true, statusGanho: fal
   const fechados = celulas.filter(c => decidirFechou({ ...com, celula: c, revenueBruto: c === '✅' ? 12000 : 0 })).length;
   eq(fechados, 11, 'a planilha da Odonto First tem 11 fechados, não 140');
 }
+
+
+// ---------------------------------------------------------------------------
+// colunaEhBooleana — impede que a coluna de sim/não aponte para uma de VALOR.
+// ⚠️ "R$ FECHADO" é o nome real de uma coluna de dinheiro na planilha da
+// Sorrifácil. Se ela virasse a coluna de fechamento, parseFechou devolveria
+// null em toda linha e TODA venda viraria "não fechou", zerando o faturamento
+// sem erro nenhum aparecer.
+// ---------------------------------------------------------------------------
+eq(colunaEhBooleana(['✅','❌','✅','']), true, 'vocabulário de emoji passa');
+eq(colunaEhBooleana(['Sim','Não','sim']), true, 'sim/não passa');
+eq(colunaEhBooleana(['R$ 1.200,00','R$ 340,00','R$ 0,00']), false, 'coluna de dinheiro é recusada');
+eq(colunaEhBooleana([1200, 340, 99]), false, 'números crus são recusados');
+eq(colunaEhBooleana(['2026-09-01','2026-09-02']), false, 'coluna de data é recusada');
+eq(colunaEhBooleana([]), true, 'coluna vazia não reprova (não há o que julgar)');
+eq(colunaEhBooleana(['', '  ', '']), true, 'só espaços também não reprova');
+eq(colunaEhBooleana(['✅','R$ 300,00']), true, 'metade reconhecida passa (fronteira)');
+eq(colunaEhBooleana(['✅','R$ 300,00','R$ 10,00']), false, 'abaixo da metade reprova');
+// 🕒 é indefinido, não é vocabulário reconhecido
+eq(colunaEhBooleana(['🕒','🕒','✅','❌']), true, 'metade reconhecida com relógio no meio');
 
 console.log(`OK ${n} asserts`);

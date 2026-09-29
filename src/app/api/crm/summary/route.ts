@@ -53,6 +53,7 @@ export async function GET(req: NextRequest) {
         ADD COLUMN IF NOT EXISTS funnel_id UUID,
         ADD COLUMN IF NOT EXISTS agendou BOOLEAN DEFAULT FALSE,
         ADD COLUMN IF NOT EXISTS compareceu BOOLEAN DEFAULT FALSE,
+        ADD COLUMN IF NOT EXISTS engajou BOOLEAN DEFAULT FALSE,
         ADD COLUMN IF NOT EXISTS fechou BOOLEAN DEFAULT FALSE,
         ADD COLUMN IF NOT EXISTS valor_rs NUMERIC,
         ADD COLUMN IF NOT EXISTS revenue NUMERIC DEFAULT 0,
@@ -85,6 +86,7 @@ export async function GET(req: NextRequest) {
               data_agendada,
               COALESCE(lead_date, data) AS data_lead,
               compareceu,
+              engajou,
               COALESCE(registro_tipo, 'hibrido') AS registro_tipo,
               (fechou OR COALESCE(NULLIF(revenue, 0), valor_rs, 0) > 0) AS fechou,
               COALESCE(NULLIF(revenue, 0), valor_rs, 0) AS valor_rs,
@@ -221,6 +223,7 @@ export async function GET(req: NextRequest) {
         // descarta. Sem esta coluna a checagem não teria com o que comparar.
         dataLead: row.data_lead ? String(row.data_lead) : null,
         compareceu: row.compareceu === true,
+        engajou: row.engajou === true,
         fechou: row.fechou === true,
         receita: Number(row.valor_rs) || 0,
         rastreado: row.rastreado === true,

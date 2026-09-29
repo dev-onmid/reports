@@ -260,6 +260,27 @@ export function parseFechou(v: unknown): boolean | null {
 }
 
 /**
+ * A coluna serve mesmo como "sim/não"?
+ *
+ * ⚠️ Existe para impedir um estrago grande e silencioso: se o de-para apontar a
+ * coluna de fechamento para uma coluna de VALOR ("R$ FECHADO" é o nome real na
+ * planilha da Sorrifácil), `parseFechou` não reconhece "R$ 1.200,00" e devolve
+ * null — e como a coluna declarada manda, TODA venda viraria "não fechou". O
+ * faturamento da dashboard iria a zero sem nenhum erro aparecer.
+ *
+ * A régua é a própria amostra: pelo menos metade das células preenchidas tem de
+ * ser vocabulário de sim/não (✅/❌/Sim/Não/x). Coluna vazia não reprova — não
+ * há o que julgar, e recusá-la impediria de marcar a coluna certa numa planilha
+ * que ainda não foi preenchida.
+ */
+export function colunaEhBooleana(valores: unknown[]): boolean {
+  const preenchidos = valores.filter(v => String(v ?? '').trim() !== '');
+  if (preenchidos.length === 0) return true;
+  const reconhecidos = preenchidos.filter(v => parseFechou(v) !== null).length;
+  return reconhecidos / preenchidos.length >= 0.5;
+}
+
+/**
  * Decide se a linha da planilha representa uma venda FECHADA.
  *
  * ⚠️⚠️ A coluna de fechamento ("Fechou?", "Ganhou?") é a AUTORIDADE quando

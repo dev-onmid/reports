@@ -1528,7 +1528,7 @@ function SpreadsheetImportPanel() {
     dealId: '',
     stage: '',
     updatedDate: '',
-    closed: '',
+    closed: '', attended: '', contact: '',
   });
   /**
    * Um de-para de colunas POR FORMATO, indexado pela assinatura do cabeçalho.
@@ -1687,6 +1687,9 @@ function SpreadsheetImportPanel() {
             dealId: f.mapping.dealId ?? '', stage: f.mapping.stage ?? '',
             updatedDate: f.mapping.updatedDate ?? '',
             closed: f.mapping.closed ?? '',
+            attended: f.mapping.attended ?? '',
+            // A fileira de tentativas vira CSV no formulário (a rota recebe assim).
+            contact: (f.mapping.contact ?? []).join(','),
           };
         }
         setPorFormato(inicial);
@@ -1719,6 +1722,8 @@ function SpreadsheetImportPanel() {
         stage: data.mapping.stage ?? '',
         updatedDate: data.mapping.updatedDate ?? '',
         closed: data.mapping.closed ?? '',
+        attended: data.mapping.attended ?? '',
+        contact: (data.mapping.contact ?? []).join(','),
       }));
       const initialMappings: SpreadsheetMapping[] = data.clinicValues.map(v => ({ clinicValue: v, clientId: '', clientName: '' }));
       setMappings(initialMappings);
@@ -1780,6 +1785,11 @@ function SpreadsheetImportPanel() {
           ['neighborhood', 'neighborhoodColumn'], ['notes', 'notesColumn'],
           ['scheduledDate', 'scheduledDateColumn'], ['status', 'statusColumn'],
           ['dealId', 'dealIdColumn'], ['stage', 'stageColumn'], ['updatedDate', 'updatedDateColumn'],
+          // ⚠️ `closed` estava de fora: a coluna "Fechou?" era lida pela IA e
+          // nunca chegava à rota por este caminho — só pela rotina do Sheets.
+          ['closed', 'closedColumn'], ['attended', 'attendedColumn'],
+          // Lista, enviada como CSV — a rota separa por vírgula.
+          ['contact', 'contactColumns'],
         ];
         for (const [chave, campo] of campos) if (lote.cols[chave]) fd.append(campo, lote.cols[chave]);
         fd.append('tipoPlanilha', lote.tipo);
@@ -1850,7 +1860,7 @@ function SpreadsheetImportPanel() {
       dealId: '',
       stage: '',
       updatedDate: '',
-      closed: '',
+      closed: '', attended: '', contact: '',
     });
     setImportResults(null);
     setPorFormato({});

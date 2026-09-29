@@ -388,3 +388,46 @@ for (const [rotulo, esperado] of [
 }
 
 console.log(`OK (com a quebra de agendamentos) — ${n} asserts`);
+
+// ---------------------------------------------------------------------------
+// ENGAJOU — contato confirmado na planilha sobe o lead para Engajados.
+// Caso real (Odonto First / SorriLeve, 2026-09-29): o contato não mora no
+// status, mora numa fileira de colunas de tentativa ("1º DIA".."4º DIA" /
+// "1º Lig"..), ✅ quando atenderam. O status pode seguir "Não Retorna".
+// ⚠️ Decisão do Matheus: UM por lead, mesmo com 4 dias marcados.
+// ---------------------------------------------------------------------------
+{
+  const L = (extra) => ({ status: null, funnelId: null, compareceu: false, fechou: false,
+    agendou: false, dataAgendada: null, receita: 0, ...extra });
+  const f = (leads) => contarFunil(leads, [], '2026-09-29');
+
+  eq(f([L({ engajou: true })]).qualificados, 1, 'contato confirmado vira Engajado');
+  eq(f([L({ engajou: false })]).qualificados, 0, 'sem contato não sobe');
+  eq(f([L({})]).qualificados, 0, 'lead sem o campo não muda nada (compat)');
+  eq(f([L({ engajou: true })]).contatos, 1, 'e continua contando como lead');
+
+  // não rebaixa nem infla quem já está acima
+  eq(f([L({ engajou: true, agendou: true })]).agendamentos, 1, 'quem agendou continua em agendamento');
+  eq(f([L({ engajou: true, fechou: true, receita: 100 })]).fechamentos, 1, 'quem fechou continua fechado');
+  eq(f([L({ engajou: true, fechou: true, receita: 100 })]).qualificados, 1,
+    'cumulativo: fechou conta em qualificados também');
+
+  // ⚠️ perdido e não-lead NÃO voltam ao funil por ter havido conversa
+  eq(f([L({ engajou: true, status: 'Sem Interesse' })]).qualificados, 0,
+    'falar com quem disse "sem interesse" não o traz de volta');
+  eq(f([L({ engajou: true, status: 'Sem Interesse' })]).perdidos, 1, 'e ele segue contado como perdido');
+  eq(f([L({ engajou: true, status: 'Paciente' })]).naoLeads, 1, 'não-lead não vira engajado');
+
+  // o status ainda manda quando é mais avançado
+  eq(f([L({ engajou: true, status: 'Avaliação Realizada' })]).comparecimentos, 1,
+    'status mais avançado não é rebaixado pelo engajou');
+
+  // o caso da SorriLeve: "Não Retorna" com contato confirmado
+  const naoRetorna = f([L({ engajou: true, status: 'Não Retorna' })]);
+  eq(naoRetorna.qualificados, 1, '"Não Retorna" COM contato é engajado');
+  eq(naoRetorna.pararamResponder, 1, 'e aparece no chip de "pararam de responder"');
+  // sem contato confirmado ele já era qualificado pelo próprio status
+  eq(f([L({ status: 'Não Retorna' })]).qualificados, 1, '"Não Retorna" sozinho já era engajado');
+}
+
+console.log(`OK engajou`);
