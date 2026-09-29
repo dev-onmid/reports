@@ -6939,6 +6939,19 @@ export default function GeneralDashboard() {
             })()}
     </>
   );
+  const leadsPorCanalCard = (
+    <CanalDonutCard
+      titulo="Leads por Canal"
+      fatiasBrutas={porCanal.leads.map(l => ({ label: l.label, valor: l.leads }))}
+      total={porCanal.leadsTotal}
+      semCanal={porCanal.leadsSemCanal}
+      formato="number"
+      aviso="São os leads do CRM contados pela data de criação — número diferente do card de Leads acima, que conta resultado de anúncio."
+    />
+  );
+  // Tipo "Leads": o gráfico de Leads por canal sobe para a linha do Investimento
+  // e do CPL (pedido do Matheus, 29/09) — e sai do bloco de canais lá embaixo.
+  const leadsNaLinhaKpi = !comReceita && comFunil && !modoFood;
   const blocoCanais = (
     <>
             {/* ── Faturamento por origem ──
@@ -6946,7 +6959,7 @@ export default function GeneralDashboard() {
                 CUSTO por canal (investimento, leads, CPL) e este mostra o
                 RETORNO. Em food só aparece quando há venda com valor no CRM —
                 a receita de delivery já tem painel próprio na grade. */}
-            {(!modoFood || porCanal.origens.length > 0 || porCanal.leads.length > 0) && (
+            {!leadsNaLinhaKpi && (!modoFood || porCanal.origens.length > 0 || porCanal.leads.length > 0) && (
               <div className="grid gap-4 xl:grid-cols-2">
                 {comReceita && (
                 <CanalDonutCard
@@ -6963,14 +6976,7 @@ export default function GeneralDashboard() {
                   aviso="Preencher a origem no cadastro do negócio (ou entrar por lead de anúncio, que já traz o canal) é o que move esse valor para uma fatia de verdade."
                 />
                 )}
-                <CanalDonutCard
-                  titulo="Leads por Canal"
-                  fatiasBrutas={porCanal.leads.map(l => ({ label: l.label, valor: l.leads }))}
-                  total={porCanal.leadsTotal}
-                  semCanal={porCanal.leadsSemCanal}
-                  formato="number"
-                  aviso="São os leads do CRM contados pela data de criação — número diferente do card de Leads acima, que conta resultado de anúncio."
-                />
+                {leadsPorCanalCard}
               </div>
             )}
     </>
@@ -7593,9 +7599,17 @@ export default function GeneralDashboard() {
                       <ChannelSummaryTable rows={channelRows} total={channelTotal} metaCpl={cplMetaSel} />
                     </div>
                     )}
-                    <div className={cn('grid gap-4 sm:grid-cols-2 md:grid-cols-3', quickMetrics.length === 2 ? 'md:grid-cols-2 xl:grid-cols-2' : quickMetrics.length === 5 ? 'xl:grid-cols-5' : 'xl:grid-cols-4')}>
+                    {leadsNaLinhaKpi ? (
+                      // Uma linha com 3 itens: Investimento · CPL · Leads por canal.
+                      <div className="grid items-stretch gap-4 md:grid-cols-2 xl:grid-cols-[1fr_1fr_1.6fr]">
+                        {quickMetrics.map((metric) => <QuickMetricCard key={metric.title} {...metric} comparacao={rotuloComp} />)}
+                        <div className="min-w-0 md:col-span-2 xl:col-span-1 [&>*]:h-full">{leadsPorCanalCard}</div>
+                      </div>
+                    ) : (
+                    <div className={cn('grid gap-4 sm:grid-cols-2 md:grid-cols-3', quickMetrics.length === 5 ? 'xl:grid-cols-5' : 'xl:grid-cols-4')}>
                       {quickMetrics.map((metric) => <QuickMetricCard key={metric.title} {...metric} comparacao={rotuloComp} />)}
                     </div>
+                    )}
                     {/* Branding: o Resumo por canal vem DEPOIS dos KPIs de tráfego (pedido do
                         Matheus, 29/09), sem meta de CPL. */}
                     {modoBranding && <ChannelSummaryTable rows={channelRows} total={channelTotal} metaCpl={0} />}
