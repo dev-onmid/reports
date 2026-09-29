@@ -1,3 +1,28 @@
+## Rastreio do Google — a palavra-chave chegava e era JOGADA FORA (2026-09-29)
+
+Print do Matheus (lead "Samara Assalin", CondoStore): "não está rastreando via UTM. Era para termos ali a campanha, a palavra-chave". A campanha estava lá; **palavra-chave, dispositivo e correspondência, não** — e o dado CHEGAVA.
+
+- **⚠️ O defeito era uma LISTA DE CHAVES curta demais.** `extractTrackingFromText` lê a URL da LP com `TEXT_PARAM_KEYS`, que tinha só os 5 `utm_*` + os click ids. O `final_url_suffix` das contas manda `keyword={keyword}&matchtype={matchtype}&device={device}` — tudo isso era lido e **descartado em silêncio**, porque a chave não estava na lista. Nenhum erro, nenhum log: o parâmetro simplesmente não existia para o código.
+- **`URL_PARAM_KEYS` (nova) é deliberadamente MAIOR que `TEXT_PARAM_KEYS`**: a URL é fonte estruturada (veio do Google), texto solto de conversa não é. Ler `device=` de uma frase digitada por humano seria inventar rastreio. Assert cobre as duas pontas.
+- **⚠️ `keyword` NUNCA cai de `utm_term`** (regressão coberta por assert): o template Meta usa `utm_term={{adset.name}}` — o fallback poluiria a coluna com nome de conjunto.
+- **Alcance medido antes de corrigir**: 43.782 leads/90d, e só **5** tinham `keyword` recuperável — não porque o bug fosse pequeno, mas porque pouquíssimo lead entra por formulário de LP. **16 das 19 contas** mandam `keyword` no sufixo, então o bug valia para a carteira quase inteira, só esperando volume.
+- ✅ **Backfill: 5 de 5** recuperados do `source_url` já gravado (fill-blanks) — "dentista" (Sorrifácil São José), "franquia de supermercado", "franquias", "franquia para investir", "franquia mercado autonomo" (CondoStore). Estado final: 19 leads com palavra-chave, **0 pendentes**.
+
+### Grupo de anúncios: o Google não tem macro de NOME, só de id
+
+- **`adgroupid` + `gad_campaignid` entraram no rastreio** e o NOME do grupo é resolvido depois pelo `resolverNomesGoogle`, que já existia (era usado só para campanha). `gad_campaignid` é o id que o Google acrescenta sozinho pelo auto-tagging — serve de campanha em conta **sem** sufixo.
+- **⚠️ Na rota da LP, o corpo do POST é o fallback errado**: a LP raramente manda `adgroupid`; quem traz é a URL. A ordem passou a ser corpo → URL (`tracking.adgroupid`), e não o contrário.
+- **`&adgroupid={adgroupid}` aplicado nas 16 contas** que já tinham sufixo, e **conferido relendo da API** (16 com o parâmetro, 3 sem sufixo nenhum). ⚠️ **Sufixo NÃO manda anúncio para revisão** (confirmado de novo: CondoStore seguiu 8 aprovados, 0 reprovado) — `tracking_url_template` manda. É por isso que toda UTM de conta vai no SUFIXO.
+- **⚠️ `customers:mutate` NÃO existe**: o endpoint é `POST /v24/customers/{cid}:mutate` (dois-pontos colado no id, sem segmento extra). Com o caminho errado a API devolve corpo vazio e o script imprime "ERRO: null" — **nenhuma conta foi alterada** e é fácil confundir com erro de permissão. Sempre imprimir `await r.text()` antes do `JSON.parse`.
+- ⚠️ **3 contas seguem sem sufixo nenhum** (Sorrifácil ingleses, Panino77 Curitiba, Leandro Ary) — não ligado, é decisão do Matheus. Ingleses tem de brinde um `tracking_url_template` de conta com `gad_source={gclid}`, e **`{gclid}` não é macro ValueTrack** — esse parâmetro sempre chegou vazio lá.
+
+### ⚠️ O botão de WhatsApp na web continua CEGO (medido, não corrigido)
+
+- Em 90 dias: **0 leads com `click_code`**. Os links `/r/` tiveram 152 cliques e **nenhum casou** com lead. Os 8 `lp-implantes-*` criados em 24/09 só registram os meus cliques de teste — foram construídos e **nunca instalados**.
+- O link de maior volume (`ughmny`, Itapema, **10.684 cliques**) recebe tráfego **sem UTM, sem gclid e sem referer**: está colado cru em algum lugar (bio/QR). Mesmo que o código chegasse, não haveria campanha para atribuir.
+- ⚠️ 4 mensagens com "COD:" no período eram clientes da Incorpast citando código de produto do catálogo, **não** o nosso código. Falso positivo — conferir o texto antes de comemorar casamento.
+- A correção não é de código: é **trocar os botões de WhatsApp (anúncio e LP) por links `/r/`**, cliente a cliente. Não feito.
+
 ## Aviso no grupo: negrito no rótulo e na identificação (2026-09-29, 5ª rodada)
 
 Pedido do Matheus depois de ver os dois primeiros avisos reais: nome, telefone, e-mail, `Campanha:`, `Conjunto:`, `Criativo:`, `Região:` e as perguntas do formulário em **negrito**.
