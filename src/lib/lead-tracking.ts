@@ -121,6 +121,14 @@ export type TextTracking = {
   gbraid?: string;
   fbclid?: string;
   ttclid?: string;
+  // ValueTrack do Google (chegam pelo final_url_suffix da conta): a LP repassa a
+  // URL inteira e é daqui que sai a PALAVRA-CHAVE. Sem eles, campanha aparecia
+  // no lead e a keyword se perdia (caso CondoStore, 29/09/2026).
+  keyword?: string;
+  matchtype?: string;
+  device?: string;
+  network?: string;
+  placement?: string;
   source_url?: string;
 };
 
@@ -294,6 +302,15 @@ const TEXT_PARAM_KEYS = [
   'gclid', 'wbraid', 'gbraid', 'fbclid', 'ttclid',
 ] as const;
 
+// ⚠️ Dentro de uma URL dá para ler também os ValueTrack do Google — é assim que a
+// palavra-chave chega das LPs. Fora de URL (texto solto de mensagem) a lista
+// segue a curta de propósito: "device=" escrito numa conversa não é atribuição.
+// ⚠️ keyword NUNCA sai de utm_term (o template Meta põe o nome do conjunto lá).
+const URL_PARAM_KEYS = [
+  ...TEXT_PARAM_KEYS,
+  'keyword', 'matchtype', 'device', 'network', 'placement',
+] as const;
+
 export function extractTrackingFromText(text: string): TextTracking {
   const urls = String(text ?? '').match(/https?:\/\/[^\s]+/g) ?? [];
   for (const url of urls) {
@@ -301,7 +318,7 @@ export function extractTrackingFromText(text: string): TextTracking {
       const u = new URL(url);
       const out: TextTracking = {};
       let found = false;
-      for (const key of TEXT_PARAM_KEYS) {
+      for (const key of URL_PARAM_KEYS) {
         const value = u.searchParams.get(key);
         if (value) { out[key] = value; found = true; }
       }
