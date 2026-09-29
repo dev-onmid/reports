@@ -57,6 +57,7 @@ function fmtTempo(seg: number) {
 const VERDE = '#6cff2f';
 const VERMELHO = '#ff5a5a';
 const AMBAR = '#f5b83d';
+const NEUTRO = '#8b959b';
 /** Paleta das barras 100% empilhadas (dispositivo, novos x recorrentes). */
 const PALETA = [VERDE, COR_SECUNDARIA, '#a78bfa', '#8a959b'];
 
@@ -80,11 +81,21 @@ function contador(linhas: Ga4Seg[]) {
   return (s: Ga4Seg) => (temTipo ? contatosSeg(s) : s.conversoes);
 }
 
+/**
+ * Amostra mínima para o connect rate virar juízo.
+ * ⚠️ Abaixo disso a razão é ruído: com 3 cliques, UM clique sem sessão já derruba
+ * o número para 67% e o painel gritava "perdendo cliques" numa conta que tinha
+ * acabado de subir. Um clique perdido é rotina (aba fechada antes de carregar,
+ * bot filtrado pelo GA4, bloqueador) e só se dilui com volume.
+ */
+const MIN_CLIQUES_CONNECT = 30;
+
 /** Connect rate (sessões ÷ cliques): quanto dos cliques pagos chegou na página. */
-function statusConnect(r: number) {
-  if (r >= 0.8) return { rotulo: 'Saudável', cor: VERDE };
-  if (r >= 0.7) return { rotulo: 'Atenção', cor: AMBAR };
-  return { rotulo: 'Perdendo cliques', cor: VERMELHO };
+function statusConnect(r: number, cliques: number) {
+  if (cliques < MIN_CLIQUES_CONNECT) return { rotulo: 'Amostra pequena', cor: NEUTRO, confiavel: false };
+  if (r >= 0.8) return { rotulo: 'Saudável', cor: VERDE, confiavel: true };
+  if (r >= 0.7) return { rotulo: 'Atenção', cor: AMBAR, confiavel: true };
+  return { rotulo: 'Perdendo cliques', cor: VERMELHO, confiavel: true };
 }
 
 
@@ -278,7 +289,7 @@ function Campanhas({ ads, utm, semCusto }: { ads: Ga4Seg[]; utm: Ga4Seg[]; semCu
               const cliques = c.cliques ?? 0;
               const k = contAds(c);
               const conn = cliques > 0 ? div(c.sessoes, cliques) : null;
-              const stc = conn !== null ? statusConnect(conn) : null;
+              const stc = conn !== null ? statusConnect(conn, cliques) : null;
               const cc = custoContato(c);
               const ehMelhor = melhor !== null && melhor.chave === c.valor;
               return (
@@ -299,7 +310,9 @@ function Campanhas({ ads, utm, semCusto }: { ads: Ga4Seg[]; utm: Ga4Seg[]; semCu
                   <span className={cx(celula, 'text-[#a7b0b6]')}>{cliques ? fmtN(cliques) : '—'}</span>
                   <span className={cx(celula, 'text-[#a7b0b6]')}>{fmtN(c.sessoes)}</span>
                   <span className={celula} title="Connect rate: sessões ÷ cliques">
-                    {stc && conn !== null ? <Pilula cor={stc.cor}>{fmtPct(conn, 0)}</Pilula> : <span className="text-[#6c767c]">—</span>}
+                    {stc && conn !== null
+                      ? <span title={stc.confiavel ? 'Connect rate: sessões ÷ cliques' : `Só ${cliques} clique(s) — amostra pequena para julgar`}><Pilula cor={stc.cor}>{fmtPct(conn, 0)}</Pilula></span>
+                      : <span className="text-[#6c767c]">—</span>}
                   </span>
                   <span className={cx(celula, 'font-bold text-[#f4f7f8]')}>{fmtN(k)}</span>
                   <span className={celula}>
@@ -1030,7 +1043,7 @@ function FunilSetas({ ads, atual }: { ads: Ga4Seg[]; atual: Ga4Totais }) {
     ];
   if (etapas[0].n <= 0) return null;
   const connect = comAds ? div(etapas[1].n, cliques) : 0;
-  const st = statusConnect(connect);
+  const st = statusConnect(connect, cliques);
   const topo = etapas[0].n;
   // % embaixo de cada seta: da etapa anterior (1ª = conversão do topo até o fim).
   const pctDe = (i: number) => (i === 0 ? div(etapas[etapas.length - 1].n, topo) : div(etapas[i].n, etapas[i - 1].n));
@@ -1083,7 +1096,11 @@ function FunilSetas({ ads, atual }: { ads: Ga4Seg[]; atual: Ga4Totais }) {
               <span className={T.miniRotulo}>Connect rate</span>{' '}
               <b className="tabular-nums text-[#f4f7f8]">{fmtPct(connect, 0)}</b>{' '}
               <Chip cor={st.cor}>{st.rotulo}</Chip>
-              <span className="ml-2">De cada 100 cliques, <b className="text-[#f4f7f8]">{fmtN(Math.round(connect * 100))}</b> chegaram na página. Abaixo de 80% costuma ser página lenta, redirecionamento ou tag do GA4 fora do ar.</span>
+              <span className="ml-2">
+                {st.confiavel
+                  ? <>De cada 100 cliques, <b className="text-[#f4f7f8]">{fmtN(Math.round(connect * 100))}</b> chegaram na página. Abaixo de 80% costuma ser página lenta, redirecionamento ou tag do GA4 fora do ar.</>
+                  : <>Só <b className="text-[#f4f7f8]">{fmtN(cliques)}</b> {cliques === 1 ? 'clique' : 'cliques'} no período — pouco para julgar. Um clique a mais ou a menos muda a conta inteira; o connect rate passa a valer a partir de {MIN_CLIQUES_CONNECT} cliques.</>}
+              </span>
             </p>
           )}
           <ul className="grid gap-1 sm:grid-cols-2">
