@@ -15,17 +15,24 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const pool = makeServerPool();
   try {
     await ensureLeadAvisoSchema(pool);
-    const [cfg, envios, oficial] = await Promise.all([
+    const [cfg, envios, oficial, resumo] = await Promise.all([
       pool.query(
         `SELECT ativo, group_id, fontes, desde
            FROM public.lead_aviso_config WHERE client_id = $1`, [id]),
       pool.query(
-        `SELECT evento_id, fonte, status, erro, texto, created_at
+        `SELECT id, evento_id, fonte, status, erro, texto, tentativas,
+                proxima_tentativa, created_at
            FROM public.lead_aviso_envios WHERE client_id = $1
-          ORDER BY created_at DESC LIMIT 20`, [id]),
+          ORDER BY created_at DESC LIMIT 30`, [id]),
       // ⚠️ NÃO é um menu: o remetente é sempre a instância oficial da ONMID.
       // Vai para a tela só para dizer POR ONDE o aviso sai.
       instanciaOnmid(pool),
+      // Contagem da fila separada do histórico: a lista é só das 30 últimas, e
+      // a pendência precisa ser verdadeira mesmo com 200 esperando.
+      pool.query(
+        `SELECT status, COUNT(*)::int n,
+                MIN(proxima_tentativa) FILTER (WHERE status = 'pendente') AS proxima
+           FROM public.lead_aviso_envios WHERE client_id = $1 GROUP BY status`, [id]),
     ]);
     const c = cfg.rows[0];
     return Response.json({
@@ -35,11 +42,19 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       desde: c?.desde ?? null,
       envios: envios.rows,
       remetente: oficial ? { id: oficial.id, nome: oficial.name } : null,
+      fila: {
+        pendentes: resumo.rows.find(r => r.status === 'pendente')?.n ?? 0,
+        enviando: resumo.rows.find(r => r.status === 'enviando')?.n ?? 0,
+        falhas: resumo.rows.find(r => r.status === 'falha')?.n ?? 0,
+        enviados: resumo.rows.find(r => r.status === 'enviado')?.n ?? 0,
+        proxima: resumo.rows.find(r => r.status === 'pendente')?.proxima ?? null,
+      },
     });
   } catch (err) {
     console.error('[lead-aviso GET]', err);
     // Degrada em vez de derrubar a aba inteira do cliente.
-    return Response.json({ ativo: false, groupId: null, fontes: FONTES_AVISO, envios: [], remetente: null });
+    return Response.json({ ativo: false, groupId: null, fontes: FONTES_AVISO, envios: [], remetente: null,
+      fila: { pendentes: 0, enviando: 0, falhas: 0, enviados: 0, proxima: null } });
   } finally { await pool.end(); }
 }
 
@@ -47,12 +62,27 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const { id } = await params;
   const body = await req.json().catch(() => ({})) as {
     ativo?: boolean; groupId?: string | null;
-    fontes?: string[]; testar?: boolean;
+    fontes?: string[]; testar?: boolean; reenviar?: string;
   };
 
   const pool = makeServerPool();
   try {
     await ensureLeadAvisoSchema(pool);
+
+    // Devolve uma linha da fila para o worker. Não cria outra: manter a MESMA
+    // linha preserva o texto que seria entregue e a contagem de tentativas.
+    if (body.reenviar) {
+      const { rowCount } = await pool.query(
+        `UPDATE public.lead_aviso_envios
+            SET status = 'pendente', proxima_tentativa = NOW(), erro = NULL,
+                tentativas = 0, atualizado_em = NOW()
+          WHERE id = $1 AND client_id = $2 AND status IN ('falha', 'pendente', 'enviando')`,
+        [body.reenviar, id],
+      );
+      return Response.json(rowCount
+        ? { ok: true }
+        : { ok: false, error: 'Esse aviso já foi entregue — não dá para reenviar.' });
+    }
 
     if (body.testar) {
       const { rows: [c] } = await pool.query(
@@ -86,13 +116,30 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     // num cliente antigo despejaria todo o histórico de formulários no grupo —
     // e mensagem enviada não volta.
     await pool.query(
+      // ⚠️ Nasce LIGADO quando o grupo é escolhido (pedido do Matheus em 29/09:
+      // "assim que configurar a integração, deixar como ativo"). Configurar e
+      // não ligar era um passo invisível — 16 clientes ficaram com grupo
+      // definido e nenhum aviso saindo, sem nada na tela explicando.
+      //
+      // Só vale na TRANSIÇÃO sem grupo → com grupo. Quem desligou de propósito
+      // e depois mexe nas fontes não é religado pelas costas.
       `INSERT INTO public.lead_aviso_config (client_id, ativo, group_id, fontes, desde)
-       VALUES ($1, COALESCE($2, FALSE), $3, COALESCE($4, 'meta_forms,landing_page'), NOW())
+       VALUES ($1, COALESCE($2, NULLIF($3, '') IS NOT NULL), $3, COALESCE($4, 'meta_forms,landing_page'), NOW())
        ON CONFLICT (client_id) DO UPDATE SET
-         ativo         = COALESCE($2, public.lead_aviso_config.ativo),
+         ativo         = COALESCE(
+                           $2,
+                           CASE WHEN NULLIF(public.lead_aviso_config.group_id, '') IS NULL
+                                 AND NULLIF($3, '') IS NOT NULL
+                                THEN TRUE ELSE public.lead_aviso_config.ativo END),
          group_id      = COALESCE($3, public.lead_aviso_config.group_id),
          fontes        = COALESCE($4, public.lead_aviso_config.fontes),
-         desde         = CASE WHEN $2 IS TRUE AND public.lead_aviso_config.ativo IS NOT TRUE
+         -- Reposiciona o marco zero em QUALQUER transição desligado → ligado,
+         -- inclusive a automática acima. Senão, ligar por tabela despejaria o
+         -- histórico que o marco existe para conter.
+         desde         = CASE WHEN public.lead_aviso_config.ativo IS NOT TRUE
+                               AND ($2 IS TRUE
+                                    OR (NULLIF(public.lead_aviso_config.group_id, '') IS NULL
+                                        AND NULLIF($3, '') IS NOT NULL))
                               THEN NOW() ELSE public.lead_aviso_config.desde END,
          atualizado_em = NOW()`,
       [id, body.ativo ?? null, body.groupId ?? null, fontes?.join(',') ?? null],

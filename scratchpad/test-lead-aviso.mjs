@@ -1,7 +1,8 @@
 // Recompilar: npx esbuild src/lib/lead-aviso.ts --bundle --format=esm --platform=node \
 //   --alias:@=./src --external:pg --outfile=scratchpad/build/lead-aviso.mjs
 import { fonteDoEvento, parseFontes, formatarTelefone, montarMensagem, FONTES_AVISO,
-  respostasDoFormulario, humanizarPergunta, humanizarValor, emailDoFormulario } from './build/lead-aviso.mjs';
+  respostasDoFormulario, humanizarPergunta, humanizarValor, emailDoFormulario,
+  proximaTentativa, MAX_TENTATIVAS, MINUTOS_ATE_DESTRAVAR } from './build/lead-aviso.mjs';
 
 let n = 0, f = 0;
 const ok = (c, nome) => { n++; if (!c) { f++; console.log('  ✗', nome); } };
@@ -148,6 +149,28 @@ const rSorri = respostasDoFormulario({ field_data: [
 ]}, 'meta_forms');
 ok(rSorri[0].resposta === 'Implante unitário', 'caso real SorriLeve: resposta legível');
 ok(rSorri[1].resposta === 'Tarde — das 14h às 18h', 'caso real SorriLeve: horário legível');
+
+
+// ── Fila de envios ─────────────────────────────────────────────────────────
+const T0 = new Date('2026-09-29T12:00:00.000Z');
+const min = (d) => Math.round((d.getTime() - T0.getTime()) / 60000);
+ok(min(proximaTentativa(1, T0)) === 1, '1ª falha: tenta de novo em 1 min');
+ok(min(proximaTentativa(2, T0)) === 2, '2ª falha: 2 min');
+ok(min(proximaTentativa(3, T0)) === 5, '3ª falha: 5 min');
+ok(min(proximaTentativa(4, T0)) === 15, '4ª falha: 15 min');
+ok(min(proximaTentativa(5, T0)) === 30, '5ª falha: 30 min');
+ok(min(proximaTentativa(6, T0)) === 60, '6ª falha: 1 h');
+ok(min(proximaTentativa(20, T0)) === 60, 'espera satura em 1 h — não cresce para sempre');
+ok(min(proximaTentativa(0, T0)) === 1, 'contagem zerada não quebra o índice');
+ok(min(proximaTentativa(-5, T0)) === 1, 'contagem negativa não vira data no passado');
+ok(proximaTentativa(3, T0) > T0, 'a próxima tentativa NUNCA cai no passado');
+ok(MAX_TENTATIVAS >= 12, 'insiste por horas antes de desistir');
+ok(MINUTOS_ATE_DESTRAVAR >= 5, 'só destrava "enviando" depois de tempo suficiente para um envio lento terminar');
+
+// Com a escala de espera, quanto tempo o sistema insiste antes de desistir?
+let acumulado = 0;
+for (let t = 1; t <= MAX_TENTATIVAS; t++) acumulado += min(proximaTentativa(t, T0));
+ok(acumulado > 60 * 12, `insiste por mais de 12 h no total (deu ${Math.round(acumulado / 60)} h)`);
 
 console.log(f === 0 ? `\n✅ ${n} asserts OK` : `\n❌ ${f} de ${n} falharam`);
 process.exit(f === 0 ? 0 : 1);

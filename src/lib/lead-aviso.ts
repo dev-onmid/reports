@@ -52,6 +52,9 @@ export async function ensureLeadAvisoSchema(pool: Pool) {
       evento_id  UUID NOT NULL,
       lead_id    UUID,
       fonte      TEXT,
+      -- pendente -> enviando -> enviado | falha. A FILA e o status pendente:
+      -- entra aqui quem nunca foi e quem falhou e vai tentar de novo.
+      -- (sem crase neste comentario: ele vive dentro de um template literal)
       status     TEXT NOT NULL,
       erro       TEXT,
       -- O texto EXATO que foi para o grupo. Guardar só o id do evento
@@ -61,6 +64,9 @@ export async function ensureLeadAvisoSchema(pool: Pool) {
       texto      TEXT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+    ALTER TABLE public.lead_aviso_envios ADD COLUMN IF NOT EXISTS tentativas INT NOT NULL DEFAULT 0;
+    ALTER TABLE public.lead_aviso_envios ADD COLUMN IF NOT EXISTS proxima_tentativa TIMESTAMPTZ NOT NULL DEFAULT NOW();
+    ALTER TABLE public.lead_aviso_envios ADD COLUMN IF NOT EXISTS atualizado_em TIMESTAMPTZ NOT NULL DEFAULT NOW();
     -- ⚠️ A defesa central contra avisar duas vezes. Não existe desfazer de
     -- mensagem no WhatsApp, e dois ticks cruzados do cron competiriam pelo
     -- mesmo evento.
@@ -68,6 +74,10 @@ export async function ensureLeadAvisoSchema(pool: Pool) {
       ON public.lead_aviso_envios (client_id, evento_id);
     CREATE INDEX IF NOT EXISTS lead_aviso_envios_cliente_idx
       ON public.lead_aviso_envios (client_id, created_at DESC);
+    -- A fila é lida a cada minuto: sem este índice o worker varre a tabela toda.
+    CREATE INDEX IF NOT EXISTS lead_aviso_envios_fila_idx
+      ON public.lead_aviso_envios (status, proxima_tentativa)
+      WHERE status IN ('pendente', 'enviando');
   `).catch(err => console.error('[lead-aviso schema]', err?.message ?? err));
   schemaPronto = true;
 }
@@ -282,6 +292,48 @@ export function montarMensagem(lead: LeadDoAviso): string {
   return linhas.join('\n');
 }
 
+// ── Fila ─────────────────────────────────────────────────────────────────────
+
+/**
+ * Quantas vezes insistir antes de desistir sozinho.
+ *
+ * ⚠️ Desistir NÃO é perder: a linha vira `falha` e continua aparecendo na tela
+ * com o motivo e um botão de reenviar. O teto existe só para o worker parar de
+ * bater num número que não existe mais — não para o lead sumir.
+ */
+export const MAX_TENTATIVAS = 24;
+
+/** Minutos de espera até a próxima tentativa, por número de falhas já ocorridas. */
+const ESPERA_MIN = [1, 2, 5, 15, 30, 60];
+
+/**
+ * ⚠️ Recebe `agora` como PARÂMETRO (mesma regra de `contarFunil`): chamar
+ * `new Date()` aqui dentro tornaria a função impura e o teste dependente do
+ * relógio.
+ */
+export function proximaTentativa(tentativas: number, agora: Date = new Date()): Date {
+  const i = Math.max(0, Math.min(tentativas - 1, ESPERA_MIN.length - 1));
+  return new Date(agora.getTime() + ESPERA_MIN[i] * 60_000);
+}
+
+/**
+ * Quanto tempo uma linha pode ficar em `enviando` antes de voltar para a fila.
+ *
+ * ⚠️⚠️ Escolha com contrapartida, e ela é consciente: uma linha presa em
+ * `enviando` é o processo que morreu ENTRE a chamada e a gravação da resposta —
+ * e daí não dá para saber se a mensagem chegou. Reenfileirar pode duplicar um
+ * aviso no grupo; NÃO reenfileirar perde o lead em silêncio, que é o que o
+ * Matheus pediu explicitamente para não acontecer ("se os disparos não forem,
+ * precisa criar uma fila para quando retomar enviar todos os pendentes").
+ *
+ * Aqui a duplicata é barulho num grupo; o silêncio é um lead que ninguém liga.
+ * A causa dominante, aliás, é redeploy do container no meio do tick (aconteceu
+ * em 29/09), e nesse caso o request morre antes de sair. Por isso volta para a
+ * fila — e a linha carrega `tentativas > 0`, então a tela consegue explicar uma
+ * eventual repetição em vez de parecer defeito.
+ */
+export const MINUTOS_ATE_DESTRAVAR = 10;
+
 // ── Motor ────────────────────────────────────────────────────────────────────
 
 export type ResultadoAviso = {
@@ -356,6 +408,10 @@ export async function processarAvisos(
       [cfg.client_id, cfg.desde, TETO_POR_RODADA],
     );
 
+    // PASSO 1 — ENFILEIRAR. Grava a linha como `pendente` com o texto já
+    // montado. Enfileirar e enviar viraram passos separados de propósito: é o
+    // que permite retomar depois de uma queda, porque a intenção de avisar fica
+    // registrada mesmo que o envio nunca tenha sido tentado.
     for (const ev of eventos) {
       const fonte = fonteDoEvento(ev.external_id);
       if (!fonte || !fontes.includes(fonte)) continue;
@@ -368,28 +424,85 @@ export async function processarAvisos(
         respostas: respostasDoFormulario(ev.raw, fonte),
       });
 
-      // ⚠️ RESERVA ANTES DE ENVIAR. Gravar depois deixaria a janela em que um
-      // segundo tick lê o mesmo evento e a pessoa recebe o aviso duas vezes.
-      // Se o INSERT colidir, outro tick já pegou — segue para o próximo.
-      const { rowCount } = await pool.query(
-        `INSERT INTO public.lead_aviso_envios (client_id, evento_id, lead_id, fonte, status, texto)
-         VALUES ($1,$2,$3,$4,'enviando',$5)
+      // A UNIQUE é a defesa real contra avisar duas vezes; o ON CONFLICT só
+      // deixa dois ticks cruzados conviverem sem erro.
+      await pool.query(
+        `INSERT INTO public.lead_aviso_envios
+           (client_id, evento_id, lead_id, fonte, status, texto, proxima_tentativa)
+         VALUES ($1,$2,$3,$4,'pendente',$5, NOW())
          ON CONFLICT (client_id, evento_id) DO NOTHING`,
         [cfg.client_id, ev.id, ev.lead_id, fonte, texto],
-      );
-      if (!rowCount) continue;
+      ).catch(e => console.error('[lead-aviso enfileirar]', e?.message ?? e));
+    }
 
-      const r = await enviar(cfg.group_id!, texto)
+    // PASSO 2 — DESTRAVAR o que ficou preso em `enviando` (processo morto no
+    // meio do tick, normalmente um redeploy). Volta para a fila.
+    await pool.query(
+      `UPDATE public.lead_aviso_envios
+          SET status = 'pendente', proxima_tentativa = NOW(), atualizado_em = NOW()
+        WHERE client_id = $1 AND status = 'enviando'
+          AND atualizado_em < NOW() - ($2 || ' minutes')::interval`,
+      [cfg.client_id, String(MINUTOS_ATE_DESTRAVAR)],
+    ).catch(() => null);
+
+    // PASSO 3 — ENVIAR a fila: o que nunca foi e o que falhou e já pode tentar
+    // de novo, do mais antigo para o mais novo (a ordem em que os leads
+    // chegaram é a ordem em que o grupo espera vê-los).
+    const { rows: fila } = await pool.query<{
+      id: string; texto: string | null; tentativas: number;
+    }>(
+      `UPDATE public.lead_aviso_envios
+          SET status = 'enviando', atualizado_em = NOW()
+        WHERE id IN (
+          SELECT id FROM public.lead_aviso_envios
+           WHERE client_id = $1 AND status = 'pendente' AND proxima_tentativa <= NOW()
+           ORDER BY created_at ASC
+           LIMIT $2
+           FOR UPDATE SKIP LOCKED
+        )
+        RETURNING id, texto, tentativas`,
+      [cfg.client_id, TETO_POR_RODADA],
+    );
+
+    for (const linha of fila) {
+      if (!linha.texto) {
+        await pool.query(
+          `UPDATE public.lead_aviso_envios
+              SET status='falha', erro='mensagem vazia', atualizado_em=NOW() WHERE id=$1`,
+          [linha.id],
+        ).catch(() => null);
+        continue;
+      }
+
+      const r = await enviar(cfg.group_id!, linha.texto)
         .catch(e => ({ ok: false, error: String(e?.message ?? e) }));
 
-      await pool.query(
-        `UPDATE public.lead_aviso_envios SET status = $3, erro = $4
-          WHERE client_id = $1 AND evento_id = $2`,
-        [cfg.client_id, ev.id, r.ok ? 'enviado' : 'erro', r.ok ? null : (r.error ?? 'falha no envio')],
-      ).catch(() => null);
+      if (r.ok) {
+        await pool.query(
+          `UPDATE public.lead_aviso_envios
+              SET status='enviado', erro=NULL, atualizado_em=NOW() WHERE id=$1`,
+          [linha.id],
+        ).catch(() => null);
+        out.enviados++; det.enviados++;
+        continue;
+      }
 
-      if (r.ok) { out.enviados++; det.enviados++; }
-      else { out.falhas++; det.falhas++; det.erro = r.error; }
+      const tentativas = (linha.tentativas ?? 0) + 1;
+      const desistiu = tentativas >= MAX_TENTATIVAS;
+      await pool.query(
+        `UPDATE public.lead_aviso_envios
+            SET status = $2, erro = $3, tentativas = $4,
+                proxima_tentativa = $5, atualizado_em = NOW()
+          WHERE id = $1`,
+        [
+          linha.id,
+          desistiu ? 'falha' : 'pendente',
+          r.error ?? 'falha no envio',
+          tentativas,
+          proximaTentativa(tentativas).toISOString(),
+        ],
+      ).catch(() => null);
+      out.falhas++; det.falhas++; det.erro = r.error;
     }
 
     if (det.enviados || det.falhas) out.detalhes.push(det);

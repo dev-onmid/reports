@@ -16,12 +16,28 @@ import { cn } from '@/lib/utils';
 type Fonte = 'meta_forms' | 'landing_page';
 type Grupo = { jid: string; nome: string; membros: number | null };
 type Envio = {
-  evento_id: string; fonte: string | null; status: string;
+  id: string; evento_id: string; fonte: string | null; status: string;
   erro: string | null; texto: string | null; created_at: string;
+  tentativas?: number; proxima_tentativa?: string | null;
+};
+type Fila = {
+  pendentes: number; enviando: number; falhas: number; enviados: number;
+  proxima: string | null;
 };
 type Config = {
   ativo: boolean; groupId: string | null; fontes: Fonte[]; envios: Envio[];
   remetente: { id: string; nome: string } | null;
+  fila?: Fila;
+};
+
+// O status cru ('pendente') não diz nada a quem está olhando o card. E
+// "desistiu" é mais honesto que "falha": a linha continua ali, com botão.
+const ROTULO_STATUS: Record<string, string> = {
+  pendente: 'Na fila',
+  enviando: 'Enviando',
+  enviado: 'Entregue',
+  falha: 'Desistiu',
+  erro: 'Falhou',
 };
 
 const ROTULO: Record<Fonte, string> = {
@@ -43,7 +59,7 @@ export function LeadAvisoCard({ clientId }: { clientId: string }) {
   }, [clientId]);
   useEffect(() => { carregar(); }, [carregar]);
 
-  const salvar = async (mudanca: Partial<Config> & { testar?: boolean }) => {
+  const salvar = async (mudanca: Partial<Config> & { testar?: boolean; reenviar?: string }) => {
     setSalvando(true); setAviso(null);
     try {
       const r = await fetch(`/api/clients/${clientId}/lead-aviso`, {
@@ -51,7 +67,7 @@ export function LeadAvisoCard({ clientId }: { clientId: string }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ativo: mudanca.ativo, groupId: mudanca.groupId,
-          fontes: mudanca.fontes, testar: mudanca.testar,
+          fontes: mudanca.fontes, testar: mudanca.testar, reenviar: mudanca.reenviar,
         }),
       });
       const d = await r.json();
@@ -93,6 +109,10 @@ export function LeadAvisoCard({ clientId }: { clientId: string }) {
     return <div className="rounded-xl border border-border bg-card p-5 text-xs text-muted-foreground">Carregando…</div>;
   }
 
+  const fila = cfg.fila;
+  const proximaTentativa = fila?.proxima && new Date(fila.proxima) > new Date()
+    ? new Date(fila.proxima).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+    : null;
   const grupoAtual = grupos?.find(g => g.jid === cfg.groupId);
   const prontoParaLigar = Boolean(cfg.remetente && cfg.groupId);
   const visiveis = (grupos ?? []).filter(g =>
@@ -231,6 +251,28 @@ export function LeadAvisoCard({ clientId }: { clientId: string }) {
         )}
       </div>
 
+      {/* ⚠️ A FILA precisa ser visível. Aviso que não saiu e não aparece em
+          lugar nenhum é indistinguível de aviso que nunca existiu — foi
+          exatamente o que aconteceu com os 16 clientes configurados e
+          desligados. Aqui o gestor vê o que está esperando, por quê, e reenvia. */}
+      {fila && (fila.pendentes > 0 || fila.enviando > 0 || fila.falhas > 0) && (
+        <div className="mt-5 rounded-lg border border-[#FF6B35]/30 bg-[#FF6B35]/5 p-3">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+            <span className="text-[10px] font-bold uppercase tracking-widest text-[#FF6B35]">Fila de envios</span>
+            {fila.pendentes > 0 && <span className="text-xs text-foreground"><b>{fila.pendentes}</b> na fila</span>}
+            {fila.enviando > 0 && <span className="text-xs text-muted-foreground">{fila.enviando} enviando</span>}
+            {fila.falhas > 0 && <span className="text-xs text-[#FF6B35]"><b>{fila.falhas}</b> desistiram</span>}
+            {proximaTentativa && (
+              <span className="text-[11px] text-muted-foreground">próxima tentativa {proximaTentativa}</span>
+            )}
+          </div>
+          <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+            Nada se perde: o sistema tenta de novo sozinho e entrega na ordem em que os leads chegaram.
+            {!cfg.ativo && ' Com o aviso desligado, a fila fica parada esperando você ligar.'}
+          </p>
+        </div>
+      )}
+
       {/* ⚠️ Mostra o texto EXATO que foi para o grupo — é o que permite conferir
           uma reclamação ("chegou torto") sem remontar a mensagem de hoje. */}
       {cfg.envios.length > 0 && (
@@ -243,11 +285,26 @@ export function LeadAvisoCard({ clientId }: { clientId: string }) {
               <div key={e.evento_id} className="rounded-lg border border-border bg-background/50 p-2.5">
                 <div className="flex items-center justify-between gap-2">
                   <span className={cn('text-[10px] font-bold uppercase tracking-wider',
-                    e.status === 'enviado' ? 'text-primary' : e.status === 'erro' ? 'text-[#FF6B35]' : 'text-muted-foreground')}>
-                    {e.status}{e.fonte ? ` · ${ROTULO[e.fonte as Fonte] ?? e.fonte}` : ''}
+                    e.status === 'enviado' ? 'text-primary'
+                      : e.status === 'falha' ? 'text-[#FF6B35]'
+                      : 'text-[#0B84FF]')}>
+                    {ROTULO_STATUS[e.status] ?? e.status}
+                    {e.fonte ? ` · ${ROTULO[e.fonte as Fonte] ?? e.fonte}` : ''}
+                    {(e.tentativas ?? 0) > 0 && e.status !== 'enviado' ? ` · ${e.tentativas}ª tentativa` : ''}
                   </span>
-                  <span className="shrink-0 text-[10px] text-muted-foreground">
-                    {new Date(e.created_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                  <span className="flex shrink-0 items-center gap-2">
+                    {e.status !== 'enviado' && (
+                      <button
+                        type="button" disabled={salvando}
+                        onClick={() => salvar({ reenviar: e.id })}
+                        className="text-[10px] font-bold uppercase tracking-wider text-primary hover:underline disabled:opacity-40"
+                      >
+                        Tentar agora
+                      </button>
+                    )}
+                    <span className="text-[10px] text-muted-foreground">
+                      {new Date(e.created_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                    </span>
                   </span>
                 </div>
                 {e.erro && <p className="mt-1 text-[11px] text-[#FF6B35]">{e.erro}</p>}
