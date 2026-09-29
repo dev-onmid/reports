@@ -57,6 +57,20 @@ eq(origemSults({ ...LEAD, canal: 'Whatsapp' }, CONF), 2, 'sem casar, cai no orig
 eq(origemSults({ ...LEAD, canal: 'Whatsapp' }, { ...CONF, origemId: null }), null, 'sem padrão, null');
 eq(origemSults({ ...LEAD, canal: null, origin: 'landing page' }, CONF), 4, 'origin também casa');
 
+// A FAMÍLIA do canal cobre a landing page nova sem mexer no mapa — foi o que
+// deixou o CondoStore mandando negócio sem origem (canal "LP | CondoStore"
+// contra a chave "landingpage google", que não existia em canal nenhum).
+const MAPA_LP = { ...CONF, mapaOrigem: { lp: 12, facebook: 2, instagram: 1 }, origemId: null };
+eq(origemSults({ ...LEAD, canal: 'LP | CondoStore', origin: 'site' }, MAPA_LP), 12, 'família lp casa');
+eq(origemSults({ ...LEAD, canal: 'LP | CondoStore Mercado', origin: 'google' }, MAPA_LP), 12, 'LP nova casa sem mexer no mapa');
+eq(origemSults({ ...LEAD, canal: 'LP - Outra', origin: '' }, MAPA_LP), 12, 'separador hífen também');
+eq(origemSults({ ...LEAD, canal: 'Facebook', origin: '' }, MAPA_LP), 2, 'canal exato continua valendo');
+eq(origemSults({ ...LEAD, canal: 'Whatsapp', origin: 'organic' }, MAPA_LP), null, 'canal fora do mapa segue sem origem');
+// ⚠️ O exato tem que vencer a família, senão mapear UMA lp específica seria
+// impossível depois que a regra geral existisse.
+eq(origemSults({ ...LEAD, canal: 'LP | CondoStore' }, { ...MAPA_LP, mapaOrigem: { lp: 12, 'lp | condostore': 7 } }), 7,
+  'canal exato vence a família');
+
 // ---- payload completo
 {
   const r = montarPayloadSults(LEAD, CONF);

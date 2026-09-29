@@ -115,14 +115,35 @@ export function temperaturaSults(t: unknown): number | null {
   return Number.isInteger(n) && n >= 1 && n <= 5 ? n : null;
 }
 
-/** origemId pelo canal/origin do lead; cai no padrão da conexão quando não há mapa. */
+/**
+ * Nome da FAMÍLIA do canal: o que vem antes do separador.
+ *
+ * ⚠️ O canal de landing page carrega o nome da página ("LP | CondoStore",
+ * "LP | CondoStore Mercado"), então uma página nova inventa um canal novo. Com
+ * casamento só exato, cada LP criada exigia mexer no mapa — e, até alguém
+ * perceber, o negócio nascia SEM origem no SULTS, em silêncio (foi o que
+ * aconteceu no CondoStore até 29/09/2026). Mapear a família "lp" cobre todas.
+ */
+function familiaDoCanal(canal: string): string {
+  return canal.split(/\s*[|\-–—/]\s*/)[0].trim();
+}
+
+/**
+ * origemId pelo canal/origin do lead; cai no padrão da conexão quando não há mapa.
+ *
+ * Ordem: canal exato → origin exato → FAMÍLIA do canal. O exato vem primeiro
+ * para que mapear uma LP específica continue vencendo a regra geral.
+ */
 export function origemSults(lead: LeadParaSults, conf: ConfigSults): number | null {
   const mapa = conf.mapaOrigem ?? {};
-  for (const chave of [lead.canal, lead.origin]) {
-    const k = String(chave ?? '').trim().toLowerCase();
-    if (k && Number.isInteger(mapa[k])) return mapa[k];
-  }
-  return conf.origemId ?? null;
+  const achar = (v: unknown) => {
+    const k = String(v ?? '').trim().toLowerCase();
+    return k && Number.isInteger(mapa[k]) ? mapa[k] : null;
+  };
+  return achar(lead.canal)
+    ?? achar(lead.origin)
+    ?? achar(familiaDoCanal(String(lead.canal ?? '')))
+    ?? conf.origemId ?? null;
 }
 
 /**
