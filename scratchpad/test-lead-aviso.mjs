@@ -37,7 +37,7 @@ const completo = montarMensagem({
   cidade: 'Bauru', uf: 'SP',
 });
 ok(completo.includes('Gessica Barbosa'), 'nome na mensagem');
-ok(completo.includes('+55 (14) 99635-8710'), 'telefone formatado');
+ok(completo.includes('*+55 (14) 99635-8710*'), 'telefone em negrito');
 ok(completo.includes('Formulário Meta'), 'fonte no título');
 ok(completo.includes('[ON] [FORMS] [MAIO]'), 'campanha');
 ok(completo.includes('AD4 ANDREIA 2'), 'anúncio');
@@ -120,11 +120,11 @@ const comTudo = montarMensagem({
   cidade: 'Bauru', uf: 'SP',
   email: emailDoFormulario(RAW_META, null), respostas: rMeta,
 });
-ok(comTudo.includes('Conjunto: [AMPLO] [+25]'), 'conjunto na mensagem');
-ok(comTudo.includes('Criativo: AD4 ANDREIA 2'), 'criativo na mensagem');
-ok(comTudo.includes('gessica.mb@hotmail.com'), 'e-mail na mensagem');
+ok(comTudo.includes('*Conjunto:* [AMPLO] [+25]'), 'conjunto com rótulo em negrito');
+ok(comTudo.includes('*Criativo:* AD4 ANDREIA 2'), 'criativo com rótulo em negrito');
+ok(comTudo.includes('*gessica.mb@hotmail.com*'), 'e-mail em negrito');
 ok(comTudo.includes('*Respostas do formulário*'), 'bloco de respostas');
-ok(comTudo.includes('• Qual nome da empresa?: Nexxon solar'), 'resposta formatada');
+ok(comTudo.includes('• *Qual nome da empresa?* Nexxon solar'), 'pergunta em negrito, sem dois-pontos depois do "?"');
 ok(!/https?:\/\//.test(comTudo), 'segue sem link nenhum');
 
 const semRespostas = montarMensagem({
@@ -171,6 +171,40 @@ ok(MINUTOS_ATE_DESTRAVAR >= 5, 'só destrava "enviando" depois de tempo suficien
 let acumulado = 0;
 for (let t = 1; t <= MAX_TENTATIVAS; t++) acumulado += min(proximaTentativa(t, T0));
 ok(acumulado > 60 * 12, `insiste por mais de 12 h no total (deu ${Math.round(acumulado / 60)} h)`);
+
+
+// ── Negrito (pedido do Matheus em 29/09) ───────────────────────────────────
+const NEG = montarMensagem({
+  nome: 'Augusto Mikael Pierre', numero: '5585988488991', fonte: 'meta_forms',
+  canal: 'Formulário Meta', campanha: '[ON] [FORMS] [MAIO]', conjunto: '[AMPLO] [+25]',
+  anuncio: '[AD10] Pasta Convenção', cidade: 'Fortaleza', uf: 'CE',
+  email: 'mikael-pierre@uol.com.br',
+  respostas: [
+    { pergunta: 'Quantas unidades está pensando em adquirir?', resposta: '10' },
+    { pergunta: 'Qual nome da empresa?', resposta: 'Grupo Odres' },
+    { pergunta: 'Cidade', resposta: 'Londrina' },
+  ],
+});
+ok(NEG.includes('*Augusto Mikael Pierre*'), 'nome em negrito');
+ok(NEG.includes('*+55 (85) 98848-8991*'), 'telefone em negrito');
+ok(NEG.includes('*mikael-pierre@uol.com.br*'), 'e-mail em negrito');
+ok(NEG.includes('*Campanha:* [ON] [FORMS] [MAIO]'), 'rótulo Campanha em negrito, valor normal');
+ok(NEG.includes('*Região:* Fortaleza · CE'), 'rótulo Região em negrito');
+ok(NEG.includes('• *Quantas unidades está pensando em adquirir?* 10'), 'pergunta em negrito');
+ok(NEG.includes('• *Cidade:* Londrina'), 'pergunta sem "?" ganha dois-pontos');
+ok(!NEG.includes('?:'), 'nunca sai "?:" — pontuação em cima de pontuação');
+// o número de asteriscos tem que ser PAR, senão o WhatsApp deixa um negrito aberto
+ok((NEG.match(/\*/g) || []).length % 2 === 0, 'asteriscos pareados: nenhum negrito fica aberto');
+
+const SUJO = montarMensagem({
+  nome: 'Fulano *da* Silva', numero: '5543999998888', fonte: 'landing_page',
+  canal: 'LP *promo*', campanha: 'Campanha *X*', conjunto: null, anuncio: null,
+  cidade: null, uf: null, email: null,
+  respostas: [{ pergunta: 'Qual *item*', resposta: 'resposta *com* asterisco' }],
+});
+ok(!SUJO.includes('*da*'), 'asterisco vindo no dado é removido');
+ok((SUJO.match(/\*/g) || []).length % 2 === 0, 'dado com asterisco não desalinha o negrito');
+ok(SUJO.includes('Fulano da Silva'), 'o texto em si é preservado, só o marcador sai');
 
 console.log(f === 0 ? `\n✅ ${n} asserts OK` : `\n❌ ${f} de ${n} falharam`);
 process.exit(f === 0 ? 0 : 1);

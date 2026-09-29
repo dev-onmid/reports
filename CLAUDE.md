@@ -1,3 +1,13 @@
+## Aviso no grupo: negrito no rótulo e na identificação (2026-09-29, 5ª rodada)
+
+Pedido do Matheus depois de ver os dois primeiros avisos reais: nome, telefone, e-mail, `Campanha:`, `Conjunto:`, `Criativo:`, `Região:` e as perguntas do formulário em **negrito**.
+
+- **Negrito no RÓTULO, valor normal** — é o rótulo que guia o olho descendo a mensagem; pôr os dois em negrito não destacaria nada. A identificação (nome, telefone, e-mail) vai inteira em negrito porque é o que a pessoa procura primeiro e o que ela copia para ligar.
+- **⚠️ `*` é o marcador de negrito do WhatsApp, então ele não pode sobreviver dentro de um VALOR**: um asterisco solto num nome de campanha pareia com o `*` que abre o rótulo seguinte e deixa metade da mensagem em negrito. `semMarcacao` remove o `*` de todo texto interpolado — em nome de campanha e resposta de formulário ele não carrega significado nenhum. Assert conta os asteriscos e exige número **par**, que é o que garante que nenhum negrito fica aberto.
+- Pergunta que já termina em `?`/`!`/`:` **não ganha dois-pontos**: "Qual nome da empresa?:" é pontuação em cima de pontuação. Assert proíbe `?:` na mensagem.
+- ✅ Verificado: **90 asserts** (negrito em cada peça, `?:` proibido, asteriscos pareados, dado sujo com `*` não desalinha e preserva o texto); tsc + `next build` limpos; prévia do lead REAL do Incorpast renderizada com e sem os marcadores.
+- ⚠️ Vale para os PRÓXIMOS avisos. Os dois já entregues (Incorpast e Romanza, 13:35) ficam como foram — `lead_aviso_envios.texto` guarda o texto exato de então, e é assim que o histórico não mente.
+
 ## Aviso de lead: nasce LIGADO e ganhou fila de reenvio visível (2026-09-29, 4ª rodada)
 
 Pedido do Matheus depois de testar o formulário da Romanza e o aviso não chegar: *"deixa como padrão, assim que configurar a integração, deixar como ativo. E se por algum acaso os disparos não forem, precisa criar uma fila de envios para quando retomar enviar todos os pendentes. Inclusive essa relação de pendência, tem que estar mostrando."*

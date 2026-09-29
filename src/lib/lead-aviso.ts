@@ -261,32 +261,58 @@ export function formatarTelefone(bruto: string | null | undefined): string | nul
  * telefone em formato internacional já vira um toque para conversar, que era
  * tudo o que o atalho fazia.
  */
+/**
+ * ⚠️ O asterisco é o marcador de negrito do WhatsApp, então ele NÃO pode
+ * sobreviver dentro de um valor: um `*` solto no nome de uma campanha pareia
+ * com o `*` que abre o próximo rótulo e deixa metade da mensagem em negrito.
+ * Some do texto interpolado — em nome de campanha e resposta de formulário ele
+ * não carrega significado nenhum.
+ */
+function semMarcacao(valor: string): string {
+  return String(valor).replace(/\*/g, '').trim();
+}
+
+/** Negrito do WhatsApp. */
+function neg(texto: string): string {
+  const limpo = semMarcacao(texto);
+  return limpo ? `*${limpo}*` : '';
+}
+
 export function montarMensagem(lead: LeadDoAviso): string {
   const linhas: string[] = [`🔔 *Lead novo* — ${ROTULO_FONTE[lead.fonte]}`, ''];
-  linhas.push(`*${lead.nome?.trim() || 'Sem nome'}*`);
+  // Identificação em negrito: é o que a pessoa do grupo procura primeiro e o
+  // que ela vai copiar para ligar.
+  linhas.push(neg(lead.nome?.trim() || 'Sem nome'));
 
   const tel = formatarTelefone(lead.numero);
-  if (tel) linhas.push(tel);
+  if (tel) linhas.push(neg(tel));
   const email = lead.email?.trim();
-  if (email) linhas.push(email);
+  if (email) linhas.push(neg(email));
 
   const local = [lead.cidade, lead.uf].filter(Boolean).join(' · ');
   const detalhe: string[] = [];
-  if (lead.campanha) detalhe.push(`Campanha: ${lead.campanha}`);
-  if (lead.conjunto) detalhe.push(`Conjunto: ${lead.conjunto}`);
+  // Negrito no RÓTULO, valor normal: é o rótulo que guia o olho descendo a
+  // mensagem; deixar os dois em negrito não destacaria nada.
+  if (lead.campanha) detalhe.push(`${neg('Campanha:')} ${semMarcacao(lead.campanha)}`);
+  if (lead.conjunto) detalhe.push(`${neg('Conjunto:')} ${semMarcacao(lead.conjunto)}`);
   // ⚠️ "Criativo", não "Anúncio": é como a equipe chama, e é a pergunta que o
   // grupo realmente faz ao ver o lead ("qual criativo trouxe esse?").
-  if (lead.anuncio) detalhe.push(`Criativo: ${lead.anuncio}`);
+  if (lead.anuncio) detalhe.push(`${neg('Criativo:')} ${semMarcacao(lead.anuncio)}`);
   if (!lead.campanha && lead.canal && lead.canal !== ROTULO_FONTE[lead.fonte]) {
-    detalhe.push(`Origem: ${lead.canal}`);
+    detalhe.push(`${neg('Origem:')} ${semMarcacao(lead.canal)}`);
   }
-  if (local) detalhe.push(`Região: ${local}`);
+  if (local) detalhe.push(`${neg('Região:')} ${semMarcacao(local)}`);
   if (detalhe.length) { linhas.push(''); linhas.push(...detalhe); }
 
   const respostas = lead.respostas ?? [];
   if (respostas.length) {
     linhas.push('', '*Respostas do formulário*');
-    for (const r of respostas) linhas.push(`• ${r.pergunta}: ${r.resposta}`);
+    for (const r of respostas) {
+      // Pergunta que já termina em "?" não ganha dois-pontos — "Qual nome da
+      // empresa?:" é pontuação em cima de pontuação.
+      const fecha = /[?!:]$/.test(r.pergunta.trim()) ? '' : ':';
+      linhas.push(`• ${neg(r.pergunta + fecha)} ${semMarcacao(r.resposta)}`);
+    }
   }
 
   return linhas.join('\n');
