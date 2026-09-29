@@ -7523,7 +7523,7 @@ export default function GeneralDashboard() {
                 {/* Página única — ordem: negócio (metas, KPIs, funil, canais) → social → mídia paga → landing page → comercial. */}
                   <>
                     {comMetas && (
-                    <div className="grid gap-4 xl:grid-cols-2">
+                    <div className={cn('grid gap-4', comReceita ? 'xl:grid-cols-2' : 'md:grid-cols-2 xl:grid-cols-3')}>
                       {comReceita ? (
                       <BulletMetaCard
                         titulo="Faturamento"
@@ -7582,6 +7582,21 @@ export default function GeneralDashboard() {
                           realizado={totalCostPerLead}
                           anterior={prevCpl}
                           formatar={(n) => premiumValue(n, 'currency')}
+                        />
+                      )}
+                      {/* "Leads": 3º card da linha é o Alcance (pedido do Matheus, 29/09).
+                          Sem meta → o total ocupa o card, como o de Leads sem meta. */}
+                      {!comReceita && (
+                        <BulletMetaCard
+                          titulo="Alcance"
+                          icon={Eye}
+                          fonte="Meta Ads"
+                          fonteTitulo="Pessoas alcançadas no Meta Ads (o Google Ads não informa alcance)"
+                          metaMes={0}
+                          esperado={0}
+                          realizado={metaReach}
+                          formatar={(n) => premiumValue(n)}
+                          variacaoAnterior={metaReach > 0 && prevMetaReach > 0 ? { pct: ((metaReach - prevMetaReach) / prevMetaReach) * 100, rotulo: rotuloComp } : null}
                         />
                       )}
                     </div>
