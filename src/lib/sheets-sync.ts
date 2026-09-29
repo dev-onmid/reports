@@ -153,60 +153,89 @@ export async function sincronizarSheets(
     };
   }
 
-  // Uma aba por arquivo, num POST só: a rota agrupa por assinatura de cabeçalho,
-  // então meses diferentes do mesmo relatório entram como um lote e o dedupe
-  // enxerga tudo de uma vez. Mandar a pasta inteira faria as 21 abas virarem 21
-  // arquivos e reimportar o histórico todo dia.
-  const fd = new FormData();
-  const mappings: { file: string; clientId: string }[] = [];
-  let linhas = 0;
+  // ⚠️⚠️ UM POST POR FORMATO DE CABEÇALHO, não um POST com todas as abas.
+  // A etapa de importação da rota processa SÓ O PRIMEIRO grupo de cabeçalho
+  // ("a tela envia só os arquivos daquele grupo") — mandar tudo junto faz as
+  // abas de formato diferente serem descartadas EM SILÊNCIO. Medido na Odonto
+  // First: as 6 abas escolhidas formam 3 formatos (26, 25 e 22 colunas, porque
+  // a planilha mudou ao longo do ano) e só abril+maio eram importados; agosto e
+  // setembro sumiam, com o comparecimento zerado na dashboard.
+  const porFormato = new Map<string, string[]>();
   for (const aba of abasOk) {
-    const so = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(so, wb.Sheets[aba], aba.slice(0, 31));
-    const bytes = XLSX.write(so, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
-    const nome = `${aba}.xlsx`;
-    fd.append('file', new Blob([new Uint8Array(bytes)]), nome);
-    mappings.push({ file: nome, clientId: cfg.clientId });
-    linhas += XLSX.utils.sheet_to_json(wb.Sheets[aba], { header: 1, defval: '' }).length;
+    const chave = (cabecalhos[aba] ?? []).join('|');
+    const lista = porFormato.get(chave);
+    if (lista) lista.push(aba);
+    else porFormato.set(chave, [aba]);
   }
 
-  fd.append('clientId', cfg.clientId);
-  fd.append('tipoPlanilha', cfg.tipoPlanilha);
-  // Faturamento é escolha declarada, não consequência do tipo — ver a rota.
-  if (cfg.fonteFaturamento) fd.append('escreveReceita', '1');
-  fd.append('mappings', JSON.stringify(mappings));
-  // O de-para da IA usa `revenue`/`name`/…; a rota de importação lê os overrides
-  // como `revenueColumn`/`nameColumn`/…. `clinic` fica de fora: aqui a planilha
-  // é de UM cliente só, e mandar a coluna de clínica faria a rota tentar o
-  // de-para clínica→cliente que não existe neste caminho.
-  for (const [campo, coluna] of Object.entries(cfg.mapeamento ?? {})) {
-    // ⚠️ `contact` é LISTA (a fileira de tentativas) e vai como CSV num campo
-    // próprio; os demais são 1:1. Sem este desvio, um array viraria a string
-    // "1º DIA,2º DIA" num `contactColumn` que a rota não conhece.
-    if (campo === 'contact') {
-      const cols = Array.isArray(coluna) ? coluna : [];
-      if (cols.length) fd.append('contactColumns', cols.join(','));
-      continue;
-    }
-    if (typeof coluna === 'string' && coluna && campo !== 'clinic') fd.append(`${campo}Column`, coluna);
-  }
-
+  const base = (process.env.APP_URL ?? process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000').replace(/\/$/, '');
   const avisos = [
     ...incompativeis.map(i => `A aba "${i.aba}" ficou de fora: não tem ${i.faltam.join(', ')}.`),
     ...(escolha.sumidas.length ? [`Não existem mais na planilha: ${escolha.sumidas.join(', ')}.`] : []),
     ...(escolha.cortadas.length ? [`Só as ${MAX_ABAS_POR_RODADA} primeiras abas entram por rodada; ficaram de fora: ${escolha.cortadas.join(', ')}.`] : []),
   ];
+  let linhas = 0;
+  const corpos: unknown[] = [];
 
-  const base = (process.env.APP_URL ?? process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000').replace(/\/$/, '');
-  const res = await fetch(`${base}/api/integrations/spreadsheet?step=import`, {
-    method: 'POST', body: fd, headers: internalHeaders(),
-  });
-  const body = await res.json().catch(() => ({}));
+  for (const [, abasDoFormato] of porFormato) {
+    const fd = new FormData();
+    const mappings: { file: string; clientId: string }[] = [];
+    for (const aba of abasDoFormato) {
+      const so = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(so, wb.Sheets[aba], aba.slice(0, 31));
+      const bytes = XLSX.write(so, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
+      const nome = `${aba}.xlsx`;
+      fd.append('file', new Blob([new Uint8Array(bytes)]), nome);
+      mappings.push({ file: nome, clientId: cfg.clientId });
+      linhas += XLSX.utils.sheet_to_json(wb.Sheets[aba], { header: 1, defval: '' }).length;
+    }
+
+    fd.append('clientId', cfg.clientId);
+    fd.append('tipoPlanilha', cfg.tipoPlanilha);
+    // Faturamento é escolha declarada, não consequência do tipo — ver a rota.
+    if (cfg.fonteFaturamento) fd.append('escreveReceita', '1');
+    fd.append('mappings', JSON.stringify(mappings));
+    // O de-para da IA usa `revenue`/`name`/…; a rota lê os overrides como
+    // `revenueColumn`/`nameColumn`/…. `clinic` fica de fora: aqui a planilha é
+    // de UM cliente só, e mandar a coluna de clínica faria a rota tentar o
+    // de-para clínica→cliente que não existe neste caminho.
+    for (const [campo, coluna] of Object.entries(cfg.mapeamento ?? {})) {
+      // ⚠️ `contact` é LISTA (a fileira de tentativas) e vai como CSV num campo
+      // próprio; os demais são 1:1.
+      if (campo === 'contact') {
+        const cols = (Array.isArray(coluna) ? coluna : [])
+          // Só as que existem NESTE formato: a fileira encolhe de um mês para
+          // outro, e mandar coluna inexistente não ajuda ninguém.
+          .filter(c => (cabecalhos[abasDoFormato[0]] ?? []).some(h => h === c || h.trim() === c.trim()));
+        if (cols.length) fd.append('contactColumns', cols.join(','));
+        continue;
+      }
+      if (typeof coluna === 'string' && coluna && campo !== 'clinic') fd.append(`${campo}Column`, coluna);
+    }
+
+    const res = await fetch(`${base}/api/integrations/spreadsheet?step=import`, {
+      method: 'POST', body: fd, headers: internalHeaders(),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      // ⚠️ Um formato que falha NÃO derruba os outros: o relatório registra e a
+      // rodada segue — perder o mês corrente porque uma aba antiga tem um
+      // problema seria o pior desfecho.
+      avisos.push(`As abas ${abasDoFormato.join(', ')} falharam: ${(body as { error?: string }).error ?? `HTTP ${res.status}`}.`);
+      continue;
+    }
+    corpos.push(body);
+    const av = (body as { avisos_coluna?: string[] }).avisos_coluna;
+    if (av?.length) avisos.push(...av);
+  }
+
   const aba = abasOk.join(', ');
   const motivo = escolha.motivoAbaDoMes;
-  if (!res.ok) {
-    return { ok: false, aba, motivoAba: motivo, erro: (body as { error?: string }).error ?? `Importação falhou (HTTP ${res.status}).` };
+  if (!corpos.length) {
+    return { ok: false, aba, motivoAba: motivo, erro: avisos[0] ?? 'Nenhum formato de aba pôde ser importado.' };
   }
+  const body = corpos.length === 1 ? corpos[0] : { formatos: corpos };
+
   await pool.query(
     `UPDATE public.client_sheets
         SET ultima_sync = NOW(), ultimo_resultado = $2::jsonb, ultimo_erro = NULL, atualizado_em = NOW()
