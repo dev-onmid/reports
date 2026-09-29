@@ -8,8 +8,8 @@ function App() {
   return (
     <div style={{ padding: 24, maxWidth: 1300 }} className="space-y-4">
       <div className="grid gap-4 xl:grid-cols-2">
-        <BulletMetaCard titulo="Leads" icon={Users} fonte="Meta + Google (plataformas)" metaMes={400} esperado={380} realizado={352} formatar={n => Math.round(n).toLocaleString('pt-BR')} projecao={371} />
-        <CustoMetaCard titulo="CPL" icon={Tag} fonte="Meta + Google (plataformas)" meta={18} realizado={15.42} anterior={17.1} formatar={f} />
+        <BulletMetaCard titulo="Leads" icon={Users} fonte="CRM (planilha / integração)" metaMes={0} esperado={0} realizado={1246} formatar={n => Math.round(n).toLocaleString('pt-BR')} variacaoAnterior={{ pct: 18.4, rotulo: 'vs 1–29/ago' }} rodape={<span>plataformas reportaram <b className="text-white">651</b></span>} />
+        <CustoMetaCard titulo="CPL" icon={Tag} fonte="Meta + Google (plataformas)" meta={7} realizado={4.27} anterior={2.85} formatar={f} />
       </div>
       <div className="grid gap-4 xl:grid-cols-3">
         <CustoMetaCard titulo="CPL (acima)" icon={Tag} fonte="Meta + Google" meta={18} realizado={23.9} anterior={19.4} formatar={f} />

@@ -31,8 +31,13 @@ export function corDoRitmo(ritmoPct: number): string {
 
 export function BulletMetaCard({
   titulo, icon: Icon, fonte, fonteTitulo, metaMes, esperado, realizado, formatar,
-  rotuloEsperado = 'Esperado até hoje', projecao, rodape,
+  rotuloEsperado = 'Esperado até hoje', projecao, rodape, variacaoAnterior,
 }: {
+  /**
+   * Variação vs período anterior, já calculada por quem chama (a fonte do número
+   * anterior pode não ser a do principal) — só usada SEM meta.
+   */
+  variacaoAnterior?: { pct: number; rotulo: string } | null;
   titulo: string;
   icon: ElementType;
   /** Chip de fonte do número ("CRM", "Meta + Google (plataformas)"). */
@@ -65,6 +70,44 @@ export function BulletMetaCard({
   const estourouMes = temMeta && realizado > metaMes;
   const mostraEsperado = esperado > 0 && Math.round(esperado) !== Math.round(metaMes);
   const pctMeta = temMeta && projecao != null ? (projecao / metaMes) * 100 : null;
+
+  // Sem meta: o TOTAL ocupa o card (pedido do Matheus, 29/09) — "Meta do mês —"
+  // e "sem meta cadastrada" pareciam erro, e a trilha vazia não dizia nada.
+  if (!temMeta) {
+    const variacao = variacaoAnterior && Number.isFinite(variacaoAnterior.pct) ? variacaoAnterior.pct : null;
+    return (
+      <section className={cn(SUPERFICIE, 'relative h-full overflow-hidden p-5')}>
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_8%_0%,rgba(108,255,47,0.16),transparent_32%),linear-gradient(135deg,rgba(108,255,47,0.05),rgba(22,139,255,0.02))]" />
+        <div className="relative flex h-full items-start gap-4">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[#55f52f]/20 bg-[#55f52f]/10 text-[#55f52f]">
+            <Icon className="h-5 w-5" />
+          </span>
+          <div className="flex min-w-0 flex-1 flex-col self-stretch">
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className={T.cardTitulo}>{titulo}</h2>
+              <span className="rounded-[4px] bg-[#172027] px-1.5 py-0.5 text-[10px] font-semibold text-[#87929B]" title={fonteTitulo}>{fonte}</span>
+            </div>
+            <div className="my-auto py-4">
+              <p className="font-heading text-[64px] leading-none tabular-nums text-[#f4f7f8]">{realizado > 0 ? formatar(realizado) : '—'}</p>
+              <p className={cn('mt-2 flex flex-wrap items-baseline gap-x-1.5', T.valorRotulo)}>
+                <span>Total no período</span>
+                {variacao !== null && (
+                  <>
+                    <span className="text-[#6c767c]">·</span>
+                    <span className={cn('font-bold', variacao >= 0 ? 'text-[#55f52f]' : 'text-[#ff6b6b]')}>
+                      {variacao > 0 ? '+' : ''}{variacao.toFixed(1).replace('.', ',')}%
+                    </span>
+                    <span>{variacaoAnterior!.rotulo}</span>
+                  </>
+                )}
+              </p>
+            </div>
+            {rodape && <div className="text-xs text-[#a7b0b6]">{rodape}</div>}
+          </div>
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section className={cn(SUPERFICIE, 'relative h-full overflow-hidden p-5')}>
@@ -191,9 +234,11 @@ export function CustoMetaCard({
   const temMeta = meta > 0 && realizado > 0;
   const razao = temMeta ? realizado / meta : 0;
   const cor = !temMeta ? '#9aa4aa' : razao <= 1 ? VERDE : razao <= 1.2 ? AMBAR : VERMELHO;
-  const escala = Math.max(meta * 1.5, realizado, 1);
-  const largura = Math.min(100, (realizado / escala) * 100);
-  const posMeta = meta > 0 ? Math.min(100, (meta / escala) * 100) : null;
+  // Escala fixa em 1,6× a meta (o pino para na borda se passar disso).
+  const escala = meta > 0 ? meta * 1.6 : Math.max(realizado, 1);
+  const posReal = Math.max(1.5, Math.min(98.5, (realizado / escala) * 100));
+  const zonaVerde = meta > 0 ? (meta / escala) * 100 : 0;
+  const zonaAmbar = meta > 0 ? ((meta * 0.2) / escala) * 100 : 0;
   const variacao = anterior && anterior > 0 && realizado > 0 ? ((realizado - anterior) / anterior) * 100 : null;
   const diffMeta = temMeta ? (razao - 1) * 100 : null;
 
@@ -227,26 +272,40 @@ export function CustoMetaCard({
 
           {meta > 0 ? (
             <div className="mt-5">
-              <div className="relative h-7 rounded-md border border-white/10 bg-[#081014]">
-                <div
-                  className="absolute inset-y-0 left-0 rounded-md"
-                  style={{
-                    width: `${largura}%`, backgroundColor: cor,
-                    backgroundImage: 'repeating-linear-gradient(45deg,rgba(255,255,255,0.12) 0 12px,transparent 12px 24px)',
-                    boxShadow: `0 0 16px ${cor}8c`, transition: 'width 600ms ease, background-color 700ms ease',
-                  }}
-                />
-                {posMeta !== null && (
-                  <div className="absolute -top-1 -bottom-1 w-0.5 rounded bg-[#f4f7f8] shadow-[0_0_6px_rgba(0,0,0,0.8)]" style={{ left: `calc(${posMeta}% - 1px)` }} title={`Meta: ${formatar(meta)}`} />
+              {/* Régua por ZONAS (pedido do Matheus, 29/09): no custo, barra "cheia até
+                  a meta" parecia progresso incompleto quando o CPL estava ótimo. Aqui a
+                  trilha é verde até a meta, âmbar até +20% e vermelha além — e o pino
+                  mostra em que zona o CPL caiu. Abaixo da meta = pino no verde. */}
+              <div className="relative pt-7">
+                {realizado > 0 && (
+                  <div className="absolute top-0 -translate-x-1/2 whitespace-nowrap" style={{ left: `${posReal}%` }}>
+                    <span className="rounded-md px-1.5 py-0.5 text-[11px] font-black text-black" style={{ backgroundColor: cor }}>{formatar(realizado)}</span>
+                  </div>
                 )}
+                <div className="relative flex h-3 overflow-hidden rounded-full">
+                  <div style={{ width: `${zonaVerde}%`, backgroundColor: VERDE, opacity: razao > 0 && razao <= 1 ? 0.9 : 0.28 }} />
+                  <div style={{ width: `${zonaAmbar}%`, backgroundColor: AMBAR, opacity: razao > 1 && razao <= 1.2 ? 0.9 : 0.28 }} />
+                  <div className="flex-1" style={{ backgroundColor: VERMELHO, opacity: razao > 1.2 ? 0.9 : 0.28 }} />
+                </div>
+                {realizado > 0 && (
+                  <div className="absolute bottom-[14px] top-[22px] w-1 -translate-x-1/2 rounded-full bg-[#f4f7f8] shadow-[0_0_8px_rgba(0,0,0,0.9)]" style={{ left: `${posReal}%` }} />
+                )}
+                <div className="relative mt-1.5 h-3 text-[10px] font-semibold text-[#7c868c]">
+                  <span className="absolute left-0">R$ 0</span>
+                  <span className="absolute -translate-x-1/2 whitespace-nowrap" style={{ left: `${zonaVerde}%` }}>meta {formatar(meta)}</span>
+                </div>
               </div>
               <div className="mt-2 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 text-xs text-[#a7b0b6]">
                 <span>
-                  {diffMeta === null ? 'Sem custo realizado no período' : (
+                  {diffMeta === null ? 'Sem custo realizado no período' : diffMeta <= 0 ? (
                     <>
-                      <span className="font-black" style={{ color: cor }}>
-                        {Math.abs(diffMeta).toFixed(0)}% {diffMeta <= 0 ? 'abaixo' : 'acima'}
-                      </span>{' '}da meta
+                      <span className="font-black" style={{ color: cor }}>{Math.abs(diffMeta).toFixed(0)}% abaixo</span> da meta
+                      {' '}· economia de <span className="font-bold text-[#f4f7f8]">{formatar(meta - realizado)}</span> por lead
+                    </>
+                  ) : (
+                    <>
+                      <span className="font-black" style={{ color: cor }}>{diffMeta.toFixed(0)}% acima</span> da meta
+                      {' '}· <span className="font-bold text-[#f4f7f8]">{formatar(realizado - meta)}</span> a mais por lead
                     </>
                   )}
                 </span>

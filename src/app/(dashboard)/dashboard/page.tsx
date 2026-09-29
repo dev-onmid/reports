@@ -6197,6 +6197,7 @@ export default function GeneralDashboard() {
   }
   const crmSales = [...selectedIds].reduce((s, id) => s + (metricsByClient[id]?.crm?.sales ?? 0), 0);
   const crmLeads = [...selectedIds].reduce((s, id) => s + (metricsByClient[id]?.crm?.leads ?? 0), 0);
+  const prevCrmLeads = [...selectedIds].reduce((s, id) => s + (prevMetricsByClient[id]?.crm?.leads ?? 0), 0);
   const avgCrmTicket = crmSales > 0 ? revenue / crmSales : 0;
   const plannedSalesPartial = autoPartial(plannedSalesTotal, period, faixaSel);
   const effectiveSalesGoal = plannedSalesPartial > 0 ? plannedSalesPartial : plannedSalesTotal;
@@ -6688,15 +6689,8 @@ export default function GeneralDashboard() {
     : funnelTaxa;
 
   // ── KPIs por tipo de dashboard ────────────────────────────────────────────
-  // "Leads": sai tudo que depende de valor de venda; entra o custo da ÚLTIMA
-  // etapa do funil do cliente (é ela a conclusão, não a venda com R$).
-  const etapaFinal = usaStageFunil
-    ? stageFunilSolo!.degraus[stageFunilSolo!.degraus.length - 1]
-    : null;
-  const etapaFinalRotulo = etapaFinal?.label ?? 'Fechamentos';
-  const etapaFinalQtd = etapaFinal ? etapaFinal.alcancaram : conversions;
-  const custoEtapaFinal = totalSpend > 0 && etapaFinalQtd > 0 ? totalSpend / etapaFinalQtd : 0;
   const SO_COM_RECEITA = new Set(['CAC', '% FAT', 'Ticket Médio', 'ROAS']);
+  const SO_COM_FUNIL_DE_VENDA = new Set(['Agendamentos', 'Conversão do funil']);
   const totalImpressoes = metaImpressions + googleImpressions;
   const totalCliques = metaClicks + googleClicks;
   const prevImpressoes = prevMetaImpressions + prevGoogleImpressions;
@@ -6720,10 +6714,9 @@ export default function GeneralDashboard() {
       ]
     : comReceita
       ? quickMetricsBase
-      : [
-          ...quickMetricsBase.filter(m => !SO_COM_RECEITA.has(m.title)),
-          { title: `Custo por ${etapaFinalRotulo.toLowerCase()}`, value: custoEtapaFinal > 0 ? premiumValue(custoEtapaFinal, 'currency') : '—', change: null, icon: Wallet, inverseChange: true, dica: `Investimento Meta + Google ÷ ${etapaFinalRotulo.toLowerCase()} (${premiumValue(etapaFinalQtd)} no período, última etapa do funil)` },
-        ];
+      // "Leads" só fala de lead (pedido do Matheus, 29/09): sai o que é de venda
+      // e também Agendamentos e Conversão do funil — ficam investimento e CPL.
+      : quickMetricsBase.filter(m => !SO_COM_RECEITA.has(m.title) && !SO_COM_FUNIL_DE_VENDA.has(m.title));
   const linhaCanal = (channel: string, logo: ReactNode, spend: number, impr: number, clicks: number, leads: number): LinhaCanal => {
     const cpl = leads > 0 ? spend / leads : 0;
     return {
@@ -7552,6 +7545,12 @@ export default function GeneralDashboard() {
                         formatar={(n) => premiumValue(n)}
                         rotuloEsperado={rotuloEsperado}
                         projecao={projetar(topoEhCrm ? funnelTopo : totalLeads)}
+                        // Sem meta de leads o total ocupa o card: a variação compara a
+                        // MESMA fonte nos dois períodos (CRM×CRM ou plataformas×plataformas).
+                        variacaoAnterior={(() => {
+                          const [a, b] = topoEhCrm ? [crmLeads, prevCrmLeads] : [totalLeads, prevTotalLeads];
+                          return a > 0 && b > 0 ? { pct: ((a - b) / b) * 100, rotulo: rotuloComp } : null;
+                        })()}
                         rodape={topoEhCrm ? (
                           <span title="O que Meta Ads + Google Ads reportaram na mesma janela.">
                             plataformas reportaram <span className="font-bold text-[#f4f7f8]">{premiumValue(totalLeads)}</span>
@@ -7584,9 +7583,7 @@ export default function GeneralDashboard() {
                     {/* Funil + Resumo por canal logo abaixo das metas e ACIMA dos cards de
                         Ticket médio / Agendamento / ROAS / Conversão (pedido do Matheus, 24/09). */}
                     {/* Branding: sem funil — o Resumo por canal ocupa a linha, sem meta de CPL. */}
-                    {modoBranding ? (
-                      <ChannelSummaryTable rows={channelRows} total={channelTotal} metaCpl={0} />
-                    ) : (
+                    {modoBranding ? null : (
                     <div className="grid gap-4 xl:grid-cols-[1.08fr_0.92fr]">
                       {deliverySoloId ? (
                         <DeliveryResumoCard clientId={deliverySoloId} from={deliveryRange.from} to={deliveryRange.to} />
@@ -7596,9 +7593,12 @@ export default function GeneralDashboard() {
                       <ChannelSummaryTable rows={channelRows} total={channelTotal} metaCpl={cplMetaSel} />
                     </div>
                     )}
-                    <div className={cn('grid gap-4 sm:grid-cols-2 md:grid-cols-3', quickMetrics.length === 5 ? 'xl:grid-cols-5' : 'xl:grid-cols-4')}>
+                    <div className={cn('grid gap-4 sm:grid-cols-2 md:grid-cols-3', quickMetrics.length === 2 ? 'md:grid-cols-2 xl:grid-cols-2' : quickMetrics.length === 5 ? 'xl:grid-cols-5' : 'xl:grid-cols-4')}>
                       {quickMetrics.map((metric) => <QuickMetricCard key={metric.title} {...metric} comparacao={rotuloComp} />)}
                     </div>
+                    {/* Branding: o Resumo por canal vem DEPOIS dos KPIs de tráfego (pedido do
+                        Matheus, 29/09), sem meta de CPL. */}
+                    {modoBranding && <ChannelSummaryTable rows={channelRows} total={channelTotal} metaCpl={0} />}
                     {(ritmo || temGraficoCpl) && (
                       <div className="grid gap-4 xl:grid-cols-2">
                         {ritmo && (
@@ -7626,7 +7626,7 @@ export default function GeneralDashboard() {
                     )}
                     {/* A "funil por canal" da planilha: só quando há lead no CRM
                         do período — sem CRM, a tabela seria toda "—". */}
-                    {comFunil && !modoFood && !deliverySoloId && funilCanal && funilCanal.canais.length > 0 && (
+                    {comFunil && comReceita && !modoFood && !deliverySoloId && funilCanal && funilCanal.canais.length > 0 && (
                       <TabelaFunilCanal linhas={funilCanal.canais} investimento={{ 'Meta Ads': metaSpend, 'Google Ads': googleCost }} semReceita={!comReceita} />
                     )}
                     {comFunil && blocoCanais}
