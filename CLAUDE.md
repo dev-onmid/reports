@@ -1,3 +1,19 @@
+## Lead de formulário avisa no grupo do cliente — fim do Make (2026-09-29)
+
+Pedido do Matheus: *"quando criar um lead que chega via formulário de meta ads ou landingpage, enviar também no grupo do whatsapp, mas configurado a nível de cliente. Hoje faço isso com o Make, mas não quero mais pagar por isso."*
+
+- **O gatilho é `lead_tracking_events.event_type='formulario'`, NÃO a coluna `canal`** — `canal` é texto livre por cliente e mudaria de grafia sem aviso. A FONTE sai do **prefixo do `external_id`**: `leadgen:` → Meta Forms, `lp:` → landing page (`fonteDoEvento`). O **webhook genérico fica de fora de propósito**: ele não carrega prefixo, então não dá para dizer de qual porta veio, e prometer "só formulário" mandando qualquer coisa seria pior que não avisar.
+- **⚠️ Worker SEPARADO da ingestão** (`/api/lead-aviso/worker`, cron de 1 min) — é a lição do SULTS: uma queda do WhatsApp não pode derrubar a recepção de lead de nenhum cliente da carteira. Nenhuma rota de recepção foi tocada.
+- **⚠️ `lead_aviso_config.desde` reseta em NOW() quando o aviso é LIGADO** (só na transição desligado→ligado): ligar num cliente antigo despejaria o histórico inteiro de formulários no grupo dele, e no WhatsApp não há desfazer. Mesma lição do `sults_connections.desde`.
+- **⚠️ A linha é RESERVADA ANTES do envio**: `INSERT ... status='enviando' ON CONFLICT DO NOTHING` contra a UNIQUE `(client_id, evento_id)`, e só depois manda. Dois ticks cruzados (ou um retry) não conseguem mandar a mesma mensagem duas vezes — mesma defesa das publicações e de `sults_envios`.
+- **⚠️ A mensagem NÃO leva link do nosso sistema.** O grupo é a equipe do CLIENTE, que não tem login aqui — um link para o CRM seria uma porta fechada na cara de quem recebe. Vai nome, telefone formatado (`+55 (14) 99635-8710`), fonte e um atalho **`wa.me`**, que é o que a pessoa realmente vai clicar.
+- **Uma mensagem por lead, sem lote** — decisão medida, não estimada: os clientes com mais formulário fazem **SorriLeve 5,7/dia (pico 2 na mesma hora), Incorpast 4,6/dia (pico 3), IGA Barney 3,3/dia (pico 3)**. Agrupar economizaria nada e atrasaria o aviso, que é o produto. Teto de `TETO_POR_RODADA = 20` por tick contra surto.
+- Envio pelo helper canônico `sendTextByInstanceId` (ramifica Evolution/Z-API por `provider`) — automação nova nunca chama `zapi.sendText` cru. O picker de grupo do card escolhe o endpoint pelo provider (`/api/otimizador/whatsapp-groups` para Evolution, `/api/disparos/extract/chats` para Z-API).
+- **Tela**: card em Cliente → Integrações → **Fontes de Captura** (`lead-aviso-card.tsx`), com instância, grupo, quais fontes avisar, "Salvar e enviar teste" e as últimas recepções.
+- **Cron na VPS**: `* * * * *` com `flock -n`, saída em `/tmp/onmid-lead-aviso.last`; backup em `/root/crontab-backup-antes-lead-aviso.txt`. ⚠️ Cron novo = SEMPRE conferir o `CRON_PREFIXES` do proxy (`/api/lead-aviso/worker` foi acrescentado) — senão o cron recebe `{"error":"Não autenticado."}` do PROXY, não da rota.
+- ✅ Verificado: **31 asserts** (`scratchpad/test-lead-aviso.mjs`: prefixo da fonte, `parseFontes` com lixo caindo em "todas", telefone em todos os formatos do banco, reserva idempotente); tsc + `next build` limpos; **worker em produção** respondendo `{"ok":true,...}` com segredo e **401 sem**; cron rodou no primeiro minuto.
+- ⚠️ **O PRIMEIRO ENVIO REAL ainda não aconteceu** — nenhum cliente configurado (`clientes:0` nas rodadas). O teste que fecha o caso é configurar instância + grupo num cliente com formulário ativo e esperar um lead de verdade.
+
 ## Google Sheets — o gestor escolhe as abas (2026-09-28, mesma rodada)
 
 Cobrança do Matheus: *"está puxando só o mês atual, quero poder escolher as abas"*. A rotina resolvia a aba sozinha pelo nome do mês e não havia como pedir histórico.
