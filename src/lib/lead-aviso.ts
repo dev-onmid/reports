@@ -35,7 +35,7 @@ export async function ensureLeadAvisoSchema(pool: Pool) {
     CREATE TABLE IF NOT EXISTS public.lead_aviso_config (
       client_id      TEXT PRIMARY KEY,
       ativo          BOOLEAN NOT NULL DEFAULT FALSE,
-      zapi_client_id TEXT,
+      zapi_client_id TEXT,   -- legado: a instância virou a oficial da ONMID (ver whatsapp-send)
       group_id       TEXT,
       fontes         TEXT NOT NULL DEFAULT 'meta_forms,landing_page',
       -- ⚠️ Marco zero. Ligar num cliente antigo despejaria a base histórica
@@ -125,9 +125,13 @@ export function formatarTelefone(bruto: string | null | undefined): string | nul
  * A mensagem que chega no grupo.
  *
  * ⚠️ Sem link para o nosso CRM de propósito: quem está no grupo é a equipe do
- * CLIENTE, que não tem login aqui — o link só entregaria uma tela de senha. O
- * que serve é o atalho do WhatsApp, que abre a conversa com a pessoa em um
- * toque, que é exatamente o que se quer fazer ao ver o aviso.
+ * CLIENTE, que não tem login aqui — o link só entregaria uma tela de senha.
+ *
+ * ⚠️ E sem NENHUMA url, nem a de atalho `wa.me`: o WhatsApp pré-visualiza o
+ * primeiro link da mensagem, e a miniatura ocupava mais espaço que o lead
+ * inteiro — o aviso virava uma logo gigante com o nome da pessoa embaixo. O
+ * telefone em formato internacional já vira um toque para conversar, que era
+ * tudo o que o atalho fazia.
  */
 export function montarMensagem(lead: LeadDoAviso): string {
   const linhas: string[] = [`🔔 *Lead novo* — ${ROTULO_FONTE[lead.fonte]}`, ''];
@@ -146,11 +150,6 @@ export function montarMensagem(lead: LeadDoAviso): string {
   if (local) detalhe.push(`Região: ${local}`);
   if (detalhe.length) { linhas.push(''); linhas.push(...detalhe); }
 
-  const digitos = String(lead.numero ?? '').replace(/\D/g, '');
-  if (digitos.length >= 10) {
-    const comDdi = digitos.startsWith('55') ? digitos : `55${digitos}`;
-    linhas.push('', `Falar agora: https://wa.me/${comDdi}`);
-  }
   return linhas.join('\n');
 }
 
@@ -174,20 +173,19 @@ export type ResultadoAviso = {
  */
 export async function processarAvisos(
   pool: Pool,
-  enviar: (instanceId: string, destino: string, texto: string) => Promise<{ ok: boolean; error?: string }>,
+  enviar: (destino: string, texto: string) => Promise<{ ok: boolean; error?: string }>,
 ): Promise<ResultadoAviso> {
   await ensureLeadAvisoSchema(pool);
   const out: ResultadoAviso = { clientes: 0, enviados: 0, falhas: 0, detalhes: [] };
 
   const { rows: configs } = await pool.query<{
-    client_id: string; zapi_client_id: string | null; group_id: string | null;
+    client_id: string; group_id: string | null;
     fontes: string; desde: string; nome: string | null;
   }>(
-    `SELECT a.client_id, a.zapi_client_id, a.group_id, a.fontes, a.desde, c.name AS nome
+    `SELECT a.client_id, a.group_id, a.fontes, a.desde, c.name AS nome
        FROM public.lead_aviso_config a
        LEFT JOIN public.clients c ON c.id = a.client_id
       WHERE a.ativo = TRUE
-        AND NULLIF(a.zapi_client_id, '') IS NOT NULL
         AND NULLIF(a.group_id, '') IS NOT NULL`,
   );
 
@@ -241,7 +239,7 @@ export async function processarAvisos(
       );
       if (!rowCount) continue;
 
-      const r = await enviar(cfg.zapi_client_id!, cfg.group_id!, texto)
+      const r = await enviar(cfg.group_id!, texto)
         .catch(e => ({ ok: false, error: String(e?.message ?? e) }));
 
       await pool.query(

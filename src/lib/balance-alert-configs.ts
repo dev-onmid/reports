@@ -61,5 +61,15 @@ export const BALANCE_CONFIG_SELECT = `
          z.provider AS zapi_provider, z.instance_id AS zapi_instance_id,
          z.token AS zapi_token, z.security_token AS zapi_security_token
   FROM public.balance_alert_configs bac
-  LEFT JOIN public.zapi_clients z ON z.id = bac.zapi_client_id AND z.active = true
+  -- ATENCAO: o remetente NAO vem mais de bac.zapi_client_id. Alerta de saldo e
+  -- recado da ONMID e sai pela instancia oficial, igual a todo o resto.
+  -- A regua canonica e a funcao instanciaOnmid, em whatsapp-send.
+  -- (sem crase aqui: isto vive dentro de um template literal)
+  LEFT JOIN LATERAL (
+    SELECT provider, instance_id, token, security_token
+      FROM public.zapi_clients
+     WHERE active = true AND name ILIKE '%onmid%assistente%'
+     ORDER BY (name = 'Onmid Assistente') DESC, name
+     LIMIT 1
+  ) z ON true
 `;

@@ -1,5 +1,5 @@
 import type { Pool } from 'pg';
-import { sendTextByInstanceId } from '@/lib/whatsapp-send';
+import { sendTextOnmid } from '@/lib/whatsapp-send';
 import { mensagemPausaAutomatica } from '@/lib/disparos-destinos';
 
 /**
@@ -33,12 +33,12 @@ export async function pausarCampanhaPorInstancia(pool: Pool, o: {
   try {
     const { rows } = await pool.query<{ key: string; value: string | null }>(
       `SELECT key, value FROM public.system_settings
-        WHERE key IN ('gads_rotina_group_id', 'social_alert_zapi_client_id', 'social_alert_group_id')`);
+        WHERE key IN ('gads_rotina_group_id', 'social_alert_group_id')`);
     const map = Object.fromEntries(rows.map(r => [r.key, r.value ?? '']));
+    // Só o DESTINO vem da config; o remetente é sempre a instância da ONMID.
     const grupo = map['gads_rotina_group_id'] || map['social_alert_group_id'];
-    const inst = map['social_alert_zapi_client_id'];
-    if (grupo && inst) {
-      await sendTextByInstanceId(pool, inst, grupo, mensagemPausaAutomatica({ ...o, restantes }));
+    if (grupo) {
+      await sendTextOnmid(pool, grupo, mensagemPausaAutomatica({ ...o, restantes }));
     }
   } catch { /* alerta mudo nunca impede a pausa */ }
 }

@@ -1,5 +1,5 @@
 import type { Pool } from 'pg';
-import { resolveInstance, isInstanceConnected, sendInstanceText } from '@/lib/whatsapp-send';
+import { instanciaOnmid, isInstanceConnected, sendInstanceText } from '@/lib/whatsapp-send';
 
 // Aviso diário do Monitor de Redes Sociais via Z-API: depois da coleta do cron,
 // manda no grupo escolhido a lista de contas VISÍVEIS no radar (monitored=TRUE)
@@ -139,7 +139,7 @@ export type AlertSendResult = {
 export async function sendSocialMonitorAlert(pool: Pool, opts: { force?: boolean } = {}): Promise<AlertSendResult> {
   const cfg = await loadSocialAlertConfig(pool);
   if (!opts.force && !cfg.ativo) return { sent: false, reason: 'Aviso desativado' };
-  if (!cfg.zapiClientId || !cfg.groupId) return { sent: false, reason: 'Instância/grupo não configurados' };
+  if (!cfg.groupId) return { sent: false, reason: 'Grupo de destino não configurado' };
 
   const today = todayBRT();
   if (!opts.force && (await getSetting(pool, K.lastSent)) === today) {
@@ -149,8 +149,10 @@ export async function sendSocialMonitorAlert(pool: Pool, opts: { force?: boolean
   const alertRows = await buildAlertRows(pool);
   if (alertRows.length === 0 && !opts.force) return { sent: false, reason: 'Nenhuma conta vermelha', clientes: 0 };
 
-  const inst = await resolveInstance(pool, cfg.zapiClientId);
-  if (!inst) return { sent: false, reason: 'Instância de WhatsApp não encontrada ou inativa' };
+  // ⚠️ Remetente FIXO: aviso da agência sai pela instância oficial da ONMID,
+  // nunca pela que estiver gravada na config (ver whatsapp-send).
+  const inst = await instanciaOnmid(pool);
+  if (!inst) return { sent: false, reason: 'Instância oficial da ONMID não encontrada ou inativa' };
 
   // Confere a conexão REAL antes de enviar (Evolution: state 'open'; Z-API: campo
   // `connected`). O Z-API responde "ok" no send mesmo desconectado — sem esta

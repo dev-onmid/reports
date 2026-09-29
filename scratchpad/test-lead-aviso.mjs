@@ -40,7 +40,11 @@ ok(completo.includes('Formulário Meta'), 'fonte no título');
 ok(completo.includes('[ON] [FORMS] [MAIO]'), 'campanha');
 ok(completo.includes('AD4 ANDREIA 2'), 'anúncio');
 ok(completo.includes('Bauru · SP'), 'região');
-ok(completo.includes('https://wa.me/5514996358710'), 'atalho para falar com o lead');
+// ⚠️ NENHUMA url na mensagem: o WhatsApp pré-visualiza o primeiro link e a
+// miniatura ocupava mais espaço que o lead inteiro. O telefone em formato
+// internacional já é tocável — era só isso que o atalho `wa.me` entregava.
+ok(!/https?:\/\//.test(completo), 'sem link nenhum — a pré-visualização engolia o aviso');
+ok(!completo.includes('wa.me'), 'sem atalho wa.me');
 ok(!completo.includes('/crm?'), 'NÃO manda link do nosso CRM (o grupo é do cliente, sem login aqui)');
 
 const semNada = montarMensagem({
@@ -49,7 +53,7 @@ const semNada = montarMensagem({
 });
 ok(semNada.includes('Sem nome'), 'lead sem nome não vira linha vazia');
 ok(semNada.includes('Landing page'), 'rótulo da landing page');
-ok(!semNada.includes('wa.me'), 'sem telefone não oferece atalho quebrado');
+ok(!/https?:\/\//.test(semNada), 'lead sem telefone também sai sem link');
 ok(!semNada.includes('undefined') && !semNada.includes('null'), 'nada de "undefined" no grupo do cliente');
 
 const soCanal = montarMensagem({

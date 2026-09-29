@@ -311,31 +311,17 @@ function TasksModal({ onClose }: { onClose: () => void }) {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [sendInstance, setSendInstance] = useState<SendInstance | null>(null);
-  const [instances, setInstances] = useState<SendInstance[]>([]);
-  const [savingInstance, setSavingInstance] = useState(false);
 
   const load = useCallback(() => {
     setLoading(true);
     fetch('/api/agent/tasks')
-      .then(r => r.ok ? r.json() as Promise<{ tasks: LunaTaskRow[]; runs: LunaTaskRun[]; sendInstance: SendInstance | null; instances: SendInstance[] }> : { tasks: [], runs: [], sendInstance: null, instances: [] })
-      .then(d => { setTasks(d.tasks ?? []); setRuns(d.runs ?? []); setSendInstance(d.sendInstance ?? null); setInstances(d.instances ?? []); })
+      .then(r => r.ok ? r.json() as Promise<{ tasks: LunaTaskRow[]; runs: LunaTaskRun[]; sendInstance: SendInstance | null }> : { tasks: [], runs: [], sendInstance: null })
+      .then(d => { setTasks(d.tasks ?? []); setRuns(d.runs ?? []); setSendInstance(d.sendInstance ?? null); })
       .catch(() => { setTasks([]); setRuns([]); })
       .finally(() => setLoading(false));
   }, []);
 
   useEffect(() => { load(); }, [load]);
-
-  async function saveInstance(id: string) {
-    if (!id || id === sendInstance?.id) return;
-    setSavingInstance(true);
-    try {
-      const res = await fetch('/api/agent/tasks', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ zapi_client_id: id }) });
-      if (!res.ok) notificar('Não foi possível trocar a instância de envio — tente de novo.', 'erro');
-      load();
-    } catch {
-      notificar('Erro de rede ao trocar a instância de envio.', 'erro');
-    } finally { setSavingInstance(false); }
-  }
 
   async function act(id: string, action: 'cancel' | 'reactivate' | 'delete') {
     if (action === 'delete' && !confirm('Apagar esta tarefa e todo o histórico dela?')) return;
@@ -373,7 +359,9 @@ function TasksModal({ onClose }: { onClose: () => void }) {
           <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><X className="h-5 w-5" /></button>
         </div>
 
-        {/* Instância de envio fixa — a Luna SÓ envia WhatsApp por aqui */}
+        {/* Remetente FIXO: a instância oficial da ONMID, resolvida no servidor.
+            ⚠️ Não é mais escolhível — o seletor que existia aqui listava
+            instâncias e permitia a Luna falar pelo número de um cliente. */}
         {!loading && (
           <div className="shrink-0 flex flex-wrap items-center gap-3 border-b border-border bg-muted/10 px-6 py-3">
             <div className="min-w-0 flex-1">
@@ -384,15 +372,9 @@ function TasksModal({ onClose }: { onClose: () => void }) {
                   : <span className="font-semibold text-red-400">nenhuma configurada — envios NÃO serão feitos</span>}
               </p>
             </div>
-            <select
-              value={sendInstance?.id ?? ''}
-              disabled={savingInstance}
-              onChange={e => void saveInstance(e.target.value)}
-              className="h-8 max-w-[220px] rounded-lg border border-border bg-background px-2 text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50"
-            >
-              <option value="" disabled>Escolher instância…</option>
-              {instances.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
-            </select>
+            <span className="shrink-0 rounded-lg border border-border bg-background px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+              Número oficial da ONMID
+            </span>
           </div>
         )}
 

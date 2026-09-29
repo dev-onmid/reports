@@ -1,6 +1,6 @@
 import { makeServerPool } from '@/lib/server-db';
 import { getAiBillingSettings } from '@/lib/ai-billing-settings';
-import { sendTextByInstanceId } from '@/lib/whatsapp-send';
+import { sendTextOnmid } from '@/lib/whatsapp-send';
 
 function providerFromModel(model: string): 'openai' | 'claude' {
   return model.toLowerCase().includes('claude') ? 'claude' : 'openai';
@@ -11,7 +11,7 @@ export async function GET() {
   try {
     const settings = await getAiBillingSettings(pool);
     if (!settings.alert_enabled) return Response.json({ ok: true, skipped: 'alert_disabled' });
-    if (!settings.alert_phone || !settings.zapi_client_id) {
+    if (!settings.alert_phone) {
       return Response.json({ ok: true, skipped: 'missing_whatsapp_config' });
     }
 
@@ -52,10 +52,9 @@ export async function GET() {
     }
 
     const lines = balances.map(item => `${item.label}: US$ ${Math.max(item.balance, 0).toFixed(2)}`);
-    // Ramifica por provider (Evolution principal / Z-API) via helper canônico.
-    const result = await sendTextByInstanceId(
+    // Sai sempre pela instância oficial da ONMID (ver whatsapp-send).
+    const result = await sendTextOnmid(
       pool,
-      settings.zapi_client_id,
       settings.alert_phone,
       `Alerta de creditos IA\nSaldo estimado abaixo de US$ ${settings.alert_threshold_usd.toFixed(2)}:\n${lines.join('\n')}`,
     );

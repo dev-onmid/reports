@@ -6,7 +6,7 @@ import {
   lunaGoogleSearch, lunaGoogleMutatePartial, criarKeywordsGoogle, resolveGoogleAccountIds,
 } from '@/lib/luna-tools';
 import { ensureOtimizacaoHistoricoSchema } from '@/lib/otimizacao-historico';
-import { sendTextByInstanceId } from '@/lib/whatsapp-send';
+import { sendTextOnmid } from '@/lib/whatsapp-send';
 import {
   filtrarTermosParaAnalise, planejarAplicacao, parseDecisoesIa, resumoParaHistorico,
   PROMPT_SISTEMA_TERMOS, type TermoBruto,
@@ -89,12 +89,12 @@ async function enviarResumoWhatsApp(pool: ReturnType<typeof makeServerPool>, tex
   try {
     const { rows } = await pool.query(
       `SELECT key, value FROM public.system_settings
-        WHERE key IN ('gads_rotina_group_id', 'social_alert_zapi_client_id', 'social_alert_group_id')`);
+        WHERE key IN ('gads_rotina_group_id', 'social_alert_group_id')`);
     const map = Object.fromEntries(rows.map((r: { key: string; value: string | null }) => [r.key, r.value ?? '']));
+    // Só o DESTINO vem da config; o remetente é sempre a instância da ONMID.
     const grupo = map['gads_rotina_group_id'] || map['social_alert_group_id'];
-    const inst = map['social_alert_zapi_client_id'];
-    if (!grupo || !inst) return false;
-    const r = await sendTextByInstanceId(pool, inst, grupo, texto);
+    if (!grupo) return false;
+    const r = await sendTextOnmid(pool, grupo, texto);
     return Boolean((r as { ok?: boolean }).ok);
   } catch { return false; }
 }

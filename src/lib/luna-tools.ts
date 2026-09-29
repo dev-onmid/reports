@@ -5,6 +5,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { computeNextRun } from '@/lib/recorrencia';
 import { deflateSync } from 'zlib';
+import { instanciaOnmid } from '@/lib/whatsapp-send';
 import { makeServerPool } from '@/lib/server-db';
 import { internalHeaders } from '@/lib/session';
 import { sendText } from '@/lib/zapi';
@@ -72,23 +73,17 @@ export async function getLunaSendInstance(pool: ReturnType<typeof makeServerPool
   await pool.query(`CREATE TABLE IF NOT EXISTS public.system_settings (
     key TEXT PRIMARY KEY, value TEXT, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_by TEXT
   )`).catch(() => {});
-  const { rows: cfg } = await pool.query(`SELECT value FROM public.system_settings WHERE key = 'luna_zapi_client_id'`).catch(() => ({ rows: [] as { value: string }[] }));
-  const configuredId = cfg[0]?.value?.trim();
-  if (configuredId) {
-    const { rows } = await pool.query(
-      `SELECT id, name, instance_id, token, security_token, COALESCE(provider,'zapi') AS provider FROM public.zapi_clients WHERE id = $1 AND active = TRUE`,
-      [configuredId]
-    ).catch(() => ({ rows: [] as LunaSendInstance[] }));
-    return rows[0] ?? null; // configurada mas inativa/apagada → não envia (engessado)
-  }
-  // Fallback sem config: prefere uma instância de teste, priorizando Evolution
-  // (provedor principal). Não exclui mais Evolution.
-  const { rows } = await pool.query(
-    `SELECT id, name, instance_id, token, security_token, COALESCE(provider,'zapi') AS provider FROM public.zapi_clients
-      WHERE active = TRUE AND name ILIKE '%test%'
-      ORDER BY (COALESCE(provider,'zapi') = 'evolution') DESC, created_at ASC LIMIT 1`
-  ).catch(() => ({ rows: [] as LunaSendInstance[] }));
-  return rows[0] ?? null;
+  // ⚠️ A Luna NÃO escolhe remetente. Todo WhatsApp em nome da ONMID sai pela
+  // instância oficial (`instanciaOnmid`, em whatsapp-send) — decisão do Matheus
+  // em 29/09/2026. A chave antiga `luna_zapi_client_id` deixou de ser lida:
+  // ela apontava para a mesma instância, mas era um lugar a mais para divergir.
+  const inst = await instanciaOnmid(pool);
+  if (!inst) return null;
+  return {
+    id: inst.id, name: inst.name, instance_id: inst.instanceId,
+    token: inst.token, security_token: inst.clientToken ?? null,
+    provider: inst.provider,
+  };
 }
 
 // ─── Google Ads (busca robusta) ──────────────────────────────────────────────

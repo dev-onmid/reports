@@ -1,4 +1,5 @@
 import type { NextRequest } from 'next/server';
+import { instanciaOnmid } from '@/lib/whatsapp-send';
 import { makeServerPool } from '@/lib/server-db';
 
 const KEYS = [
@@ -33,10 +34,12 @@ export async function GET() {
     const map: Record<string, string | null> = Object.fromEntries(KEYS.map((k) => [k, null]));
     for (const row of rows) map[row.key] = row.value;
 
-    // Busca instâncias Evolution disponíveis para popular o select na UI
-    const { rows: instances } = await pool.query<{ id: string; name: string; instance_id: string }>(
-      `SELECT id, name, instance_id FROM public.zapi_clients WHERE provider = 'evolution' ORDER BY name`,
-    ).catch(() => ({ rows: [] as { id: string; name: string; instance_id: string }[] }));
+    // ⚠️ Uma opção só, e é a oficial da ONMID: alerta da agência não escolhe
+    // remetente (a régua canônica é `instanciaOnmid`, em whatsapp-send).
+    const oficial = await instanciaOnmid(pool);
+    const instances = oficial
+      ? [{ id: oficial.id, name: oficial.name, instance_id: oficial.instanceId }]
+      : [];
 
     return Response.json({
       zapi_client_id: map['otimizador_whatsapp_zapi_client_id'],

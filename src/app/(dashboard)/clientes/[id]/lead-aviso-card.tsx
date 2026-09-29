@@ -1,23 +1,27 @@
 'use client';
 
 // ── Aviso de lead novo no grupo do cliente ───────────────────────────────────
-// Substitui o cenário do Make. Configurado por CLIENTE: instância que envia,
-// grupo de destino e de quais fontes avisar. Ver src/lib/lead-aviso.ts.
+// Substitui o cenário do Make. Configurado por CLIENTE: grupo de destino e de
+// quais fontes avisar. Ver src/lib/lead-aviso.ts.
+//
+// ⚠️ O REMETENTE NÃO É ESCOLHÍVEL: todo disparo em nome da ONMID sai pela
+// instância oficial (`instanciaOnmid`, em whatsapp-send). O seletor que existia
+// aqui listava instâncias de CLIENTE junto com a da agência — escolher errado
+// mandava recado da ONMID pelo WhatsApp de outro cliente, sem desfazer.
 
 import { useCallback, useEffect, useState } from 'react';
-import { Bell, Check, Loader2, RefreshCw, Search, Send } from 'lucide-react';
+import { Bell, Check, Loader2, RefreshCw, Search, Send, ShieldCheck } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 type Fonte = 'meta_forms' | 'landing_page';
-type Instancia = { id: string; name: string; provider: string | null };
 type Grupo = { jid: string; nome: string; membros: number | null };
 type Envio = {
   evento_id: string; fonte: string | null; status: string;
   erro: string | null; texto: string | null; created_at: string;
 };
 type Config = {
-  ativo: boolean; zapiClientId: string | null; groupId: string | null;
-  fontes: Fonte[]; envios: Envio[]; instancias: Instancia[];
+  ativo: boolean; groupId: string | null; fontes: Fonte[]; envios: Envio[];
+  remetente: { id: string; nome: string } | null;
 };
 
 const ROTULO: Record<Fonte, string> = {
@@ -46,8 +50,8 @@ export function LeadAvisoCard({ clientId }: { clientId: string }) {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          ativo: mudanca.ativo, zapiClientId: mudanca.zapiClientId,
-          groupId: mudanca.groupId, fontes: mudanca.fontes, testar: mudanca.testar,
+          ativo: mudanca.ativo, groupId: mudanca.groupId,
+          fontes: mudanca.fontes, testar: mudanca.testar,
         }),
       });
       const d = await r.json();
@@ -62,18 +66,14 @@ export function LeadAvisoCard({ clientId }: { clientId: string }) {
     } finally { setSalvando(false); }
   };
 
-  // ⚠️ O endpoint de grupos é OUTRO conforme o provedor da instância — Evolution
-  // e Z-API não falam a mesma língua. Escolher errado devolve lista vazia e
-  // parece "o cliente não tem grupo".
+  // Os grupos listados são os da instância OFICIAL — é dela que a mensagem sai,
+  // então é nela que o grupo precisa existir. Ela é Evolution.
   const carregarGrupos = async () => {
-    const inst = cfg?.instancias.find(i => i.id === cfg?.zapiClientId);
-    if (!inst) { setAviso({ tipo: 'erro', texto: 'Escolha a instância primeiro.' }); return; }
+    const remetente = cfg?.remetente;
+    if (!remetente) { setAviso({ tipo: 'erro', texto: 'A instância oficial da ONMID não está ativa.' }); return; }
     setBuscandoGrupos(true); setAviso(null);
     try {
-      const url = inst.provider === 'evolution'
-        ? `/api/otimizador/whatsapp-groups?zapiClientId=${inst.id}`
-        : `/api/disparos/extract/chats?type=groups&clientId=${inst.id}`;
-      const r = await fetch(url);
+      const r = await fetch(`/api/otimizador/whatsapp-groups?zapiClientId=${remetente.id}`);
       const d = await r.json();
       const lista: Grupo[] = Array.isArray(d)
         ? d.map((g: Record<string, unknown>) => ({
@@ -83,7 +83,7 @@ export function LeadAvisoCard({ clientId }: { clientId: string }) {
           })).filter(g => g.jid)
         : [];
       setGrupos(lista);
-      if (!lista.length) setAviso({ tipo: 'erro', texto: d?.error ?? 'Nenhum grupo encontrado nessa instância.' });
+      if (!lista.length) setAviso({ tipo: 'erro', texto: d?.error ?? 'Nenhum grupo encontrado na instância da ONMID.' });
     } catch {
       setAviso({ tipo: 'erro', texto: 'Não foi possível listar os grupos.' });
     } finally { setBuscandoGrupos(false); }
@@ -93,9 +93,8 @@ export function LeadAvisoCard({ clientId }: { clientId: string }) {
     return <div className="rounded-xl border border-border bg-card p-5 text-xs text-muted-foreground">Carregando…</div>;
   }
 
-  const instAtual = cfg.instancias.find(i => i.id === cfg.zapiClientId);
   const grupoAtual = grupos?.find(g => g.jid === cfg.groupId);
-  const prontoParaLigar = Boolean(cfg.zapiClientId && cfg.groupId);
+  const prontoParaLigar = Boolean(cfg.remetente && cfg.groupId);
   const visiveis = (grupos ?? []).filter(g =>
     !buscaGrupo.trim() || g.nome.toLowerCase().includes(buscaGrupo.trim().toLowerCase()));
 
@@ -108,8 +107,7 @@ export function LeadAvisoCard({ clientId }: { clientId: string }) {
             <h3 className="text-sm font-bold text-foreground">Avisar lead novo no grupo</h3>
             <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
               Quando entrar lead por formulário do Meta ou pela landing page, o sistema manda uma
-              mensagem no grupo de WhatsApp deste cliente — com nome, telefone, campanha e o atalho
-              para falar com a pessoa.
+              mensagem no grupo de WhatsApp deste cliente — com nome, telefone, campanha e região.
             </p>
           </div>
         </div>
@@ -121,28 +119,30 @@ export function LeadAvisoCard({ clientId }: { clientId: string }) {
             'shrink-0 rounded-lg px-3 py-1.5 text-xs font-bold transition-colors disabled:opacity-40',
             cfg.ativo ? 'bg-primary text-black' : 'border border-border text-muted-foreground hover:text-foreground',
           )}
-          title={!cfg.ativo && !prontoParaLigar ? 'Escolha a instância e o grupo antes de ligar' : undefined}
+          title={!cfg.ativo && !prontoParaLigar ? 'Escolha o grupo antes de ligar' : undefined}
         >
           {cfg.ativo ? 'Ativo' : 'Desativado'}
         </button>
       </div>
 
       <div className="grid gap-3 md:grid-cols-2">
-        <label className="block">
+        <div>
           <span className="mb-1.5 block text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Quem envia</span>
-          <select
-            value={cfg.zapiClientId ?? ''}
-            onChange={e => { setGrupos(null); salvar({ zapiClientId: e.target.value || null }); }}
-            className="h-10 w-full rounded-lg border border-border bg-background px-3 text-sm outline-none [color-scheme:dark] focus:border-primary"
-          >
-            <option value="">Escolha a instância…</option>
-            {cfg.instancias.map(i => (
-              <option key={i.id} value={i.id}>
-                {i.name} {i.provider === 'evolution' ? '· Evolution' : '· Z-API'}
-              </option>
-            ))}
-          </select>
-        </label>
+          <div className="flex h-10 items-center gap-2 rounded-lg border border-border bg-background px-3 text-sm">
+            {cfg.remetente ? (
+              <>
+                <ShieldCheck className="h-4 w-4 shrink-0 text-primary" />
+                <span className="truncate">{cfg.remetente.nome}</span>
+                <span className="ml-auto shrink-0 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Oficial</span>
+              </>
+            ) : (
+              <span className="text-xs text-red-400">Instância oficial da ONMID inativa — reconecte em Configurações › Instâncias.</span>
+            )}
+          </div>
+          <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+            Todo aviso da ONMID sai por este número. Não é escolha por cliente.
+          </p>
+        </div>
 
         <div>
           <span className="mb-1.5 block text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Grupo de destino</span>
@@ -151,7 +151,7 @@ export function LeadAvisoCard({ clientId }: { clientId: string }) {
               {grupoAtual?.nome ?? (cfg.groupId ? <span className="font-mono text-xs text-muted-foreground">{cfg.groupId}</span> : <span className="text-muted-foreground">Nenhum escolhido</span>)}
             </div>
             <button
-              type="button" onClick={carregarGrupos} disabled={buscandoGrupos || !cfg.zapiClientId}
+              type="button" onClick={carregarGrupos} disabled={buscandoGrupos || !cfg.remetente}
               className="shrink-0 rounded-lg border border-border px-3 text-xs font-bold text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
             >
               {buscandoGrupos ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Escolher'}

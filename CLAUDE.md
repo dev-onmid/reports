@@ -1,3 +1,21 @@
+## O aviso no grupo perdeu o link, e o remetente da ONMID virou lei (2026-09-29, mesma rodada)
+
+Print do Matheus com o primeiro aviso chegando no grupo: uma **logo gigante do WhatsApp** ocupando 80% da tela e o lead espremido embaixo. *"vai vir sempre com essa imagem de link?"* — vinha, e a decisão dele foi direta: *"tira o link, e deixa só o número com 55(DDD)número, o whatsapp já reconhece para iniciar conversa."*
+
+- **A mensagem não carrega NENHUMA url.** O WhatsApp pré-visualiza o primeiro link que encontra, e a miniatura do `wa.me` era maior que o conteúdo inteiro do aviso. ⚠️ **Não adiantava desligar a pré-visualização no provedor** (`linkPreview: false` existe na Evolution e na Z-API): seria plumbing novo em quatro assinaturas para resolver um problema que some tirando a url. O telefone em `+55 (43) 99999-8888` **já é tocável** — o próprio print prova, ele aparece sublinhado e clicável —, então o atalho não entregava nada que o número não entregue.
+- Assert virou `!/https?:\/\//.test(mensagem)` em vez de procurar `wa.me`: qualquer url nova que alguém acrescente amanhã derruba o teste, não só aquela.
+
+### Quem envia em nome da ONMID não é mais escolha
+
+Na mesma rodada, vendo o seletor "Escolha a instância…" oferecer **PicoLocos Guanabara** ao lado de **Onmid Assistente**: *"deixa padrão e de forma oficial... Não deixa nem a possibilidade de poder escolher outro."*
+
+- **`instanciaOnmid(pool)` + `sendTextOnmid(pool, destino, texto)` em `whatsapp-send.ts`** são a régua única: `system_settings['onmid_instancia_oficial']` se existir, senão pelo NOME (`ILIKE '%onmid%assistente%'`, ativa). ⚠️ Id configurado que não resolve mais **cai no nome em vez de virar silêncio** — instância apagada não pode deixar a agência muda.
+- **⚠️ A regra é de SERVIDOR, não de tela.** Quem envia não recebe id de instância: pede a oficial. Aplicado em **seis** caminhos — aviso de lead no grupo, monitor de redes, rotina de termos do Google, alerta de crédito de IA, alerta de instância parada nos Disparos e a Luna (`getLunaSendInstance` parou de ler `luna_zapi_client_id`). No alerta de saldo o próprio `BALANCE_CONFIG_SELECT` deixou de dar JOIN em `bac.zapi_client_id` e passa a juntar a oficial por LATERAL.
+- **E os seletores sumiram das telas**, porque menu que o servidor ignora é pior que menu nenhum: o card do cliente virou uma linha fixa ("Onmid Assistente · OFICIAL"), `alert-config` e `whatsapp-config` devolvem **uma opção só**, Pagamentos já entra com ela escolhida e a Luna mostra um selo. `PUT /api/agent/tasks` foi **selado com 409 explicando o motivo** em vez de apagado — apagar devolveria 404 e pareceria bug de rota.
+- **Medido antes de mexer** (é o que dimensiona o risco): só existem **4 instâncias ativas**, e **3 são de CLIENTE** (PicoLocos ×2, SAAC). Os avisos já configurados — monitor social e Luna — **já apontavam para a Onmid Assistente**, então a mudança não desligou nada; ela fecha a porta para o erro que ainda não tinha acontecido: mandar recado da ONMID pelo WhatsApp de um cliente, que não tem desfazer.
+- ⚠️ **Crase dentro de comentário SQL em template literal quebra o build** — reincidi nisso escrevendo o `LATERAL` do alerta de saldo, o MESMO bug do commit `e8fe88b`. O comentário do SQL agora avisa, na própria linha, que ali não entra crase.
+- ✅ Verificado: **32 asserts**; tsc + `next build` limpos com a rota `/api/whatsapp/oficial` registrada; eslint comparado contra `origin/main` **na mesma config** (7 erros antes, 7 depois — nenhum novo); **browser** com o card real bundlado — **zero `<select>` na tela**, "Quem envia: Onmid Assistente · OFICIAL", a lista de grupos pedida com o id da oficial (`whatsapp-groups?zapiClientId=64cc7d27…`), o PATCH saindo como `{"ativo":true}` sem instância nenhuma, e o texto do aviso sem link.
+
 ## Lead de formulário avisa no grupo do cliente — fim do Make (2026-09-29)
 
 Pedido do Matheus: *"quando criar um lead que chega via formulário de meta ads ou landingpage, enviar também no grupo do whatsapp, mas configurado a nível de cliente. Hoje faço isso com o Make, mas não quero mais pagar por isso."*

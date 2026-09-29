@@ -1,7 +1,7 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { processarAvisos } from '@/lib/lead-aviso';
-import { sendTextByInstanceId } from '@/lib/whatsapp-send';
+import { sendTextOnmid } from '@/lib/whatsapp-send';
 
 // Avisa no grupo do cliente os leads que entraram por formulário (Meta Lead Ads
 // e landing page). Chamado pelo cron da VPS a cada minuto.
@@ -26,8 +26,7 @@ export async function GET(req: NextRequest) {
 
   const pool = makeServerPool();
   try {
-    const r = await processarAvisos(pool, (instanceId, destino, texto) =>
-      sendTextByInstanceId(pool, instanceId, destino, texto));
+    const r = await processarAvisos(pool, (destino, texto) => sendTextOnmid(pool, destino, texto));
     return Response.json({ ok: true, ...r });
   } catch (err) {
     console.error('[lead-aviso worker]', err);

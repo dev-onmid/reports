@@ -397,10 +397,14 @@ function BalanceAlertSettings({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     Promise.all([
       fetch('/api/alerts/balance-configs', { headers: callerHeaders() }).then(r => r.ok ? r.json() : []),
-      fetch('/api/disparos/clients', { headers: callerHeaders() }).then(r => r.ok ? r.json() : []),
+      // ⚠️ Não é mais a lista de instâncias: o alerta de saldo é recado da
+      // ONMID e sai pela instância oficial. Vem uma só, e já entra escolhida.
+      fetch('/api/whatsapp/oficial', { headers: callerHeaders() }).then(r => r.ok ? r.json() : []),
     ]).then(([cfgs, zapis]) => {
       setConfigs(Array.isArray(cfgs) ? cfgs as BalanceAlertConfig[] : []);
-      setZapiClients(Array.isArray(zapis) ? zapis as ZapiClientOption[] : []);
+      const lista = Array.isArray(zapis) ? zapis as ZapiClientOption[] : [];
+      setZapiClients(lista);
+      if (lista[0]) setForm(f => ({ ...f, zapiClientId: lista[0].id }));
     }).catch(() => {});
   }, []);
 
@@ -451,7 +455,7 @@ function BalanceAlertSettings({ onClose }: { onClose: () => void }) {
       const inst = zapiClients.find(z => z.id === form.zapiClientId);
       setConfigs(prev => [{ ...created, zapi_name: inst?.name ?? null, zapi_provider: inst?.provider ?? null }, ...prev]);
       setShowForm(false);
-      setForm({ whatsappGroup: '', zapiClientId: '', diasAntecedencia: 3, emailTo: '' });
+      setForm({ whatsappGroup: '', zapiClientId: zapiClients[0]?.id ?? '', diasAntecedencia: 3, emailTo: '' });
     } finally {
       setSaving(false);
     }
@@ -588,19 +592,12 @@ function BalanceAlertSettings({ onClose }: { onClose: () => void }) {
             <div className="rounded-lg border border-border p-3 space-y-3">
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1.5">
-                  <label className="text-xs text-muted-foreground font-medium">Instância de WhatsApp</label>
-                  <select
-                    value={form.zapiClientId}
-                    onChange={e => setForm(f => ({ ...f, zapiClientId: e.target.value, whatsappGroup: '' }))}
-                    className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg text-foreground focus:outline-none focus:ring-1 focus:ring-violet-500/50"
-                  >
-                    <option value="">Selecionar instância...</option>
-                    {zapiClients.map(z => (
-                      <option key={z.id} value={z.id}>
-                        {z.name}{z.provider ? ` (${z.provider})` : ''}
-                      </option>
-                    ))}
-                  </select>
+                  <label className="text-xs text-muted-foreground font-medium">Quem envia</label>
+                  <div className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg text-foreground truncate">
+                    {zapiClients[0]
+                      ? <>{zapiClients[0].name} <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">· oficial</span></>
+                      : <span className="text-red-400 text-xs">Instância oficial da ONMID inativa</span>}
+                  </div>
                 </div>
                 <div className="space-y-1.5">
                   <label className="text-xs text-muted-foreground font-medium">Grupo WhatsApp</label>

@@ -1,4 +1,5 @@
 import type { NextRequest } from 'next/server';
+import { instanciaOnmid } from '@/lib/whatsapp-send';
 import { makeServerPool } from '@/lib/server-db';
 import {
   loadSocialAlertConfig, saveSocialAlertConfig, sendSocialMonitorAlert,
@@ -11,22 +12,15 @@ export async function GET() {
   const pool = makeServerPool();
   try {
     const config = await loadSocialAlertConfig(pool);
-    // Oferece TODAS as instâncias ativas com o provider — Evolution (principal) e
-    // Z-API. O envio (social-monitor-alert) ramifica por provider; a UI usa o
-    // provider pra listar os grupos do endpoint certo.
-    let instances: Array<{ id: string; name: string; provider: string }> = [];
-    try {
-      const { rows } = await pool.query(
-        `SELECT id, name, COALESCE(provider, 'zapi') AS provider
-           FROM public.zapi_clients WHERE active = TRUE ORDER BY name`,
-      );
-      instances = rows as Array<{ id: string; name: string; provider: string }>;
-    } catch {
-      const { rows } = await pool.query(
-        `SELECT id, name FROM public.zapi_clients WHERE active = TRUE ORDER BY name`,
-      );
-      instances = (rows as Array<{ id: string; name: string }>).map(r => ({ ...r, provider: 'zapi' }));
-    }
+    // ⚠️ NÃO oferece mais uma lista: aviso da agência sai SEMPRE pela instância
+    // oficial da ONMID (o envio, em social-monitor-alert, já ignora o que
+    // estiver gravado). Devolver as outras aqui só daria ao gestor a impressão
+    // de uma escolha que o servidor descarta — e a pior delas, mandar recado da
+    // ONMID pelo WhatsApp de um cliente, é o que motivou a regra.
+    const oficial = await instanciaOnmid(pool);
+    const instances = oficial
+      ? [{ id: oficial.id, name: oficial.name, provider: oficial.provider }]
+      : [];
     return Response.json({ config, instances });
   } catch (e) {
     return Response.json({ error: e instanceof Error ? e.message : 'Erro ao carregar config' }, { status: 500 });
