@@ -182,8 +182,10 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ token: str
 
     if (pareceIdGoogle(tracking.utm_campaign) || txt(c.campaignid)) {
       const g = await resolverNomesGoogle(pool, origem.client_id, {
-        campaignId: txt(c.campaignid) ?? tracking.utm_campaign,
-        adgroupId: txt(c.adgroupid),
+        // O corpo da LP raramente manda esses ids — quem traz é a própria URL
+        // (final_url_suffix da conta), então ela é o fallback dos dois.
+        campaignId: txt(c.campaignid) ?? tracking.utm_campaign ?? tracking.gad_campaignid,
+        adgroupId: txt(c.adgroupid) ?? tracking.adgroupid ?? null,
       });
       if (g?.campaign_name) nomes.campaign = g.campaign_name;
       if (g?.adgroup_name) nomes.adset = g.adgroup_name;

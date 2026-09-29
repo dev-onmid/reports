@@ -129,6 +129,11 @@ export type TextTracking = {
   device?: string;
   network?: string;
   placement?: string;
+  // Grupo de anúncios: o Google não tem macro de NOME, só de id — o nome é
+  // resolvido depois por `resolverNomesGoogle`. `gad_campaignid` é o id que o
+  // Google acrescenta sozinho (vale como campanha em conta sem sufixo).
+  adgroupid?: string;
+  gad_campaignid?: string;
   source_url?: string;
 };
 
@@ -309,6 +314,7 @@ const TEXT_PARAM_KEYS = [
 const URL_PARAM_KEYS = [
   ...TEXT_PARAM_KEYS,
   'keyword', 'matchtype', 'device', 'network', 'placement',
+  'adgroupid', 'gad_campaignid',
 ] as const;
 
 export function extractTrackingFromText(text: string): TextTracking {
@@ -593,9 +599,15 @@ async function resolverNomesDosIds(
   }
 
   // Google: o ValueTrack não tem macro de nome, então campanha/grupo vêm por id.
-  if (!out.campaign && pareceIdGoogle(t.utm_campaign)) {
+  // `adgroupid` é o caminho explícito; `utm_term` continua como fallback só para
+  // os sufixos antigos que punham o id do grupo lá.
+  const idCampanhaGoogle = pareceIdGoogle(t.utm_campaign) ? t.utm_campaign : t.gad_campaignid;
+  const idGrupoGoogle = pareceIdGoogle(t.adgroupid)
+    ? t.adgroupid
+    : (pareceIdGoogle(t.utm_term) ? t.utm_term : null);
+  if (!out.campaign && pareceIdGoogle(idCampanhaGoogle)) {
     const g = await resolverNomesGoogle(pool, clientId, {
-      campaignId: t.utm_campaign, adgroupId: pareceIdGoogle(t.utm_term) ? t.utm_term : null,
+      campaignId: idCampanhaGoogle, adgroupId: idGrupoGoogle,
     }).catch(() => null);
     if (g?.campaign_name) out.campaign = g.campaign_name;
     if (g?.adgroup_name && !out.adset) out.adset = g.adgroup_name;
