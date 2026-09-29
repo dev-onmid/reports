@@ -1,0 +1,260 @@
+// ── Aviso de lead novo no grupo do cliente ───────────────────────────────────
+//
+// Substitui o cenário do Make: quando entra lead por FORMULÁRIO (Meta Lead Ads
+// ou landing page), manda uma mensagem no grupo de WhatsApp daquele cliente.
+// Configurado por cliente, não global.
+//
+// ⚠️ O gatilho é `lead_tracking_events.event_type = 'formulario'`, não o texto
+// do canal. As duas portas gravam esse evento (meta-leadgen.ts e a rota da LP),
+// enquanto `canal` é livre — na LP ele é o nome da origem cadastrada, que muda
+// por cliente. Casar texto de canal quebraria no dia em que alguém renomeasse
+// uma origem.
+//
+// ⚠️⚠️ O envio roda num WORKER separado, NUNCA dentro da rota que recebe o
+// lead. É a lição da integração SULTS: uma queda do WhatsApp não pode derrubar
+// a recepção de lead de nenhum cliente da carteira.
+
+import type { Pool } from 'pg';
+
+export type FonteAviso = 'meta_forms' | 'landing_page';
+export const FONTES_AVISO: FonteAviso[] = ['meta_forms', 'landing_page'];
+
+export const ROTULO_FONTE: Record<FonteAviso, string> = {
+  meta_forms: 'Formulário Meta',
+  landing_page: 'Landing page',
+};
+
+/** Teto de mensagens por cliente em cada rodada — ver `processarAvisos`. */
+export const TETO_POR_RODADA = 20;
+
+let schemaPronto = false;
+
+export async function ensureLeadAvisoSchema(pool: Pool) {
+  if (schemaPronto) return;
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS public.lead_aviso_config (
+      client_id      TEXT PRIMARY KEY,
+      ativo          BOOLEAN NOT NULL DEFAULT FALSE,
+      zapi_client_id TEXT,
+      group_id       TEXT,
+      fontes         TEXT NOT NULL DEFAULT 'meta_forms,landing_page',
+      -- ⚠️ Marco zero. Ligar num cliente antigo despejaria a base histórica
+      -- inteira no grupo dele, e não há como desfazer mensagem enviada. O
+      -- worker só olha evento POSTERIOR a esta marca, que é reposicionada
+      -- sempre que o aviso é (re)ligado.
+      desde          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      criado_em      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      atualizado_em  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS public.lead_aviso_envios (
+      id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      client_id  TEXT NOT NULL,
+      evento_id  UUID NOT NULL,
+      lead_id    UUID,
+      fonte      TEXT,
+      status     TEXT NOT NULL,
+      erro       TEXT,
+      -- O texto EXATO que foi para o grupo. Guardar só o id do evento
+      -- obrigaria a remontar a mensagem para exibir, e remontagem não é
+      -- registro: mudar o formato amanhã faria o histórico mentir sobre o que
+      -- foi entregue ontem (mesma lição de fidelidade_envios.texto).
+      texto      TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    -- ⚠️ A defesa central contra avisar duas vezes. Não existe desfazer de
+    -- mensagem no WhatsApp, e dois ticks cruzados do cron competiriam pelo
+    -- mesmo evento.
+    CREATE UNIQUE INDEX IF NOT EXISTS lead_aviso_envios_unico
+      ON public.lead_aviso_envios (client_id, evento_id);
+    CREATE INDEX IF NOT EXISTS lead_aviso_envios_cliente_idx
+      ON public.lead_aviso_envios (client_id, created_at DESC);
+  `).catch(err => console.error('[lead-aviso schema]', err?.message ?? err));
+  schemaPronto = true;
+}
+
+/**
+ * De qual porta o lead veio, lido do `external_id` do evento.
+ *
+ * ⚠️ O prefixo é o que as próprias ingestões escrevem: `leadgen:` em
+ * meta-leadgen.ts e `lp:` na rota da landing page. O webhook genérico também
+ * grava event_type 'formulario' mas com id livre — ele cai em `null` e fica de
+ * fora, porque "formulário do Meta ou landing page" foi o pedido; incluir
+ * qualquer webhook faria o grupo receber coisa que ninguém configurou.
+ */
+export function fonteDoEvento(externalId: string | null | undefined): FonteAviso | null {
+  const id = String(externalId ?? '');
+  if (id.startsWith('leadgen:')) return 'meta_forms';
+  if (id.startsWith('lp:')) return 'landing_page';
+  return null;
+}
+
+/** 'meta_forms,landing_page' → lista válida, sem lixo e sem repetição. */
+export function parseFontes(bruto: string | null | undefined): FonteAviso[] {
+  const itens = String(bruto ?? '').split(',').map(s => s.trim()).filter(Boolean);
+  const validas = itens.filter((f): f is FonteAviso => (FONTES_AVISO as string[]).includes(f));
+  const unicas = [...new Set(validas)];
+  // Config vazia ou corrompida vale como "todas" — o cliente ligou o aviso
+  // esperando ser avisado, não ficar em silêncio por um campo malformado.
+  return unicas.length ? unicas : [...FONTES_AVISO];
+}
+
+export type LeadDoAviso = {
+  nome: string | null;
+  numero: string | null;
+  fonte: FonteAviso;
+  canal: string | null;
+  campanha: string | null;
+  anuncio: string | null;
+  cidade: string | null;
+  uf: string | null;
+};
+
+/** +55 (14) 99635-8710 — o grupo é de gente, não de máquina. */
+export function formatarTelefone(bruto: string | null | undefined): string | null {
+  const d = String(bruto ?? '').replace(/\D/g, '');
+  if (d.length < 10) return bruto?.trim() || null;
+  const sem55 = d.startsWith('55') && d.length >= 12 ? d.slice(2) : d;
+  const ddd = sem55.slice(0, 2);
+  const resto = sem55.slice(2);
+  if (resto.length < 8) return bruto?.trim() || null;
+  const meio = resto.slice(0, resto.length - 4);
+  return `+55 (${ddd}) ${meio}-${resto.slice(-4)}`;
+}
+
+/**
+ * A mensagem que chega no grupo.
+ *
+ * ⚠️ Sem link para o nosso CRM de propósito: quem está no grupo é a equipe do
+ * CLIENTE, que não tem login aqui — o link só entregaria uma tela de senha. O
+ * que serve é o atalho do WhatsApp, que abre a conversa com a pessoa em um
+ * toque, que é exatamente o que se quer fazer ao ver o aviso.
+ */
+export function montarMensagem(lead: LeadDoAviso): string {
+  const linhas: string[] = [`🔔 *Lead novo* — ${ROTULO_FONTE[lead.fonte]}`, ''];
+  linhas.push(`*${lead.nome?.trim() || 'Sem nome'}*`);
+
+  const tel = formatarTelefone(lead.numero);
+  if (tel) linhas.push(tel);
+
+  const local = [lead.cidade, lead.uf].filter(Boolean).join(' · ');
+  const detalhe: string[] = [];
+  if (lead.campanha) detalhe.push(`Campanha: ${lead.campanha}`);
+  if (lead.anuncio) detalhe.push(`Anúncio: ${lead.anuncio}`);
+  if (!lead.campanha && lead.canal && lead.canal !== ROTULO_FONTE[lead.fonte]) {
+    detalhe.push(`Origem: ${lead.canal}`);
+  }
+  if (local) detalhe.push(`Região: ${local}`);
+  if (detalhe.length) { linhas.push(''); linhas.push(...detalhe); }
+
+  const digitos = String(lead.numero ?? '').replace(/\D/g, '');
+  if (digitos.length >= 10) {
+    const comDdi = digitos.startsWith('55') ? digitos : `55${digitos}`;
+    linhas.push('', `Falar agora: https://wa.me/${comDdi}`);
+  }
+  return linhas.join('\n');
+}
+
+// ── Motor ────────────────────────────────────────────────────────────────────
+
+export type ResultadoAviso = {
+  clientes: number;
+  enviados: number;
+  falhas: number;
+  detalhes: Array<{ cliente: string; enviados: number; falhas: number; erro?: string }>;
+};
+
+/**
+ * Varre os eventos de formulário ainda não avisados e manda um por lead.
+ *
+ * ⚠️ Volume medido em 28/09 (14 dias): o cliente mais movimentado tem 5,7
+ * formulários por dia e pico de 3 numa hora. Por isso é uma mensagem POR LEAD,
+ * sem lote: no volume real não é spam, e avisar na hora é o ponto. O
+ * `TETO_POR_RODADA` existe só como cinto de segurança para um dia anormal —
+ * o que sobrar entra na rodada seguinte, não se perde.
+ */
+export async function processarAvisos(
+  pool: Pool,
+  enviar: (instanceId: string, destino: string, texto: string) => Promise<{ ok: boolean; error?: string }>,
+): Promise<ResultadoAviso> {
+  await ensureLeadAvisoSchema(pool);
+  const out: ResultadoAviso = { clientes: 0, enviados: 0, falhas: 0, detalhes: [] };
+
+  const { rows: configs } = await pool.query<{
+    client_id: string; zapi_client_id: string | null; group_id: string | null;
+    fontes: string; desde: string; nome: string | null;
+  }>(
+    `SELECT a.client_id, a.zapi_client_id, a.group_id, a.fontes, a.desde, c.name AS nome
+       FROM public.lead_aviso_config a
+       LEFT JOIN public.clients c ON c.id = a.client_id
+      WHERE a.ativo = TRUE
+        AND NULLIF(a.zapi_client_id, '') IS NOT NULL
+        AND NULLIF(a.group_id, '') IS NOT NULL`,
+  );
+
+  for (const cfg of configs) {
+    out.clientes++;
+    const fontes = parseFontes(cfg.fontes);
+    const det = { cliente: cfg.nome ?? cfg.client_id, enviados: 0, falhas: 0 } as ResultadoAviso['detalhes'][number];
+
+    // Eventos ainda não avisados. O LEFT JOIN é o filtro barato; a UNIQUE é a
+    // garantia real (dois ticks cruzados leem a mesma lista).
+    const { rows: eventos } = await pool.query<{
+      id: string; lead_id: string | null; external_id: string | null; canal: string | null;
+      campaign_name: string | null; ad_name: string | null;
+      regiao_cidade: string | null; regiao_uf: string | null;
+      nome: string | null; numero: string | null;
+    }>(
+      `SELECT e.id, e.lead_id, e.external_id, e.canal,
+              e.campaign_name, e.ad_name, e.regiao_cidade, e.regiao_uf,
+              l.nome, l.numero
+         FROM public.lead_tracking_events e
+         LEFT JOIN public.crm_leads l ON l.id = e.lead_id
+         LEFT JOIN public.lead_aviso_envios v
+                ON v.client_id = e.client_id AND v.evento_id = e.id
+        WHERE e.client_id = $1
+          AND e.event_type = 'formulario'
+          AND e.created_at > $2::timestamptz
+          AND v.id IS NULL
+        ORDER BY e.created_at ASC
+        LIMIT $3`,
+      [cfg.client_id, cfg.desde, TETO_POR_RODADA],
+    );
+
+    for (const ev of eventos) {
+      const fonte = fonteDoEvento(ev.external_id);
+      if (!fonte || !fontes.includes(fonte)) continue;
+
+      const texto = montarMensagem({
+        nome: ev.nome, numero: ev.numero, fonte, canal: ev.canal,
+        campanha: ev.campaign_name, anuncio: ev.ad_name,
+        cidade: ev.regiao_cidade, uf: ev.regiao_uf,
+      });
+
+      // ⚠️ RESERVA ANTES DE ENVIAR. Gravar depois deixaria a janela em que um
+      // segundo tick lê o mesmo evento e a pessoa recebe o aviso duas vezes.
+      // Se o INSERT colidir, outro tick já pegou — segue para o próximo.
+      const { rowCount } = await pool.query(
+        `INSERT INTO public.lead_aviso_envios (client_id, evento_id, lead_id, fonte, status, texto)
+         VALUES ($1,$2,$3,$4,'enviando',$5)
+         ON CONFLICT (client_id, evento_id) DO NOTHING`,
+        [cfg.client_id, ev.id, ev.lead_id, fonte, texto],
+      );
+      if (!rowCount) continue;
+
+      const r = await enviar(cfg.zapi_client_id!, cfg.group_id!, texto)
+        .catch(e => ({ ok: false, error: String(e?.message ?? e) }));
+
+      await pool.query(
+        `UPDATE public.lead_aviso_envios SET status = $3, erro = $4
+          WHERE client_id = $1 AND evento_id = $2`,
+        [cfg.client_id, ev.id, r.ok ? 'enviado' : 'erro', r.ok ? null : (r.error ?? 'falha no envio')],
+      ).catch(() => null);
+
+      if (r.ok) { out.enviados++; det.enviados++; }
+      else { out.falhas++; det.falhas++; det.erro = r.error; }
+    }
+
+    if (det.enviados || det.falhas) out.detalhes.push(det);
+  }
+  return out;
+}

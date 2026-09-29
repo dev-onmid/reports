@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { DictateButton } from '@/components/ui/dictate-button';
+import { LeadAvisoCard } from './lead-aviso-card';
 
 type RedirectLink = {
   id: string;
@@ -881,6 +882,10 @@ export function CaptureLinksTab({ clientId }: { clientId: string }) {
           </div>
         </div>
       )}
+
+      {/* Fecha o ciclo desta aba: aqui se configura por onde o lead ENTRA —
+          logo abaixo, o que acontece no instante em que ele entra. */}
+      <LeadAvisoCard clientId={clientId} />
 
       {selectedLink && <UseInstructions link={selectedLink} onClose={() => setSelectedLink(null)} />}
     </div>

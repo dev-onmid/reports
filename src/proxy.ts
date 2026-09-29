@@ -101,6 +101,7 @@ const CRON_PREFIXES = [
   '/api/crm/followup/worker',
   '/api/fidelidade/worker',
   '/api/publicacoes/worker',
+  '/api/lead-aviso/worker',
   '/api/crm/sync-cron',
   '/api/google/search-terms-cron',
   '/api/disparos/worker',
