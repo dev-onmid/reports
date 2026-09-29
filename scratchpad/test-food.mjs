@@ -31,7 +31,7 @@ const ok = (c, m) => { assert.ok(c, m); n++; };
 eq(normalizarSegmento('food'), 'food', 'food');
 eq(normalizarSegmento('delivery'), 'food', 'delivery e alias de food');
 eq(normalizarSegmento('leads'), 'leads', 'leads');
-eq(normalizarSegmento('branding'), 'leads', 'valor legado cai em leads');
+eq(normalizarSegmento('conversao'), 'leads', 'valor legado cai em leads');
 eq(normalizarSegmento(null), 'leads', 'nulo cai em leads');
 eq(normalizarSegmento(undefined), 'leads', 'ausente cai em leads');
 

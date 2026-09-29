@@ -12,14 +12,34 @@
  * que JÁ EXISTIA. Não criar campo novo.
  */
 
-export type SegmentoDashboard = 'leads' | 'food' | 'clinicas';
+/**
+ * ⚠️ `leads` É o "Leads + R$" (com faturamento) — o valor que a carteira quase
+ * inteira já tinha e a coluna já nasce com. O "Leads" sem faturamento é o valor
+ * NOVO `leads_cpl` (pedido do Matheus, 29/09). Inverter isso exigiria migrar
+ * 36 clientes e o default da coluna, e todo `?? 'leads'` do código passaria a
+ * esconder o faturamento em silêncio.
+ */
+export type SegmentoDashboard = 'leads' | 'leads_cpl' | 'branding' | 'food';
 
-/** Valores legados de `dashboard_type` que continuam caindo no perfil lead-gen. */
+/**
+ * Valores legados (`conversao`, `clinicas`) caem em `leads`: eram cópias do
+ * lead-gen com faturamento e saíram das opções — quem os tinha continua vendo
+ * exatamente a mesma tela.
+ */
 export function normalizarSegmento(v: unknown): SegmentoDashboard {
   if (v === 'food' || v === 'delivery') return 'food';
-  if (v === 'clinicas' || v === 'clinica') return 'clinicas';
+  if (v === 'leads_cpl') return 'leads_cpl';
+  if (v === 'branding') return 'branding';
   return 'leads';
 }
+
+/** As opções dos seletores de "Tipo de dashboard", na ordem em que aparecem. */
+export const OPCOES_TIPO_DASHBOARD: Array<{ valor: SegmentoDashboard; rotulo: string; dica: string }> = [
+  { valor: 'leads_cpl', rotulo: 'Leads', dica: 'Metas de leads e CPL; sem faturamento — o resultado final é a última etapa do funil' },
+  { valor: 'leads', rotulo: 'Leads + R$', dica: 'Leads e faturamento (padrão)' },
+  { valor: 'branding', rotulo: 'Branding', dica: 'Só métricas de tráfego, sem metas, com comparativo de período' },
+  { valor: 'food', rotulo: 'Food / Delivery', dica: 'Pedidos, recorrência e delivery' },
+];
 
 // ─────────────────────────────────────────────────────────── Blocos da tela
 
@@ -133,11 +153,18 @@ export type PerfilSegmento = {
   metasSugeridas: ChaveKpi[];
   /** Ordem + visibilidade dos blocos. Bloco ausente da lista não renderiza. */
   blocos: VisibilidadeBloco[];
+  /** Faturamento, ticket, ROAS, CAC, %FAT e vendas por anúncio aparecem. */
+  receita: boolean;
+  /** Cards de meta (bullet) e comparação contra meta do planejamento. */
+  metas: boolean;
+  /** Funil de performance e tudo que vem do CRM (canais, regiões, comercial). */
+  funil: boolean;
 };
 
 const PERFIL_LEADS: PerfilSegmento = {
   segmento: 'leads',
-  rotuloSegmento: 'Geração de leads',
+  rotuloSegmento: 'Leads + R$',
+  receita: true, metas: true, funil: true,
   kpisTopo: ['investimento', 'cpl', 'conversas', 'agendamentos', 'roi', 'conversao_geral'],
   metasSugeridas: ['faturamento', 'leads'],
   blocos: [
@@ -168,6 +195,7 @@ const PERFIL_LEADS: PerfilSegmento = {
 const PERFIL_FOOD: PerfilSegmento = {
   segmento: 'food',
   rotuloSegmento: 'Food / Delivery',
+  receita: true, metas: true, funil: true,
   kpisTopo: ['investimento', 'custo_por_pedido', 'roas', 'cac', 'conversao_catalogo', 'ticket_medio'],
   metasSugeridas: ['faturamento', 'pedidos'],
   blocos: [
@@ -187,33 +215,47 @@ const PERFIL_FOOD: PerfilSegmento = {
 };
 
 /**
- * Clínicas — nasce como CÓPIA do lead-gen (pedido do Matheus), com identidade
- * própria para poder divergir sem mexer no perfil de todo mundo.
+ * Leads (sem faturamento) — pedido do Matheus, 29/09: cliente cujo resultado
+ * final é a ÚLTIMA ETAPA do funil (reunião, contrato, matrícula), não venda com
+ * valor. As metas viram leads e CPL, e tudo que é R$ de venda some da tela.
  *
- * ⚠️ É por isso que ele existe mesmo idêntico: clínica e lead-gen genérico
- * compartilham o esqueleto hoje, mas o modelo editável é POR SEGMENTO — separar
- * agora significa que arrumar a tela da clínica não vai reordenar o painel dos
- * outros clientes depois.
- *
- * Divergências naturais quando chegarem: comparecimento vira etapa de primeira
- * classe (hoje só existe no funil), e "Leads" tende a virar "Pacientes".
+ * ⚠️ Cópia das LISTAS, não `...PERFIL_LEADS` — spread é raso e a primeira
+ * customização deste perfil mudaria o de todo o resto junto.
  */
-const PERFIL_CLINICAS: PerfilSegmento = {
-  segmento: 'clinicas',
-  rotuloSegmento: 'Clínicas',
-  // ⚠️ Cópia das LISTAS, não `...PERFIL_LEADS`. Spread é raso: os arrays
-  // continuariam sendo os mesmos do lead-gen, e a primeira customização de
-  // clínicas mudaria o painel de todo cliente de lead-gen junto — em silêncio,
-  // que é justamente o oposto do motivo de o perfil existir separado.
-  kpisTopo: [...PERFIL_LEADS.kpisTopo],
-  metasSugeridas: [...PERFIL_LEADS.metasSugeridas],
+const PERFIL_LEADS_CPL: PerfilSegmento = {
+  segmento: 'leads_cpl',
+  rotuloSegmento: 'Leads',
+  receita: false, metas: true, funil: true,
+  kpisTopo: ['investimento', 'cpl', 'conversas', 'agendamentos', 'conversao_geral'],
+  metasSugeridas: ['leads', 'cpl'],
   blocos: PERFIL_LEADS.blocos.map((b) => ({ ...b })),
+};
+
+/**
+ * Branding — só tráfego (investimento, alcance, impressões, cliques, CTR, CPC,
+ * CPM), SEM metas e sem CRM, mas com o comparativo contra o período anterior.
+ */
+const PERFIL_BRANDING: PerfilSegmento = {
+  segmento: 'branding',
+  rotuloSegmento: 'Branding',
+  receita: false, metas: false, funil: false,
+  kpisTopo: ['investimento'],
+  metasSugeridas: [],
+  blocos: [
+    { bloco: 'kpis_topo' },
+    { bloco: 'resumo_trafego' },
+    { bloco: 'instagram' },
+    { bloco: 'midia_paga' },
+    { bloco: 'google_ads' },
+    { bloco: 'resumo_clientes' },
+  ],
 };
 
 const PERFIS: Record<SegmentoDashboard, PerfilSegmento> = {
   leads: PERFIL_LEADS,
+  leads_cpl: PERFIL_LEADS_CPL,
+  branding: PERFIL_BRANDING,
   food: PERFIL_FOOD,
-  clinicas: PERFIL_CLINICAS,
 };
 
 export function perfilDoSegmento(segmento: SegmentoDashboard): PerfilSegmento {
@@ -231,8 +273,11 @@ export function perfilDaSelecao(segmentos: SegmentoDashboard[]): PerfilSegmento 
   // Só assume um perfil quando TODOS os selecionados são dele. Seleção mista
   // cai no lead-gen: somar recorrência de pedidos com funil de leads produz um
   // agregado que não descreve nenhum dos dois.
-  if (segmentos.every((s) => s === 'food')) return PERFIL_FOOD;
-  if (segmentos.every((s) => s === 'clinicas')) return PERFIL_CLINICAS;
+  // Mista sem food cai no mais COMPLETO (Leads + R$): esconder faturamento de um
+  // cliente que tem por causa de outro que não tem seria pior que mostrar "—".
+  for (const seg of ['food', 'leads_cpl', 'branding'] as const) {
+    if (segmentos.every((s) => s === seg)) return PERFIS[seg];
+  }
   return PERFIL_LEADS;
 }
 

@@ -1587,6 +1587,26 @@ Pedido do Matheus: uma caixa em Mídia paga com os principais criativos, campanh
 - **Substituiu** a antiga "Faturamento por criativo" (`CreativeRevenueStrip`, régua de criação do lead e só miniatura) — componente e harness removidos.
 - ✅ Verificado: rota compilada rodando no container contra produção (Cambé, setembro: R$ 36.399,69 atribuídos de R$ 128.412,10; Presidente Prudente R$ 26.134,11; Incorpast R$ 948,50 — "AD4 ANDREIA 2"); `adIds` devolveu 6/6 previews com imagem para Cambé em 3,2s; harness no browser com os dados reais (3 abas, fallback sem preview, "sem valor lançado"); tsc limpo, lint da página no baseline (164). ⚠️ `videoUrl` veio vazio nos 6 (vídeo `source` depende de permissão da Página) — igual ao "Melhores criativos", o modal mostra imagem + link.
 
+## Tipo de dashboard: Leads · Leads + R$ · Branding · Food (2026-09-29)
+
+Pedido do Matheus: o selo de tipo do cliente passa a ter 4 opções. **Leads** (metas de leads e CPL, sem faturamento; o resultado final é a última etapa do funil), **Leads + R$** (o de sempre, com faturamento), **Branding** (só tráfego, sem metas, com comparativo de período) e **Food / Delivery** (inalterado). Clínicas e Conversão saíram.
+
+- **⚠️ `leads` CONTINUA sendo o "Leads + R$"** e o novo "Leads" sem faturamento é o valor `leads_cpl`. Motivo: 36 clientes e o default da coluna já estavam em `leads`, e todo `?? 'leads'` do código passaria a esconder faturamento em silêncio se o significado fosse invertido. Zero migração para a carteira.
+- **Legados**: os 6 clientes `conversao` (Cão Veio, Dominos, La Pasta Gialla Maringá, Meta Pizzaria, Panino'77, Seu Bredis) viraram `leads` no banco — já viam exatamente o layout de lead-gen. `clinicas` não tinha nenhum. `normalizarSegmento` continua mapeando os dois para `leads`.
+- **⚠️ Branding muda a tela de quem já estava nele** (Feira de Louças, Panino77 Curitiba, Outlet Jeans): antes via o lead-gen completo, agora só tráfego.
+- **Fonte única das opções**: `OPCOES_TIPO_DASHBOARD` em `dashboard-segmento.ts`, usada nos 4 seletores (novo cliente, detalhe, lista, ajuste em massa). `PerfilSegmento` ganhou `receita`/`metas`/`funil`.
+- **Tela "Leads"**: meta de Faturamento → `CustoMetaCard` de CPL (novo em `bullet-meta.tsx`: menor é melhor, verde ≤ meta, âmbar até +20%, vermelho acima, com período anterior); saem CAC, %FAT, Ticket, ROAS, donut de Faturamento por canal, coluna Faturamento do funil por canal, "Vendas e faturamento por anúncio" e Comercial; entra **"Custo por {última etapa do funil}"** com o nome real da coluna do Kanban. Ritmo do mês usa leads.
+- **Tela "Branding"**: sem cards de meta, funil, alertas, regiões, canais do CRM, ritmo e CPL diário; o Resumo por canal ocupa a linha (sem meta de CPL); KPIs de tráfego com variação vs período anterior (Investimento, Impressões, Alcance, Cliques, CTR, CPC, CPM, Resultados).
+- **Seleção mista** cai em "Leads + R$" — esconder o faturamento de um cliente que tem por causa de outro que não tem seria pior que "—".
+- O selo "Modo X" no topo agora aparece para todo tipo que não é o padrão.
+- ✅ 36 asserts (`scratchpad/test-segmento.mjs`); tsc limpo; lint no baseline; cards novos vistos em harness. ⚠️ A tela inteira em cada modo só produção valida (dev sem banco).
+
+## Instagram — Seguidores sem comparativo não some mais em cinza (2026-09-29)
+
+Print do Matheus (Cinfel): "+610 no período" apagado sob um traço "— ganho vs período anterior". **Causa medida**: a métrica `follower_count` do Instagram só responde para os **últimos 30 dias** — setembro deu +610, agosto (1–29) deu **0**. Sem base, a variação virava traço e o ganho ficava escondido na nota cinza.
+- `IndicadorCard` ganhou `destaque` (linha colorida no lugar da variação). Sem base anterior, o card mostra **"+610 no período" em verde** e a nota "sem comparativo · o Instagram só guarda 30 dias". Com base (janelas dentro dos 30 dias, ex. últimos 7d), segue a variação % como antes.
+- ⚠️ Comparar ganho de seguidores entre meses só seria possível guardando o total diário (o snapshot do monitor é 1 linha por cliente, sobrescrita). Não feito.
+
 # ONMID Reports — Guia de Contexto
 
 ## O que é este projeto

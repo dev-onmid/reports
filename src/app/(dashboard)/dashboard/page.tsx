@@ -104,7 +104,7 @@ import {
 } from '@/lib/dashboard-periodo';
 import { statusCpl, statusCplComGasto, ROTULO_STATUS_CPL, CLASSE_STATUS_CPL, TEXTO_STATUS_CPL, type StatusCpl } from '@/lib/dashboard-metas';
 import { Donut } from '@/components/dashboard/donut';
-import { BulletMetaCard } from '@/components/dashboard/bullet-meta';
+import { BulletMetaCard, CustoMetaCard } from '@/components/dashboard/bullet-meta';
 import { RitmoMesChart, CplDiarioChart } from '@/components/dashboard/ritmo-chart';
 import { SUPERFICIE, Superficie, GrupoTitulo } from '@/components/dashboard/superficie';
 import { IndicadorCard, IndicadorMini, FaixaIndicadores, IconeBadge } from '@/components/dashboard/indicador-card';
@@ -4205,13 +4205,13 @@ function IgMark({ className }: { className?: string }) {
 // dentro de uma moldura rosa com brilho.
 const ROSA_IG = '#ff5c93';
 
-function IgKpi({ label, icon, valor, variacao, comparacao, sub, subRuim }: {
+function IgKpi({ label, icon, valor, variacao, comparacao, sub, subRuim, destaque }: {
   label: string; icon: React.ElementType; valor: string; variacao: number | null;
-  comparacao?: string; sub?: string; subRuim?: boolean;
+  comparacao?: string; sub?: string; subRuim?: boolean; destaque?: { texto: string; bom: boolean };
 }) {
   return (
     <IndicadorCard rotulo={label} icone={icon} cor={ROSA_IG} valor={valor} variacao={variacao}
-      comparacao={comparacao} nota={sub} notaRuim={subRuim} />
+      comparacao={comparacao} nota={sub} notaRuim={subRuim} destaque={destaque} />
   );
 }
 
@@ -4980,7 +4980,9 @@ function CabFunil({ chave, rotulo, dica, ordem, onOrdenar }: {
   );
 }
 
-function TabelaFunilCanal({ linhas, investimento }: {
+function TabelaFunilCanal({ linhas, investimento, semReceita = false }: {
+  /** Dashboard "Leads": sem coluna de Faturamento (o cliente não fatura pelo funil). */
+  semReceita?: boolean;
   linhas: LinhaFunilCanal[];
   /** Gasto do período por canal pago (chave = rótulo do canal como o CRM devolve). */
   investimento: Record<string, number>;
@@ -5048,7 +5050,7 @@ function TabelaFunilCanal({ linhas, investimento }: {
                 <CabFunil ordem={ordem} onOrdenar={setOrdem} chave="conversao" rotulo="% Conv." dica="Vendas ÷ leads do canal" />
                 <CabFunil ordem={ordem} onOrdenar={setOrdem} chave="cpl" rotulo="CPL" dica="Investimento ÷ leads (canais pagos)" />
                 <CabFunil ordem={ordem} onOrdenar={setOrdem} chave="cac" rotulo="CAC" dica="Investimento ÷ vendas (canais pagos)" />
-                <CabFunil ordem={ordem} onOrdenar={setOrdem} chave="receita" rotulo="Faturamento" dica="Receita das vendas do canal" />
+                {!semReceita && <CabFunil ordem={ordem} onOrdenar={setOrdem} chave="receita" rotulo="Faturamento" dica="Receita das vendas do canal" />}
               </tr>
             </thead>
             <tbody className="divide-y divide-white/[0.07]">
@@ -5069,7 +5071,7 @@ function TabelaFunilCanal({ linhas, investimento }: {
                     <CelFunil>{pct(l.fechamentos, l.leads)}</CelFunil>
                     <CelFunil>{razao(inv, l.leads)}</CelFunil>
                     <CelFunil forte>{razao(inv, l.fechamentos)}</CelFunil>
-                    <CelFunil forte className={cn(temVenda && 'text-[#6cff2f]')}>{moeda(l.receita)}</CelFunil>
+                    {!semReceita && <CelFunil forte className={cn(temVenda && 'text-[#6cff2f]')}>{moeda(l.receita)}</CelFunil>}
                   </tr>
                 );
               })}
@@ -5085,7 +5087,7 @@ function TabelaFunilCanal({ linhas, investimento }: {
                   <CelFunil forte>{pct(soma.fechamentos, soma.leads)}</CelFunil>
                   <CelFunil forte>{razao(soma.investimento, soma.leads)}</CelFunil>
                   <CelFunil forte>{razao(soma.investimento, soma.fechamentos)}</CelFunil>
-                  <CelFunil forte className={cn(soma.receita > 0 && 'text-[#6cff2f]')}>{moeda(soma.receita)}</CelFunil>
+                  {!semReceita && <CelFunil forte className={cn(soma.receita > 0 && 'text-[#6cff2f]')}>{moeda(soma.receita)}</CelFunil>}
                 </tr>
               )}
             </tbody>
@@ -6447,6 +6449,13 @@ export default function GeneralDashboard() {
   // `perfilDaSelecao` em src/lib/dashboard-segmento.ts.
   const perfilAtivo = perfilDaSelecao(selectedClients.map(c => normalizarSegmento(c.dashboard_type)));
   const modoFood = perfilAtivo.segmento === 'food';
+  // Tipo de dashboard (pedido do Matheus, 29/09): "Leads" esconde tudo que é R$
+  // de venda e troca a meta de faturamento pela de CPL; "Branding" mostra só
+  // tráfego, sem metas e sem CRM — com o comparativo de período mantido.
+  const comReceita = perfilAtivo.receita;
+  const comMetas = perfilAtivo.metas;
+  const comFunil = perfilAtivo.funil;
+  const modoBranding = perfilAtivo.segmento === 'branding';
   // Cliente único é a condição para os blocos de food: somar recorrência e mix
   // de produtos de estabelecimentos diferentes produz um agregado sem sentido.
   const foodSoloId = modoFood && selectedIds.size === 1 ? [...selectedIds][0] : null;
@@ -6549,7 +6558,7 @@ export default function GeneralDashboard() {
   const notaMeta = (meta: number, formato: 'currency' | 'percent') => (meta > 0 ? `meta ${premiumValue(meta, formato)}` : undefined);
   const estourou = (real: number, meta: number) => real > 0 && meta > 0 && real > meta;
 
-  const quickMetrics = [
+  const quickMetricsBase = [
     { title: 'Investimento Total', value: premiumValue(totalSpend, 'currency'), change: pctChange(totalSpend, prevTotalSpend), icon: CreditCard, neutralChange: true, serie: temSerieGasto ? gastoDia : undefined },
     { title: 'CPL Médio', value: totalCostPerLead > 0 ? premiumValue(totalCostPerLead, 'currency') : '—', change: pctChange(totalCostPerLead, prevCpl), icon: Tag, inverseChange: true, serie: temSerieGasto && leadsDia.some(v => v > 0) ? cplSeries : undefined, dica: 'Investimento Meta + Google ÷ leads reportados pelas plataformas · linha = CPL acumulado dia a dia', nota: notaMeta(cplMetaSel, 'currency'), notaRuim: estourou(totalCostPerLead, cplMetaSel) },
     { title: 'CAC', value: cac > 0 ? premiumValue(cac, 'currency') : '—', change: cac > 0 && prevCac > 0 ? pctChange(cac, prevCac) : null, icon: Wallet, inverseChange: true, dica: 'Investimento Meta + Google ÷ vendas do CRM no período', nota: notaMeta(metaCac, 'currency'), notaRuim: estourou(cac, metaCac) },
@@ -6677,6 +6686,44 @@ export default function GeneralDashboard() {
     ? (stageFunilSolo!.degraus[stageFunilSolo!.degraus.length - 1].alcancaram
         / Math.max(stageFunilSolo!.degraus[0].alcancaram, 1)) * 100
     : funnelTaxa;
+
+  // ── KPIs por tipo de dashboard ────────────────────────────────────────────
+  // "Leads": sai tudo que depende de valor de venda; entra o custo da ÚLTIMA
+  // etapa do funil do cliente (é ela a conclusão, não a venda com R$).
+  const etapaFinal = usaStageFunil
+    ? stageFunilSolo!.degraus[stageFunilSolo!.degraus.length - 1]
+    : null;
+  const etapaFinalRotulo = etapaFinal?.label ?? 'Fechamentos';
+  const etapaFinalQtd = etapaFinal ? etapaFinal.alcancaram : conversions;
+  const custoEtapaFinal = totalSpend > 0 && etapaFinalQtd > 0 ? totalSpend / etapaFinalQtd : 0;
+  const SO_COM_RECEITA = new Set(['CAC', '% FAT', 'Ticket Médio', 'ROAS']);
+  const totalImpressoes = metaImpressions + googleImpressions;
+  const totalCliques = metaClicks + googleClicks;
+  const prevImpressoes = prevMetaImpressions + prevGoogleImpressions;
+  const prevCliques = prevMetaClicks + prevGoogleClicks;
+  const ctrTotal = totalImpressoes > 0 ? (totalCliques / totalImpressoes) * 100 : 0;
+  const prevCtrTotal = prevImpressoes > 0 ? (prevCliques / prevImpressoes) * 100 : 0;
+  const cpcTotal = totalCliques > 0 ? totalSpend / totalCliques : 0;
+  const prevCpcTotal = prevCliques > 0 ? prevTotalSpend / prevCliques : 0;
+  const cpmTotal = totalImpressoes > 0 ? (totalSpend / totalImpressoes) * 1000 : 0;
+  const prevCpmTotal = prevImpressoes > 0 ? (prevTotalSpend / prevImpressoes) * 1000 : 0;
+  const quickMetrics = modoBranding
+    ? [
+        quickMetricsBase[0],
+        { title: 'Impressões', value: totalImpressoes > 0 ? premiumValue(totalImpressoes) : '—', change: pctChange(totalImpressoes, prevImpressoes), icon: Eye, dica: 'Meta Ads + Google Ads' },
+        { title: 'Alcance', value: metaReach > 0 ? premiumValue(metaReach) : '—', change: pctChange(metaReach, prevMetaReach), icon: Users, dica: 'Pessoas alcançadas no Meta Ads (o Google não informa alcance)' },
+        { title: 'Cliques', value: totalCliques > 0 ? premiumValue(totalCliques) : '—', change: pctChange(totalCliques, prevCliques), icon: MousePointerClick, dica: 'Meta Ads + Google Ads' },
+        { title: 'CTR', value: ctrTotal > 0 ? premiumValue(ctrTotal, 'percent') : '—', change: ctrTotal > 0 && prevCtrTotal > 0 ? pctChange(ctrTotal, prevCtrTotal) : null, icon: Target, dica: 'Cliques ÷ impressões' },
+        { title: 'CPC', value: cpcTotal > 0 ? premiumValue(cpcTotal, 'currency') : '—', change: cpcTotal > 0 && prevCpcTotal > 0 ? pctChange(cpcTotal, prevCpcTotal) : null, icon: Tag, inverseChange: true, dica: 'Investimento ÷ cliques' },
+        { title: 'CPM', value: cpmTotal > 0 ? premiumValue(cpmTotal, 'currency') : '—', change: cpmTotal > 0 && prevCpmTotal > 0 ? pctChange(cpmTotal, prevCpmTotal) : null, icon: BarChart3, inverseChange: true, dica: 'Custo por mil impressões' },
+        { title: 'Resultados', value: totalLeads > 0 ? premiumValue(totalLeads) : '—', change: pctChange(totalLeads, prevTotalLeads), icon: Zap, dica: 'Leads e conversas iniciadas, como as plataformas reportam' },
+      ]
+    : comReceita
+      ? quickMetricsBase
+      : [
+          ...quickMetricsBase.filter(m => !SO_COM_RECEITA.has(m.title)),
+          { title: `Custo por ${etapaFinalRotulo.toLowerCase()}`, value: custoEtapaFinal > 0 ? premiumValue(custoEtapaFinal, 'currency') : '—', change: null, icon: Wallet, inverseChange: true, dica: `Investimento Meta + Google ÷ ${etapaFinalRotulo.toLowerCase()} (${premiumValue(etapaFinalQtd)} no período, última etapa do funil)` },
+        ];
   const linhaCanal = (channel: string, logo: ReactNode, spend: number, impr: number, clicks: number, leads: number): LinhaCanal => {
     const cpl = leads > 0 ? spend / leads : 0;
     return {
@@ -6703,7 +6750,8 @@ export default function GeneralDashboard() {
   // No mês corrente o eixo vai até o FIM do mês (dias futuros = null) para a
   // projeção ter onde ser desenhada; nos demais períodos, só a janela.
   const ritmo = (() => {
-    const usaReceita = receitaDia.some(v => v > 0);
+    if (!comMetas) return null;
+    const usaReceita = comReceita && receitaDia.some(v => v > 0);
     const usaLeads = !usaReceita && leadsDia.some(v => v > 0);
     if (!usaReceita && !usaLeads) return null;
     const mesCorrente = period === 'this_month';
@@ -6849,20 +6897,33 @@ export default function GeneralDashboard() {
                       {/* ⚠️ Seguidores: o valor grande é o TOTAL (snapshot); a
                           variação é a do GANHO no período contra o ganho anterior
                           — `followers_count` ignora a janela e volta igual nas duas. */}
-                      <IgKpi
-                        label="Seguidores"
-                        icon={Users}
-                        valor={pageInsightsLoading ? '…' : igFollow > 0 ? premiumValue(igFollow) : '—'}
-                        sub={pageInsightsLoading || (igFollowGain === 0 && prevFollowGain === 0)
-                          ? undefined
-                          : `${igFollowGain >= 0 ? '+' : ''}${premiumValue(igFollowGain)} no período`
-                            + (chg(igFollowGain, prevFollowGain) === null && prevFollowGain !== 0
-                              ? ` · antes ${prevFollowGain >= 0 ? '+' : ''}${premiumValue(prevFollowGain)}`
-                              : '')}
-                        subRuim={igFollowGain < 0}
-                        variacao={chg(igFollowGain, prevFollowGain)}
-                        comparacao="ganho vs período anterior"
-                      />
+                      {(() => {
+                        // ⚠️ O Instagram só informa `follower_count` dos ÚLTIMOS 30 DIAS
+                        // (medido na Cinfel: set = +610, ago = 0). Comparar setembro com
+                        // agosto sempre dava base zero e o card caía num traço cinza com o
+                        // ganho escondido na nota. Sem base, o GANHO vira a linha de
+                        // destaque e a nota explica por que não há %.
+                        const ganhoTxt = `${igFollowGain >= 0 ? '+' : ''}${premiumValue(igFollowGain)} no período`;
+                        const semBase = prevFollowGain === 0 && igFollowGain !== 0;
+                        return (
+                          <IgKpi
+                            label="Seguidores"
+                            icon={Users}
+                            valor={pageInsightsLoading ? '…' : igFollow > 0 ? premiumValue(igFollow) : '—'}
+                            destaque={!pageInsightsLoading && semBase ? { texto: ganhoTxt, bom: igFollowGain > 0 } : undefined}
+                            sub={pageInsightsLoading || (igFollowGain === 0 && prevFollowGain === 0)
+                              ? undefined
+                              : semBase
+                                ? 'sem comparativo · o Instagram só guarda 30 dias'
+                                : ganhoTxt + (chg(igFollowGain, prevFollowGain) === null
+                                  ? ` · antes ${prevFollowGain >= 0 ? '+' : ''}${premiumValue(prevFollowGain)}`
+                                  : '')}
+                            subRuim={!semBase && igFollowGain < 0}
+                            variacao={chg(igFollowGain, prevFollowGain)}
+                            comparacao="ganho vs período anterior"
+                          />
+                        );
+                      })()}
                       <IgKpi label="Alcance" icon={Eye} valor={pageInsightsLoading ? '…' : igReach > 0 ? premiumValue(igReach) : '—'} variacao={chg(igReach, prevReach)} comparacao={rotuloComp} sub="contas alcançadas" />
                       <IgKpi
                         label="Engajamento"
@@ -6894,6 +6955,7 @@ export default function GeneralDashboard() {
                 a receita de delivery já tem painel próprio na grade. */}
             {(!modoFood || porCanal.origens.length > 0 || porCanal.leads.length > 0) && (
               <div className="grid gap-4 xl:grid-cols-2">
+                {comReceita && (
                 <CanalDonutCard
                   titulo="Faturamento por Canal"
                   fatiasBrutas={porCanal.origens.map(o => ({
@@ -6907,6 +6969,7 @@ export default function GeneralDashboard() {
                   formato="currency"
                   aviso="Preencher a origem no cadastro do negócio (ou entrar por lead de anúncio, que já traz o canal) é o que move esse valor para uma fatia de verdade."
                 />
+                )}
                 <CanalDonutCard
                   titulo="Leads por Canal"
                   fatiasBrutas={porCanal.leads.map(l => ({ label: l.label, valor: l.leads }))}
@@ -6960,7 +7023,7 @@ export default function GeneralDashboard() {
                   period={period}
                   dateFrom={customDateFrom}
                   dateTo={customDateTo}
-                  metaCpl={cplMetaSel}
+                  metaCpl={comMetas ? cplMetaSel : 0}
                   abrirTudo
                   preencher
                 />
@@ -7113,9 +7176,9 @@ export default function GeneralDashboard() {
     midia: campaignsLoading || metricsLoading || totalSpend > 0 || campaigns.length > 0 || creatives.length > 0 || metaBalance > 0 || googleBalance > 0,
     lp: selectedClients.some(c => ga4ByClient[c.id]?.ga4),
     social: pageInsightsLoading || pageInsights.some(pi => pi.instagram),
-    comercial: desempenhoLoading || vendedores.length > 0 || categorias.length > 0,
+    comercial: comReceita && (desempenhoLoading || vendedores.length > 0 || categorias.length > 0),
   };
-  const temGraficoCpl = diasSel.length >= 2 && gastoDia.some(v => v > 0) && leadsDia.some(v => v > 0);
+  const temGraficoCpl = comMetas && diasSel.length >= 2 && gastoDia.some(v => v > 0) && leadsDia.some(v => v > 0);
 
   return (
     <div className="-m-3 min-h-full bg-[#05090B] text-[#f4f7f8] sm:-m-6">
@@ -7236,7 +7299,7 @@ export default function GeneralDashboard() {
             ))}
           </div>
           {/* Bloco 1 da seção 6: header mantido, só ganha o badge do segmento ativo. */}
-          {modoFood && (
+          {perfilAtivo.segmento !== 'leads' && (
             <span className="inline-flex items-center gap-1.5 rounded-[10px] border border-[#6cff2f]/30 bg-[#6cff2f]/10 px-3 py-2 text-xs font-bold text-[#6cff2f]">
               Modo {perfilAtivo.rotuloSegmento}
             </span>
@@ -7460,7 +7523,9 @@ export default function GeneralDashboard() {
               <>
                 {/* Página única — ordem: negócio (metas, KPIs, funil, canais) → social → mídia paga → landing page → comercial. */}
                   <>
+                    {comMetas && (
                     <div className="grid gap-4 xl:grid-cols-2">
+                      {comReceita ? (
                       <BulletMetaCard
                         titulo="Faturamento"
                         icon={DollarSign}
@@ -7473,6 +7538,7 @@ export default function GeneralDashboard() {
                         rotuloEsperado={rotuloEsperado}
                         projecao={projetar(revenue)}
                       />
+                      ) : null}
                       <BulletMetaCard
                         titulo="Leads"
                         icon={Users}
@@ -7500,9 +7566,27 @@ export default function GeneralDashboard() {
                           </span>
                         ) : undefined}
                       />
+                      {/* "Leads" (sem faturamento): a segunda meta é o CPL. */}
+                      {!comReceita && (
+                        <CustoMetaCard
+                          titulo="CPL"
+                          icon={Tag}
+                          fonte="Meta + Google (plataformas)"
+                          fonteTitulo="Investimento Meta + Google ÷ leads reportados pelas plataformas"
+                          meta={cplMetaSel}
+                          realizado={totalCostPerLead}
+                          anterior={prevCpl}
+                          formatar={(n) => premiumValue(n, 'currency')}
+                        />
+                      )}
                     </div>
+                    )}
                     {/* Funil + Resumo por canal logo abaixo das metas e ACIMA dos cards de
                         Ticket médio / Agendamento / ROAS / Conversão (pedido do Matheus, 24/09). */}
+                    {/* Branding: sem funil — o Resumo por canal ocupa a linha, sem meta de CPL. */}
+                    {modoBranding ? (
+                      <ChannelSummaryTable rows={channelRows} total={channelTotal} metaCpl={0} />
+                    ) : (
                     <div className="grid gap-4 xl:grid-cols-[1.08fr_0.92fr]">
                       {deliverySoloId ? (
                         <DeliveryResumoCard clientId={deliverySoloId} from={deliveryRange.from} to={deliveryRange.to} />
@@ -7511,7 +7595,8 @@ export default function GeneralDashboard() {
                       )}
                       <ChannelSummaryTable rows={channelRows} total={channelTotal} metaCpl={cplMetaSel} />
                     </div>
-                    <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4">
+                    )}
+                    <div className={cn('grid gap-4 sm:grid-cols-2 md:grid-cols-3', quickMetrics.length === 5 ? 'xl:grid-cols-5' : 'xl:grid-cols-4')}>
                       {quickMetrics.map((metric) => <QuickMetricCard key={metric.title} {...metric} comparacao={rotuloComp} />)}
                     </div>
                     {(ritmo || temGraficoCpl) && (
@@ -7531,20 +7616,20 @@ export default function GeneralDashboard() {
                         {temGraficoCpl && <CplDiarioChart dias={diasSel} gasto={gastoDia} leads={leadsDia} metaCpl={cplMetaSel} />}
                       </div>
                     )}
-                    {blocoAlertas}
+                    {comMetas && blocoAlertas}
                     {/* Só para cliente com integração de leads via SULTS (pedido do
                         Matheus, 2026-09-24) — é onde origem e região chegam completas.
                         Com vários selecionados, TODOS precisam ter SULTS, senão a soma
                         misturaria leads sem origem. E só se há região em algum lugar. */}
-                    {!modoFood && selectedIds.size > 0 && [...selectedIds].every(id => sultsFlags[id]) && linhasRegiao.length > 0 && (
+                    {comFunil && !modoFood && selectedIds.size > 0 && [...selectedIds].every(id => sultsFlags[id]) && linhasRegiao.length > 0 && (
                       <TabelaRegioes linhas={linhasRegiao} semRegiao={porRegiao?.semRegiao ?? 0} total={porRegiao?.total ?? 0} nacionalPorUf={nacionalPorUf} ufs={porRegiao?.ufs ?? []} />
                     )}
                     {/* A "funil por canal" da planilha: só quando há lead no CRM
                         do período — sem CRM, a tabela seria toda "—". */}
-                    {!modoFood && !deliverySoloId && funilCanal && funilCanal.canais.length > 0 && (
-                      <TabelaFunilCanal linhas={funilCanal.canais} investimento={{ 'Meta Ads': metaSpend, 'Google Ads': googleCost }} />
+                    {comFunil && !modoFood && !deliverySoloId && funilCanal && funilCanal.canais.length > 0 && (
+                      <TabelaFunilCanal linhas={funilCanal.canais} investimento={{ 'Meta Ads': metaSpend, 'Google Ads': googleCost }} semReceita={!comReceita} />
                     )}
-                    {blocoCanais}
+                    {comFunil && blocoCanais}
                   </>
 
                 {/* Social logo ACIMA de Mídia paga (pedido do Matheus, 24/09 — segunda
@@ -7558,7 +7643,7 @@ export default function GeneralDashboard() {
                 {secaoVisivel.midia && (
                   <>
                     <TituloSecao titulo="Mídia paga" sub="Meta Ads e Google Ads" />
-                    {blocoVendasAnuncio}
+                    {comReceita && blocoVendasAnuncio}
                     {blocoMeta}
                     {blocoGoogle}
                   </>

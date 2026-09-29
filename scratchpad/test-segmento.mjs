@@ -1,9 +1,9 @@
-// Asserts do perfil por segmento.
+// Asserts do perfil por segmento — os 4 tipos de dashboard (2026-09-29).
 //
-// O que protegem: o segmento novo (clinicas) existir de verdade em todo lugar
-// que decide o que a tela mostra, e a regra de selecao MISTA continuar caindo
-// no lead-gen — somar recorrencia de pedidos com funil de leads produz um
-// agregado que nao descreve nenhum dos dois.
+// O que protegem: `leads` continua sendo o "Leads + R$" (a carteira inteira já
+// estava nele); `leads_cpl` esconde receita e mantém metas; `branding` tira
+// metas, receita e funil; valores legados (conversao/clinicas) caem no padrão;
+// seleção mista cai no mais completo.
 //
 // Compilar antes:
 //   npx esbuild src/lib/dashboard-segmento.ts --bundle --format=esm \
@@ -12,61 +12,59 @@
 
 import assert from 'node:assert';
 import {
-  normalizarSegmento, perfilDoSegmento, perfilDaSelecao,
-  blocoVisivel, ordemDoBloco, kpisComMetaPermitida, definicaoKpi, rotuloKpi,
+  normalizarSegmento, perfilDoSegmento, perfilDaSelecao, OPCOES_TIPO_DASHBOARD,
+  blocoVisivel, kpisComMetaPermitida, definicaoKpi,
 } from './build-seg/dashboard-segmento.mjs';
 
 let n = 0;
 const eq = (a, b, m) => { assert.deepStrictEqual(a, b, m); n++; };
 const ok = (c, m) => { assert.ok(c, m); n++; };
 
-// ── normalizacao do valor de clients.dashboard_type
-eq(normalizarSegmento('clinicas'), 'clinicas', 'clinicas e reconhecido');
-eq(normalizarSegmento('clinica'), 'clinicas', 'singular tambem cai em clinicas');
-eq(normalizarSegmento('food'), 'food', 'food intocado');
-eq(normalizarSegmento('delivery'), 'food', 'alias legado de food intocado');
-for (const v of ['leads', 'branding', 'conversao', '', null, undefined, 42, {}]) {
-  eq(normalizarSegmento(v), 'leads', `"${String(v)}" cai no lead-gen`);
+// ── normalização
+eq(normalizarSegmento('leads'), 'leads', 'leads e o padrao com R$');
+eq(normalizarSegmento('leads_cpl'), 'leads_cpl', 'leads sem R$');
+eq(normalizarSegmento('branding'), 'branding', 'branding reconhecido');
+eq(normalizarSegmento('food'), 'food', 'food');
+eq(normalizarSegmento('delivery'), 'food', 'delivery alias de food');
+for (const v of ['conversao', 'clinicas', 'clinica', '', null, undefined, 42, {}]) {
+  eq(normalizarSegmento(v), 'leads', `legado/lixo ${JSON.stringify(v)} cai no padrao`);
 }
 
-// ── o perfil de clinicas e COPIA do lead-gen (pedido do Matheus), com
-//    identidade propria para poder divergir depois sem mexer nos outros.
-const leads = perfilDoSegmento('leads');
-const clin = perfilDoSegmento('clinicas');
-eq(clin.segmento, 'clinicas', 'tem segmento proprio');
-eq(clin.rotuloSegmento, 'Clínicas', 'tem rotulo proprio');
-eq(clin.kpisTopo, leads.kpisTopo, 'mesmos KPIs do lead-gen');
-eq(clin.metasSugeridas, leads.metasSugeridas, 'mesmas metas sugeridas');
-eq(clin.blocos.map(b => b.bloco), leads.blocos.map(b => b.bloco), 'mesma ordem de blocos');
-ok(clin !== leads, 'e um objeto proprio, nao a mesma referencia');
+// ── flags dos perfis
+const p = (s) => perfilDoSegmento(s);
+eq([p('leads').receita, p('leads').metas, p('leads').funil], [true, true, true], 'Leads + R$ completo');
+eq([p('leads_cpl').receita, p('leads_cpl').metas, p('leads_cpl').funil], [false, true, true], 'Leads: sem receita, com metas');
+eq([p('branding').receita, p('branding').metas, p('branding').funil], [false, false, false], 'Branding: so trafego');
+eq([p('food').receita, p('food').metas, p('food').funil], [true, true, true], 'Food intocado');
+ok(!p('leads_cpl').metasSugeridas.includes('faturamento'), 'Leads nao sugere meta de faturamento');
+ok(p('leads_cpl').metasSugeridas.includes('cpl'), 'Leads sugere meta de CPL');
+eq(p('branding').metasSugeridas, [], 'Branding sem metas');
+ok(!blocoVisivel(p('branding'), 'funil_leads'), 'Branding sem funil');
+ok(blocoVisivel(p('branding'), 'midia_paga'), 'Branding mostra midia paga');
+eq(p('leads').rotuloSegmento, 'Leads + R$', 'rotulo do padrao');
+eq(p('leads_cpl').rotuloSegmento, 'Leads', 'rotulo do sem R$');
 
-// ⚠️ Mexer no perfil de clinicas NAO pode vazar para o lead-gen.
-clin.kpisTopo.push('seguidores');
-eq(perfilDoSegmento('leads').kpisTopo.includes('seguidores'), false,
-   'alterar clinicas nao contamina lead-gen');
+// ⚠️ spread raso: mexer no perfil Leads nao pode vazar para Leads + R$
+p('leads_cpl').blocos.push({ bloco: 'mix_produtos' });
+ok(!blocoVisivel(p('leads'), 'mix_produtos'), 'alterar Leads nao contamina Leads + R$');
+p('leads_cpl').blocos.pop();
 
-// ── selecao: so assume o perfil quando TODOS sao dele
-eq(perfilDaSelecao(['clinicas', 'clinicas']).segmento, 'clinicas', 'so clinicas -> clinicas');
+// ── opções dos seletores: 4, na ordem pedida, sem clinicas/conversao
+eq(OPCOES_TIPO_DASHBOARD.map(o => o.rotulo), ['Leads', 'Leads + R$', 'Branding', 'Food / Delivery'], 'ordem das opcoes');
+eq(OPCOES_TIPO_DASHBOARD.map(o => o.valor), ['leads_cpl', 'leads', 'branding', 'food'], 'valores das opcoes');
+
+// ── seleção
+eq(perfilDaSelecao(['leads_cpl', 'leads_cpl']).segmento, 'leads_cpl', 'so Leads -> Leads');
+eq(perfilDaSelecao(['branding']).segmento, 'branding', 'so Branding -> Branding');
 eq(perfilDaSelecao(['food', 'food']).segmento, 'food', 'so food -> food');
-eq(perfilDaSelecao(['leads']).segmento, 'leads', 'so leads -> leads');
-eq(perfilDaSelecao(['clinicas', 'food']).segmento, 'leads', 'mista clinicas+food -> lead-gen');
-eq(perfilDaSelecao(['clinicas', 'leads']).segmento, 'leads', 'mista clinicas+leads -> lead-gen');
-eq(perfilDaSelecao(['food', 'leads']).segmento, 'leads', 'mista food+leads -> lead-gen');
-eq(perfilDaSelecao([]).segmento, 'leads', 'selecao vazia -> lead-gen');
-
-// ── blocos: clinicas ve o que o lead-gen ve
-for (const b of ['resultado_negocio', 'kpis_topo', 'funil_leads', 'instagram', 'google_ads']) {
-  eq(blocoVisivel(perfilDoSegmento('clinicas'), b), true, `clinicas mostra ${b}`);
-  eq(ordemDoBloco(perfilDoSegmento('clinicas'), b), ordemDoBloco(leads, b), `${b} na mesma posicao`);
-}
-eq(blocoVisivel(perfilDoSegmento('clinicas'), 'mix_produtos'), false, 'clinicas nao mostra bloco de food');
-eq(ordemDoBloco(perfilDoSegmento('clinicas'), 'mix_produtos'), Infinity, 'bloco ausente vai pro fim');
+eq(perfilDaSelecao(['leads_cpl', 'leads']).segmento, 'leads', 'mista cai no completo');
+eq(perfilDaSelecao(['branding', 'leads_cpl']).segmento, 'leads', 'mista cai no completo');
+eq(perfilDaSelecao(['food', 'leads']).segmento, 'leads', 'mista food+leads -> padrao');
+eq(perfilDaSelecao([]).segmento, 'leads', 'vazia -> padrao');
 
 // ── metas continuam valendo para qualquer segmento
 const comMeta = kpisComMetaPermitida().map(k => k.chave);
-ok(comMeta.includes('faturamento') && comMeta.includes('seguidores'),
-   'meta nao e exclusiva de segmento');
+ok(comMeta.includes('faturamento') && comMeta.includes('cpl'), 'meta nao e exclusiva de segmento');
 eq(definicaoKpi('cpl').menorMelhor, true, 'custo: menor e melhor');
-eq(rotuloKpi(perfilDoSegmento('clinicas'), 'cpl'), 'CPL médio', 'clinicas herda o vocabulario de lead-gen');
 
 console.log(`OK — ${n} asserts`);

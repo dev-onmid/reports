@@ -55,6 +55,7 @@ import { ClientTrackingTab } from './tracking-tab';
 import { ClientDemandasTab } from './demandas-tab';
 import { ClientReunioesTab } from './reunioes-tab';
 import { ClientFidelidadeTab } from './fidelidade-tab';
+import { OPCOES_TIPO_DASHBOARD } from '@/lib/dashboard-segmento';
 
 // ── Funnel types & logic ───────────────────────────────────────────────────────
 type FunnelStage = { id: string; name: string; conversion: number };
@@ -2343,11 +2344,7 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
             <CelulaAjuste icone={BarChart3} rotulo="Dashboard">
               <select value={clientDashType} className={SELECT_AJUSTE}
                 onChange={e => { const v = e.target.value as DashboardType; setClientDashType(v); void patchClient({ dashboard_type: v }); }}>
-                <option value="leads">Leads</option>
-                <option value="branding">Branding</option>
-                <option value="conversao">Conversão</option>
-                <option value="food">Food / Delivery</option>
-                <option value="clinicas">Clínicas</option>
+                {OPCOES_TIPO_DASHBOARD.map(o => <option key={o.valor} value={o.valor}>{o.rotulo}</option>)}
               </select>
             </CelulaAjuste>
             <CelulaAjuste icone={Filter} rotulo="Topo do funil" dica="O que conta como Contatos no topo do Funil de Performance do dashboard">

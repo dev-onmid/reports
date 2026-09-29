@@ -165,3 +165,106 @@ export function BulletMetaCard({
     </section>
   );
 }
+
+/**
+ * Meta de CUSTO (CPL) — o lado "menor é melhor" do BulletMetaCard, para o
+ * dashboard "Leads" (sem faturamento), onde a meta de faturamento dá lugar à
+ * de CPL. A barra é o CPL realizado sobre uma escala que cobre o teto; o
+ * marcador é a meta. Cor pela distância da meta: dentro = verde, até 20% acima
+ * = âmbar, além disso = vermelho.
+ */
+export function CustoMetaCard({
+  titulo, icon: Icon, fonte, fonteTitulo, meta, realizado, anterior, formatar, rodape,
+}: {
+  titulo: string;
+  icon: ElementType;
+  fonte: string;
+  fonteTitulo?: string;
+  /** Custo-alvo do planejamento; 0 = sem meta. */
+  meta: number;
+  realizado: number;
+  /** Mesmo custo no período anterior (para a variação); 0 = sem comparação. */
+  anterior?: number;
+  formatar: (n: number) => string;
+  rodape?: ReactNode;
+}) {
+  const temMeta = meta > 0 && realizado > 0;
+  const razao = temMeta ? realizado / meta : 0;
+  const cor = !temMeta ? '#9aa4aa' : razao <= 1 ? VERDE : razao <= 1.2 ? AMBAR : VERMELHO;
+  const escala = Math.max(meta * 1.5, realizado, 1);
+  const largura = Math.min(100, (realizado / escala) * 100);
+  const posMeta = meta > 0 ? Math.min(100, (meta / escala) * 100) : null;
+  const variacao = anterior && anterior > 0 && realizado > 0 ? ((realizado - anterior) / anterior) * 100 : null;
+  const diffMeta = temMeta ? (razao - 1) * 100 : null;
+
+  return (
+    <section className={cn(SUPERFICIE, 'relative h-full overflow-hidden p-5')}>
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_8%_0%,rgba(108,255,47,0.16),transparent_32%),linear-gradient(135deg,rgba(108,255,47,0.05),rgba(22,139,255,0.02))]" />
+      <div className="relative flex items-start gap-4">
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[#55f52f]/20 bg-[#55f52f]/10 text-[#55f52f]">
+          <Icon className="h-5 w-5" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className={T.cardTitulo}>{titulo}</h2>
+            <span className="rounded-[4px] bg-[#172027] px-1.5 py-0.5 text-[10px] font-semibold text-[#87929B]" title={fonteTitulo}>{fonte}</span>
+          </div>
+
+          <div className="mt-4 grid grid-cols-3 gap-3">
+            <div className="min-w-0">
+              <p className={cn('truncate', T.kpiValor)}>{realizado > 0 ? formatar(realizado) : '—'}</p>
+              <p className={cn('mt-1.5', T.valorRotulo)}>Realizado</p>
+            </div>
+            <div className="min-w-0">
+              <p className={cn('truncate', T.kpiValorSec)}>{anterior && anterior > 0 ? formatar(anterior) : '—'}</p>
+              <p className={cn('mt-1.5', T.valorRotulo)}>Período anterior</p>
+            </div>
+            <div className="min-w-0">
+              <p className={cn('truncate', T.kpiValorSec)}>{meta > 0 ? formatar(meta) : '—'}</p>
+              <p className={cn('mt-1.5', T.valorRotulo)}>Meta</p>
+            </div>
+          </div>
+
+          {meta > 0 ? (
+            <div className="mt-5">
+              <div className="relative h-7 rounded-md border border-white/10 bg-[#081014]">
+                <div
+                  className="absolute inset-y-0 left-0 rounded-md"
+                  style={{
+                    width: `${largura}%`, backgroundColor: cor,
+                    backgroundImage: 'repeating-linear-gradient(45deg,rgba(255,255,255,0.12) 0 12px,transparent 12px 24px)',
+                    boxShadow: `0 0 16px ${cor}8c`, transition: 'width 600ms ease, background-color 700ms ease',
+                  }}
+                />
+                {posMeta !== null && (
+                  <div className="absolute -top-1 -bottom-1 w-0.5 rounded bg-[#f4f7f8] shadow-[0_0_6px_rgba(0,0,0,0.8)]" style={{ left: `calc(${posMeta}% - 1px)` }} title={`Meta: ${formatar(meta)}`} />
+                )}
+              </div>
+              <div className="mt-2 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 text-xs text-[#a7b0b6]">
+                <span>
+                  {diffMeta === null ? 'Sem custo realizado no período' : (
+                    <>
+                      <span className="font-black" style={{ color: cor }}>
+                        {Math.abs(diffMeta).toFixed(0)}% {diffMeta <= 0 ? 'abaixo' : 'acima'}
+                      </span>{' '}da meta
+                    </>
+                  )}
+                </span>
+                {variacao !== null && (
+                  <span>
+                    <span className={cn('font-bold', variacao <= 0 ? 'text-[#55f52f]' : 'text-[#ff6b6b]')}>
+                      {variacao > 0 ? '+' : ''}{variacao.toFixed(1).replace('.', ',')}%
+                    </span>{' '}vs período anterior
+                  </span>
+                )}
+              </div>
+            </div>
+          ) : (
+            <p className={cn('mt-5', T.cardSub)}>Sem meta de CPL cadastrada no planejamento do cliente.</p>
+          )}
+          {rodape && <div className="mt-2 text-xs text-[#a7b0b6]">{rodape}</div>}
+        </div>
+      </div>
+    </section>
+  );
+}

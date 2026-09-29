@@ -14,6 +14,7 @@ import type { DashboardType } from '@/lib/mock-data';
 import { cn } from '@/lib/utils';
 import { SeletorModeloFunil } from '@/components/crm/seletor-modelo-funil';
 import { MODELO_PADRAO } from '@/lib/funil-etapas';
+import { OPCOES_TIPO_DASHBOARD } from '@/lib/dashboard-segmento';
 
 // Onboarding obrigatório de cliente novo: enquanto não concluir os 4 passos, o cliente
 // fica em modo rascunho (onboarding_completed=false) e qualquer tentativa de abrir as
@@ -335,11 +336,7 @@ function NovoClienteWizard() {
             <Label>Tipo de Dashboard</Label>
             <select value={dashType} onChange={e => setDashType(e.target.value as DashboardType)}
               className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm outline-none focus:ring-1 focus:ring-primary">
-              <option value="leads">Leads</option>
-              <option value="branding">Branding</option>
-              <option value="conversao">Conversão</option>
-                <option value="food">Food / Delivery</option>
-                <option value="clinicas">Clínicas</option>
+              {OPCOES_TIPO_DASHBOARD.map(o => <option key={o.valor} value={o.valor}>{o.rotulo}</option>)}
             </select>
           </div>
           <div className="space-y-1.5">

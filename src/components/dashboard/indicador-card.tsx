@@ -69,8 +69,13 @@ export function IconeBadge({ icone: Icon, cor = COR_PRIMARIA, tamanho }: { icone
 
 export function IndicadorCard({
   rotulo, valor, icone, cor = COR_PRIMARIA, variacao, unidade = '%', inverso, neutro, comparacao,
-  nota, notaRuim, serie, dica, className, style, estiloRotulo, estiloValor, tamanhoIcone,
+  nota, notaRuim, serie, dica, className, style, estiloRotulo, estiloValor, tamanhoIcone, destaque,
 }: {
+  /**
+   * Linha colorida no lugar da variação %, quando o número do período é a
+   * notícia e não há base para % (ex.: "+610 no período" de seguidores).
+   */
+  destaque?: { texto: string; bom: boolean };
   rotulo: ReactNode;
   valor: ReactNode;
   icone: ElementType;
@@ -111,7 +116,9 @@ export function IndicadorCard({
         </p>
       </div>
       <p className={cn('mt-3 tabular-nums', T.kpiValor)} style={estiloValor} title={dica}>{valor}</p>
-      {mostraVariacao && (
+      {destaque ? (
+        <p className={cn('mt-1.5', T.delta, destaque.bom ? 'text-[#55f52f]' : 'text-[#ff6b6b]')}>{destaque.texto}</p>
+      ) : mostraVariacao && (
         <p className="mt-1.5 flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
           <Variacao v={variacao} unidade={unidade} inverso={inverso} neutro={neutro} />
           {comparacao && <span className={T.comparacao}>{comparacao}</span>}

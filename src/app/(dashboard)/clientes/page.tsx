@@ -27,21 +27,20 @@ import type { ClientStatus, DashboardType } from '@/lib/mock-data';
  * vinha rotulado errado. Mapa explícito para o próximo segmento não repetir.
  */
 const DASH_TYPE_ROTULO: Record<string, string> = {
-  leads: 'Leads', branding: 'Branding', conversao: 'Conversão',
-  food: 'Food', clinicas: 'Clínicas',
+  leads: 'Leads + R$', leads_cpl: 'Leads', branding: 'Branding', food: 'Food',
 };
 const DASH_TYPE_BADGE: Record<string, string> = {
   leads: 'bg-violet-500/15 text-violet-400 hover:bg-violet-500/30',
+  leads_cpl: 'bg-cyan-500/15 text-cyan-400 hover:bg-cyan-500/30',
   branding: 'bg-blue-500/15 text-blue-400 hover:bg-blue-500/30',
-  conversao: 'bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/30',
   food: 'bg-orange-500/15 text-orange-400 hover:bg-orange-500/30',
-  clinicas: 'bg-cyan-500/15 text-cyan-400 hover:bg-cyan-500/30',
 };
 import { LinkAccountsDialog } from '@/components/link-accounts-dialog';
 import { PlatformIconButton, ALL_PLATFORMS, type PlatformId } from '@/components/platform-icons';
 import { ClientAvatar } from '@/components/client-avatar';
 import { cn } from '@/lib/utils';
 import { useAbaPersistida } from '@/lib/aba-persistida';
+import { OPCOES_TIPO_DASHBOARD } from '@/lib/dashboard-segmento';
 
 type ActivityLog = {
   id: string;
@@ -656,11 +655,7 @@ export default function ClientesPage() {
                             onBlur={() => setInlineEdit(null)}
                             className="rounded border border-primary/50 bg-background px-1 py-0.5 text-[10px] focus:outline-none focus:ring-1 focus:ring-primary"
                           >
-                            <option value="leads">Leads</option>
-                            <option value="branding">Branding</option>
-                            <option value="conversao">Conversão</option>
-                            <option value="food">Food / Delivery</option>
-                <option value="clinicas">Clínicas</option>
+                            {OPCOES_TIPO_DASHBOARD.map(o => <option key={o.valor} value={o.valor}>{o.rotulo}</option>)}
                           </select>
                         ) : (
                           <button
@@ -668,11 +663,11 @@ export default function ClientesPage() {
                             onClick={() => setInlineEdit({ id: cliente.id, field: 'dashtype' })}
                             className={cn(
                               'rounded px-1.5 py-0.5 text-[10px] font-bold uppercase transition-colors',
-                              DASH_TYPE_BADGE[cliente.dashboard_type ?? 'leads'] ?? DASH_TYPE_BADGE.conversao,
+                              DASH_TYPE_BADGE[cliente.dashboard_type ?? 'leads'] ?? DASH_TYPE_BADGE.leads,
                             )}
                             title="Clique para alterar tipo de dashboard"
                           >
-                            {DASH_TYPE_ROTULO[cliente.dashboard_type ?? 'leads'] ?? 'Conversão'}
+                            {DASH_TYPE_ROTULO[cliente.dashboard_type ?? 'leads'] ?? DASH_TYPE_ROTULO.leads}
                           </button>
                         )}
 
@@ -1091,11 +1086,7 @@ export default function ClientesPage() {
                 className="h-8 rounded-lg border border-border bg-background px-2 text-xs focus:outline-none focus:ring-1 focus:ring-primary max-w-[130px]"
               >
                 <option value="">Tipo dashboard…</option>
-                <option value="leads">Leads</option>
-                <option value="branding">Branding</option>
-                <option value="conversao">Conversão</option>
-                <option value="food">Food / Delivery</option>
-                <option value="clinicas">Clínicas</option>
+                {OPCOES_TIPO_DASHBOARD.map(o => <option key={o.valor} value={o.valor}>{o.rotulo}</option>)}
               </select>
               <button
                 onClick={bulkSetDashType}
