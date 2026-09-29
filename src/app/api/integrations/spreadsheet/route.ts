@@ -613,8 +613,18 @@ async function upsertPorTelefone(
          -- ⚠️ Receita só é escrita por quem tem receita pra escrever. A planilha
          -- de Leads zera o valor de propósito (o faturamento mora no ledger de
          -- Vendas) — sem esta guarda, importá-la APAGAVA a receita já gravada.
-         revenue  = CASE WHEN $16 AND ${maisNovo} THEN $6 ELSE public.crm_leads.revenue END,
-         valor_rs = CASE WHEN $16 AND ${maisNovo} THEN $6 ELSE public.crm_leads.valor_rs END,
+         -- ⚠️⚠️ E valor ZERO nunca apaga valor já gravado (`NULLIF($6, 0)`).
+         -- Numa planilha de CRM a célula de valor vazia significa "ainda não
+         -- fechou", não "a venda foi cancelada" — e a MESMA pessoa aparece em
+         -- várias abas de mês. Caso real (Odonto First, 2026-09-29): EDNA
+         -- aparece em MAI26 sem valor e em AGOSTO 2026 com ✅ R$ 3.690; ao
+         -- importar as duas abas juntas, a linha sem valor apagou a venda —
+         -- o lead ficou `fechou = true` com receita 0, e agosto perdeu
+         -- R$ 3.690. Apagar faturamento real é destrutivo e não se recupera
+         -- sem reimportar; deixar de zerar uma venda cancelada, não (quem
+         -- retifica o ledger é `reconciliarVendasDoPeriodo`, que APAGA a linha).
+         revenue  = CASE WHEN $16 AND ${maisNovo} THEN COALESCE(NULLIF($6, 0), public.crm_leads.revenue) ELSE public.crm_leads.revenue END,
+         valor_rs = CASE WHEN $16 AND ${maisNovo} THEN COALESCE(NULLIF($6, 0), public.crm_leads.valor_rs) ELSE public.crm_leads.valor_rs END,
          orcamento = CASE WHEN ${maisNovo} THEN COALESCE($7, orcamento) ELSE orcamento END,
          pagamento = COALESCE($8, pagamento),
          data_agendada = COALESCE($9, data_agendada),
