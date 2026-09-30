@@ -16,6 +16,7 @@ import { useClients } from '@/lib/client-store';
 import { callerHeaders } from '@/lib/auth-store';
 import { cn } from '@/lib/utils';
 import { exportReportToPdf } from '@/lib/export-report-pdf';
+import { nomeArquivoRelatorio } from '@/lib/report-filename';
 import { REPORT_SECTIONS } from '@/lib/report-sections';
 import { useIsMobile } from '@/lib/use-is-mobile';
 import { notificar } from '@/components/ui/toast';
@@ -506,11 +507,15 @@ export default function RelatoriosPage() {
     await sendPublicLink(report.public_token, displayTitle(report));
   }
 
-  async function downloadReport(token: string, clientName: string) {
+  async function downloadReport(token: string, clientName: string, from?: string, to?: string) {
     setDownloadingToken(token);
     try {
-      const safeName = clientName.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-zA-Z0-9]+/g, '-');
-      await exportReportToPdf(token, `relatorio-${safeName}-${token.slice(0, 8)}.pdf`);
+      // Sem período no chamador (ex: card de automação), busca o relatório já carregado.
+      const doBanco = from && to ? null : diagnostics.find(d => d.public_token === token);
+      await exportReportToPdf(
+        token,
+        nomeArquivoRelatorio(clientName, from ?? doBanco?.period_from, to ?? doBanco?.period_to),
+      );
     } catch (e) {
       alert(e instanceof Error ? e.message : 'Erro ao gerar o PDF. Tente novamente.');
     } finally {
@@ -877,7 +882,7 @@ export default function RelatoriosPage() {
                               <button
                                 title="Baixar PDF"
                                 disabled={downloadingToken === row.public_token}
-                                onClick={() => downloadReport(row.public_token!, row.client_name)}
+                                onClick={() => downloadReport(row.public_token!, row.client_name, row.period_from, row.period_to)}
                                 className="p-1.5 rounded-md text-muted-foreground hover:text-violet-400 hover:bg-violet-500/10 transition-colors disabled:opacity-50"
                               >
                                 {downloadingToken === row.public_token

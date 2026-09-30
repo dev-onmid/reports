@@ -30,10 +30,14 @@ export async function GET(
     if (!rows[0]) {
       return new Response('Relatório não encontrado ou expirado.', { status: 404 });
     }
+    // O nome tem acento e espaço ("Relatório _ Cinfel _ Julho 2026.pdf"). Header HTTP é
+    // ASCII: manda uma versão simplificada em `filename` e a real em `filename*` (RFC 5987).
+    const nome = rows[0].filename as string;
+    const nomeAscii = nome.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^\x20-\x7e]/g, '_').replace(/"/g, "'");
     return new Response(new Uint8Array(rows[0].pdf_data as Buffer), {
       headers: {
         'Content-Type': 'application/pdf',
-        'Content-Disposition': `attachment; filename="${rows[0].filename as string}"`,
+        'Content-Disposition': `attachment; filename="${nomeAscii}"; filename*=UTF-8''${encodeURIComponent(nome)}`,
         'Cache-Control': 'private, max-age=604800',
       },
     });

@@ -19,6 +19,7 @@ import { dispararEventosPorStatus } from '@/lib/conversions';
 import { sanitizeGoogleKeywords, parsePartialFailure, cityNameVariants, type PartialFailureResult } from '@/lib/google-campaign-utils';
 import { salvarAssetDeUrl, salvarVideoUrl, listarAssets, obterAssetImagem } from '@/lib/client-assets';
 import type { OptimizerAcaoTipo, OptimizerObjetoTipo } from '@/lib/otimizador-legado';
+import { nomeArquivoRelatorio } from './report-filename';
 
 // ─── Agendamento (luna_tasks) ────────────────────────────────────────────────
 
@@ -1314,7 +1315,7 @@ async function buildRealReport(
   dateFrom?: string,
   dateTo?: string,
   templateOverride?: string,
-): Promise<{ token: string; url: string; clientName: string; template: string }> {
+): Promise<{ token: string; url: string; clientName: string; template: string; from: string; to: string }> {
   const { rows: clientRows } = await pool.query('SELECT name FROM public.clients WHERE id = $1', [clientId]);
   if (!clientRows[0]) throw new Error('Cliente não encontrado.');
   const clientName = clientRows[0].name as string;
@@ -1343,7 +1344,7 @@ async function buildRealReport(
   }
   const data = await res.json() as { public_token: string };
   if (!data.public_token) throw new Error('O gerador não retornou o relatório.');
-  return { token: data.public_token, url: `${origin}/relatorio/${data.public_token}`, clientName, template };
+  return { token: data.public_token, url: `${origin}/relatorio/${data.public_token}`, clientName, template, from, to };
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1858,28 +1859,28 @@ export async function execSystemTool(
     if (name === 'generate_client_report') {
       const clientId = input.client_id as string;
       const period = (input.period as string) || 'this_month';
-      const { token, url, clientName, template } = await buildRealReport(
+      const { token, url, clientName, template, from, to } = await buildRealReport(
         pool, clientId, period,
         input.date_from as string | undefined, input.date_to as string | undefined,
         input.template as string | undefined,
       );
       const label = reportLabel(template);
-      onEvent?.({ type: 'report_link', token, url, clientName, label: `${label} — ${clientName}` });
+      onEvent?.({ type: 'report_link', token, url, clientName, label: `${label} — ${clientName}`, filename: nomeArquivoRelatorio(clientName, from, to) });
       return `✅ ${label} de ${clientName} gerado pelo gerador oficial da plataforma (todas as páginas).\n\n🔗 Link do relatório: ${url}\n\nO card no chat tem o botão "Baixar PDF" para exportar o arquivo completo.`;
     }
 
     if (name === 'generate_report_pdf') {
       const clientId = input.client_id as string;
       const period = (input.period as string) || 'this_month';
-      const { token, url, clientName, template } = await buildRealReport(
+      const { token, url, clientName, template, from, to } = await buildRealReport(
         pool, clientId, period,
         input.date_from as string | undefined, input.date_to as string | undefined,
         input.template as string | undefined,
       );
       const label = reportLabel(template);
-      const filename = `Relatorio_${clientName.replace(/\s+/g, '_')}_${period}.pdf`;
+      const filename = nomeArquivoRelatorio(clientName, from, to);
       if (onEvent) {
-        onEvent({ type: 'report_link', token, url, clientName, label: `${label} — ${clientName}` });
+        onEvent({ type: 'report_link', token, url, clientName, label: `${label} — ${clientName}`, filename });
         // O PDF fiel (mesma qualidade da tela de Relatórios) só é renderizável no navegador —
         // pede pro chat gerar e baixar o arquivo completo.
         onEvent({ type: 'render_report_pdf', mode: 'download', token, filename, clientName });
@@ -1902,19 +1903,19 @@ export async function execSystemTool(
       const format = (input.format as string) === 'pdf' ? 'pdf' : 'link';
 
       // Gera o relatório REAL pelo gerador da plataforma (link + token).
-      const { token, url, clientName, template } = await buildRealReport(
+      const { token, url, clientName, template, from, to } = await buildRealReport(
         pool, client_id, period,
         input.date_from as string | undefined, input.date_to as string | undefined,
         input.template as string | undefined,
       );
       const label = reportLabel(template);
-      const filename = `Relatorio_${clientName.replace(/\s+/g, '_')}_${period}.pdf`;
+      const filename = nomeArquivoRelatorio(clientName, from, to);
 
       // Formato PDF (só no chat, com navegador): o front renderiza o PDF completo e sobe
       // pra /api/agent/send-report-pdf, que envia via Z-API. Sem navegador (agendador),
       // cai no envio do LINK abaixo.
       if (format === 'pdf' && onEvent) {
-        onEvent({ type: 'report_link', token, url, clientName, label: `${label} — ${clientName}` });
+        onEvent({ type: 'report_link', token, url, clientName, label: `${label} — ${clientName}`, filename });
         onEvent({
           type: 'render_report_pdf', mode: 'whatsapp', token, filename, clientName,
           phone, zapi_client_id: zapi_client_id ?? null, caption: caption ?? null,
@@ -1938,7 +1939,7 @@ export async function execSystemTool(
       if (!zapiConn) return `⚠️ Relatório gerado (${url}) mas nenhuma conexão de WhatsApp foi encontrada para enviar. Use list_zapi_clients.`;
 
       const msg = caption ?? `📊 *${label} — ${clientName}*\n\nSeu relatório está pronto!\n\nAcesse aqui: ${url}`;
-      onEvent?.({ type: 'report_link', token, url, clientName, label: `${label} — ${clientName}` });
+      onEvent?.({ type: 'report_link', token, url, clientName, label: `${label} — ${clientName}`, filename });
       const result = await lunaConnSend(zapiConn, phone, msg);
       if (result.ok) return `✅ ${label} de ${clientName} enviado para ${phone} (link do relatório completo).\n🔗 ${url}`;
       return `❌ Relatório gerado mas falha ao enviar no WhatsApp: ${result.error}.\n🔗 Link: ${url}`;
