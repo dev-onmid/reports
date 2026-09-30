@@ -125,6 +125,7 @@ const INTEGRATION_PREFIXES = [
   '/api/integrations/tldv-backfill',
   '/api/integrations/google-conversoes', // lps/bin/gtag: ações de conversão do Google Ads
   '/api/integrations/mapa-calor',        // lps/bin/gtag calor: página do Mapa de Calor por LP
+  '/api/integrations/google-destinos',   // lps/bin/gtag: URLs finais das campanhas
 ];
 
 function matches(pathname: string, prefixes: string[]): boolean {
