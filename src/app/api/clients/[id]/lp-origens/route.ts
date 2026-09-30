@@ -67,6 +67,10 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     await atualizarOrigem(pool, origemId, {
       nome: body.nome, url: body.url, enabled: body.enabled,
       notificarEmails: body.notificar_emails,
+<<<<<<< Updated upstream
+=======
+      sheetId: body.sheet_id, sheetTab: body.sheet_tab,
+>>>>>>> Stashed changes
     });
     return Response.json({ ok: true });
   } catch (err) {

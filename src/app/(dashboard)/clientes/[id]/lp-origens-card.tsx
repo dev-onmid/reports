@@ -10,7 +10,11 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
+<<<<<<< Updated upstream
 import { Check, Copy, Globe, Loader2, Mail, Plus, RefreshCw, Trash2 } from 'lucide-react';
+=======
+import { Check, Copy, Globe, Loader2, Mail, Plus, RefreshCw, Trash2, Table2 } from 'lucide-react';
+>>>>>>> Stashed changes
 import { cn } from '@/lib/utils';
 
 type Origem = {
@@ -22,6 +26,11 @@ type Origem = {
   last_received_at: string | null;
   total_recebidos: number;
   notificar_emails: string[] | null;
+<<<<<<< Updated upstream
+=======
+  sheet_id: string | null;
+  sheet_tab: string | null;
+>>>>>>> Stashed changes
   url_receptora: string;
 };
 
@@ -65,6 +74,10 @@ export default function LpOrigensCard({ clientId }: { clientId: string }) {
   const [copiado, setCopiado] = useState<string | null>(null);
   // rascunho do campo de e-mails por origem: o input é livre e só vira lista no blur
   const [emails, setEmails] = useState<Record<string, string>>({});
+<<<<<<< Updated upstream
+=======
+  const [planilha, setPlanilha] = useState<Record<string, { id: string; aba: string }>>({});
+>>>>>>> Stashed changes
   const [salvoEmails, setSalvoEmails] = useState<string | null>(null);
 
   const carregar = useCallback(async () => {
@@ -75,6 +88,11 @@ export default function LpOrigensCard({ clientId }: { clientId: string }) {
       const lista: Origem[] = d.origens ?? [];
       setOrigens(lista);
       setEmails(Object.fromEntries(lista.map(o => [o.id, (o.notificar_emails ?? []).join(', ')])));
+<<<<<<< Updated upstream
+=======
+      setPlanilha(Object.fromEntries(lista.map(o => [o.id,
+        { id: o.sheet_id ?? '', aba: o.sheet_tab ?? '' }])));
+>>>>>>> Stashed changes
       setLog(d.log ?? []);
     } catch { /* deixa a tela como está */ }
     setCarregando(false);
@@ -120,6 +138,22 @@ export default function LpOrigensCard({ clientId }: { clientId: string }) {
     }
   }
 
+<<<<<<< Updated upstream
+=======
+  // Espelha o lead numa planilha do Google. Vazio = não espelha.
+  async function salvarPlanilha(o: Origem) {
+    const atual = planilha[o.id] ?? { id: '', aba: '' };
+    if (atual.id === (o.sheet_id ?? '') && atual.aba === (o.sheet_tab ?? '')) return;
+    await fetch(`/api/clients/${clientId}/lp-origens`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ origemId: o.id, sheet_id: atual.id, sheet_tab: atual.aba }),
+    });
+    setSalvoEmails(o.id);
+    setTimeout(() => setSalvoEmails(null), 1500);
+    void carregar();
+  }
+
+>>>>>>> Stashed changes
   async function remover(o: Origem) {
     if (!confirm(`Remover "${o.nome}"?\n\nA URL para de funcionar na hora. Os leads que já chegaram por ela ficam no CRM.`)) return;
     setOrigens(os => os.filter(x => x.id !== o.id));
@@ -228,6 +262,28 @@ export default function LpOrigensCard({ clientId }: { clientId: string }) {
                 </span>
               )}
             </div>
+<<<<<<< Updated upstream
+=======
+            <div className="mt-2 flex items-center gap-2">
+              <Table2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              <input
+                value={planilha[o.id]?.id ?? ''}
+                onChange={e => setPlanilha(m => ({ ...m, [o.id]: { ...(m[o.id] ?? { id: '', aba: '' }), id: e.target.value } }))}
+                onBlur={() => void salvarPlanilha(o)}
+                onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+                placeholder="Cole o link da planilha (opcional)"
+                className="h-8 min-w-0 flex-[2] rounded-md border border-border bg-background px-2 text-xs"
+              />
+              <input
+                value={planilha[o.id]?.aba ?? ''}
+                onChange={e => setPlanilha(m => ({ ...m, [o.id]: { ...(m[o.id] ?? { id: '', aba: '' }), aba: e.target.value } }))}
+                onBlur={() => void salvarPlanilha(o)}
+                onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+                placeholder="Aba"
+                className="h-8 min-w-0 flex-1 rounded-md border border-border bg-background px-2 text-xs"
+              />
+            </div>
+>>>>>>> Stashed changes
           </div>
         ))}
 
