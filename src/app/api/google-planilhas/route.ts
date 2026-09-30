@@ -46,7 +46,7 @@ export async function GET(req: NextRequest) {
       `SELECT access_token, refresh_token, token_expiry, scope
          FROM public.google_connections
         WHERE account_type = 'sheets' AND status = 'connected' AND refresh_token IS NOT NULL
-        ORDER BY created_at DESC
+        ORDER BY connected_at DESC
         LIMIT 1`,
     );
     const conn = rows[0];

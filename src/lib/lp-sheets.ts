@@ -85,7 +85,9 @@ export async function gravarLeadNaPlanilha(
     `SELECT access_token, refresh_token, token_expiry
        FROM public.google_connections
       WHERE account_type = $1 AND status = 'connected' AND refresh_token IS NOT NULL
-      ORDER BY updated_at DESC NULLS LAST
+      -- ⚠️ A coluna é connected_at. Não existe created_at nem updated_at aqui,
+      -- e as outras 11 consultas a esta tabela sempre usaram connected_at.
+      ORDER BY connected_at DESC NULLS LAST
       LIMIT 1`,
     [TIPO_CONEXAO],
   );

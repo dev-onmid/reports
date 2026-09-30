@@ -41,6 +41,7 @@ const BADGE: Record<string, string> = {
   atualizado: 'bg-sky-500/15 text-sky-400',
   sem_contato: 'bg-yellow-500/15 text-yellow-400',
   origem_desativada: 'bg-muted text-muted-foreground',
+  planilha_falhou: 'bg-[#FF6B35]/15 text-[#FF6B35]',
   erro: 'bg-red-500/15 text-red-400',
 };
 const LABEL: Record<string, string> = {
@@ -48,6 +49,7 @@ const LABEL: Record<string, string> = {
   atualizado: 'Lead atualizado',
   sem_contato: 'Sem telefone/e-mail',
   origem_desativada: 'Origem desativada',
+  planilha_falhou: 'Planilha falhou',
   erro: 'Erro',
 };
 

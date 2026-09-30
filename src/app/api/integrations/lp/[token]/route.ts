@@ -257,7 +257,16 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ token: str
           utmMedium: tracking.utm_medium ?? null,
         },
       ).catch(err => ({ ok: false as const, motivo: String(err) }));
-      if (!r.ok) console.error('[lp] planilha:', r.motivo);
+      // ⚠️ Vai para o log da TELA, não só para o console. Esta feature existe
+      // porque o Make falhou em silêncio por um mês; entregá-la com a própria
+      // falha invisível repetiria exatamente o erro que ela veio corrigir.
+      if (!r.ok) {
+        console.error('[lp] planilha:', r.motivo);
+        await registrarLog(pool, {
+          origemId: origem.id, clientId: origem.client_id, raw: c,
+          resultado: 'planilha_falhou', detalhe: r.motivo, leadId,
+        });
+      }
     }
 
     // Aviso para quem atende. Roda DEPOIS de tudo gravado e com catch próprio:
