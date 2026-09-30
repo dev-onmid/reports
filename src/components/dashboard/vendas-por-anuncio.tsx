@@ -1,13 +1,13 @@
 'use client';
 
 import { useState, type ReactNode } from 'react';
-import { ImageIcon, Trophy } from 'lucide-react';
+import { Trophy } from 'lucide-react';
 import { cn, formatCurrencyBRL } from '@/lib/utils';
 import { T } from '@/lib/dashboard-tipografia';
 import { MetaAdsMark, GoogleAdsMark } from '@/components/platform-logos';
 import { Superficie } from './superficie';
 import type {
-  Plataforma, VendaPorCampanha, VendaPorConjunto, VendaPorCriativo, VendasPorAnuncio,
+  Plataforma, VendaPorCampanha, VendaPorConjunto, VendasPorAnuncio,
 } from '@/app/api/crm/vendas-por-anuncio/route';
 
 /**
@@ -17,7 +17,9 @@ import type {
  */
 
 const VERDE = '#6cff2f';
-type Aba = 'criativos' | 'campanhas' | 'conjuntos';
+// A aba Criativos saiu (30/09): o Funil de criativos mostra todos os anúncios, com
+// prévia e o mesmo faturamento. Aqui ficam campanhas e conjuntos, que ele não cobre.
+type Aba = 'campanhas' | 'conjuntos';
 
 const fmtInt = (n: number) => Math.round(n).toLocaleString('pt-BR');
 const fmtPct = (n: number) => `${n.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%`;
@@ -36,19 +38,17 @@ function conversao(vendas: number, leads: number): string {
 export type InvestimentoCampanha = (nome: string) => number | null;
 
 export function VendasPorAnuncioPanel({
-  dados, loading, renderCriativo, investimentoDaCampanha,
+  dados, loading, investimentoDaCampanha,
 }: {
   dados: VendasPorAnuncio | null;
   loading: boolean;
-  /** Card com o preview do anúncio (o mesmo de "Melhores criativos"); null = sem preview. */
-  renderCriativo: (c: VendaPorCriativo, index: number) => ReactNode | null;
   /** Investimento da campanha no período (nome → R$), quando a plataforma informou. */
   investimentoDaCampanha: InvestimentoCampanha;
 }) {
-  const [aba, setAba] = useState<Aba>('criativos');
-  const titulo = 'Vendas e faturamento por anúncio';
+  const [aba, setAba] = useState<Aba>('campanhas');
+  const titulo = 'Vendas e faturamento por campanha';
   const icone = <Trophy className="h-5 w-5" style={{ color: VERDE }} />;
-  const temDados = !!dados && (dados.criativos.length > 0 || dados.campanhas.length > 0 || dados.conjuntos.length > 0);
+  const temDados = !!dados && (dados.campanhas.length > 0 || dados.conjuntos.length > 0);
 
   if (!loading && !temDados) {
     return (
@@ -60,7 +60,6 @@ export function VendasPorAnuncioPanel({
   }
 
   const abas: Array<{ id: Aba; rotulo: string; n: number }> = [
-    { id: 'criativos', rotulo: 'Criativos', n: dados?.criativos.length ?? 0 },
     { id: 'campanhas', rotulo: 'Campanhas', n: dados?.campanhas.length ?? 0 },
     { id: 'conjuntos', rotulo: 'Conjuntos', n: dados?.conjuntos.length ?? 0 },
   ];
@@ -72,7 +71,7 @@ export function VendasPorAnuncioPanel({
     <Superficie
       titulo={titulo}
       icone={icone}
-      sub="o que cada criativo, campanha e conjunto trouxe em venda — cruzamento do CRM com o rastreio do lead"
+      sub="o que cada campanha e conjunto trouxe em venda — cruzamento do CRM com o rastreio do lead"
       direita={(
         <div className="flex rounded-lg bg-white/[0.04] p-1 ring-1 ring-white/[0.06]">
           {abas.map(a => (
@@ -113,7 +112,6 @@ export function VendasPorAnuncioPanel({
             <Resumo rotulo="Ticket médio atribuído" valor={ticket !== null ? formatCurrencyBRL(ticket) : '—'} nota="faturamento ÷ vendas atribuídas" />
           </div>
 
-          {aba === 'criativos' && <Criativos lista={dados.criativos} renderCriativo={renderCriativo} />}
           {aba === 'campanhas' && <TabelaCampanhas lista={dados.campanhas} investimentoDaCampanha={investimentoDaCampanha} />}
           {aba === 'conjuntos' && <TabelaConjuntos lista={dados.conjuntos} />}
 
@@ -139,64 +137,6 @@ function Resumo({ rotulo, valor, nota, barra }: { rotulo: string; valor: string;
       )}
       <p className={cn(T.nota, 'mt-2')}>{nota}</p>
     </div>
-  );
-}
-
-function Criativos({ lista, renderCriativo }: {
-  lista: VendaPorCriativo[];
-  renderCriativo: (c: VendaPorCriativo, index: number) => ReactNode | null;
-}) {
-  if (lista.length === 0) return <p className="py-6 text-center text-sm text-[#9aa4aa]">Nenhum criativo com venda no período.</p>;
-  return (
-    <div className="flex gap-3 overflow-x-auto pb-2">
-      {lista.map((c, i) => renderCriativo(c, i) ?? <CardSemPreview key={c.chave} c={c} index={i} />)}
-    </div>
-  );
-}
-
-/** Anúncio sem preview (Google, ou só o nome veio no rastreio): mesmo tamanho do card com imagem. */
-function CardSemPreview({ c, index }: { c: VendaPorCriativo; index: number }) {
-  return (
-    <div className="w-[220px] shrink-0 overflow-hidden rounded-xl bg-white/[0.03] ring-1 ring-white/[0.05]">
-      <div className="relative flex flex-col items-center justify-center gap-2 bg-[#071014]" style={{ aspectRatio: '4/5' }}>
-        {c.plataforma === 'google' ? <GoogleAdsMark className="h-8 w-8 opacity-70" /> : <ImageIcon className="h-6 w-6 text-[#9aa4aa]/40" />}
-        <span className="px-4 text-center text-[10px] text-[#7c868c]">
-          {c.plataforma === 'google' ? 'Anúncio de pesquisa' : 'Prévia indisponível'}
-        </span>
-        <span className="absolute bottom-2 left-2 flex h-5 w-5 items-center justify-center rounded-full bg-black/85 text-[10px] font-black text-white">{index + 1}</span>
-        <span className="absolute right-2 top-2 rounded bg-[#6cff2f] px-1.5 py-0.5 text-[9px] font-black text-black">
-          {c.receita > 0 ? formatCurrencyBRL(c.receita) : 'sem valor'}
-        </span>
-      </div>
-      <div className="p-2.5">
-        {c.campanha && (
-          <p className="mb-1 truncate text-[10px] font-semibold uppercase tracking-[0.06em] text-[#6cff2f]/70" title={c.campanha}>{c.campanha}</p>
-        )}
-        <p className={cn('mb-2 truncate', T.listaRotulo)} title={c.nome}>{c.nome}</p>
-        <MetricasVenda c={c} />
-      </div>
-    </div>
-  );
-}
-
-/** As linhas de métrica de venda — as mesmas no card com e sem preview. */
-export function MetricasVenda({ c, investimento }: { c: Pick<VendaPorCriativo, 'receita' | 'vendas' | 'leads'>; investimento?: number | null }) {
-  const linhas: Array<[string, string]> = [
-    ['Faturamento', c.receita > 0 ? formatCurrencyBRL(c.receita) : 'sem valor'],
-    ['Vendas', fmtInt(c.vendas)],
-    ['Leads', c.leads > 0 ? fmtInt(c.leads) : '—'],
-    ['Conversão', conversao(c.vendas, c.leads)],
-  ];
-  if (investimento && investimento > 0) linhas.push(['ROAS', `${(c.receita / investimento).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}x`]);
-  return (
-    <dl className="space-y-1 text-[11px]">
-      {linhas.map(([rotulo, valor]) => (
-        <div key={rotulo} className="flex items-baseline justify-between gap-2">
-          <dt className="font-black uppercase tracking-[0.06em] text-[#9aa4aa]">{rotulo}</dt>
-          <dd className={cn('whitespace-nowrap font-black tabular-nums', rotulo === 'Faturamento' ? 'text-[#6cff2f]' : 'text-[#f4f7f8]')}>{valor}</dd>
-        </div>
-      ))}
-    </dl>
   );
 }
 

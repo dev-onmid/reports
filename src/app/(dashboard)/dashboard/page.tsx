@@ -61,7 +61,7 @@ import { useClients } from '@/lib/client-store';
 import { cn, formatCurrencyBRL } from '@/lib/utils';
 import { T } from '@/lib/dashboard-tipografia';
 import { ClientAvatar } from '@/components/client-avatar';
-import { VendasPorAnuncioPanel, MetricasVenda } from '@/components/dashboard/vendas-por-anuncio';
+import { VendasPorAnuncioPanel } from '@/components/dashboard/vendas-por-anuncio';
 import { FunilCriativosPanel } from '@/components/dashboard/funil-criativos';
 import type { FunilDoCriativo } from '@/app/api/crm/funil-criativos/route';
 import type { VendasPorAnuncio } from '@/app/api/crm/vendas-por-anuncio/route';
@@ -4790,117 +4790,6 @@ function CompactKeywordTable({ keywords, loading, metaCpl }: { keywords: GoogleK
   );
 }
 
-function creativeObjectiveMetrics(c: TopCreative): Array<{ label: string; value: string }> {
-  if (c.leads > 0) {
-    return [
-      { label: 'Leads', value: premiumValue(c.leads) },
-      { label: 'CPL', value: c.cpl > 0 ? premiumValue(c.cpl, 'currency') : '—' },
-      { label: 'CTR', value: `${c.ctr.toFixed(2)}%` },
-    ];
-  }
-  return [
-    { label: 'Cliques', value: premiumValue(c.clicks) },
-    { label: 'CTR', value: `${c.ctr.toFixed(2)}%` },
-    { label: 'Invest.', value: premiumValue(c.spend, 'currency') },
-  ];
-}
-
-function HorizontalCreativeCard({ creative, index, onPreview, fluido = false, metricas, selo }: {
-  /** Ocupa a largura da célula da grade (em vez dos 220px fixos da faixa). */
-  fluido?: boolean;
-  /** Troca as métricas de plataforma por outras (ex.: vendas e faturamento do CRM). */
-  metricas?: ReactNode;
-  /** Troca o selo de investimento no canto da imagem (ex.: faturamento). */
-  selo?: string;
-  creative: TopCreative;
-  index: number;
-  onPreview: (c: TopCreative) => void;
-}) {
-  const [imgFailed, setImgFailed] = useState(false);
-  const [imgStage, setImgStage] = useState<'primary' | 'thumb' | 'error'>('primary');
-
-  const primaryUrl = creative.imageUrl;
-  const thumbUrl = creative.thumbnailUrl;
-  const imgUrl = imgStage === 'primary' ? (primaryUrl ?? thumbUrl) : imgStage === 'thumb' ? thumbUrl : undefined;
-  const hasVideo = !!creative.videoUrl;
-  const metrics = creativeObjectiveMetrics(creative);
-  const st = creativeStatusInfo(creative.status);
-
-  function handleImgError() {
-    if (imgStage === 'primary' && primaryUrl && thumbUrl && thumbUrl !== primaryUrl) {
-      setImgStage('thumb');
-    } else {
-      setImgStage('error');
-    }
-  }
-
-  const showImage = !!imgUrl && imgStage !== 'error' && !imgFailed;
-
-  return (
-    <button
-      type="button"
-      onClick={() => onPreview(creative)}
-      className={cn('group overflow-hidden rounded-xl bg-white/[0.03] text-left ring-1 ring-white/[0.05] transition hover:ring-[#6cff2f]/40', fluido ? 'w-full' : 'w-[220px] shrink-0')}
-    >
-      <div className="relative overflow-hidden bg-[#071014]" style={{ aspectRatio: '4/5' }}>
-        {showImage ? (
-          <img
-            src={imgUrl}
-            alt={creative.adName}
-            className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
-            onError={handleImgError}
-          />
-        ) : creative.permalink ? (
-          <div className="flex h-full flex-col items-center justify-center gap-1.5 bg-black/30">
-            <ExternalLink className="h-5 w-5 text-white/40" />
-            <span className="text-[9px] text-white/30">Ver publicação</span>
-          </div>
-        ) : (
-          <div className="flex h-full items-center justify-center">
-            <ImageIcon className="h-6 w-6 text-[#9aa4aa]/40" />
-          </div>
-        )}
-        {/* Play centralizado — só quando há vídeo (confirma que toca no modal) */}
-        {hasVideo && showImage && (
-          <span className="pointer-events-none absolute inset-0 flex items-center justify-center">
-            <span className="flex h-9 w-9 items-center justify-center rounded-full bg-black/55 ring-1 ring-white/30 backdrop-blur-sm">
-              <Play className="h-3.5 w-3.5 fill-white text-white" />
-            </span>
-          </span>
-        )}
-        {/* Selo Ativo/Pausado — leitura instantânea do status do anúncio */}
-        {st && (
-          <span className={cn('absolute left-2 top-2 inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wide backdrop-blur-sm', st.pill)} title={st.titulo}>
-            <span className={cn('h-1.5 w-1.5 rounded-full', st.dot)} /> {st.label}
-          </span>
-        )}
-        <span className="absolute bottom-2 left-2 flex h-5 w-5 items-center justify-center rounded-full bg-black/85 text-[10px] font-black text-white">{index + 1}</span>
-        <span className="absolute right-2 top-2 rounded bg-[#6cff2f] px-1.5 py-0.5 text-[9px] font-black text-black">
-          {selo ?? premiumValue(creative.spend, 'currency')}
-        </span>
-      </div>
-      <div className="p-2.5">
-        {creative.campaignName && (
-          <p className="mb-1 truncate text-[10px] font-semibold uppercase tracking-[0.06em] text-[#6cff2f]/70" title={creative.campaignName}>
-            {creative.campaignName}
-          </p>
-        )}
-        <p className={cn('mb-2 truncate', T.listaRotulo)} title={creative.adName}>{creative.adName}</p>
-        {/* Rótulo/valor em LINHAS: três caixinhas lado a lado em 170px
-            cortavam o CPL em "R$ 4…". */}
-        {metricas ?? <dl className="space-y-1 text-[11px]">
-          {metrics.map(m => (
-            <div key={m.label} className="flex items-baseline justify-between gap-2">
-              <dt className="font-black uppercase tracking-[0.06em] text-[#9aa4aa]">{m.label}</dt>
-              <dd className="whitespace-nowrap font-black tabular-nums text-[#f4f7f8]">{m.value}</dd>
-            </div>
-          ))}
-        </dl>}
-      </div>
-    </button>
-  );
-}
-
 // ── Desempenho por região ─────────────────────────────────────────────────────
 // Uma linha por região: o que a campanha da região custou/trouxe (mídia, pelo
 // NOME da campanha) × o funil dos leads com DDD/cidade daquela região (CRM).
@@ -5320,7 +5209,6 @@ export default function GeneralDashboard() {
   /** Vendas e faturamento por anúncio (CRM × rastreio) + o preview Meta de cada criativo que vendeu. */
   const [vendasAnuncio, setVendasAnuncio] = useState<VendasPorAnuncio | null>(null);
   const [vendasAnuncioLoading, setVendasAnuncioLoading] = useState(false);
-  const [previewsVenda, setPreviewsVenda] = useState<Record<string, TopCreative>>({});
   /** Funil de criativos: TODOS os anúncios que veicularam + o funil de cada um no CRM. */
   const [criativosTodos, setCriativosTodos] = useState<TopCreative[]>([]);
   const [funilCriativos, setFunilCriativos] = useState<FunilDoCriativo[]>([]);
@@ -6366,12 +6254,10 @@ export default function GeneralDashboard() {
   }, [selectedKey, periodoISO.from, periodoISO.to]);
 
   // ── Vendas e faturamento por anúncio (CRM) ────────────────────────────────
-  // Mesma faixa de datas do Faturamento por canal; depois busca o preview EXATO
-  // (o mesmo de "Melhores criativos") só dos anúncios Meta que venderam.
+  // Mesma faixa de datas do Faturamento por canal.
   useEffect(() => {
     let cancelado = false;
     setVendasAnuncio(null);
-    setPreviewsVenda({});
     if (selectedIds.size === 0 || !customReady) { setVendasAnuncioLoading(false); return () => { cancelado = true; }; }
     setVendasAnuncioLoading(true);
     const clientIds = [...selectedIds].join(',');
@@ -6382,12 +6268,6 @@ export default function GeneralDashboard() {
       if (cancelado) return;
       setVendasAnuncio(j);
       setVendasAnuncioLoading(false);
-      const adIds = (j?.criativos ?? []).map(c => c.adId).filter((id): id is string => !!id);
-      if (adIds.length === 0) return;
-      const params = buildPeriodParams({ clientIds, adIds: adIds.join(',') });
-      const p = await fetch(`/api/meta/top-creatives?${params.toString()}`).catch(() => null);
-      const lista = p?.ok ? await p.json().catch(() => []) as TopCreative[] : [];
-      if (!cancelado) setPreviewsVenda(Object.fromEntries(lista.map(c => [c.adId, c])));
     })().catch(() => { if (!cancelado) setVendasAnuncioLoading(false); });
     return () => { cancelado = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -6999,15 +6879,6 @@ export default function GeneralDashboard() {
                 />
               </Superficie>
 
-            {/* Funil de criativos (pedido do Matheus, 30/09): todos os anúncios, cada um
-                com a prévia e o que aconteceu com quem ele trouxe até o faturamento. */}
-            <FunilCriativosPanel
-              criativos={criativosTodos}
-              crm={funilCriativos}
-              loading={funilCriativosLoading}
-              onPreview={setPreviewCreative}
-            />
-
     </>
   );
   // Investimento da campanha no período, pelo NOME (Meta/Google) — ou pelo id,
@@ -7018,25 +6889,22 @@ export default function GeneralDashboard() {
       investimentoPorCampanha.set(chave, (investimentoPorCampanha.get(chave) ?? 0) + (c.spend || 0));
     }
   }
+  // Funil de criativos (pedido do Matheus, 30/09): todos os anúncios, cada um com a
+  // prévia e o que aconteceu com quem ele trouxe até o faturamento. Abre a Mídia
+  // paga, no lugar onde ficava a aba Criativos da caixa de vendas por anúncio.
+  const blocoFunilCriativos = (
+    <FunilCriativosPanel
+      criativos={criativosTodos}
+      crm={funilCriativos}
+      loading={funilCriativosLoading}
+      onPreview={setPreviewCreative}
+    />
+  );
   const blocoVendasAnuncio = (
     <VendasPorAnuncioPanel
       dados={vendasAnuncio}
       loading={vendasAnuncioLoading}
       investimentoDaCampanha={nome => investimentoPorCampanha.get(nome.trim().toLowerCase()) ?? investimentoPorCampanha.get(nome.trim()) ?? null}
-      renderCriativo={(c, i) => {
-        const preview = c.adId ? previewsVenda[c.adId] : undefined;
-        if (!preview) return null;
-        return (
-          <HorizontalCreativeCard
-            key={c.chave}
-            creative={preview}
-            index={i}
-            onPreview={setPreviewCreative}
-            selo={c.receita > 0 ? formatCurrencyBRL(c.receita) : 'sem valor'}
-            metricas={<MetricasVenda c={c} investimento={preview.spend} />}
-          />
-        );
-      }}
     />
   );
   const blocoGoogle = (
@@ -7484,6 +7352,7 @@ export default function GeneralDashboard() {
                     título vem daqui, como na página de lead-gen. */}
                 {secaoVisivel.comercial && <TituloSecao titulo="Comercial" sub="CRM" />}
                 {blocoComercial}
+                {blocoFunilCriativos}
                 {blocoMeta}
                 {blocoVendasAnuncio}
                 {blocoResumoCliente}
@@ -7642,6 +7511,7 @@ export default function GeneralDashboard() {
                 {secaoVisivel.midia && (
                   <>
                     <TituloSecao titulo="Mídia paga" sub="Meta Ads e Google Ads" />
+                    {blocoFunilCriativos}
                     {comReceita && blocoVendasAnuncio}
                     {blocoMeta}
                     {blocoGoogle}
