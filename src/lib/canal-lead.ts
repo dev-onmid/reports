@@ -10,34 +10,79 @@
  * Vive numa lib compartilhada porque o donut de canais e a lista de leads do
  * funil PRECISAM concordar: dois SQLs parecidos divergiriam na primeira
  * mudança, e o gestor veria um canal no gráfico e outro na lista do mesmo lead.
+ */
+
+/**
+ * Rótulos que, PARA UM CLIENTE, nomeiam a MESMA coisa e devem virar uma fatia só.
  *
- * ⚠️ A expressão pressupõe que a tabela `crm_leads` esteja sem alias (ou que o
- * caller passe o alias em `pre`).
+ * Existe porque o rótulo não é nosso: vem da lista de origens cadastrada no CRM
+ * do próprio cliente, e lá o mesmo canal costuma ter mais de um nome. No
+ * CondoStore (SULTS) há duas origens para a mesma landing page — "Landing Page
+ * (Google)" (id 12, usada pelo mapa da conexão) e "LP | CondoStore" (criada
+ * depois, à mão) — e mais os leads em que o `gclid` sobreviveu, que caíam numa
+ * terceira fatia ("Google Ads"). Três fatias para um canal.
  *
- * ⚠️ `fbclid` NÃO é mais sinal de Meta Ads (2026-09-28): o Facebook carimba esse
- * parâmetro em QUALQUER link clicado dentro dele, inclusive de publicação
- * orgânica, então ele inflava o canal pago. Quem prova anúncio de WhatsApp é o
- * `ctwa_clid`. Impacto medido antes de tirar: 1 lead no sistema inteiro tinha
- * `fbclid` sozinho.
+ * ⚠️ A fusão é POR CLIENTE, nunca global: em outras contas "Google Ads" e uma
+ * landing page são canais legitimamente distintos, e juntá-los apagaria a
+ * medição de quem paga por clique.
+ *
+ * ⚠️ `origens` casa contra a coluna `canal` CRUA (minúscula, sem espaço nas
+ * pontas), não contra o rótulo derivado — e o branch entra ANTES da leitura de
+ * click id, então aqui o canal declarado pelo cliente vence o `gclid`. É o que
+ * impede um lead da OUTRA landing page do mesmo cliente (ex.: "LP | CondoStore
+ * Mercado", a página de quem já conhece o produto) de ser sugado para esta
+ * fatia só porque o clique veio do Google. Rótulo fora da lista continua
+ * inteiro: fundir é decisão explícita, item por item.
+ */
+export const FUSOES_CANAL: Record<string, { destino: string; origens: string[] }[]> = {
+  // CondoStore — decisão do Matheus em 2026-09-30.
+  'client-1778639563347': [
+    {
+      destino: 'Landing Page (Google)',
+      origens: ['landing page (google)', 'lp | condostore', 'google ads'],
+    },
+    // ⚠️ A LP /mercado é a página do público que JÁ conhece mercado autônomo
+    // (criada em 2026-09-13 junto com a home, para o outro nível de
+    // consciência) — fica FORA da fusão acima de propósito, senão a separação
+    // que justifica as duas páginas deixa de ser medível. A entrada de um item
+    // só existe para o canal declarado vencer o `gclid` aqui também: sem ela o
+    // lead dessa LP reaparece como "Google Ads", o rótulo genérico que a fusão
+    // veio tirar da tela.
+    { destino: 'LP | CondoStore Mercado', origens: ['lp | condostore mercado'] },
+  ],
+};
+
+const lit = (v: string) => `'${v.replace(/'/g, "''")}'`;
+
+/** Branches de fusão (vazio quando não há nenhuma cadastrada). */
+function fusoesSql(c: string): string {
+  const linhas: string[] = [];
+  for (const [clientId, regras] of Object.entries(FUSOES_CANAL)) {
+    for (const regra of regras) {
+      if (regra.origens.length === 0) continue;
+      const lista = regra.origens.map((o) => lit(o.toLowerCase())).join(', ');
+      linhas.push(
+        `  WHEN ${c}client_id = ${lit(clientId)}
+` +
+          `   AND lower(btrim(${c}canal)) IN (${lista}) THEN ${lit(regra.destino)}`,
+      );
+    }
+  }
+  return linhas.length ? `${linhas.join('\n')}\n` : '';
+}
+
+/**
+ * Expressão SQL do canal do lead.
+ *
+ * ⚠️ Pressupõe a tabela `crm_leads` sem alias (ou o alias em `pre`), e usa as
+ * colunas `client_id` e `canal` — as fusões de `FUSOES_CANAL` dependem das duas.
  */
 export function canalSql(pre = ''): string {
   const c = pre ? `${pre}.` : '';
   return `CASE
-  WHEN NULLIF(${c}ctwa_clid, '') IS NOT NULL THEN 'Meta Ads'
+${fusoesSql(c)}  WHEN NULLIF(${c}ctwa_clid, '') IS NOT NULL OR NULLIF(${c}fbclid, '') IS NOT NULL THEN 'Meta Ads'
   WHEN NULLIF(${c}gclid, '') IS NOT NULL OR NULLIF(${c}wbraid, '') IS NOT NULL
     OR NULLIF(${c}gbraid, '') IS NOT NULL THEN 'Google Ads'
-  -- ⚠️ O WhatsApp entrega a URL de ORIGEM (externalAdReply) mesmo quando a pessoa
-  -- veio de uma PUBLICAÇÃO, não de anúncio — e nesse caso não há ctwa_clid. Sem
-  -- esta regra, 311 leads que sabemos terem vindo do Instagram, do Facebook ou do
-  -- site do cliente ficavam no balaio 'Whatsapp' (medido em 2026-09-28).
-  -- Só atua quando o canal gravado é GENÉRICO: canal que o cliente informou
-  -- ('Indicação', 'TV', 'Facebook - WhatsApp') continua mandando.
-  WHEN NULLIF(${c}source_url, '') IS NOT NULL
-   AND COALESCE(lower(btrim(${c}canal)), '') IN ('', 'whatsapp', 'chatwoot - whatsapp')
-    THEN CASE
-      WHEN ${c}source_url ILIKE '%instagram.com%' OR ${c}source_url ILIKE '%ig.me%' THEN 'Instagram (post)'
-      WHEN ${c}source_url ILIKE '%fb.me%' OR ${c}source_url ILIKE '%facebook.com%' THEN 'Facebook (post)'
-      ELSE 'Site' END
   WHEN NULLIF(btrim(${c}canal), '') IS NOT NULL
    AND lower(btrim(${c}canal)) NOT IN ('agendor', 'datalytics', 'planilha', 'importacao', 'crm')
     THEN btrim(${c}canal)
@@ -59,9 +104,7 @@ export const ROTULO_CANAL: Record<string, string> = {
   meta: 'Meta Ads',
   google: 'Google Ads',
   instagram: 'Instagram',
-  ig: 'Instagram',
   facebook: 'Facebook',
-  fb: 'Facebook',
   whatsapp: 'WhatsApp',
   tiktok: 'TikTok',
   organic: 'Orgânico / Direto',
