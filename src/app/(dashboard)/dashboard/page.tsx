@@ -1710,6 +1710,7 @@ function CampaignPerformanceTable({
   metaCpl = 0,
   abrirTudo = false,
   preencher = false,
+  alturaMax = 288,
 }: {
   campaigns: CampaignPerformance[];
   loading: boolean;
@@ -1722,6 +1723,8 @@ function CampaignPerformanceTable({
   abrirTudo?: boolean;
   /** Em tela larga ocupa a altura do card vizinho, com rolagem interna, sem esticar a linha. */
   preencher?: boolean;
+  /** Altura recolhida da tabela (sem `preencher`); "Ver todas" abre o resto. */
+  alturaMax?: number;
 }) {
   const [campaigns, setCampaigns] = useState(initialCampaigns);
   // IS%/IS Orç./Topo Abs. só existem no Google Search: numa tabela só de Meta
@@ -2090,7 +2093,7 @@ function CampaignPerformanceTable({
       <div className={cn('-mx-2', preencher && '2xl:relative 2xl:min-h-[220px] 2xl:flex-1')}>
         <div
           className={cn('overflow-auto transition-all duration-300', preencher && 'max-h-[560px] 2xl:absolute 2xl:inset-0 2xl:max-h-none')}
-          style={preencher ? undefined : { maxHeight: tableExpanded ? '9999px' : '288px' }}
+          style={preencher ? undefined : { maxHeight: tableExpanded ? '9999px' : `${alturaMax}px` }}
         >
           {/* Cabeçalhos curtos e sem min-width largo: a tabela do Google tinha
               12 colunas e passava de 1080px — IS/Perda orç./Topo sumiam à
@@ -4898,49 +4901,6 @@ function HorizontalCreativeCard({ creative, index, onPreview, fluido = false, me
   );
 }
 
-function CreativeHorizontalStrip({ creatives, loading, onPreview, grade = false }: {
-  creatives: TopCreative[];
-  loading: boolean;
-  onPreview: (creative: TopCreative) => void;
-  /**
-   * Ao lado da tabela de campanhas: altura FIXA de 2 linhas de cards de 200px
-   * (pedido do Matheus, 24/09: "do jeito e tamanho da Cinfel, padrão e fixo") e
-   * os demais criativos entram rolando para o LADO — a caixa nunca cresce.
-   */
-  grade?: boolean;
-}) {
-  const classeGrade = 'grid grid-flow-col grid-rows-2 auto-cols-[200px] gap-3 overflow-x-auto pb-2 [scrollbar-width:thin] [scrollbar-color:#2a2d3a_transparent]';
-  if (loading) {
-    return (
-      <div className={grade ? classeGrade : 'flex gap-3 overflow-x-auto pb-2'}>
-        {Array.from({ length: grade ? 8 : 6 }).map((_, i) => (
-          <div key={i} className={cn('animate-pulse rounded-xl bg-white/[0.06]', !grade && 'w-[220px] shrink-0')} style={{ height: grade ? 326 : 345 }} />
-        ))}
-      </div>
-    );
-  }
-  if (!creatives.length) {
-    return <div className="py-8 text-center text-xs text-[#9aa4aa]">Nenhum criativo encontrado.</div>;
-  }
-  // "Melhores" = mais leads e, no empate, menor CPL. A API ordena por gasto —
-  // que mostra o que mais CUSTOU, não o que mais rendeu. Sem nenhum lead no
-  // período (campanha de tráfego/engajamento), fica a ordem por gasto.
-  const ordenados = creatives.some(c => c.leads > 0)
-    ? [...creatives].sort((a, b) =>
-      (b.leads - a.leads)
-      || ((a.cpl > 0 ? a.cpl : Infinity) - (b.cpl > 0 ? b.cpl : Infinity))
-      || (b.spend - a.spend))
-    : creatives;
-  return (
-    <div className={grade ? classeGrade : 'flex gap-3 overflow-x-auto pb-2 [scrollbar-width:thin] [scrollbar-color:#2a2d3a_transparent]'}>
-      {(grade ? ordenados : ordenados.slice(0, 10)).map((creative, index) => (
-        <HorizontalCreativeCard key={creative.adId} creative={creative} index={index} onPreview={onPreview} fluido={grade} />
-      ))}
-    </div>
-  );
-}
-
-
 // ── Desempenho por região ─────────────────────────────────────────────────────
 // Uma linha por região: o que a campanha da região custou/trouxe (mídia, pelo
 // NOME da campanha) × o funil dos leads com DDD/cidade daquela região (CRM).
@@ -5353,7 +5313,6 @@ export default function GeneralDashboard() {
   const [campaigns, setCampaigns] = useState<CampaignPerformance[]>([]);
   const [keywords, setKeywords] = useState<GoogleKeyword[]>([]);
   const [keywordsLoading, setKeywordsLoading] = useState(false);
-  const [creatives, setCreatives] = useState<TopCreative[]>([]);
   const [audience, setAudience] = useState<AudienceResponse>(EMPTY_AUDIENCE);
   const [balances, setBalances] = useState<AdAccountBalance[]>([]);
   const [clientLinks, setClientLinks] = useState<ClientAccountLink[]>([]);
@@ -5366,6 +5325,10 @@ export default function GeneralDashboard() {
   const [criativosTodos, setCriativosTodos] = useState<TopCreative[]>([]);
   const [funilCriativos, setFunilCriativos] = useState<FunilDoCriativo[]>([]);
   const [funilCriativosLoading, setFunilCriativosLoading] = useState(false);
+  // "Melhores criativos" saiu (30/09): o Funil de criativos já traz TODOS os
+  // anúncios. Quem ainda precisa da lista (contagem, altura dos painéis) lê dela.
+  const creatives = criativosTodos;
+  const creativesLoading = funilCriativosLoading;
   /** Quem vendeu mais e o que mais se vendeu — CRM externo (Agendor). */
   const [vendedores, setVendedores] = useState<LinhaVendedor[]>([]);
   const [categorias, setCategorias] = useState<LinhaCategoria[]>([]);
@@ -5375,10 +5338,8 @@ export default function GeneralDashboard() {
   /** Lista dos leads de anúncio que o cliente não cadastrou (alerta do funil). */
   const [verForaDoCrm, setVerForaDoCrm] = useState(false);
   const [campaignSortBy, setCampaignSortBy] = useState<SortKey>('spend');
-  const [sortBy, setSortBy] = useState<SortKey>('spend');
   const [metricsLoading, setMetricsLoading] = useState(false);
   const [campaignsLoading, setCampaignsLoading] = useState(false);
-  const [creativesLoading, setCreativesLoading] = useState(false);
   const [audienceLoading, setAudienceLoading] = useState(false);
   const [balancesLoading, setBalancesLoading] = useState(false);
   const [dataCacheAge, setDataCacheAge] = useState<number | null>(null);
@@ -5791,23 +5752,6 @@ export default function GeneralDashboard() {
     return () => { cancelled = true; };
   }, [period, selectedIds, customDateFrom, customDateTo, customReady]);
 
-  // Fetch top creatives
-  useEffect(() => {
-    let cancelled = false;
-    setCreativesLoading(true);
-    setCreatives([]);
-    if (selectedIds.size === 0 || !customReady) {
-      setCreativesLoading(false);
-      return () => { cancelled = true; };
-    }
-    const params = buildPeriodParams({ sortBy, limit: '20', clientIds: [...selectedIds].join(',') });
-    fetch(`/api/meta/top-creatives?${params.toString()}`)
-      .then(res => res.ok ? res.json() as Promise<TopCreative[]> : [])
-      .then(data => { if (!cancelled) setCreatives(data); })
-      .catch(() => { if (!cancelled) setCreatives([]); })
-      .finally(() => { if (!cancelled) setCreativesLoading(false); });
-    return () => { cancelled = true; };
-  }, [period, sortBy, selectedIds, customDateFrom, customDateTo, customReady]);
 
   // Fetch audience breakdowns
   useEffect(() => {
@@ -7034,12 +6978,9 @@ export default function GeneralDashboard() {
     <>
             {/* ── Meta Ads: cards de topo (sem a moldura azul que embrulhava
                 tabela + criativos num "painel dentro do painel"). ── */}
-            {/* Campanhas e melhores criativos LADO A LADO (pedido do Matheus,
-                2026-09-24): a tabela só de leitura ficou estreita e sobrava um
-                vazio enorme à direita; os criativos sobem para ele, em grade. */}
-            <div className="grid gap-4 2xl:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
+            {/* "Melhores criativos" saiu daqui (pedido do Matheus, 30/09): o Funil de
+                criativos abaixo mostra todos os anúncios, com prévia e resultado no CRM. */}
               <Superficie
-                className="2xl:flex 2xl:flex-col"
                 titulo="Campanhas Meta Ads"
                 icone={<MetaAdsMark className="h-5 w-5 text-[#168BFF]" />}
                 sub="com veiculação no período · clique para abrir conjuntos e anúncios"
@@ -7054,19 +6995,9 @@ export default function GeneralDashboard() {
                   dateTo={customDateTo}
                   metaCpl={comMetas ? cplMetaSel : 0}
                   abrirTudo
-                  preencher
+                  alturaMax={560}
                 />
               </Superficie>
-              <Superficie
-                titulo="Melhores criativos"
-                icone={<MetaAdsMark className="h-5 w-5 text-[#168BFF]" />}
-                sub="ordenados por leads (e menor CPL no empate); sem leads no período, por investimento"
-                vazio={!creativesLoading && creatives.length === 0}
-                avisoVazio="Nenhum criativo com veiculação no período."
-              >
-                <CreativeHorizontalStrip creatives={creatives} loading={creativesLoading} onPreview={setPreviewCreative} grade />
-              </Superficie>
-            </div>
 
             {/* Funil de criativos (pedido do Matheus, 30/09): todos os anúncios, cada um
                 com a prévia e o que aconteceu com quem ele trouxe até o faturamento. */}
