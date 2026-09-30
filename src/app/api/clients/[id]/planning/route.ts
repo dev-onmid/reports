@@ -17,7 +17,15 @@ async function ensureTable(pool: ReturnType<typeof makeServerPool>) {
   // Divisão por canal: [{ id, share, cpl }]. Vazio = planejamento com um CPL só,
   // exatamente como era antes — a coluna não muda nada de quem não usa.
   await pool.query(`ALTER TABLE public.client_planning ADD COLUMN IF NOT EXISTS canais JSONB NOT NULL DEFAULT '[]'`);
+  // Verba total do planejamento por canal. Coluna PRÓPRIA, longe de cpl_meta:
+  // é a ÂNCORA que o gestor digita, e as fatias só a repartem. cpl_meta segue
+  // guardando o CPL que o resto do sistema lê como meta.
+  await pool.query(`ALTER TABLE public.client_planning ADD COLUMN IF NOT EXISTS investimento_total NUMERIC NOT NULL DEFAULT 0`);
 }
+
+const SELECT_COLS = `tkm::float, cpl_meta::float AS "cplMeta", stages, canais,
+                     investimento_total::float AS "investimentoTotal",
+                     simple_mode AS "simpleMode", inv_pla_simple::float AS "invPlaSimple"`;
 
 export async function GET(
   _req: NextRequest,
@@ -28,9 +36,7 @@ export async function GET(
   try {
     await ensureTable(pool);
     const { rows: [row] } = await pool.query(
-      `SELECT tkm::float, cpl_meta::float AS "cplMeta", stages, canais,
-              simple_mode AS "simpleMode", inv_pla_simple::float AS "invPlaSimple"
-         FROM public.client_planning WHERE client_id = $1`,
+      `SELECT ${SELECT_COLS} FROM public.client_planning WHERE client_id = $1`,
       [id],
     );
     return Response.json(row ?? null);
@@ -44,25 +50,32 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  const body = await req.json() as { tkm: number; cplMeta: number; stages: unknown[]; canais?: unknown[]; simpleMode?: boolean; invPlaSimple?: number };
+  const body = await req.json() as {
+    tkm: number; cplMeta: number; stages: unknown[];
+    canais?: unknown; investimentoTotal?: number;
+    simpleMode?: boolean; invPlaSimple?: number;
+  };
+  const verba = Number(body.investimentoTotal);
+  const investimentoTotal = Number.isFinite(verba) ? Math.max(0, verba) : 0;
   const pool = makeServerPool();
   try {
     await ensureTable(pool);
     const { rows: [row] } = await pool.query(
-      // ⚠️ `cpl_meta` continua sendo gravado, e com o valor DERIVADO quando há
-      // canais: dez lugares do sistema leem essa coluna como "a meta de CPL do
-      // cliente" (dashboard, Radar, relatório diário, funil por cidade, Luna).
-      // Deixá-la com o número digitado antigo faria o resto do sistema cobrar
-      // uma meta que a tela do planejamento não mostra mais.
-      `INSERT INTO public.client_planning (client_id, tkm, cpl_meta, stages, canais, simple_mode, inv_pla_simple, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+      // cpl_meta continua sendo gravado, e com o valor DERIVADO quando há canais:
+      // dez lugares do sistema leem essa coluna como "a meta de CPL do cliente"
+      // (dashboard, Radar, relatório diário, funil por cidade, Luna). Deixá-la
+      // com o número digitado antigo faria o resto do sistema cobrar uma meta
+      // que a tela do planejamento não mostra mais.
+      `INSERT INTO public.client_planning
+         (client_id, tkm, cpl_meta, stages, canais, investimento_total, simple_mode, inv_pla_simple, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
        ON CONFLICT (client_id) DO UPDATE
-         SET tkm = $2, cpl_meta = $3, stages = $4, canais = $5, simple_mode = $6, inv_pla_simple = $7, updated_at = NOW()
-       RETURNING tkm::float, cpl_meta::float AS "cplMeta", stages, canais,
-                 simple_mode AS "simpleMode", inv_pla_simple::float AS "invPlaSimple"`,
+         SET tkm = $2, cpl_meta = $3, stages = $4, canais = $5,
+             investimento_total = $6, simple_mode = $7, inv_pla_simple = $8, updated_at = NOW()
+       RETURNING ${SELECT_COLS}`,
       [id, body.tkm, body.cplMeta, JSON.stringify(body.stages),
        JSON.stringify(normalizarCanais(body.canais ?? [])),
-       body.simpleMode ?? false, body.invPlaSimple ?? 0],
+       investimentoTotal, body.simpleMode ?? false, body.invPlaSimple ?? 0],
     );
     return Response.json(row);
   } finally {

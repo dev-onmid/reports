@@ -2,7 +2,11 @@
 
 import { use, useEffect, useRef, useState, type ComponentType, type CSSProperties, type PointerEvent } from 'react';
 import { useAbaPersistida } from '@/lib/aba-persistida';
-import { CANAIS, calcularPlanoCanais, normalizarCanais, type CanalPlano } from '@/lib/planejamento-canais';
+import {
+  CANAIS, adicionarCanal, ajustarCpl, ajustarShare, calcularPlanoCanais,
+  normalizarCanais, removerCanal,
+  type CanalPlano, type PlanoCanais,
+} from '@/lib/planejamento-canais';
 import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { mockDashboardData, mockClients, type ClientStatus, type DashboardType } from '@/lib/mock-data';
@@ -276,8 +280,10 @@ type ClientPlanningConfig = {
   tkm: number;
   cplMeta: number;
   stages: FunnelStage[];
-  /** Divisão dos leads por canal. Vazio = planejamento com um CPL só (como era). */
+  /** Divisão da verba por canal. Vazio = planejamento com um CPL só (como era). */
   canais: CanalPlano[];
+  /** Verba do mês. É a ÂNCORA da divisão: as fatias repartem ela, nunca a mudam. */
+  investimentoTotal: number;
   simpleMode: boolean;
   invPlaSimple: number;
 };
@@ -287,6 +293,7 @@ const DEFAULT_CLIENT_PLANNING: ClientPlanningConfig = {
   cplMeta: 30,
   stages: DEFAULT_STAGES,
   canais: [],
+  investimentoTotal: 0,
   simpleMode: false,
   invPlaSimple: 0,
 };
@@ -317,11 +324,13 @@ function readSavedClientPlanning(clientId: string): ClientPlanningConfig {
     const tkm = Number(parsed.tkm ?? DEFAULT_CLIENT_PLANNING.tkm);
     const cplMeta = Number(parsed.cplMeta ?? DEFAULT_CLIENT_PLANNING.cplMeta);
     const invPlaSimple = Number(parsed.invPlaSimple ?? 0);
+    const investimentoTotal = Number(parsed.investimentoTotal ?? 0);
     return {
       tkm: Number.isFinite(tkm) ? tkm : DEFAULT_CLIENT_PLANNING.tkm,
       cplMeta: Number.isFinite(cplMeta) ? cplMeta : DEFAULT_CLIENT_PLANNING.cplMeta,
       stages: sanitizePlanningStages(parsed.stages),
       canais: normalizarCanais(parsed.canais),
+      investimentoTotal: Number.isFinite(investimentoTotal) ? Math.max(0, investimentoTotal) : 0,
       simpleMode: Boolean(parsed.simpleMode ?? false),
       invPlaSimple: Number.isFinite(invPlaSimple) ? invPlaSimple : 0,
     };
@@ -336,8 +345,201 @@ function saveClientPlanning(clientId: string, planning: ClientPlanningConfig) {
   fetch(`/api/clients/${clientId}/planning`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ tkm: planning.tkm, cplMeta: planning.cplMeta, stages: planning.stages, canais: planning.canais, simpleMode: planning.simpleMode, invPlaSimple: planning.invPlaSimple }),
+    body: JSON.stringify({ tkm: planning.tkm, cplMeta: planning.cplMeta, stages: planning.stages, canais: planning.canais, investimentoTotal: planning.investimentoTotal, simpleMode: planning.simpleMode, invPlaSimple: planning.invPlaSimple }),
   }).catch(() => {});
+}
+
+const inputCls = "bg-transparent focus:outline-none border-b border-transparent hover:border-border focus:border-primary transition-colors w-full";
+
+// ── Divisão do investimento por canal ─────────────────────────────────────────
+/**
+ * Compara a verba com o que o funil exige. É a pergunta que o gestor faz depois
+ * de dividir: "essa verba dá conta?". Sem ela a divisão seria bonita e muda.
+ */
+function ComparacaoVerbaFunil({ plano }: { plano: PlanoCanais }) {
+  if (plano.leadsNecessarios <= 0) return null;
+  const compra = Math.round(plano.leadsComprados).toLocaleString('pt-BR');
+  const precisa = Math.round(plano.leadsNecessarios).toLocaleString('pt-BR');
+  // 2% de folga: 399 contra 400 leads é a mesma coisa na prática, e pintar isso
+  // de vermelho treinaria o gestor a ignorar o aviso.
+  const fecha = (plano.cobertura ?? 0) >= 0.98;
+  const cor = fecha ? 'border-primary/30 bg-primary/5' : 'border-[#FF6B35]/40 bg-[#FF6B35]/5';
+  return (
+    <div className={cn('mt-3 rounded-lg border p-2.5 text-[11px] leading-relaxed', cor)}>
+      <span className={cn('font-bold', fecha ? 'text-primary' : 'text-[#FF6B35]')}>
+        Essa verba compra {compra} {plano.leadsComprados === 1 ? 'lead' : 'leads'}
+      </span>
+      <span className="text-muted-foreground"> — o funil precisa de {precisa} para bater a meta.</span>
+      {!fecha && (
+        <span className="text-[#FF6B35]">
+          {' '}Faltam {Math.round(plano.faltamLeads).toLocaleString('pt-BR')}
+          {plano.investimentoNecessario !== null && <>; no CPL médio de agora, fecharia com {fmtBRL(plano.investimentoNecessario)}</>}.
+        </span>
+      )}
+      {fecha && plano.sobramLeads >= 1 && (
+        <span className="text-muted-foreground"> Sobram {Math.round(plano.sobramLeads).toLocaleString('pt-BR')}.</span>
+      )}
+      {/* ⚠️ Canal com verba e sem CPL some da conta: sem este aviso a cobertura
+          apareceria menor do que é e o gestor jogaria verba atrás de um buraco
+          que é de cadastro, não de dinheiro. */}
+      {plano.semCpl && (
+        <span className="text-[#FF6B35]"> Um canal está sem CPL — os leads dele não entram nesta conta.</span>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Onde a divisão é configurada. Em modal, e não na tela do funil, porque foi
+ * exatamente isso que o Matheus pediu: "queria isso configurado talvez em modal,
+ * e na tela do estudo do funil seria apenas a visualização".
+ */
+function DivisaoCanaisModal({
+  open, onClose, investimentoTotal, setInvestimentoTotal, canais, setCanais, cplMeta, plano,
+}: {
+  open: boolean;
+  onClose: () => void;
+  investimentoTotal: number;
+  setInvestimentoTotal: (v: number) => void;
+  canais: CanalPlano[];
+  setCanais: (fn: (cs: CanalPlano[]) => CanalPlano[]) => void;
+  cplMeta: number;
+  plano: PlanoCanais;
+}) {
+  const faltando = CANAIS.filter(c => !canais.some(x => x.id === c.id));
+  return (
+    <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
+      <DialogContent className="sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>Divisão do investimento</DialogTitle>
+        </DialogHeader>
+
+        <div className="max-h-[70vh] space-y-4 overflow-y-auto pr-1">
+          <div className="rounded-xl border border-border bg-background/40 p-4">
+            <p className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground mb-2">VERBA DO MÊS</p>
+            <div className="flex items-baseline gap-1">
+              <span className="text-lg font-bold text-muted-foreground">R$</span>
+              <CurrencyInput
+                value={investimentoTotal}
+                onChange={setInvestimentoTotal}
+                className={cn('font-heading font-normal text-2xl leading-none flex-1 min-w-0 text-primary', inputCls)}
+              />
+            </div>
+            {/* ⚠️ A frase existe porque é a regra que a primeira versão quebrou. */}
+            <p className="mt-1.5 text-[11px] text-muted-foreground">
+              As fatias abaixo repartem esta verba. Mexer nos % nunca muda o total.
+            </p>
+          </div>
+
+          {faltando.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-[11px] text-muted-foreground">Acrescentar:</span>
+              {faltando.map(c => (
+                <button
+                  key={c.id}
+                  type="button"
+                  onClick={() => setCanais(cs => adicionarCanal(cs, c.id, cplMeta))}
+                  className="flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1 text-[11px] font-bold text-muted-foreground transition-colors hover:border-primary/50 hover:text-foreground"
+                >
+                  <span className="h-2 w-2 rounded-full" style={{ backgroundColor: c.cor }} />
+                  {c.nome}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {canais.length === 0 ? (
+            <p className="text-[11px] leading-relaxed text-muted-foreground">
+              Acrescente os canais acima. O primeiro leva a verba inteira; a partir do segundo, subir
+              a fatia de um desconta dos outros automaticamente — a soma fica sempre em 100%.
+            </p>
+          ) : (
+            <div className="space-y-2.5">
+              {plano.linhas.map(l => (
+                <div key={l.id} className="rounded-xl border border-border bg-background/40 p-3">
+                  <div className="mb-2 flex items-center gap-2">
+                    <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: l.cor }} />
+                    <span className="text-xs font-bold text-foreground">{l.nome}</span>
+                    <span className="font-heading text-lg leading-none text-foreground">{l.share}%</span>
+                    <span className="text-[11px] font-bold text-primary">{fmtBRL(l.investimento)}</span>
+                    <button
+                      type="button"
+                      title={`Tirar ${l.nome} da divisão`}
+                      onClick={() => setCanais(cs => removerCanal(cs, l.id))}
+                      className="ml-auto text-muted-foreground transition-colors hover:text-foreground"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-3">
+                    <input
+                      type="range" min={0} max={100} step={1} value={l.share}
+                      onChange={e => setCanais(cs => ajustarShare(cs, l.id, Number(e.target.value)))}
+                      className="h-1.5 min-w-[9rem] flex-1 cursor-pointer appearance-none rounded-full bg-muted accent-primary"
+                      style={{ accentColor: l.cor }}
+                      aria-label={`Fatia de ${l.nome}`}
+                    />
+                    <label className="flex items-center gap-1">
+                      <input
+                        type="number" min={0} max={100} value={l.share}
+                        onChange={e => setCanais(cs => ajustarShare(cs, l.id, Number(e.target.value)))}
+                        className="h-7 w-14 rounded-md border border-border bg-background px-1.5 text-center text-xs"
+                      />
+                      <span className="text-[10px] text-muted-foreground">%</span>
+                    </label>
+                    <label className="flex items-center gap-1">
+                      <span className="text-[10px] text-muted-foreground">CPL R$</span>
+                      <CurrencyInput
+                        value={l.cpl}
+                        onChange={v => setCanais(cs => ajustarCpl(cs, l.id, v))}
+                        className="h-7 w-20 rounded-md border border-border bg-background px-1.5 text-center text-xs"
+                      />
+                    </label>
+                  </div>
+
+                  <p className="mt-1.5 text-[10px] text-muted-foreground">
+                    {l.leads === null
+                      ? 'Sem CPL, não dá para saber quantos leads esta fatia compra.'
+                      : `Compra ${Math.round(l.leads).toLocaleString('pt-BR')} leads`}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {canais.length > 0 && (
+            <div className="rounded-xl border border-border bg-background/40 p-3 text-[11px]">
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                <span className="font-bold text-foreground">
+                  {Math.round(plano.leadsComprados).toLocaleString('pt-BR')} leads no total
+                </span>
+                {/* ⚠️ Média PONDERADA pela verba, nunca a simples dos CPLs: 70% em
+                    Meta a R$20 e 30% em Google a R$60 dá R$25, não R$40. */}
+                <span className="text-muted-foreground">
+                  CPL médio {plano.cplGeral === null ? '—' : fmtBRL(plano.cplGeral)} (ponderado pela verba)
+                </span>
+              </div>
+              <ComparacaoVerbaFunil plano={plano} />
+              {/* ⚠️ Dito em texto porque o modelo supõe isso, e supor calado
+                  venderia uma precisão que o dado não tem. */}
+              <p className="mt-2 text-[10px] leading-relaxed text-muted-foreground">
+                As vendas de cada canal saem proporcionais aos leads dele — o plano supõe a mesma
+                taxa de conversão do funil para todos. Se um canal converte diferente na prática, o
+                CAC dele fica otimista ou pessimista na mesma medida.
+              </p>
+            </div>
+          )}
+        </div>
+
+        <DialogFooter>
+          {/* Sem botão de salvar: a tela inteira do planejamento grava sozinha a
+              cada mudança, e um "Salvar" aqui sugeriria que o resto não grava. */}
+          <Button onClick={onClose}>Concluído</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
 }
 
 // ── Funnel planning tab ────────────────────────────────────────────────────────
@@ -346,6 +548,8 @@ function FunnelTab({ clientId, clientName, goalConfig, isAdmin }: { clientId: st
   const [tkm, setTkm] = useState(() => readSavedClientPlanning(clientId).tkm);
   const [cplMeta, setCplMeta] = useState(() => readSavedClientPlanning(clientId).cplMeta);
   const [canais, setCanais] = useState<CanalPlano[]>(() => readSavedClientPlanning(clientId).canais);
+  const [investimentoTotal, setInvestimentoTotal] = useState(() => readSavedClientPlanning(clientId).investimentoTotal);
+  const [canaisModal, setCanaisModal] = useState(false);
   const [stages, setStages] = useState<FunnelStage[]>(() => readSavedClientPlanning(clientId).stages);
   const [simpleMode, setSimpleMode] = useState(() => readSavedClientPlanning(clientId).simpleMode);
   const [invPlaSimple, setInvPlaSimple] = useState(() => readSavedClientPlanning(clientId).invPlaSimple);
@@ -360,13 +564,14 @@ function FunnelTab({ clientId, clientName, goalConfig, isAdmin }: { clientId: st
     setTkm(saved.tkm);
     setCplMeta(saved.cplMeta);
     setCanais(saved.canais);
+    setInvestimentoTotal(saved.investimentoTotal);
     setStages(saved.stages);
     setSimpleMode(saved.simpleMode);
     setInvPlaSimple(saved.invPlaSimple);
     setPlanningLoadedFor(clientId);
     fetch(`/api/clients/${clientId}/planning`)
       .then(r => r.json())
-      .then((dbData: { tkm: number; cplMeta: number; stages: FunnelStage[]; canais?: unknown; simpleMode?: boolean; invPlaSimple?: number } | null) => {
+      .then((dbData: { tkm: number; cplMeta: number; stages: FunnelStage[]; canais?: unknown; investimentoTotal?: number; simpleMode?: boolean; invPlaSimple?: number } | null) => {
         if (cancelled) return;
         if (dbData) {
           // Banco tem dado → ele manda (admin incluso)
@@ -375,12 +580,14 @@ function FunnelTab({ clientId, clientName, goalConfig, isAdmin }: { clientId: st
             cplMeta: dbData.cplMeta || saved.cplMeta,
             stages: sanitizePlanningStages(dbData.stages),
             canais: normalizarCanais(dbData.canais),
+            investimentoTotal: dbData.investimentoTotal ?? saved.investimentoTotal,
             simpleMode: dbData.simpleMode ?? saved.simpleMode,
             invPlaSimple: dbData.invPlaSimple ?? saved.invPlaSimple,
           };
           setTkm(planning.tkm);
           setCplMeta(planning.cplMeta);
           setCanais(planning.canais);
+          setInvestimentoTotal(planning.investimentoTotal);
           setStages(planning.stages);
           setSimpleMode(planning.simpleMode);
           setInvPlaSimple(planning.invPlaSimple);
@@ -395,10 +602,14 @@ function FunnelTab({ clientId, clientName, goalConfig, isAdmin }: { clientId: st
   const vols     = plannedFunnelFromGoal(goalConfig, stages, tkm);
   const topVol   = vols[0] ?? 0;
   const botVol   = vols[stages.length - 1] ?? 0;
-  const planoCanais = calcularPlanoCanais(canais, topVol, botVol, goalConfig.type === 'revenue' ? goalConfig.target : 0);
   const dividindoPorCanal = canais.length > 0;
-  // Com canais, o CPL geral é DERIVADO (média ponderada). Sem canais, segue
-  // sendo o número digitado — quem não usa a divisão não vê diferença nenhuma.
+  const planoCanais = calcularPlanoCanais(
+    canais, investimentoTotal, topVol, botVol,
+    goalConfig.type === 'revenue' ? goalConfig.target : 0,
+  );
+  // ⚠️ Com canais a direção da conta INVERTE: a verba é a âncora que o gestor
+  // digita e o CPL sai dela (média ponderada). Sem canais, o CPL é digitado e a
+  // verba é que sai dele — o comportamento de sempre, intocado para quem não usa.
   const cplPlanejado = dividindoPorCanal ? (planoCanais.cplGeral ?? 0) : cplMeta;
 
   useEffect(() => {
@@ -408,10 +619,10 @@ function FunnelTab({ clientId, clientName, goalConfig, isAdmin }: { clientId: st
     // Radar, relatório diário, funil por cidade e Luna leem como "a meta de CPL
     // do cliente". Salvar o número digitado antigo faria o resto do sistema
     // cobrar uma meta diferente da que esta tela mostra.
-    saveClientPlanning(clientId, { tkm, cplMeta: cplPlanejado, stages, canais, simpleMode, invPlaSimple });
-  }, [clientId, planningLoadedFor, tkm, cplMeta, cplPlanejado, stages, canais, simpleMode, invPlaSimple]);
+    saveClientPlanning(clientId, { tkm, cplMeta: cplPlanejado, stages, canais, investimentoTotal, simpleMode, invPlaSimple });
+  }, [clientId, planningLoadedFor, tkm, cplMeta, cplPlanejado, stages, canais, investimentoTotal, simpleMode, invPlaSimple]);
 
-  const invPla   = topVol * cplPlanejado;
+  const invPla   = dividindoPorCanal ? planoCanais.investimentoTotal : topVol * cplMeta;
   const cac      = botVol > 0 ? invPla / botVol : 0;
   const roi      = goalConfig.type === 'revenue' && invPla > 0 ? goalConfig.target / invPla : 0;
   const maxVol   = topVol || 1;
@@ -433,7 +644,6 @@ function FunnelTab({ clientId, clientName, goalConfig, isAdmin }: { clientId: st
     setStages((prev) => prev.filter((_, i) => i !== idx));
   }
 
-  const inputCls = "bg-transparent focus:outline-none border-b border-transparent hover:border-border focus:border-primary transition-colors w-full";
 
   // Redes sociais tem planejamento PRÓPRIO. O bloco padrão é todo construído em
   // cima de venda — TKM, faturamento estimado, ROI, funil de conversão — e nada
@@ -710,115 +920,88 @@ function FunnelTab({ clientId, clientName, goalConfig, isAdmin }: { clientId: st
             </p>
             <p className="text-[11px] text-muted-foreground mt-1">
               {planoCanais.cplGeral === null
-                ? 'Defina a fatia e o CPL de cada canal'
-                : 'Sai da divisão por canal, não é digitado'}
+                ? 'Defina o CPL de cada canal na divisão'
+                : 'Média ponderada pela verba de cada canal'}
             </p>
           </div>
         )}
       </div>
 
-      {/* ── Divisão por canal ─────────────────────────────────────────────
-          Existe porque um CPL só para a conta inteira é meta injusta: Google
-          custa mais que Meta por natureza, e cobrar os dois pelo mesmo número
-          premia um e pune o outro sem ninguém ter errado. */}
+      {/* ── Divisão do investimento (VISUALIZAÇÃO) ────────────────────────
+          Só leitura de propósito: a configuração mora no modal. Um CPL só para
+          a conta inteira é meta injusta (Google custa mais que Meta por
+          natureza), mas encher a tela de estudo com campos editáveis foi
+          justamente o que o Matheus recusou na primeira versão. */}
       <div className="bg-card border border-border rounded-xl p-5">
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <h3 className="text-sm font-bold text-foreground">DIVISÃO POR CANAL</h3>
-            <p className="text-[11px] text-muted-foreground">
-              Cada canal leva uma fatia dos {Math.ceil(topVol).toLocaleString('pt-BR')} leads e tem o seu CPL.
-            </p>
+        <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
+          <div className="min-w-0">
+            <h3 className="text-sm font-bold text-foreground">DIVISÃO DO INVESTIMENTO</h3>
+            {dividindoPorCanal ? (
+              <p className="text-[11px] text-muted-foreground">
+                <span className="font-bold text-primary">{fmtBRL(planoCanais.investimentoTotal)}</span> no mês,
+                repartidos entre {planoCanais.linhas.length} {planoCanais.linhas.length === 1 ? 'canal' : 'canais'}
+                {planoCanais.cplGeral !== null && <> · CPL médio {fmtBRL(planoCanais.cplGeral)}</>}
+              </p>
+            ) : (
+              <p className="text-[11px] text-muted-foreground">
+                Hoje o plano usa um CPL só para tudo.
+              </p>
+            )}
           </div>
-          <div className="flex flex-wrap gap-1.5">
-            {CANAIS.filter(c => !canais.some(x => x.id === c.id)).map(c => (
-              <button
-                key={c.id}
-                type="button"
-                onClick={() => setCanais(cs => [...cs, { id: c.id, share: 0, cpl: cplMeta }])}
-                className="rounded-lg border border-border px-2.5 py-1 text-[11px] font-bold text-muted-foreground transition-colors hover:border-primary/50 hover:text-foreground"
-              >+ {c.nome}</button>
-            ))}
-          </div>
+          <Button variant="outline" size="sm" className="h-8 shrink-0 text-xs" onClick={() => setCanaisModal(true)}>
+            <SlidersHorizontal className="mr-1.5 h-3.5 w-3.5" />
+            {dividindoPorCanal ? 'Configurar' : 'Dividir por canal'}
+          </Button>
         </div>
 
-        {canais.length === 0 ? (
+        {!dividindoPorCanal ? (
           <p className="text-[11px] leading-relaxed text-muted-foreground">
-            Sem divisão, o planejamento usa um CPL só para tudo — o que já funciona quando a verba
-            vai para um canal só. Acrescente os canais acima para dar um CPL a cada um.
+            Um CPL só já funciona quando a verba vai para um canal só. Com mais de um, Google e Meta
+            passam a ser cobrados pelo mesmo número — e aí a meta fica injusta com um dos dois.
           </p>
         ) : (
           <>
-            <div className="space-y-2">
-              {canais.map(c => {
-                const linha = planoCanais.linhas.find(l => l.id === c.id);
-                const nome = CANAIS.find(x => x.id === c.id)?.nome ?? c.id;
-                return (
-                  <div key={c.id} className="grid grid-cols-[minmax(4.5rem,1fr)_auto_auto_1fr] items-center gap-2 rounded-lg border border-border bg-background/40 p-2">
-                    <span className="truncate text-xs font-bold text-foreground">{nome}</span>
-                    <label className="flex items-center gap-1">
-                      <input
-                        type="number" min={0} max={100} value={c.share}
-                        onChange={e => { const v = Number(e.target.value); setCanais(cs => cs.map(x => x.id === c.id ? { ...x, share: Number.isFinite(v) ? Math.max(0, Math.min(100, v)) : 0 } : x)); }}
-                        className="h-7 w-14 rounded-md border border-border bg-background px-1.5 text-center text-xs"
-                      />
-                      <span className="text-[10px] text-muted-foreground">% dos leads</span>
-                    </label>
-                    <label className="flex items-center gap-1">
-                      <span className="text-[10px] text-muted-foreground">CPL R$</span>
-                      <input
-                        type="number" min={0} step="0.01" value={c.cpl}
-                        onChange={e => { const v = Number(e.target.value); setCanais(cs => cs.map(x => x.id === c.id ? { ...x, cpl: Number.isFinite(v) ? Math.max(0, v) : 0 } : x)); }}
-                        className="h-7 w-20 rounded-md border border-border bg-background px-1.5 text-center text-xs"
-                      />
-                    </label>
-                    <div className="flex items-center justify-end gap-3 text-[11px]">
-                      <span className="text-muted-foreground">{Math.round(linha?.leads ?? 0).toLocaleString('pt-BR')} leads</span>
-                      <span className="font-bold text-primary">{fmtBRL(linha?.investimento ?? 0)}</span>
-                      {/* ⚠️ CAC sem venda é —, nunca R$ 0,00: zero afirmaria que
-                          o canal vendeu de graça. */}
-                      <span className="text-muted-foreground">CAC {linha?.cac === null || linha?.cac === undefined ? '—' : fmtBRL(linha.cac)}</span>
-                      <button
-                        type="button" title={`Tirar ${nome} do plano`}
-                        onClick={() => setCanais(cs => cs.filter(x => x.id !== c.id))}
-                        className="text-muted-foreground transition-colors hover:text-foreground"
-                      >×</button>
-                    </div>
-                  </div>
-                );
-              })}
+            {/* Barra empilhada: a proporção de relance, antes dos números */}
+            <div className="flex h-2.5 w-full overflow-hidden rounded-sm bg-muted">
+              {planoCanais.linhas.map(l => (
+                <div key={l.id} style={{ width: `${l.share}%`, backgroundColor: l.cor }} title={`${l.nome} — ${l.share}%`} />
+              ))}
             </div>
 
-            {/* ⚠️ A soma NÃO é normalizada em silêncio: 90% deixa 10% dos leads
-                sem canal e o investimento sai visivelmente incompleto, em vez de
-                inflar os outros canais e fingir que a conta fecha. */}
-            <div className={cn('mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border p-2.5 text-[11px]',
-              planoCanais.completo ? 'border-primary/30 bg-primary/5' : 'border-[#FF6B35]/40 bg-[#FF6B35]/5')}>
-              <span className={planoCanais.completo ? 'font-bold text-primary' : 'font-bold text-[#FF6B35]'}>
-                Soma {planoCanais.somaShare.toLocaleString('pt-BR')}%
-              </span>
-              {!planoCanais.completo && (
-                <span className="text-[#FF6B35]">
-                  {planoCanais.leadsSemCanal > 0
-                    ? `${Math.round(planoCanais.leadsSemCanal).toLocaleString('pt-BR')} leads sem canal — o investimento abaixo está incompleto`
-                    : 'passou de 100% — os leads estão contados mais de uma vez'}
-                </span>
-              )}
-              <span className="ml-auto text-muted-foreground">
-                Investimento {fmtBRL(planoCanais.investimentoTotal)}
-                {planoCanais.cplGeral !== null && <> · CPL geral {fmtBRL(planoCanais.cplGeral)}</>}
-              </span>
+            <div className="mt-3 space-y-1.5">
+              {planoCanais.linhas.map(l => (
+                <div key={l.id} className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px]">
+                  <span className="flex items-center gap-1.5 font-bold text-foreground">
+                    <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: l.cor }} />
+                    {l.nome}
+                  </span>
+                  <span className="font-heading text-sm leading-none text-foreground">{l.share}%</span>
+                  <span className="text-muted-foreground">{fmtBRL(l.investimento)}</span>
+                  <span className="text-muted-foreground">
+                    {/* ⚠️ CPL 0 não vira "infinitos leads": a linha diz que falta o CPL. */}
+                    {l.leads === null ? 'sem CPL definido' : `${Math.round(l.leads).toLocaleString('pt-BR')} leads a ${fmtBRL(l.cpl)}`}
+                  </span>
+                  {/* ⚠️ CAC sem venda é —, nunca R$ 0,00: zero afirmaria venda de graça. */}
+                  <span className="ml-auto text-muted-foreground">CAC {l.cac === null ? '—' : fmtBRL(l.cac)}</span>
+                </div>
+              ))}
             </div>
 
-            {/* ⚠️ Dito em texto porque o modelo supõe isso e supor calado venderia
-                uma precisão que o dado não tem. */}
-            <p className="mt-2 text-[10px] leading-relaxed text-muted-foreground">
-              As vendas de cada canal saem proporcionais à fatia de leads — o plano supõe a mesma
-              taxa de conversão do funil para todos. Se um canal converte diferente na prática, o
-              CAC dele é otimista ou pessimista na mesma medida.
-            </p>
+            <ComparacaoVerbaFunil plano={planoCanais} />
           </>
         )}
       </div>
+
+      <DivisaoCanaisModal
+        open={canaisModal}
+        onClose={() => setCanaisModal(false)}
+        investimentoTotal={investimentoTotal}
+        setInvestimentoTotal={setInvestimentoTotal}
+        canais={canais}
+        setCanais={setCanais}
+        cplMeta={cplMeta}
+        plano={planoCanais}
+      />
 
       {/* Funnel + Summary side by side */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-stretch">
@@ -930,7 +1113,11 @@ function FunnelTab({ clientId, clientName, goalConfig, isAdmin }: { clientId: st
           <div className="bg-primary/10 border border-primary/30 rounded-xl p-5">
             <p className="text-[9px] font-bold uppercase tracking-widest text-primary mb-2">INV. PLANEJADO</p>
             <p className="text-xl font-heading font-normal text-primary">{fmtBRL(invPla)}</p>
-            <p className="text-xs text-muted-foreground mt-2">{topVol} leads × {fmtBRL(cplPlanejado)} CPL planejado</p>
+            <p className="text-xs text-muted-foreground mt-2">
+              {dividindoPorCanal
+                ? `Verba do mês, dividida entre ${planoCanais.linhas.length} ${planoCanais.linhas.length === 1 ? 'canal' : 'canais'}`
+                : `${topVol} leads × ${fmtBRL(cplPlanejado)} CPL planejado`}
+            </p>
           </div>
 
           <div className="grid grid-cols-2 gap-4">
