@@ -2,6 +2,7 @@
 
 import { use, useEffect, useRef, useState, type ComponentType, type CSSProperties, type PointerEvent } from 'react';
 import { useAbaPersistida } from '@/lib/aba-persistida';
+import { CANAIS, calcularPlanoCanais, normalizarCanais, type CanalPlano } from '@/lib/planejamento-canais';
 import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { mockDashboardData, mockClients, type ClientStatus, type DashboardType } from '@/lib/mock-data';
@@ -275,6 +276,8 @@ type ClientPlanningConfig = {
   tkm: number;
   cplMeta: number;
   stages: FunnelStage[];
+  /** Divisão dos leads por canal. Vazio = planejamento com um CPL só (como era). */
+  canais: CanalPlano[];
   simpleMode: boolean;
   invPlaSimple: number;
 };
@@ -283,6 +286,7 @@ const DEFAULT_CLIENT_PLANNING: ClientPlanningConfig = {
   tkm: 9000,
   cplMeta: 30,
   stages: DEFAULT_STAGES,
+  canais: [],
   simpleMode: false,
   invPlaSimple: 0,
 };
@@ -317,6 +321,7 @@ function readSavedClientPlanning(clientId: string): ClientPlanningConfig {
       tkm: Number.isFinite(tkm) ? tkm : DEFAULT_CLIENT_PLANNING.tkm,
       cplMeta: Number.isFinite(cplMeta) ? cplMeta : DEFAULT_CLIENT_PLANNING.cplMeta,
       stages: sanitizePlanningStages(parsed.stages),
+      canais: normalizarCanais(parsed.canais),
       simpleMode: Boolean(parsed.simpleMode ?? false),
       invPlaSimple: Number.isFinite(invPlaSimple) ? invPlaSimple : 0,
     };
@@ -331,7 +336,7 @@ function saveClientPlanning(clientId: string, planning: ClientPlanningConfig) {
   fetch(`/api/clients/${clientId}/planning`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ tkm: planning.tkm, cplMeta: planning.cplMeta, stages: planning.stages, simpleMode: planning.simpleMode, invPlaSimple: planning.invPlaSimple }),
+    body: JSON.stringify({ tkm: planning.tkm, cplMeta: planning.cplMeta, stages: planning.stages, canais: planning.canais, simpleMode: planning.simpleMode, invPlaSimple: planning.invPlaSimple }),
   }).catch(() => {});
 }
 
@@ -340,6 +345,7 @@ function FunnelTab({ clientId, clientName, goalConfig, isAdmin }: { clientId: st
   const [planningLoadedFor, setPlanningLoadedFor] = useState(clientId);
   const [tkm, setTkm] = useState(() => readSavedClientPlanning(clientId).tkm);
   const [cplMeta, setCplMeta] = useState(() => readSavedClientPlanning(clientId).cplMeta);
+  const [canais, setCanais] = useState<CanalPlano[]>(() => readSavedClientPlanning(clientId).canais);
   const [stages, setStages] = useState<FunnelStage[]>(() => readSavedClientPlanning(clientId).stages);
   const [simpleMode, setSimpleMode] = useState(() => readSavedClientPlanning(clientId).simpleMode);
   const [invPlaSimple, setInvPlaSimple] = useState(() => readSavedClientPlanning(clientId).invPlaSimple);
@@ -353,13 +359,14 @@ function FunnelTab({ clientId, clientName, goalConfig, isAdmin }: { clientId: st
     const saved = readSavedClientPlanning(clientId);
     setTkm(saved.tkm);
     setCplMeta(saved.cplMeta);
+    setCanais(saved.canais);
     setStages(saved.stages);
     setSimpleMode(saved.simpleMode);
     setInvPlaSimple(saved.invPlaSimple);
     setPlanningLoadedFor(clientId);
     fetch(`/api/clients/${clientId}/planning`)
       .then(r => r.json())
-      .then((dbData: { tkm: number; cplMeta: number; stages: FunnelStage[]; simpleMode?: boolean; invPlaSimple?: number } | null) => {
+      .then((dbData: { tkm: number; cplMeta: number; stages: FunnelStage[]; canais?: unknown; simpleMode?: boolean; invPlaSimple?: number } | null) => {
         if (cancelled) return;
         if (dbData) {
           // Banco tem dado → ele manda (admin incluso)
@@ -367,11 +374,13 @@ function FunnelTab({ clientId, clientName, goalConfig, isAdmin }: { clientId: st
             tkm: dbData.tkm || saved.tkm,
             cplMeta: dbData.cplMeta || saved.cplMeta,
             stages: sanitizePlanningStages(dbData.stages),
+            canais: normalizarCanais(dbData.canais),
             simpleMode: dbData.simpleMode ?? saved.simpleMode,
             invPlaSimple: dbData.invPlaSimple ?? saved.invPlaSimple,
           };
           setTkm(planning.tkm);
           setCplMeta(planning.cplMeta);
+          setCanais(planning.canais);
           setStages(planning.stages);
           setSimpleMode(planning.simpleMode);
           setInvPlaSimple(planning.invPlaSimple);
@@ -383,16 +392,25 @@ function FunnelTab({ clientId, clientName, goalConfig, isAdmin }: { clientId: st
     return () => { cancelled = true; };
   }, [clientId, isAdmin]);
 
-  useEffect(() => {
-    if (planningLoadedFor !== clientId) return;
-    if (!planningDbLoaded.current) return;
-    saveClientPlanning(clientId, { tkm, cplMeta, stages, simpleMode, invPlaSimple });
-  }, [clientId, planningLoadedFor, tkm, cplMeta, stages, simpleMode, invPlaSimple]);
-
-  const cplPlanejado = cplMeta;
   const vols     = plannedFunnelFromGoal(goalConfig, stages, tkm);
   const topVol   = vols[0] ?? 0;
   const botVol   = vols[stages.length - 1] ?? 0;
+  const planoCanais = calcularPlanoCanais(canais, topVol, botVol, goalConfig.type === 'revenue' ? goalConfig.target : 0);
+  const dividindoPorCanal = canais.length > 0;
+  // Com canais, o CPL geral é DERIVADO (média ponderada). Sem canais, segue
+  // sendo o número digitado — quem não usa a divisão não vê diferença nenhuma.
+  const cplPlanejado = dividindoPorCanal ? (planoCanais.cplGeral ?? 0) : cplMeta;
+
+  useEffect(() => {
+    if (planningLoadedFor !== clientId) return;
+    if (!planningDbLoaded.current) return;
+    // ⚠️ Grava o CPL DERIVADO quando há canais: é essa coluna que dashboard,
+    // Radar, relatório diário, funil por cidade e Luna leem como "a meta de CPL
+    // do cliente". Salvar o número digitado antigo faria o resto do sistema
+    // cobrar uma meta diferente da que esta tela mostra.
+    saveClientPlanning(clientId, { tkm, cplMeta: cplPlanejado, stages, canais, simpleMode, invPlaSimple });
+  }, [clientId, planningLoadedFor, tkm, cplMeta, cplPlanejado, stages, canais, simpleMode, invPlaSimple]);
+
   const invPla   = topVol * cplPlanejado;
   const cac      = botVol > 0 ? invPla / botVol : 0;
   const roi      = goalConfig.type === 'revenue' && invPla > 0 ? goalConfig.target / invPla : 0;
@@ -659,7 +677,9 @@ function FunnelTab({ clientId, clientName, goalConfig, isAdmin }: { clientId: st
         </div>
         {[
           { label: 'TKM (Ticket Médio)',        value: tkm,      set: setTkm,      color: 'text-foreground', desc: 'Valor médio por venda'     },
-          { label: 'CPL META (Custo/Lead)',     value: cplMeta,  set: setCplMeta,  color: 'text-primary',    desc: 'CPL planejado'             },
+          ...(dividindoPorCanal ? [] : [
+            { label: 'CPL META (Custo/Lead)',   value: cplMeta,  set: setCplMeta,  color: 'text-primary',    desc: 'CPL planejado'             },
+          ]),
         ].map(({ label, value, set, color, desc }) => (
           // Deixar em 0 é uma resposta válida: significa "sem meta". O Radar então
           // para de julgar essa métrica e mostra só o número de performance.
@@ -679,6 +699,125 @@ function FunnelTab({ clientId, clientName, goalConfig, isAdmin }: { clientId: st
             </p>
           </div>
         ))}
+
+        {/* Com canais, o CPL geral deixa de ser digitado: vira a média PONDERADA
+            pelos canais. É o número que o resto do sistema continua lendo. */}
+        {dividindoPorCanal && (
+          <div className="bg-card border border-border rounded-xl p-4">
+            <p className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground mb-2">CPL META (MÉDIA PONDERADA)</p>
+            <p className="font-heading font-normal text-xl leading-none text-primary">
+              {planoCanais.cplGeral === null ? '—' : fmtBRL(planoCanais.cplGeral)}
+            </p>
+            <p className="text-[11px] text-muted-foreground mt-1">
+              {planoCanais.cplGeral === null
+                ? 'Defina a fatia e o CPL de cada canal'
+                : 'Sai da divisão por canal, não é digitado'}
+            </p>
+          </div>
+        )}
+      </div>
+
+      {/* ── Divisão por canal ─────────────────────────────────────────────
+          Existe porque um CPL só para a conta inteira é meta injusta: Google
+          custa mais que Meta por natureza, e cobrar os dois pelo mesmo número
+          premia um e pune o outro sem ninguém ter errado. */}
+      <div className="bg-card border border-border rounded-xl p-5">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h3 className="text-sm font-bold text-foreground">DIVISÃO POR CANAL</h3>
+            <p className="text-[11px] text-muted-foreground">
+              Cada canal leva uma fatia dos {Math.ceil(topVol).toLocaleString('pt-BR')} leads e tem o seu CPL.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {CANAIS.filter(c => !canais.some(x => x.id === c.id)).map(c => (
+              <button
+                key={c.id}
+                type="button"
+                onClick={() => setCanais(cs => [...cs, { id: c.id, share: 0, cpl: cplMeta }])}
+                className="rounded-lg border border-border px-2.5 py-1 text-[11px] font-bold text-muted-foreground transition-colors hover:border-primary/50 hover:text-foreground"
+              >+ {c.nome}</button>
+            ))}
+          </div>
+        </div>
+
+        {canais.length === 0 ? (
+          <p className="text-[11px] leading-relaxed text-muted-foreground">
+            Sem divisão, o planejamento usa um CPL só para tudo — o que já funciona quando a verba
+            vai para um canal só. Acrescente os canais acima para dar um CPL a cada um.
+          </p>
+        ) : (
+          <>
+            <div className="space-y-2">
+              {canais.map(c => {
+                const linha = planoCanais.linhas.find(l => l.id === c.id);
+                const nome = CANAIS.find(x => x.id === c.id)?.nome ?? c.id;
+                return (
+                  <div key={c.id} className="grid grid-cols-[minmax(4.5rem,1fr)_auto_auto_1fr] items-center gap-2 rounded-lg border border-border bg-background/40 p-2">
+                    <span className="truncate text-xs font-bold text-foreground">{nome}</span>
+                    <label className="flex items-center gap-1">
+                      <input
+                        type="number" min={0} max={100} value={c.share}
+                        onChange={e => { const v = Number(e.target.value); setCanais(cs => cs.map(x => x.id === c.id ? { ...x, share: Number.isFinite(v) ? Math.max(0, Math.min(100, v)) : 0 } : x)); }}
+                        className="h-7 w-14 rounded-md border border-border bg-background px-1.5 text-center text-xs"
+                      />
+                      <span className="text-[10px] text-muted-foreground">% dos leads</span>
+                    </label>
+                    <label className="flex items-center gap-1">
+                      <span className="text-[10px] text-muted-foreground">CPL R$</span>
+                      <input
+                        type="number" min={0} step="0.01" value={c.cpl}
+                        onChange={e => { const v = Number(e.target.value); setCanais(cs => cs.map(x => x.id === c.id ? { ...x, cpl: Number.isFinite(v) ? Math.max(0, v) : 0 } : x)); }}
+                        className="h-7 w-20 rounded-md border border-border bg-background px-1.5 text-center text-xs"
+                      />
+                    </label>
+                    <div className="flex items-center justify-end gap-3 text-[11px]">
+                      <span className="text-muted-foreground">{Math.round(linha?.leads ?? 0).toLocaleString('pt-BR')} leads</span>
+                      <span className="font-bold text-primary">{fmtBRL(linha?.investimento ?? 0)}</span>
+                      {/* ⚠️ CAC sem venda é —, nunca R$ 0,00: zero afirmaria que
+                          o canal vendeu de graça. */}
+                      <span className="text-muted-foreground">CAC {linha?.cac === null || linha?.cac === undefined ? '—' : fmtBRL(linha.cac)}</span>
+                      <button
+                        type="button" title={`Tirar ${nome} do plano`}
+                        onClick={() => setCanais(cs => cs.filter(x => x.id !== c.id))}
+                        className="text-muted-foreground transition-colors hover:text-foreground"
+                      >×</button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* ⚠️ A soma NÃO é normalizada em silêncio: 90% deixa 10% dos leads
+                sem canal e o investimento sai visivelmente incompleto, em vez de
+                inflar os outros canais e fingir que a conta fecha. */}
+            <div className={cn('mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border p-2.5 text-[11px]',
+              planoCanais.completo ? 'border-primary/30 bg-primary/5' : 'border-[#FF6B35]/40 bg-[#FF6B35]/5')}>
+              <span className={planoCanais.completo ? 'font-bold text-primary' : 'font-bold text-[#FF6B35]'}>
+                Soma {planoCanais.somaShare.toLocaleString('pt-BR')}%
+              </span>
+              {!planoCanais.completo && (
+                <span className="text-[#FF6B35]">
+                  {planoCanais.leadsSemCanal > 0
+                    ? `${Math.round(planoCanais.leadsSemCanal).toLocaleString('pt-BR')} leads sem canal — o investimento abaixo está incompleto`
+                    : 'passou de 100% — os leads estão contados mais de uma vez'}
+                </span>
+              )}
+              <span className="ml-auto text-muted-foreground">
+                Investimento {fmtBRL(planoCanais.investimentoTotal)}
+                {planoCanais.cplGeral !== null && <> · CPL geral {fmtBRL(planoCanais.cplGeral)}</>}
+              </span>
+            </div>
+
+            {/* ⚠️ Dito em texto porque o modelo supõe isso e supor calado venderia
+                uma precisão que o dado não tem. */}
+            <p className="mt-2 text-[10px] leading-relaxed text-muted-foreground">
+              As vendas de cada canal saem proporcionais à fatia de leads — o plano supõe a mesma
+              taxa de conversão do funil para todos. Se um canal converte diferente na prática, o
+              CAC dele é otimista ou pessimista na mesma medida.
+            </p>
+          </>
+        )}
       </div>
 
       {/* Funnel + Summary side by side */}
