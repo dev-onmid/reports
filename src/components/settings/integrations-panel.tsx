@@ -2287,7 +2287,7 @@ function SpreadsheetImportPanel() {
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type IntegrationId = 'meta-ads' | 'google-ads' | 'google-my-business' | 'website' | 'spreadsheet' | 'leadlovers' | 'clickup' | 'sorrifacil';
+type IntegrationId = 'meta-ads' | 'google-ads' | 'google-my-business' | 'website' | 'spreadsheet' | 'google-sheets' | 'leadlovers' | 'clickup' | 'sorrifacil';
 
 type Integration = {
   id: IntegrationId;
@@ -2332,6 +2332,17 @@ const BASE_INTEGRATIONS: Integration[] = [
     description: 'Avaliações, buscas e desempenho do perfil da empresa.',
     category: 'Analytics',
     logo: <LogoGoogleMyBusiness size="lg" />,
+  },
+  {
+    // ⚠️ Não confundir com "Importação de planilhas" (id 'spreadsheet'), que
+    // SOBE um arquivo para o CRM. Este é o contrário: conecta a conta Google
+    // para o sistema ESCREVER o lead da landing page numa planilha — o que o
+    // cenário do Make fazia e quebrou em silêncio por um mês.
+    id: 'google-sheets',
+    name: 'Google Planilhas',
+    description: 'Escreve os leads das landing pages direto numa planilha sua.',
+    category: 'Automação',
+    logo: <LogoSheets size="lg" />,
   },
   {
     id: 'leadlovers',
@@ -2433,6 +2444,7 @@ export function IntegrationsPanel() {
   const metaConnected = !metaLoading && metaConns.length > 0;
   const googleAdsConnected = !googleLoading && googleConns.some((c) => c.accountType === 'google_ads');
   const gmbConnected = !googleLoading && googleConns.some((c) => c.accountType === 'gmb');
+  const sheetsConnected = !googleLoading && googleConns.some((c) => c.accountType === 'sheets');
 
   // Handle OAuth callback URL params
   useEffect(() => {
@@ -2442,7 +2454,10 @@ export function IntegrationsPanel() {
     const connType = params.get('type');
 
     if (connected) {
-      const label = connType === 'google_ads' ? 'Google Ads' : 'Google Meu Negócio';
+      const label = connType === 'google_ads' ? 'Google Ads'
+        : connType === 'ga4' ? 'Google Analytics'
+        : connType === 'sheets' ? 'Google Planilhas'
+        : 'Google Meu Negócio';
       setOauthBanner({ type: 'success', msg: `${label} conectado com sucesso!` });
       void reloadGoogle();
       window.history.replaceState({}, '', '/integracoes');
@@ -2468,7 +2483,7 @@ export function IntegrationsPanel() {
     }
   }
 
-  function openGoogleOAuth(type: 'gmb' | 'google_ads' | 'ga4') {
+  function openGoogleOAuth(type: 'gmb' | 'google_ads' | 'ga4' | 'sheets') {
     const popup = window.open(
       `/api/auth/google?type=${type}`,
       'google-oauth',
@@ -2480,7 +2495,7 @@ export function IntegrationsPanel() {
         window.removeEventListener('message', handleMessage);
         popup?.close();
         void reloadGoogle();
-        const label = event.data.accountType === 'gmb' ? 'Google Meu Negócio' : event.data.accountType === 'ga4' ? 'Google Analytics' : 'Google Ads';
+        const label = event.data.accountType === 'gmb' ? 'Google Meu Negócio' : event.data.accountType === 'ga4' ? 'Google Analytics' : event.data.accountType === 'sheets' ? 'Google Planilhas' : 'Google Ads';
         setOauthBanner({ type: 'success', msg: `${label} conectado com sucesso!` });
       } else if (event.data?.type === 'google_oauth_error') {
         window.removeEventListener('message', handleMessage);
@@ -2507,6 +2522,10 @@ export function IntegrationsPanel() {
     }
     if (id === 'website') {
       openGoogleOAuth('ga4');
+      return;
+    }
+    if (id === 'google-sheets') {
+      openGoogleOAuth('sheets');
       return;
     }
     if (id === 'leadlovers') {
@@ -2553,6 +2572,11 @@ export function IntegrationsPanel() {
         return { length: it.length, itens: it, rotulo: rot(it.length, 'conta conectada', 'contas conectadas'),
           vazio: 'Conecte o perfil da empresa no Google.' };
       }
+      case 'google-sheets': {
+        const it = g('sheets');
+        return { length: it.length, itens: it, rotulo: rot(it.length, 'conta conectada', 'contas conectadas'),
+          vazio: 'Conecte a conta dona das planilhas para espelhar os leads.' };
+      }
       case 'clickup':
         return { length: clickupInfo ? 1 : 0,
           itens: clickupInfo ? [{ id: 'cu', nome: clickupInfo.workspace_name ?? 'Workspace', sub: `${clickupInfo.linked ?? 0} listas sincronizadas` }] : [],
@@ -2586,6 +2610,7 @@ export function IntegrationsPanel() {
     (metaConnected ? 1 : 0) +
     (googleAdsConnected ? 1 : 0) +
     (gmbConnected ? 1 : 0) +
+    (sheetsConnected ? 1 : 0) +
     (clickupConnected ? 1 : 0);
 
   // ⚠️ O selo tem de concordar com a lista de contas do MESMO card: Website
@@ -2597,6 +2622,7 @@ export function IntegrationsPanel() {
     if (id === 'google-my-business') return gmbConnected;
     if (id === 'clickup') return clickupConnected;
     if (id === 'website') return googleConns.some((c) => c.accountType === 'ga4');
+    if (id === 'google-sheets') return sheetsConnected;
     if (id === 'leadlovers') return leadloversOn;
     if (id === 'sorrifacil') return !!sorrifacil;
     return false;

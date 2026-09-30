@@ -2,7 +2,10 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
-export type GoogleAccountType = 'gmb' | 'google_ads' | 'ga4';
+// ⚠️ 'sheets' entrou com o espelho de leads em planilha: o callback do OAuth
+// grava account_type='sheets' desde então, mas o tipo não sabia — o que fazia
+// o tsc tratar toda comparação com 'sheets' como código morto.
+export type GoogleAccountType = 'gmb' | 'google_ads' | 'ga4' | 'sheets';
 
 export type GoogleConnection = {
   id: string;
