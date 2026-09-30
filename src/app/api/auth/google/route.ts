@@ -25,6 +25,9 @@ const GA4_SCOPES = [
 
 const SHEETS_SCOPES = [
   'https://www.googleapis.com/auth/spreadsheets',
+  // Só METADADOS do Drive: o seletor precisa de nome e id para listar, nunca do
+  // conteúdo dos arquivos. `drive.readonly` daria acesso de leitura a tudo.
+  'https://www.googleapis.com/auth/drive.metadata.readonly',
   'https://www.googleapis.com/auth/userinfo.email',
   'https://www.googleapis.com/auth/userinfo.profile',
 ];

@@ -10,7 +10,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import { Check, Copy, Globe, Loader2, Mail, Plus, RefreshCw, Trash2, Table2 } from 'lucide-react';
+import { Check, Copy, Globe, Loader2, Mail, Plus, RefreshCw, Search, Trash2, Table2, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 type Origem = {
@@ -68,6 +68,16 @@ export default function LpOrigensCard({ clientId }: { clientId: string }) {
   // rascunho do campo de e-mails por origem: o input é livre e só vira lista no blur
   const [emails, setEmails] = useState<Record<string, string>>({});
   const [planilha, setPlanilha] = useState<Record<string, { id: string; aba: string }>>({});
+  // Seletor de planilha: qual origem está escolhendo, o que foi digitado e o
+  // que o Drive devolveu. Um de cada vez — dois abertos competiriam pelo foco.
+  const [seletor, setSeletor] = useState<string | null>(null);
+  const [buscaPl, setBuscaPl] = useState('');
+  const [achadas, setAchadas] = useState<Array<{ id: string; nome: string; dono: string | null }>>([]);
+  const [buscando, setBuscando] = useState(false);
+  const [erroPl, setErroPl] = useState<{ msg: string; reconectar?: boolean } | null>(null);
+  // Abas por planilha, para o campo da aba virar menu em vez de digitação.
+  const [abas, setAbas] = useState<Record<string, string[]>>({});
+  const [titulos, setTitulos] = useState<Record<string, string>>({});
   const [salvoEmails, setSalvoEmails] = useState<string | null>(null);
 
   const carregar = useCallback(async () => {
@@ -126,16 +136,81 @@ export default function LpOrigensCard({ clientId }: { clientId: string }) {
   }
 
   // Espelha o lead numa planilha do Google. Vazio = não espelha.
-  async function salvarPlanilha(o: Origem) {
-    const atual = planilha[o.id] ?? { id: '', aba: '' };
-    if (atual.id === (o.sheet_id ?? '') && atual.aba === (o.sheet_tab ?? '')) return;
+  /**
+   * Grava planilha e aba com valores EXPLÍCITOS.
+   *
+   * ⚠️ Recebe os valores em vez de ler do estado: escolher no menu e salvar no
+   * mesmo gesto lia o estado antes do React aplicar o setState, e gravava o
+   * valor anterior. Quem chama já sabe o que quer gravar.
+   */
+  async function gravarPlanilha(o: Origem, valores: { id: string; aba: string }) {
+    setPlanilha(m => ({ ...m, [o.id]: valores }));
     await fetch(`/api/clients/${clientId}/lp-origens`, {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ origemId: o.id, sheet_id: atual.id, sheet_tab: atual.aba }),
+      body: JSON.stringify({ origemId: o.id, sheet_id: valores.id, sheet_tab: valores.aba }),
     });
     setSalvoEmails(o.id);
     setTimeout(() => setSalvoEmails(null), 1500);
     void carregar();
+  }
+
+  /** Saída do campo digitado: só grava se mudou de verdade. */
+  async function salvarPlanilha(o: Origem) {
+    const atual = planilha[o.id] ?? { id: '', aba: '' };
+    if (atual.id === (o.sheet_id ?? '') && atual.aba === (o.sheet_tab ?? '')) return;
+    await gravarPlanilha(o, atual);
+  }
+
+  // Busca no Drive. Debounce curto porque é chamada externa por tecla digitada;
+  // sem ele, "romanza" dispararia sete vezes.
+  const buscarPlanilhas = useCallback(async (termo: string) => {
+    setBuscando(true); setErroPl(null);
+    try {
+      const r = await fetch(`/api/google-planilhas?q=${encodeURIComponent(termo)}`);
+      const d = await r.json();
+      if (!r.ok) { setAchadas([]); setErroPl({ msg: d?.erro ?? 'Não consegui listar as planilhas.', reconectar: !!d?.reconectar }); }
+      else { setAchadas(d.planilhas ?? []); }
+    } catch {
+      setAchadas([]); setErroPl({ msg: 'Não consegui falar com o Google.' });
+    }
+    setBuscando(false);
+  }, []);
+
+  useEffect(() => {
+    if (!seletor) return;
+    const t = setTimeout(() => void buscarPlanilhas(buscaPl), 350);
+    return () => clearTimeout(t);
+  }, [seletor, buscaPl, buscarPlanilhas]);
+
+  // As abas saem do próprio Sheets, então funcionam mesmo sem o escopo de Drive.
+  const carregarAbas = useCallback(async (sheetId: string) => {
+    if (!sheetId || abas[sheetId]) return;
+    try {
+      const r = await fetch(`/api/google-planilhas?sheetId=${encodeURIComponent(sheetId)}`);
+      const d = await r.json();
+      if (r.ok && Array.isArray(d.abas)) {
+        setAbas(m => ({ ...m, [sheetId]: d.abas }));
+        if (d.titulo) setTitulos(m => ({ ...m, [sheetId]: d.titulo }));
+      }
+    } catch { /* o campo continua aceitando digitar */ }
+  }, [abas]);
+
+  useEffect(() => {
+    for (const o of origens) if (o.sheet_id) void carregarAbas(o.sheet_id);
+  }, [origens, carregarAbas]);
+
+  /** Escolher no menu grava na hora — o gestor não deve caçar um botão salvar. */
+  async function escolherPlanilha(o: Origem, sheetId: string) {
+    setSeletor(null); setBuscaPl('');
+    await gravarPlanilha(o, { id: sheetId, aba: planilha[o.id]?.aba ?? '' });
+    void carregarAbas(sheetId);
+  }
+
+  /** Nome amigável da planilha escolhida, quando já sabemos (veio da busca ou do Sheets). */
+  function nomeDaPlanilha(o: Origem): string | null {
+    const id = planilha[o.id]?.id;
+    if (!id) return null;
+    return achadas.find(p => p.id === id)?.nome ?? titulos[id] ?? null;
   }
 
   async function remover(o: Origem) {
@@ -246,24 +321,110 @@ export default function LpOrigensCard({ clientId }: { clientId: string }) {
                 </span>
               )}
             </div>
-            <div className="mt-2 flex items-center gap-2">
+            <div className="relative mt-2 flex items-center gap-2">
               <Table2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-              <input
-                value={planilha[o.id]?.id ?? ''}
-                onChange={e => setPlanilha(m => ({ ...m, [o.id]: { ...(m[o.id] ?? { id: '', aba: '' }), id: e.target.value } }))}
-                onBlur={() => void salvarPlanilha(o)}
-                onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }}
-                placeholder="Cole o link da planilha (opcional)"
-                className="h-8 min-w-0 flex-[2] rounded-md border border-border bg-background px-2 text-xs"
-              />
-              <input
-                value={planilha[o.id]?.aba ?? ''}
-                onChange={e => setPlanilha(m => ({ ...m, [o.id]: { ...(m[o.id] ?? { id: '', aba: '' }), aba: e.target.value } }))}
-                onBlur={() => void salvarPlanilha(o)}
-                onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }}
-                placeholder="Aba"
-                className="h-8 min-w-0 flex-1 rounded-md border border-border bg-background px-2 text-xs"
-              />
+
+              {/* Gatilho: mostra a planilha escolhida ou convida a escolher. */}
+              <button
+                type="button"
+                onClick={() => { setSeletor(seletor === o.id ? null : o.id); setBuscaPl(''); setAchadas([]); setErroPl(null); }}
+                className="h-8 min-w-0 flex-[2] truncate rounded-md border border-border bg-background px-2 text-left text-xs hover:border-primary/50"
+              >
+                {planilha[o.id]?.id
+                  ? <span className="text-foreground">{nomeDaPlanilha(o) ?? planilha[o.id].id}</span>
+                  : <span className="text-muted-foreground">Escolher planilha (opcional)</span>}
+              </button>
+
+              {/* Aba vira menu quando sabemos quais existem; senão segue digitável. */}
+              {planilha[o.id]?.id && (abas[planilha[o.id].id]?.length ?? 0) > 0 ? (
+                <select
+                  value={planilha[o.id]?.aba ?? ''}
+                  onChange={e => void gravarPlanilha(o, { id: planilha[o.id]?.id ?? '', aba: e.target.value })}
+                  className="h-8 min-w-0 flex-1 rounded-md border border-border bg-background px-2 text-xs [color-scheme:dark]"
+                >
+                  <option value="">Primeira aba</option>
+                  {abas[planilha[o.id].id].map(a => <option key={a} value={a}>{a}</option>)}
+                </select>
+              ) : (
+                <input
+                  value={planilha[o.id]?.aba ?? ''}
+                  onChange={e => setPlanilha(m => ({ ...m, [o.id]: { ...(m[o.id] ?? { id: '', aba: '' }), aba: e.target.value } }))}
+                  onBlur={() => void salvarPlanilha(o)}
+                  onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+                  placeholder="Aba"
+                  className="h-8 min-w-0 flex-1 rounded-md border border-border bg-background px-2 text-xs"
+                />
+              )}
+
+              {planilha[o.id]?.id && (
+                <button
+                  type="button"
+                  title="Parar de espelhar nesta planilha"
+                  onClick={() => void gravarPlanilha(o, { id: '', aba: '' })}
+                  className="shrink-0 rounded-md border border-border p-1.5 text-muted-foreground hover:text-foreground"
+                ><X className="h-3 w-3" /></button>
+              )}
+
+              {/* Menu de busca. Backdrop fecha — o Popover do Base UI não devolve
+                  o foco ao campo em abertura por clique (lição do client-switcher). */}
+              {seletor === o.id && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setSeletor(null)} />
+                  <div className="absolute left-5 top-9 z-50 w-[22rem] max-w-[calc(100%-1.25rem)] rounded-lg border border-border bg-card p-2 shadow-xl">
+                    <div className="relative">
+                      <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                      <input
+                        autoFocus
+                        value={buscaPl}
+                        onChange={e => setBuscaPl(e.target.value)}
+                        placeholder="Digite o nome da planilha"
+                        className="h-8 w-full rounded-md border border-border bg-background pl-7 pr-2 text-xs"
+                      />
+                    </div>
+
+                    {erroPl && (
+                      <p className="mt-2 text-[11px] leading-relaxed text-[#FF6B35]">
+                        {erroPl.msg}
+                        {erroPl.reconectar && ' Reconecte em Configurações › Integrações › Google Planilhas.'}
+                      </p>
+                    )}
+
+                    <div className="mt-2 max-h-56 space-y-0.5 overflow-y-auto">
+                      {buscando && <p className="px-1 py-2 text-[11px] text-muted-foreground">Procurando…</p>}
+                      {!buscando && !erroPl && achadas.length === 0 && (
+                        <p className="px-1 py-2 text-[11px] text-muted-foreground">
+                          {buscaPl ? 'Nenhuma planilha com esse nome.' : 'Digite para procurar.'}
+                        </p>
+                      )}
+                      {achadas.map(pl => (
+                        <button
+                          key={pl.id}
+                          type="button"
+                          onClick={() => void escolherPlanilha(o, pl.id)}
+                          className="block w-full truncate rounded-md px-2 py-1.5 text-left text-xs hover:bg-muted/40"
+                        >
+                          {pl.nome}
+                          {pl.dono && <span className="ml-1 text-[10px] text-muted-foreground">· {pl.dono}</span>}
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* ⚠️ Escape: planilha compartilhada de fora do Drive da conta
+                        pode não aparecer na busca. Menu que não tem a opção vira
+                        parede — o link colado continua valendo. */}
+                    <div className="mt-2 border-t border-border pt-2">
+                      <input
+                        value={planilha[o.id]?.id ?? ''}
+                        onChange={e => setPlanilha(m => ({ ...m, [o.id]: { ...(m[o.id] ?? { id: '', aba: '' }), id: e.target.value } }))}
+                        onBlur={() => void salvarPlanilha(o)}
+                        onKeyDown={e => { if (e.key === 'Enter') { e.currentTarget.blur(); setSeletor(null); } }}
+                        placeholder="ou cole o link da planilha"
+                        className="h-7 w-full rounded-md border border-border bg-background px-2 text-[11px]"
+                      />
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         ))}
