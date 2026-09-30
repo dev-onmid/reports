@@ -4666,10 +4666,14 @@ function StatusCplPill({ status, titulo }: { status: StatusCpl; titulo?: string 
   );
 }
 
+type ChaveCanal = 'investment' | 'impressions' | 'clicks' | 'ctr' | 'cpc' | 'cpm' | 'leads' | 'cpl';
 type LinhaCanal = {
   channel: string; logo: ReactNode;
   investment: string; impressions: string; clicks: string; ctr: string; cpc: string; cpm: string;
   leads: string; cpl: string; cplNum: number; status: StatusCpl;
+  /** Variação % vs período anterior por métrica (null = sem base). Trouxe para cá o
+   *  comparativo dos cards "Investimento total" e "CPL médio", que saíram (30/09). */
+  variacao?: Partial<Record<ChaveCanal, number | null>>;
 };
 
 /** Cartão de status do CPL (mock): ícone em círculo + rótulo + explicação. */
@@ -4702,33 +4706,45 @@ function CartaoStatusCpl({ status, titulo }: { status: StatusCpl; titulo?: strin
  * nas colunas; cabeçalho em faixa, rótulos em caixa normal, CPL colorido pelo status e
  * a última linha com cartões de status do CPL contra a meta do planejamento.
  */
-function ChannelSummaryTable({ rows, total, metaCpl }: {
+function ChannelSummaryTable({ rows, total, metaCpl, comparacao }: {
   rows: LinhaCanal[];
   total: LinhaCanal;
   metaCpl: number;
+  /** "vs 1–29/ago" — some sem período anterior. */
+  comparacao?: string;
 }) {
   // ⚠️ A linha "Conversão" saiu: dividia leads do Meta pelo ALCANCE e
   // conversões do Google pelos CLIQUES — duas taxas sem relação lado a lado.
   const colunas = [...rows, total];
-  const metricas: Array<{ rotulo: string; valor: (l: LinhaCanal) => ReactNode }> = [
-    { rotulo: 'Investimento', valor: l => l.investment },
-    { rotulo: 'Impressões', valor: l => l.impressions },
-    { rotulo: 'Cliques', valor: l => l.clicks },
-    { rotulo: 'CTR', valor: l => l.ctr },
-    { rotulo: 'CPC', valor: l => l.cpc },
+  // `sentido`: +1 subir é bom, -1 subir é ruim (custo), 0 sem direção (investimento).
+  const metricas: Array<{ rotulo: string; chave: ChaveCanal; sentido: 1 | -1 | 0; valor: (l: LinhaCanal) => ReactNode }> = [
+    { rotulo: 'Investimento', chave: 'investment', sentido: 0, valor: l => l.investment },
+    { rotulo: 'Impressões', chave: 'impressions', sentido: 1, valor: l => l.impressions },
+    { rotulo: 'Cliques', chave: 'clicks', sentido: 1, valor: l => l.clicks },
+    { rotulo: 'CTR', chave: 'ctr', sentido: 1, valor: l => l.ctr },
+    { rotulo: 'CPC', chave: 'cpc', sentido: -1, valor: l => l.cpc },
     // CPM logo acima de Leads (pedido do Matheus, 2026-09-24): CPL subindo com CPM
     // estável é criativo; com CPM subindo é leilão.
-    { rotulo: 'CPM', valor: l => l.cpm },
-    { rotulo: 'Leads', valor: l => l.leads },
-    { rotulo: 'CPL', valor: l => <span className={cn('font-bold', TEXTO_STATUS_CPL[l.status])}>{l.cpl}</span> },
+    { rotulo: 'CPM', chave: 'cpm', sentido: -1, valor: l => l.cpm },
+    { rotulo: 'Leads', chave: 'leads', sentido: 1, valor: l => l.leads },
+    { rotulo: 'CPL', chave: 'cpl', sentido: -1, valor: l => <span className={cn('font-bold', TEXTO_STATUS_CPL[l.status])}>{l.cpl}</span> },
   ];
+  const Delta = ({ v, sentido }: { v: number | null | undefined; sentido: 1 | -1 | 0 }) => {
+    if (v === null || v === undefined || !Number.isFinite(v)) return null;
+    const bom = sentido === 0 ? null : v * sentido >= 0;
+    return (
+      <span className={cn('ml-1.5 text-[10px] font-bold', bom === null ? 'text-[#7c868c]' : bom ? 'text-[#55f52f]' : 'text-[#ff6b6b]')}>
+        {v > 0 ? '+' : ''}{v.toFixed(1).replace('.', ',')}%
+      </span>
+    );
+  };
   return (
     <PremiumPanel className="flex flex-col p-5">
       <div className="mb-5 flex items-center gap-3">
         <IconeBadge icone={BarChart3} />
         <div className="min-w-0">
           <h3 className={T.cardTitulo}>Resumo por canal</h3>
-          <p className={cn('mt-1', T.cardSub)}>Meta Ads, Google Ads e o total no período.</p>
+          <p className={cn('mt-1', T.cardSub)}>Meta Ads, Google Ads e o total no período{comparacao ? ` · variação ${comparacao}` : ''}.</p>
         </div>
       </div>
       <div className="flex-1 overflow-x-auto">
@@ -4748,7 +4764,10 @@ function ChannelSummaryTable({ rows, total, metaCpl }: {
               <tr key={m.rotulo}>
                 <td className="py-2.5 pl-4 pr-2 font-semibold text-[#dce4e8]">{m.rotulo}</td>
                 {colunas.map(c => (
-                  <td key={c.channel} className="whitespace-nowrap py-2.5 pl-3 pr-4 text-right text-[#f4f7f8]">{m.valor(c)}</td>
+                  <td key={c.channel} className="whitespace-nowrap py-2.5 pl-3 pr-4 text-right text-[#f4f7f8]">
+                    {m.valor(c)}
+                    <Delta v={c.variacao?.[m.chave]} sentido={m.sentido} />
+                  </td>
                 ))}
               </tr>
             ))}
@@ -4959,6 +4978,11 @@ function TabelaFunilCanal({ linhas, investimento, semReceita = false }: {
   const moeda = (v: number | null) => (v !== null && v > 0 ? premiumValue(v, 'currency') : '—');
   const razao = (inv: number | null, den: number) => (inv !== null && inv > 0 && den > 0 ? premiumValue(inv / den, 'currency') : '—');
   const pct = (num: number, den: number) => (den > 0 ? premiumValue((num / den) * 100, 'percent') : '—');
+  // Participação do canal no total — o que os donuts de Leads/Faturamento por
+  // canal mostravam; eles saíram quando esta tabela está na tela (30/09).
+  const parte = (v: number, total: number) => (v > 0 && total > 0
+    ? <span className="ml-1 text-[10px] font-semibold text-[#7c868c]">{Math.round((v / total) * 100)}%</span>
+    : null);
 
   return (
     <PremiumPanel className="p-5">
@@ -4994,7 +5018,7 @@ function TabelaFunilCanal({ linhas, investimento, semReceita = false }: {
                       <span className={cn('font-bold', l.semCanal ? 'text-[#9aa4aa]' : temVenda ? 'text-[#6cff2f]' : 'text-[#f4f7f8]')}>{l.canal}</span>
                     </td>
                     <CelFunil forte>{moeda(inv)}</CelFunil>
-                    <CelFunil forte>{n(l.leads)}</CelFunil>
+                    <CelFunil forte>{n(l.leads)}{parte(l.leads, soma.leads)}</CelFunil>
                     <CelFunil>{n(l.engajados)}</CelFunil>
                     <CelFunil>{n(l.agendamentos)}</CelFunil>
                     <CelFunil>{n(l.comparecimentos)}</CelFunil>
@@ -5002,7 +5026,7 @@ function TabelaFunilCanal({ linhas, investimento, semReceita = false }: {
                     <CelFunil>{pct(l.fechamentos, l.leads)}</CelFunil>
                     <CelFunil>{razao(inv, l.leads)}</CelFunil>
                     <CelFunil forte>{razao(inv, l.fechamentos)}</CelFunil>
-                    {!semReceita && <CelFunil forte className={cn(temVenda && 'text-[#6cff2f]')}>{moeda(l.receita)}</CelFunil>}
+                    {!semReceita && <CelFunil forte className={cn(temVenda && 'text-[#6cff2f]')}>{moeda(l.receita)}{parte(l.receita, soma.receita)}</CelFunil>}
                   </tr>
                 );
               })}
@@ -6647,13 +6671,30 @@ export default function GeneralDashboard() {
         { title: 'Resultados', value: totalLeads > 0 ? premiumValue(totalLeads) : '—', change: pctChange(totalLeads, prevTotalLeads), icon: Zap, dica: 'Leads e conversas iniciadas, como as plataformas reportam' },
       ]
     : comReceita
-      ? quickMetricsBase
+      // "Investimento Total" e "CPL Médio" repetiam a coluna Total do Resumo por
+      // canal, que agora traz o comparativo com o período anterior (30/09).
+      ? quickMetricsBase.filter(m => m.title !== 'Investimento Total' && m.title !== 'CPL Médio')
       // "Leads" só fala de lead (pedido do Matheus, 29/09): sai o que é de venda
       // e também Agendamentos e Conversão do funil — ficam investimento e CPL.
       : quickMetricsBase.filter(m => !SO_COM_RECEITA.has(m.title) && !SO_COM_FUNIL_DE_VENDA.has(m.title));
-  const linhaCanal = (channel: string, logo: ReactNode, spend: number, impr: number, clicks: number, leads: number): LinhaCanal => {
+  const linhaCanal = (
+    channel: string, logo: ReactNode, spend: number, impr: number, clicks: number, leads: number,
+    prev?: { spend: number; impr: number; clicks: number; leads: number },
+  ): LinhaCanal => {
     const cpl = leads > 0 ? spend / leads : 0;
+    const razao = (a: number, b: number) => (b > 0 ? a / b : 0);
+    const variacao: LinhaCanal['variacao'] = prev ? {
+      investment: pctChange(spend, prev.spend),
+      impressions: pctChange(impr, prev.impr),
+      clicks: pctChange(clicks, prev.clicks),
+      ctr: impr > 0 && clicks > 0 ? pctChange(razao(clicks, impr), razao(prev.clicks, prev.impr)) : null,
+      cpc: clicks > 0 && spend > 0 ? pctChange(razao(spend, clicks), razao(prev.spend, prev.clicks)) : null,
+      cpm: impr > 0 && spend > 0 ? pctChange(razao(spend, impr), razao(prev.spend, prev.impr)) : null,
+      leads: pctChange(leads, prev.leads),
+      cpl: cpl > 0 ? pctChange(cpl, razao(prev.spend, prev.leads)) : null,
+    } : undefined;
     return {
+      variacao,
       channel, logo,
       investment: premiumValue(spend, 'currency'),
       impressions: impr > 0 ? premiumValue(impr) : '—',
@@ -6668,10 +6709,13 @@ export default function GeneralDashboard() {
     };
   };
   const channelRows: LinhaCanal[] = [
-    linhaCanal('Meta Ads', <MetaAdsMark className="h-4 w-4 text-[#168BFF]" />, metaSpend, metaImpressions, metaClicks, metaLeads),
-    linhaCanal('Google Ads', <GoogleAdsMark className="h-4 w-4" />, googleCost, googleImpressions, googleClicks, googleConv),
+    linhaCanal('Meta Ads', <MetaAdsMark className="h-4 w-4 text-[#168BFF]" />, metaSpend, metaImpressions, metaClicks, metaLeads,
+      { spend: prevMetaSpend, impr: prevMetaImpressions, clicks: prevMetaClicks, leads: prevMetaLeads }),
+    linhaCanal('Google Ads', <GoogleAdsMark className="h-4 w-4" />, googleCost, googleImpressions, googleClicks, googleConv,
+      { spend: prevGoogleCost, impr: prevGoogleImpressions, clicks: prevGoogleClicks, leads: prevGoogleConv }),
   ];
-  const channelTotal = linhaCanal('Total', null, totalSpend, metaImpressions + googleImpressions, metaClicks + googleClicks, totalLeads);
+  const channelTotal = linhaCanal('Total', null, totalSpend, metaImpressions + googleImpressions, metaClicks + googleClicks, totalLeads,
+    { spend: prevTotalSpend, impr: prevMetaImpressions + prevGoogleImpressions, clicks: prevMetaClicks + prevGoogleClicks, leads: prevTotalLeads });
 
   // ── Ritmo do mês ──────────────────────────────────────────────────────────
   // No mês corrente o eixo vai até o FIM do mês (dias futuros = null) para a
@@ -6886,6 +6930,10 @@ export default function GeneralDashboard() {
   // Tipo "Leads": o gráfico de Leads por canal sobe para a linha do Investimento
   // e do CPL (pedido do Matheus, 29/09) — e sai do bloco de canais lá embaixo.
   const leadsNaLinhaKpi = !comReceita && comFunil && !modoFood;
+  // "Funil por canal" é a caixa ÚNICA de canais quando aparece (30/09): leads,
+  // vendas, CPL, CAC, faturamento e a participação de cada canal. Com ela na
+  // tela saem o seletor por canal do Funil de performance e os dois donuts.
+  const mostraFunilCanal = comFunil && comReceita && !modoFood && !deliverySoloId && !!funilCanal && funilCanal.canais.length > 0;
   const blocoCanais = (
     <>
             {/* ── Faturamento por origem ──
@@ -7516,9 +7564,9 @@ export default function GeneralDashboard() {
                       {deliverySoloId ? (
                         <DeliveryResumoCard clientId={deliverySoloId} from={deliveryRange.from} to={deliveryRange.to} />
                       ) : (
-                        <SimpleFunnel steps={funnelStepsNew} totalRate={funnelTaxaFinal > 0 ? premiumValue(funnelTaxaFinal, 'percent') : '—'} fonteLabel={usaStageFunil ? 'fonte: CRM' : fonteTopoLabel} onStageClick={setFunilStageIdx} todosClicaveis={usaStageFunil} semiDegraus={funnelSemiDegraus} porCanal={funilPorCanal} rastreadosForaDoCrm={rastreadosForaDoCrm} onVerForaDoCrm={() => setVerForaDoCrm(true)} />
+                        <SimpleFunnel steps={funnelStepsNew} totalRate={funnelTaxaFinal > 0 ? premiumValue(funnelTaxaFinal, 'percent') : '—'} fonteLabel={usaStageFunil ? 'fonte: CRM' : fonteTopoLabel} onStageClick={setFunilStageIdx} todosClicaveis={usaStageFunil} semiDegraus={funnelSemiDegraus} porCanal={mostraFunilCanal ? undefined : funilPorCanal} rastreadosForaDoCrm={rastreadosForaDoCrm} onVerForaDoCrm={() => setVerForaDoCrm(true)} />
                       )}
-                      <ChannelSummaryTable rows={channelRows} total={channelTotal} metaCpl={cplMetaSel} />
+                      <ChannelSummaryTable rows={channelRows} total={channelTotal} metaCpl={cplMetaSel} comparacao={rotuloComp} />
                     </div>
                     )}
                     {leadsNaLinhaKpi ? (
@@ -7534,7 +7582,7 @@ export default function GeneralDashboard() {
                     )}
                     {/* Branding: o Resumo por canal vem DEPOIS dos KPIs de tráfego (pedido do
                         Matheus, 29/09), sem meta de CPL. */}
-                    {modoBranding && <ChannelSummaryTable rows={channelRows} total={channelTotal} metaCpl={0} />}
+                    {modoBranding && <ChannelSummaryTable rows={channelRows} total={channelTotal} metaCpl={0} comparacao={rotuloComp} />}
                     {(ritmo || temGraficoCpl) && (
                       <div className="grid gap-4 xl:grid-cols-2">
                         {ritmo && (
@@ -7562,10 +7610,10 @@ export default function GeneralDashboard() {
                     )}
                     {/* A "funil por canal" da planilha: só quando há lead no CRM
                         do período — sem CRM, a tabela seria toda "—". */}
-                    {comFunil && comReceita && !modoFood && !deliverySoloId && funilCanal && funilCanal.canais.length > 0 && (
+                    {mostraFunilCanal && (
                       <TabelaFunilCanal linhas={funilCanal.canais} investimento={{ 'Meta Ads': metaSpend, 'Google Ads': googleCost }} semReceita={!comReceita} />
                     )}
-                    {comFunil && blocoCanais}
+                    {comFunil && !mostraFunilCanal && blocoCanais}
                   </>
 
                 {/* Social logo ACIMA de Mídia paga (pedido do Matheus, 24/09 — segunda

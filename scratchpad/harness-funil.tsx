@@ -232,11 +232,17 @@ function StatusCplPill({ status, titulo }: { status: StatusCpl; titulo?: string 
   );
 }
 
+type ChaveCanal = 'investment' | 'impressions' | 'clicks' | 'ctr' | 'cpc' | 'cpm' | 'leads' | 'cpl';
 type LinhaCanal = {
   channel: string; logo: ReactNode;
   investment: string; impressions: string; clicks: string; ctr: string; cpc: string; cpm: string;
   leads: string; cpl: string; cplNum: number; status: StatusCpl;
+  /** Variação % vs período anterior por métrica (null = sem base). Trouxe para cá o
+   *  comparativo dos cards "Investimento total" e "CPL médio", que saíram (30/09). */
+  variacao?: Partial<Record<ChaveCanal, number | null>>;
 };
+
+
 
 /** Cartão de status do CPL (mock): ícone em círculo + rótulo + explicação. */
 const STATUS_CPL_CARTAO: Record<StatusCpl, { icone: React.ElementType; rotulo: string; sub: string; cor: string }> = {
@@ -268,33 +274,45 @@ function CartaoStatusCpl({ status, titulo }: { status: StatusCpl; titulo?: strin
  * nas colunas; cabeçalho em faixa, rótulos em caixa normal, CPL colorido pelo status e
  * a última linha com cartões de status do CPL contra a meta do planejamento.
  */
-function ChannelSummaryTable({ rows, total, metaCpl }: {
+function ChannelSummaryTable({ rows, total, metaCpl, comparacao }: {
   rows: LinhaCanal[];
   total: LinhaCanal;
   metaCpl: number;
+  /** "vs 1–29/ago" — some sem período anterior. */
+  comparacao?: string;
 }) {
   // ⚠️ A linha "Conversão" saiu: dividia leads do Meta pelo ALCANCE e
   // conversões do Google pelos CLIQUES — duas taxas sem relação lado a lado.
   const colunas = [...rows, total];
-  const metricas: Array<{ rotulo: string; valor: (l: LinhaCanal) => ReactNode }> = [
-    { rotulo: 'Investimento', valor: l => l.investment },
-    { rotulo: 'Impressões', valor: l => l.impressions },
-    { rotulo: 'Cliques', valor: l => l.clicks },
-    { rotulo: 'CTR', valor: l => l.ctr },
-    { rotulo: 'CPC', valor: l => l.cpc },
+  // `sentido`: +1 subir é bom, -1 subir é ruim (custo), 0 sem direção (investimento).
+  const metricas: Array<{ rotulo: string; chave: ChaveCanal; sentido: 1 | -1 | 0; valor: (l: LinhaCanal) => ReactNode }> = [
+    { rotulo: 'Investimento', chave: 'investment', sentido: 0, valor: l => l.investment },
+    { rotulo: 'Impressões', chave: 'impressions', sentido: 1, valor: l => l.impressions },
+    { rotulo: 'Cliques', chave: 'clicks', sentido: 1, valor: l => l.clicks },
+    { rotulo: 'CTR', chave: 'ctr', sentido: 1, valor: l => l.ctr },
+    { rotulo: 'CPC', chave: 'cpc', sentido: -1, valor: l => l.cpc },
     // CPM logo acima de Leads (pedido do Matheus, 2026-09-24): CPL subindo com CPM
     // estável é criativo; com CPM subindo é leilão.
-    { rotulo: 'CPM', valor: l => l.cpm },
-    { rotulo: 'Leads', valor: l => l.leads },
-    { rotulo: 'CPL', valor: l => <span className={cn('font-bold', TEXTO_STATUS_CPL[l.status])}>{l.cpl}</span> },
+    { rotulo: 'CPM', chave: 'cpm', sentido: -1, valor: l => l.cpm },
+    { rotulo: 'Leads', chave: 'leads', sentido: 1, valor: l => l.leads },
+    { rotulo: 'CPL', chave: 'cpl', sentido: -1, valor: l => <span className={cn('font-bold', TEXTO_STATUS_CPL[l.status])}>{l.cpl}</span> },
   ];
+  const Delta = ({ v, sentido }: { v: number | null | undefined; sentido: 1 | -1 | 0 }) => {
+    if (v === null || v === undefined || !Number.isFinite(v)) return null;
+    const bom = sentido === 0 ? null : v * sentido >= 0;
+    return (
+      <span className={cn('ml-1.5 text-[10px] font-bold', bom === null ? 'text-[#7c868c]' : bom ? 'text-[#55f52f]' : 'text-[#ff6b6b]')}>
+        {v > 0 ? '+' : ''}{v.toFixed(1).replace('.', ',')}%
+      </span>
+    );
+  };
   return (
     <PremiumPanel className="flex flex-col p-5">
       <div className="mb-5 flex items-center gap-3">
         <IconeBadge icone={BarChart3} />
         <div className="min-w-0">
           <h3 className={T.cardTitulo}>Resumo por canal</h3>
-          <p className={cn('mt-1', T.cardSub)}>Meta Ads, Google Ads e o total no período.</p>
+          <p className={cn('mt-1', T.cardSub)}>Meta Ads, Google Ads e o total no período{comparacao ? ` · variação ${comparacao}` : ''}.</p>
         </div>
       </div>
       <div className="flex-1 overflow-x-auto">
@@ -314,7 +332,10 @@ function ChannelSummaryTable({ rows, total, metaCpl }: {
               <tr key={m.rotulo}>
                 <td className="py-2.5 pl-4 pr-2 font-semibold text-[#dce4e8]">{m.rotulo}</td>
                 {colunas.map(c => (
-                  <td key={c.channel} className="whitespace-nowrap py-2.5 pl-3 pr-4 text-right text-[#f4f7f8]">{m.valor(c)}</td>
+                  <td key={c.channel} className="whitespace-nowrap py-2.5 pl-3 pr-4 text-right text-[#f4f7f8]">
+                    {m.valor(c)}
+                    <Delta v={c.variacao?.[m.chave]} sentido={m.sentido} />
+                  </td>
                 ))}
               </tr>
             ))}
@@ -339,19 +360,6 @@ function ChannelSummaryTable({ rows, total, metaCpl }: {
   );
 }
 
-function TituloSecao({ titulo, sub, direita }: { titulo: string; sub?: string; direita?: ReactNode }) {
-  return (
-    <div className="mt-10 flex flex-wrap items-center gap-x-4 gap-y-2">
-      <span className="h-8 w-1.5 rounded-full bg-[#6cff2f]" />
-      <h2 className={T.secao}>{titulo}</h2>
-      {sub && <span className={T.secaoSub}>{sub}</span>}
-      <span className="h-px min-w-[40px] flex-1 bg-white/[0.08]" />
-      {direita}
-    </div>
-  );
-}
-const Meta = () => <span style={{color:'#168BFF',fontWeight:900}}>∞</span>;
-const G = () => <span style={{color:'#4285F4',fontWeight:900}}>G</span>;
 const steps = [
   { label: 'Leads', actual: 168, planned: 0, color: '#7dd3fc', detalhes: [{ texto: '38 sem resposta', tom: 'neutro' as const }] },
   { label: 'Engajados', actual: 70, planned: 0, color: '#0ea5e9' },
@@ -364,17 +372,16 @@ const semis: SemiDegrau[] = [
   { apos: 2, rotulo: 'Não compareceram', valor: 0, tom: 'ruim' }, { apos: 3, rotulo: 'Faltam comparecer', valor: 0, tom: 'bom' },
 ];
 const porCanal = [{ canal: 'Google', valores: [80, 40, 38, 9, 9] }, { canal: 'Instagram', valores: [60, 22, 21, 4, 4] }];
-const linha = (channel: string, logo: ReactNode, inv: string, imp: string, cli: string, ctr: string, cpc: string, cpm: string, leads: string, cpl: string, cplNum: number, status: StatusCpl): LinhaCanal => ({ channel, logo, investment: inv, impressions: imp, clicks: cli, ctr, cpc, cpm, leads, cpl, cplNum, status });
+const linha = (channel: string, logo: ReactNode, inv: string, imp: string, cli: string, ctr: string, cpc: string, cpm: string, leads: string, cpl: string, cplNum: number, status: StatusCpl): LinhaCanal => ({ channel, logo, investment: inv, impressions: imp, clicks: cli, ctr, cpc, cpm, leads, cpl, cplNum, status,
+  variacao: { investment: 12.4, impressions: -8.1, clicks: 5.3, ctr: 14.6, cpc: -9.9, cpm: 21.2, leads: 18.4, cpl: -5.1 } });
 function App() {
   return (
     <div style={{ padding: 24, background: '#05090B' }} className="flex flex-col gap-4">
-      <TituloSecao titulo="Mídia paga" sub="Meta Ads e Google Ads" />
-      <GrupoTitulo titulo="Campanhas na página" sub="o que o GA4 viu de cada campanha e palavra-chave" />
       <div className="grid gap-4 xl:grid-cols-[1.08fr_0.92fr]">
         <SimpleFunnel steps={steps} totalRate="8,33%" fonteLabel="fonte: CRM" onStageClick={() => {}} todosClicaveis semiDegraus={semis} porCanal={porCanal} />
-        <ChannelSummaryTable metaCpl={7} rows={[
-          linha('Meta Ads', <Meta />, 'R$ 1.212,01', '82.971', '2.236', '2,69%', 'R$ 0,54', 'R$ 14,61', '120', 'R$ 10,10', 10.1, 'atencao'),
-          linha('Google Ads', <G />, 'R$ 818,78', '3.825', '493', '12,89%', 'R$ 1,66', 'R$ 214,06', '16', 'R$ 51,17', 51.17, 'acima'),
+        <ChannelSummaryTable metaCpl={7} comparacao="vs 1–29/ago" rows={[
+          linha('Meta Ads', <span>M</span>, 'R$ 1.212,01', '82.971', '2.236', '2,69%', 'R$ 0,54', 'R$ 14,61', '120', 'R$ 10,10', 10.1, 'atencao'),
+          linha('Google Ads', <span>G</span>, 'R$ 818,78', '3.825', '493', '12,89%', 'R$ 1,66', 'R$ 214,06', '16', 'R$ 51,17', 51.17, 'acima'),
         ]} total={linha('Total', null, 'R$ 2.030,79', '86.796', '2.729', '3,14%', 'R$ 0,74', 'R$ 23,40', '136', 'R$ 14,93', 14.93, 'acima')} />
       </div>
     </div>
