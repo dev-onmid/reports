@@ -2,15 +2,18 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { AtSign, BarChart3, Clapperboard } from 'lucide-react';
+import { AtSign, BarChart3, Clapperboard, LayoutGrid } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 // A Biblioteca Meta (baixar criativos) NÃO é aba daqui — mora no grupo
 // "Ferramentas" da sidebar, em /ferramentas/biblioteca-meta.
+// "Criativos" ranqueia pelo resultado do CRM; "Anúncios" é a galeria do que
+// rodou no Meta em todas as contas (capa, gasto, prévia, alerta de cidade).
 const TABS = [
   { label: 'Radar', href: '/resultados', icon: BarChart3 },
   { label: 'Redes Sociais', href: '/resultados/redes-sociais', icon: AtSign },
   { label: 'Criativos', href: '/resultados/criativos', icon: Clapperboard },
+  { label: 'Anúncios', href: '/resultados/anuncios', icon: LayoutGrid },
 ];
 
 // Tab-nav do módulo Radar (/resultados e subrotas). A subrota herda a flag
