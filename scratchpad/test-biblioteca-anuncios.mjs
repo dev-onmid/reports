@@ -20,6 +20,9 @@ eq(cidadesCitadas('A vitória de Mauro Ribeiro no Tour de France', CIDADES_BASE,
 eq(cidadesCitadas('Canela, Gramado e Bauru na promoção', CIDADES_BASE, {textoLivre:true}), [], 'texto livre: palavras comuns não são cidade');
 eq(cidadesCitadas('[FORMS] [VITÓRIA] - 01/09'), ['Vitória'], 'nome de campanha (não é texto livre): Vitória conta');
 eq(cidadesCitadas('Aberta para novas unidades em Joinville e Bauru', CIDADES_BASE, {textoLivre:true}), ['Joinville'], 'texto livre: só a não-ambígua');
+eq(cidadesCitadas('Está procurando uma casa em Apucarana? Fale com a Atibaia Imóveis', CIDADES_BASE, {textoLivre:true, ignorar:['Atibaia Imóveis']}), ['Apucarana'], 'nome do cliente com cidade dentro é ignorado');
+eq(cidadesCitadas('Mudando para Atibaia? A ATIBAIA IMOVEIS ajuda', CIDADES_BASE, {textoLivre:true, ignorar:['Atibaia Imóveis']}), ['Atibaia'], 'a cidade citada FORA da marca continua contando');
+eq(cidadesCitadas('Panino77 Curitiba abre em Londrina', CIDADES_BASE, {textoLivre:true, ignorar:['Panino77 Curitiba']}), ['Londrina'], 'marca removida, cidade real fica');
 
 // --- alertaDeCidade
 eq(alertaDeCidade(['Joinville'], ['Curitiba']), 'cidade', 'vídeo de Curitiba em campanha de Joinville');

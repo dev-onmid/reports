@@ -116,14 +116,20 @@ function escapeRegex(s: string): string {
  * sem caixa, e resolve o nome MAIS LONGO primeiro: "São José do Rio Preto" no
  * texto não pode virar também "São José". Nomes com menos de 4 letras ficam
  * fora (falso positivo garantido). `textoLivre`: é legenda/título de anúncio,
- * então nomes ambíguos (CIDADES_AMBIGUAS) não contam.
+ * então nomes ambíguos (CIDADES_AMBIGUAS) não contam. `ignorar`: trechos
+ * apagados antes da busca — o NOME DO CLIENTE, porque marca com nome de cidade
+ * ("Atibaia Imóveis", que fica em Apucarana) não é o anúncio citando a cidade.
  */
 export function cidadesCitadas(
   texto: string,
   catalogo: readonly string[] = CIDADES_BASE,
-  opts: { textoLivre?: boolean } = {},
+  opts: { textoLivre?: boolean; ignorar?: readonly string[] } = {},
 ): string[] {
   let t = ' ' + normalizarTexto(texto).replace(/\s+/g, ' ') + ' ';
+  for (const frase of opts.ignorar ?? []) {
+    const n = normalizarTexto(frase).replace(/\s+/g, ' ').trim();
+    if (n.length >= 4) t = t.split(n).join(' ');
+  }
   const ordenado = [...new Set(catalogo.filter(c => c && c.trim().length >= 4))]
     .filter(c => !opts.textoLivre || !CIDADES_AMBIGUAS.has(normalizarTexto(c).replace(/\s+/g, ' ')))
     .sort((a, b) => b.length - a.length);
