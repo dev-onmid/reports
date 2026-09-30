@@ -226,7 +226,7 @@ export async function coletarAnunciosDaConta(
       ...geo.nomes,
       ...cidadesCitadas(`${ins.campaign_name ?? ''} ${ins.adset_name ?? ''}`, catalogo),
     ])];
-    const citadas = cidadesCitadas(`${d.name ?? ins.ad_name ?? ''} ${titulo} ${corpo} ${cr.name ?? ''}`, catalogo);
+    const citadas = cidadesCitadas(`${d.name ?? ins.ad_name ?? ''} ${titulo} ${corpo} ${cr.name ?? ''}`, catalogo, { textoLivre: true });
     // Pin cuja cidade não se resolveu: alvo indeterminável, alerta fica mudo.
     const alvoIndefinido = geo.temPin && geo.nomes.length === 0;
 

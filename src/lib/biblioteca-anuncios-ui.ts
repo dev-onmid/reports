@@ -77,6 +77,17 @@ export const CIDADES_BASE: string[] = [
   'Manaus', 'Belém', 'Porto Velho', 'Vitória',
 ];
 
+// Cidades cujo nome também é palavra comum. No TEXTO LIVRE do anúncio não
+// contam como cidade ("vitória de Mauro Ribeiro" não é Vitória/ES, "canela" é
+// tempero, "bauru" é sanduíche) — medido em produção: era o único falso
+// positivo forte da carteira. Como ALVO continuam valendo, porque o alvo vem
+// da segmentação geográfica (nome vindo da Meta) ou do nome da campanha.
+export const CIDADES_AMBIGUAS: ReadonlySet<string> = new Set([
+  'vitoria', 'santos', 'belem', 'salvador', 'canela', 'gramado', 'toledo', 'cascavel',
+  'marilia', 'canoas', 'bauru', 'campo grande', 'santa maria', 'santo andre', 'sao jose',
+  'palmas', 'natal', 'boa vista', 'americana', 'sorocaba',
+]);
+
 export function normalizarTexto(s: string): string {
   return (s ?? '')
     .normalize('NFD')
@@ -104,11 +115,17 @@ function escapeRegex(s: string): string {
  * Cidades do catálogo citadas no texto. Casa por palavra inteira, sem acento e
  * sem caixa, e resolve o nome MAIS LONGO primeiro: "São José do Rio Preto" no
  * texto não pode virar também "São José". Nomes com menos de 4 letras ficam
- * fora (falso positivo garantido).
+ * fora (falso positivo garantido). `textoLivre`: é legenda/título de anúncio,
+ * então nomes ambíguos (CIDADES_AMBIGUAS) não contam.
  */
-export function cidadesCitadas(texto: string, catalogo: readonly string[] = CIDADES_BASE): string[] {
+export function cidadesCitadas(
+  texto: string,
+  catalogo: readonly string[] = CIDADES_BASE,
+  opts: { textoLivre?: boolean } = {},
+): string[] {
   let t = ' ' + normalizarTexto(texto).replace(/\s+/g, ' ') + ' ';
   const ordenado = [...new Set(catalogo.filter(c => c && c.trim().length >= 4))]
+    .filter(c => !opts.textoLivre || !CIDADES_AMBIGUAS.has(normalizarTexto(c).replace(/\s+/g, ' ')))
     .sort((a, b) => b.length - a.length);
   const achadas: string[] = [];
   for (const cidade of ordenado) {

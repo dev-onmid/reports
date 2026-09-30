@@ -16,6 +16,10 @@ eq(cidadesCitadas('curitibano de coração'), [], 'palavra inteira: curitibano n
 eq(cidadesCitadas('unidade em Jataizinho', [...CIDADES_BASE,'Jataizinho']), ['Jataizinho'], 'catálogo dinâmico (geo da conta)');
 eq(cidadesCitadas('a Rio das Ostras', ['Rio','Rio das Ostras']), ['Rio das Ostras'], 'nome curto (<4) ignorado');
 eq(cidadesCitadas('Maringá Maringá Maringá'), ['Maringá'], 'deduplica');
+eq(cidadesCitadas('A vitória de Mauro Ribeiro no Tour de France', CIDADES_BASE, {textoLivre:true}), [], 'texto livre: "vitória" não é a cidade');
+eq(cidadesCitadas('Canela, Gramado e Bauru na promoção', CIDADES_BASE, {textoLivre:true}), [], 'texto livre: palavras comuns não são cidade');
+eq(cidadesCitadas('[FORMS] [VITÓRIA] - 01/09'), ['Vitória'], 'nome de campanha (não é texto livre): Vitória conta');
+eq(cidadesCitadas('Aberta para novas unidades em Joinville e Bauru', CIDADES_BASE, {textoLivre:true}), ['Joinville'], 'texto livre: só a não-ambígua');
 
 // --- alertaDeCidade
 eq(alertaDeCidade(['Joinville'], ['Curitiba']), 'cidade', 'vídeo de Curitiba em campanha de Joinville');
