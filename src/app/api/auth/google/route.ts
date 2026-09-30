@@ -23,6 +23,12 @@ const GA4_SCOPES = [
   'openid',
 ];
 
+const SHEETS_SCOPES = [
+  'https://www.googleapis.com/auth/spreadsheets',
+  'https://www.googleapis.com/auth/userinfo.email',
+  'https://www.googleapis.com/auth/userinfo.profile',
+];
+
 const GMAIL_SCOPES = [
   'https://www.googleapis.com/auth/gmail.send',
   'https://www.googleapis.com/auth/userinfo.email',
@@ -50,7 +56,7 @@ export async function GET(request: NextRequest) {
     `${appUrl}/api/auth/google/callback`
   );
 
-  const scopes = type === 'google_ads' ? GOOGLE_ADS_SCOPES : type === 'gmail' ? GMAIL_SCOPES : type === 'ga4' ? GA4_SCOPES : GMB_SCOPES;
+  const scopes = type === 'google_ads' ? GOOGLE_ADS_SCOPES : type === 'gmail' ? GMAIL_SCOPES : type === 'ga4' ? GA4_SCOPES : type === 'sheets' ? SHEETS_SCOPES : GMB_SCOPES;
 
   const url = oauth2Client.generateAuthUrl({
     access_type: 'offline',

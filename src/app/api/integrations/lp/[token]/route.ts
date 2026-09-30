@@ -11,10 +11,14 @@ import {
   extractTrackingFromText, type MergedTracking,
 } from '@/lib/lead-tracking';
 import { regiaoFromPhone } from '@/lib/ddd-regioes';
+import { gravarLeadNaPlanilha } from '@/lib/lp-sheets';
 import { resolverNomesGoogle, pareceIdGoogle } from '@/lib/google-ad-resolver';
 import { resolveMetaAdHierarchy, pareceIdMeta } from '@/lib/meta-ad-resolver';
 import { notificarLeadPorEmail } from '@/lib/lp-notificacao';
+<<<<<<< Updated upstream
 import { enviarLeadSiteParaMeta, primeiroIp } from '@/lib/meta-capi-site';
+=======
+>>>>>>> Stashed changes
 import { webhookOrigin } from '@/lib/evolution-api';
 
 /**
@@ -241,6 +245,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ token: str
       leadId,
     });
 
+<<<<<<< Updated upstream
     // Meta · API de Conversões (evento de SITE). Roda depois de o lead estar
     // gravado e com catch próprio: se a Meta recusar ou o cliente não tiver
     // Pixel, o lead continua salvo. O `event_id` vem do Pixel do navegador
@@ -258,6 +263,28 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ token: str
       ip: primeiroIp(req.headers.get('x-forwarded-for')) ?? req.headers.get('x-real-ip'),
       userAgent: req.headers.get('user-agent'),
     }).catch(err => { console.error('[lp] meta capi', err); return { enviado: false as const }; });
+=======
+    // Espelho na planilha do cliente. Mesmo lugar e mesma filosofia do aviso
+    // por e-mail: o lead já está salvo, então planilha fora do ar não pode
+    // virar erro para a landing page. Substitui o cenário do Make que fazia
+    // exatamente isto ouvindo o mesmo formulário.
+    if (origem.sheet_id) {
+      const r = await gravarLeadNaPlanilha(
+        pool,
+        { sheetId: origem.sheet_id, sheetTab: origem.sheet_tab },
+        {
+          nome: nome ?? null,
+          telefone: telefoneBruto ?? telefone ?? null,
+          email: email ?? null,
+          cidade: cidade ?? null,
+          cpf: txt(c.cpf) ?? null,
+          utmSource: tracking.utm_source ?? null,
+          utmMedium: tracking.utm_medium ?? null,
+        },
+      ).catch(err => ({ ok: false as const, motivo: String(err) }));
+      if (!r.ok) console.error('[lp] planilha:', r.motivo);
+    }
+>>>>>>> Stashed changes
 
     // Aviso para quem atende. Roda DEPOIS de tudo gravado e com catch próprio:
     // o lead já está salvo, então falha de e-mail não pode virar erro para a LP.
@@ -273,7 +300,11 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ token: str
       }).catch(err => console.error('[lp] aviso por e-mail', err));
     }
 
+<<<<<<< Updated upstream
     return resposta({ ok: true, lead_id: leadId, criado, cliente: origem.client_id, site: origem.nome, meta: eventoMeta });
+=======
+    return resposta({ ok: true, lead_id: leadId, criado, cliente: origem.client_id, site: origem.nome });
+>>>>>>> Stashed changes
   } catch (err) {
     console.error('[lp origens] erro', err);
     await registrarLog(pool, { origemId: null, clientId: null, raw,
