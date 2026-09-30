@@ -15,10 +15,6 @@ import { gravarLeadNaPlanilha } from '@/lib/lp-sheets';
 import { resolverNomesGoogle, pareceIdGoogle } from '@/lib/google-ad-resolver';
 import { resolveMetaAdHierarchy, pareceIdMeta } from '@/lib/meta-ad-resolver';
 import { notificarLeadPorEmail } from '@/lib/lp-notificacao';
-<<<<<<< Updated upstream
-import { enviarLeadSiteParaMeta, primeiroIp } from '@/lib/meta-capi-site';
-=======
->>>>>>> Stashed changes
 import { webhookOrigin } from '@/lib/evolution-api';
 
 /**
@@ -186,10 +182,8 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ token: str
 
     if (pareceIdGoogle(tracking.utm_campaign) || txt(c.campaignid)) {
       const g = await resolverNomesGoogle(pool, origem.client_id, {
-        // O corpo da LP raramente manda esses ids — quem traz é a própria URL
-        // (final_url_suffix da conta), então ela é o fallback dos dois.
-        campaignId: txt(c.campaignid) ?? tracking.utm_campaign ?? tracking.gad_campaignid,
-        adgroupId: txt(c.adgroupid) ?? tracking.adgroupid ?? null,
+        campaignId: txt(c.campaignid) ?? tracking.utm_campaign,
+        adgroupId: txt(c.adgroupid),
       });
       if (g?.campaign_name) nomes.campaign = g.campaign_name;
       if (g?.adgroup_name) nomes.adset = g.adgroup_name;
@@ -245,25 +239,6 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ token: str
       leadId,
     });
 
-<<<<<<< Updated upstream
-    // Meta · API de Conversões (evento de SITE). Roda depois de o lead estar
-    // gravado e com catch próprio: se a Meta recusar ou o cliente não tiver
-    // Pixel, o lead continua salvo. O `event_id` vem do Pixel do navegador
-    // (mesmo id nos dois lados = a Meta conta UM evento, sem duplicar); sem
-    // ele, gera um aqui — o evento vale como "só servidor".
-    const eventoMeta = await enviarLeadSiteParaMeta(pool, {
-      clientId: origem.client_id,
-      leadId,
-      eventName: txt(c.meta_event_name) ?? 'Lead',
-      eventId: txt(c.event_id) ?? `lp-${leadId}`,
-      nome, email, telefone: telefoneBruto ?? telefone, cidade,
-      estado: estado ?? regiao?.uf ?? null,
-      pageUrl: tracking.source_url ?? txt(c.page_url) ?? null,
-      fbp: txt(c.fbp), fbc: txt(c.fbc), fbclid: tracking.fbclid ?? txt(c.fbclid),
-      ip: primeiroIp(req.headers.get('x-forwarded-for')) ?? req.headers.get('x-real-ip'),
-      userAgent: req.headers.get('user-agent'),
-    }).catch(err => { console.error('[lp] meta capi', err); return { enviado: false as const }; });
-=======
     // Espelho na planilha do cliente. Mesmo lugar e mesma filosofia do aviso
     // por e-mail: o lead já está salvo, então planilha fora do ar não pode
     // virar erro para a landing page. Substitui o cenário do Make que fazia
@@ -284,7 +259,6 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ token: str
       ).catch(err => ({ ok: false as const, motivo: String(err) }));
       if (!r.ok) console.error('[lp] planilha:', r.motivo);
     }
->>>>>>> Stashed changes
 
     // Aviso para quem atende. Roda DEPOIS de tudo gravado e com catch próprio:
     // o lead já está salvo, então falha de e-mail não pode virar erro para a LP.
@@ -300,11 +274,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ token: str
       }).catch(err => console.error('[lp] aviso por e-mail', err));
     }
 
-<<<<<<< Updated upstream
-    return resposta({ ok: true, lead_id: leadId, criado, cliente: origem.client_id, site: origem.nome, meta: eventoMeta });
-=======
     return resposta({ ok: true, lead_id: leadId, criado, cliente: origem.client_id, site: origem.nome });
->>>>>>> Stashed changes
   } catch (err) {
     console.error('[lp origens] erro', err);
     await registrarLog(pool, { origemId: null, clientId: null, raw,

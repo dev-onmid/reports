@@ -38,8 +38,6 @@ export function ensureLpOrigensSchema(pool: Pool): Promise<void> {
       await pool.query(
         `ALTER TABLE public.lp_origens ADD COLUMN IF NOT EXISTS notificar_emails TEXT[]`,
       );
-<<<<<<< Updated upstream
-=======
       // Planilha que espelha os leads desta origem. Fica na ORIGEM porque cada
       // LP tem a sua — e porque era assim que o cenário do Make funcionava,
       // uma planilha por formulário. Sem isto preenchido, não grava em lugar
@@ -50,7 +48,6 @@ export function ensureLpOrigensSchema(pool: Pool): Promise<void> {
       await pool.query(
         `ALTER TABLE public.lp_origens ADD COLUMN IF NOT EXISTS sheet_tab TEXT`,
       );
->>>>>>> Stashed changes
       // dois sites do mesmo cliente não podem ter o mesmo nome: o nome é o que
       // aparece no rastreio do lead, e repetido não distinguiria nada
       await pool.query(`
@@ -91,17 +88,11 @@ export type LpOrigem = {
   last_received_at: string | null;
   total_recebidos: number;
   notificar_emails: string[] | null;
-<<<<<<< Updated upstream
-};
-
-const COLS = 'id, client_id, nome, url, token, enabled, last_received_at, total_recebidos, notificar_emails';
-=======
   sheet_id: string | null;
   sheet_tab: string | null;
 };
 
 const COLS = 'id, client_id, nome, url, token, enabled, last_received_at, total_recebidos, notificar_emails, sheet_id, sheet_tab';
->>>>>>> Stashed changes
 
 export async function listarOrigens(pool: Pool, clientId: string): Promise<LpOrigem[]> {
   await ensureLpOrigensSchema(pool);
@@ -152,12 +143,8 @@ export function normalizarEmailsNotificacao(valor: unknown): string[] {
 
 export async function atualizarOrigem(
   pool: Pool, id: string,
-<<<<<<< Updated upstream
-  campos: { nome?: string; url?: string | null; enabled?: boolean; notificarEmails?: unknown },
-=======
   campos: { nome?: string; url?: string | null; enabled?: boolean; notificarEmails?: unknown;
             sheetId?: string | null; sheetTab?: string | null },
->>>>>>> Stashed changes
 ): Promise<void> {
   await ensureLpOrigensSchema(pool);
   const set: string[] = [];
@@ -172,8 +159,6 @@ export async function atualizarOrigem(
     params.push(lista.length ? lista : null);
     set.push(`notificar_emails = $${params.length}`);
   }
-<<<<<<< Updated upstream
-=======
   // Aceita o ID cru ou a URL da planilha colada da barra de endereços — quem
   // configura está vendo a planilha aberta, não o id.
   if (campos.sheetId !== undefined) {
@@ -186,7 +171,6 @@ export async function atualizarOrigem(
     params.push(campos.sheetTab?.trim() || null);
     set.push(`sheet_tab = $${params.length}`);
   }
->>>>>>> Stashed changes
   if (!set.length) return;
   params.push(id);
   await pool.query(`UPDATE public.lp_origens SET ${set.join(', ')} WHERE id = $${params.length}`, params);
