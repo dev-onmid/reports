@@ -32,6 +32,28 @@ async function proxyCrossOriginImages(doc: Document, origin: string): Promise<vo
   }));
 }
 
+type LinkArea = { url: string; left: number; top: number; width: number; height: number };
+
+// Posição de cada <a href> DENTRO do slide, em px de CSS relativos ao canto do slide.
+// Só destinos http(s) reais: âncora "#", mailto e link vazio não viram anotação. Área
+// recortada ao slide (um link que vaze do card não pode virar clique fora da página).
+function coletarLinks(slide: HTMLElement): LinkArea[] {
+  const base = slide.getBoundingClientRect();
+  const out: LinkArea[] = [];
+  slide.querySelectorAll<HTMLAnchorElement>('a[href]').forEach((a) => {
+    const url = (a.getAttribute('href') || '').trim();
+    if (!/^https?:\/\//i.test(url)) return;
+    const r = a.getBoundingClientRect();
+    const left = Math.max(0, r.left - base.left);
+    const top = Math.max(0, r.top - base.top);
+    const right = Math.min(base.width, r.right - base.left);
+    const bottom = Math.min(base.height, r.bottom - base.top);
+    if (right - left < 2 || bottom - top < 2) return;
+    out.push({ url, left, top, width: right - left, height: bottom - top });
+  });
+  return out;
+}
+
 export async function exportReportToPdf(token: string, filename: string): Promise<void> {
   const { blob } = await renderReportPdf(token);
   const url = URL.createObjectURL(blob);
@@ -120,6 +142,11 @@ export async function renderReportPdf(token: string): Promise<{ blob: Blob }> {
       const rgb = (bg.match(/\d+/g) ?? ['255', '255', '255']).map(Number);
 
       palco.appendChild(slides[i]);
+      // Links clicáveis: o html2canvas gera uma IMAGEM, então os <a> do slide viram pixels.
+      // Guardamos a posição de cada um (relativa ao slide, em px de CSS) para desenhar por
+      // cima uma anotação de link do PDF na mesma área — o leitor abre o mesmo destino que
+      // o relatório web (post do calendário, mídia do criativo).
+      const links = coletarLinks(slides[i]);
       const canvas = await html2canvas(slides[i], {
         // scale 1.6 (era 2) + JPEG 0.85 (era 0.92): ~2880px continua nítido em tela/impressão
         // e derruba o tamanho do arquivo ~40% (relatórios com muitas fotos de IG ficavam 7-8 MB,
@@ -154,6 +181,9 @@ export async function renderReportPdf(token: string): Promise<{ blob: Blob }> {
       const x = (SLIDE_W - drawW) / 2;
       const y = (SLIDE_H - drawH) / 2;
       pdf.addImage(imgData, 'JPEG', x, y, drawW, drawH);
+      for (const l of links) {
+        pdf.link(x + l.left * scale, y + l.top * scale, l.width * scale, l.height * scale, { url: l.url });
+      }
     }
 
     return { blob: pdf.output('blob') };
