@@ -9,7 +9,7 @@
 import type { Pool } from 'pg';
 import { getClientMetaAdsToken } from '@/lib/meta-ad-resolver';
 import {
-  CIDADES_BASE, alertaDeCidade, cidadesCitadas, statusDaMeta,
+  CIDADES_BASE, alertaDeCidade, cidadesCitadas, cortarTexto, statusDaMeta,
   type AnuncioRow, type TipoAnuncio,
 } from '@/lib/biblioteca-anuncios-ui';
 
@@ -235,11 +235,11 @@ export async function coletarAnunciosDaConta(
       client_name: conta.client_name,
       account_id: conta.account_id,
       ad_id: adId,
-      ad_name: String(d.name ?? ins.ad_name ?? adId),
+      ad_name: cortarTexto(String(d.name ?? ins.ad_name ?? adId), 200),
       campaign_id: String(ins.campaign_id ?? ''),
-      campaign_name: String(ins.campaign_name ?? ''),
+      campaign_name: cortarTexto(String(ins.campaign_name ?? ''), 200),
       adset_id: String(ins.adset_id ?? ''),
-      adset_name: String(ins.adset_name ?? ''),
+      adset_name: cortarTexto(String(ins.adset_name ?? ''), 200),
       spend: Number(ins.spend ?? 0),
       impressions: Number(ins.impressions ?? 0),
       clicks: Number(ins.clicks ?? 0),
@@ -251,8 +251,8 @@ export async function coletarAnunciosDaConta(
       thumb_url: video?.picture ?? cr.image_url ?? ld.picture ?? cr.thumbnail_url ?? null,
       tipo,
       duracao_seg: video?.length ? Math.round(Number(video.length)) : null,
-      titulo: titulo.slice(0, 200),
-      corpo: corpo.replace(/\s+/g, ' ').slice(0, 300),
+      titulo: cortarTexto(titulo, 200),
+      corpo: cortarTexto(corpo.replace(/\s+/g, ' '), 300),
       cidades_alvo: cidadesAlvo,
       cidades_citadas: citadas,
       alerta: alertaDeCidade(cidadesAlvo, citadas, catalogo, { alvoIndefinido }),
@@ -271,7 +271,9 @@ export async function coletarEGravar(pool: Pool, conta: ContaMeta, days: number)
   } catch (err) {
     erro = err instanceof Error ? err.message.slice(0, 300) : String(err);
   }
-  const { rows } = await pool.query<{ fetched_at: string; payload: AnuncioRow[] }>(
+  let rows: Array<{ fetched_at: string; payload: AnuncioRow[] }> = [];
+  try {
+    ({ rows } = await pool.query<{ fetched_at: string; payload: AnuncioRow[] }>(
     `INSERT INTO public.biblioteca_anuncios_cache (client_id, account_id, days, payload, erro, fetched_at)
      VALUES ($1, $2, $3, $4::jsonb, $5, NOW())
      ON CONFLICT (client_id, account_id, days) DO UPDATE SET
@@ -281,7 +283,12 @@ export async function coletarEGravar(pool: Pool, conta: ContaMeta, days: number)
        fetched_at = NOW()
      RETURNING fetched_at, payload`,
     [conta.client_id, conta.account_id, days, JSON.stringify(payload), erro],
-  );
+    ));
+  } catch (err) {
+    // Gravar falhou (ex.: JSON recusado pelo Postgres): a conta volta com o erro
+    // e o que foi coletado, sem derrubar a resposta das outras contas.
+    erro = erro ?? `cache: ${err instanceof Error ? err.message.slice(0, 200) : String(err)}`;
+  }
   return {
     client_id: conta.client_id,
     account_id: conta.account_id,

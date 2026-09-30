@@ -1,6 +1,6 @@
 // node scratchpad/test-biblioteca-anuncios.mjs  (recompilar antes: npx esbuild src/lib/biblioteca-anuncios-ui.ts --format=esm --outfile=scratchpad/build/biblioteca-anuncios-ui.mjs)
 import assert from 'node:assert/strict';
-import { cidadesCitadas, alertaDeCidade, statusDaMeta, filtrarEOrdenar, resumoBiblioteca, CIDADES_BASE } from './build/biblioteca-anuncios-ui.mjs';
+import { cidadesCitadas, alertaDeCidade, statusDaMeta, filtrarEOrdenar, resumoBiblioteca, cortarTexto, CIDADES_BASE } from './build/biblioteca-anuncios-ui.mjs';
 let n=0; const ok=(c,m)=>{assert.ok(c,m);n++}; const eq=(a,b,m)=>{assert.deepEqual(a,b,m);n++};
 
 // --- cidadesCitadas
@@ -49,4 +49,10 @@ eq(filtrarEOrdenar(rows,{...base,clientId:'c2'}).map(r=>r.ad_id),['2'],'cliente'
 eq(filtrarEOrdenar(rows,{...base,busca:'panino'}).map(r=>r.ad_id),['2'],'busca por cliente');
 eq(filtrarEOrdenar(rows,{...base,busca:'JOINVILLE'}).map(r=>r.ad_id),['2','1'],'busca por campanha, sem caixa');
 const res=resumoBiblioteca(rows); eq([res.anuncios,res.gasto,res.leads,res.videos,res.imagens,res.alertas],[3,80,6,2,1,1],'resumo');
+// --- cortarTexto (emoji cortado no meio = JSON inválido no Postgres)
+eq(cortarTexto('Fature 🤑🤑🤑 já', 9), 'Fature 🤑🤑', 'corta por caractere, emoji inteiro');
+eq(JSON.stringify(cortarTexto('a🤑'.repeat(50), 3)).includes('\\ud83e'), false, 'nunca sobra surrogate órfão');
+eq(cortarTexto('x\uD83Ey', 10), 'xy', 'surrogate órfão que já veio assim é removido');
+eq(cortarTexto('curto', 300), 'curto', 'texto curto intacto');
+for (const t of ['🔥 Já são mais de 200 empreendedores 🤌', '🇮🇹🥪 Panino'.repeat(40)]) for (const n of [5,12,33,150]) { const c=cortarTexto(t,n); ok(!/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(c), 'varredura sem órfão '+n); }
 console.log(`OK — ${n} asserts`);

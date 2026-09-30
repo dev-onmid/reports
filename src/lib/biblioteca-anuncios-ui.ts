@@ -84,6 +84,18 @@ export function normalizarTexto(s: string): string {
     .toLowerCase();
 }
 
+/**
+ * Corta texto por CARACTERE (code point), nunca por unidade UTF-16: legenda
+ * de anúncio é cheia de emoji, e `slice` no meio de um emoji deixa um surrogate
+ * órfão que o Postgres recusa em JSON ("Unicode low surrogate must follow a
+ * high surrogate"). Também remove surrogates órfãos que já vieram assim.
+ */
+export function cortarTexto(s: string, max: number): string {
+  const limpo = (s ?? '').replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '');
+  const chars = Array.from(limpo);
+  return chars.length > max ? chars.slice(0, max).join('') : limpo;
+}
+
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
