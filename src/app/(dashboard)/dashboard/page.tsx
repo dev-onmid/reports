@@ -61,7 +61,6 @@ import { useClients } from '@/lib/client-store';
 import { cn, formatCurrencyBRL } from '@/lib/utils';
 import { T } from '@/lib/dashboard-tipografia';
 import { ClientAvatar } from '@/components/client-avatar';
-import { VendasPorAnuncioPanel } from '@/components/dashboard/vendas-por-anuncio';
 import { FunilCriativosPanel } from '@/components/dashboard/funil-criativos';
 import type { FunilDoCriativo } from '@/app/api/crm/funil-criativos/route';
 import type { VendasPorAnuncio } from '@/app/api/crm/vendas-por-anuncio/route';
@@ -1701,6 +1700,37 @@ function AdCreativePreview({ ad, x, y }: { ad: MetaAdWithMetrics; x: number; y: 
   );
 }
 
+/**
+ * Campanha que VENDEU no período mas não veiculou nele (anúncio pausado, lead
+ * antigo que fechou agora) não entra na tabela de campanhas — que lista só o
+ * que teve entrega. Sem esta linha, o faturamento dela sumiria da Mídia paga.
+ */
+function VendasSemVeiculacao({ vendas, campanhas }: { vendas: VendasPorAnuncio | null; campanhas: CampaignPerformance[] }) {
+  if (!vendas) return null;
+  const k = (v: string) => v.trim().toLowerCase();
+  const naTabela = new Set(campanhas.flatMap(c => [k(c.name), k(c.id)]));
+  const fora = vendas.campanhas.filter(c => !naTabela.has(c.chave) && (c.receita > 0 || c.vendas > 0));
+  if (fora.length === 0) return null;
+  return (
+    <div className="mt-3 rounded-lg border border-white/[0.06] bg-white/[0.02] px-3 py-2.5">
+      <p className="text-[10px] font-black uppercase tracking-[0.08em] text-[#9aa4aa]">
+        Também venderam no período, sem veiculação agora
+      </p>
+      <ul className="mt-1.5 space-y-1">
+        {fora.map(c => (
+          <li key={c.chave} className="flex items-baseline justify-between gap-3 text-xs">
+            <span className="min-w-0 truncate text-[#dce4e8]" title={c.nome}>{c.nome}</span>
+            <span className="shrink-0 tabular-nums text-[#a7b0b6]">
+              {c.vendas} {c.vendas === 1 ? 'venda' : 'vendas'} ·{' '}
+              {c.receita > 0 ? <span className="font-bold text-[#6cff2f]">{formatCurrencyBRL(c.receita)}</span> : 'sem valor'}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function CampaignPerformanceTable({
   campaigns: initialCampaigns,
   loading,
@@ -1711,7 +1741,14 @@ function CampaignPerformanceTable({
   abrirTudo = false,
   preencher = false,
   alturaMax = 288,
+  vendas = null,
 }: {
+  /**
+   * Vendas e faturamento do CRM por campanha, conjunto e anúncio (rastreio do
+   * lead). Com ele a tabela ganha Vendas · Faturamento · ROAS em cada nível —
+   * substitui a antiga caixa "Vendas e faturamento por campanha" (30/09).
+   */
+  vendas?: VendasPorAnuncio | null;
   campaigns: CampaignPerformance[];
   loading: boolean;
   period: string;
@@ -1736,7 +1773,20 @@ function CampaignPerformanceTable({
   // Só CONSULTA (pedido do Matheus, 2026-09-24): pausar/ativar, editar verba e
   // otimizar saíram da dashboard — ação em campanha é no gerenciador/CRM, não
   // num painel de leitura onde um clique errado pausa a conta do cliente.
-  const totalColunas = (mostrarIS ? 10 : 7) + (mostrarPlataforma ? 1 : 0);
+  const mostrarVendas = !!vendas;
+  const totalColunas = (mostrarIS ? 10 : 7) + (mostrarPlataforma ? 1 : 0) + (mostrarVendas ? 3 : 0);
+  // Casamento pelas MESMAS chaves que a rota grava: nome da campanha em
+  // minúsculas (ou o id, quando o rastreio do Google guardou {campaignid}),
+  // "campanha|conjunto" e o id do anúncio.
+  const vendasIdx = useMemo(() => {
+    const k = (v: string | null | undefined) => (v ?? '').trim().toLowerCase();
+    return {
+      k,
+      camp: new Map((vendas?.campanhas ?? []).map(c => [c.chave, c])),
+      conj: new Map((vendas?.conjuntos ?? []).map(c => [c.chave, c])),
+      ad: new Map((vendas?.criativos ?? []).filter(c => c.adId).map(c => [c.adId as string, c])),
+    };
+  }, [vendas]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [childrenMap, setChildrenMap] = useState<Record<string, ChildState>>({});
   const [adPreview, setAdPreview] = useState<{ ad: MetaAdWithMetrics; x: number; y: number } | null>(null);
@@ -2060,6 +2110,29 @@ function CampaignPerformanceTable({
         <td className="px-2 py-2.5 text-right text-xs text-muted-foreground">{impressions > 0 ? impressions.toLocaleString('pt-BR') : <span className="opacity-40">—</span>}</td>
         <td className="px-2 py-2.5 text-right text-xs text-muted-foreground">{ctr > 0 ? `${ctr.toFixed(2).replace('.', ',')}%` : <span className="opacity-40">—</span>}</td>
 
+        {/* Vendas · Faturamento · ROAS — do CRM, pelo anúncio que trouxe o lead */}
+        {mostrarVendas && (() => {
+          const { k, camp, conj, ad } = vendasIdx;
+          const v = row.kind === 'campaign' ? (camp.get(k(row.data.name)) ?? camp.get(k(row.data.id)))
+            : row.kind === 'adset' || row.kind === 'adgroup' ? conj.get(`${k(row.campaign.name)}|${k(row.data.name)}`)
+            : row.kind === 'meta-ad' ? ad.get(row.data.id)
+            : undefined;
+          const roas = v && v.receita > 0 && spend > 0 ? v.receita / spend : null;
+          return (
+            <>
+              <td className="px-2 py-2.5 text-right text-xs font-semibold">{v && v.vendas > 0 ? v.vendas : <span className="opacity-40">—</span>}</td>
+              <td className="whitespace-nowrap px-2 py-2.5 text-right text-xs font-bold">
+                {v && v.receita > 0 ? <span className="text-[#6cff2f]">{formatCurrencyBRL(v.receita)}</span>
+                  : v && v.vendas > 0 ? <span className="text-[10px] font-semibold text-muted-foreground" title="Venda fechada no CRM sem valor lançado">sem valor</span>
+                  : <span className="opacity-40">—</span>}
+              </td>
+              <td className="whitespace-nowrap px-2 py-2.5 text-right text-xs font-bold">
+                {roas !== null ? <span className={roas >= 1 ? 'text-[#6cff2f]' : 'text-[#ff6b6b]'}>{roas.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}x</span> : <span className="opacity-40">—</span>}
+              </td>
+            </>
+          );
+        })()}
+
         {/* IS metrics — Google Search campaigns only */}
         {mostrarIS && (() => {
           const isGoogleCampaign = row.kind === 'campaign' && row.data.platform === 'google';
@@ -2110,6 +2183,13 @@ function CampaignPerformanceTable({
                 <th className="px-2 py-2.5 text-right">CPL</th>
                 <th className="px-2 py-2.5 text-right">Impr.</th>
                 <th className="px-2 py-2.5 text-right">CTR</th>
+                {mostrarVendas && (
+                  <>
+                    <th className="px-2 py-2.5 text-right" title="Clientes que compraram vindos deste anúncio (CRM)">Vendas</th>
+                    <th className="px-2 py-2.5 text-right" title="Faturamento das vendas rastreadas até este anúncio, pela data do ganho">Faturam.</th>
+                    <th className="px-2 py-2.5 text-right" title="Faturamento ÷ investido">ROAS</th>
+                  </>
+                )}
                 {mostrarIS && (
                   <>
                     <th className="px-2 py-2.5 text-right" title="Parcela de impressões na Rede de Pesquisa">IS</th>
@@ -6876,19 +6956,13 @@ export default function GeneralDashboard() {
                   metaCpl={comMetas ? cplMetaSel : 0}
                   abrirTudo
                   alturaMax={560}
+                  vendas={comReceita ? vendasAnuncio : null}
                 />
+                {comReceita && <VendasSemVeiculacao vendas={vendasAnuncio} campanhas={campaigns} />}
               </Superficie>
 
     </>
   );
-  // Investimento da campanha no período, pelo NOME (Meta/Google) — ou pelo id,
-  // quando o rastreio do Google gravou o {campaignid} no lugar do nome.
-  const investimentoPorCampanha = new Map<string, number>();
-  for (const c of campaigns) {
-    for (const chave of [c.name.trim().toLowerCase(), c.id]) {
-      investimentoPorCampanha.set(chave, (investimentoPorCampanha.get(chave) ?? 0) + (c.spend || 0));
-    }
-  }
   // Funil de criativos (pedido do Matheus, 30/09): todos os anúncios, cada um com a
   // prévia e o que aconteceu com quem ele trouxe até o faturamento. Abre a Mídia
   // paga, no lugar onde ficava a aba Criativos da caixa de vendas por anúncio.
@@ -6896,15 +6970,9 @@ export default function GeneralDashboard() {
     <FunilCriativosPanel
       criativos={criativosTodos}
       crm={funilCriativos}
+      receitaTotal={comReceita ? vendasAnuncio?.receitaTotal ?? null : null}
       loading={funilCriativosLoading}
       onPreview={setPreviewCreative}
-    />
-  );
-  const blocoVendasAnuncio = (
-    <VendasPorAnuncioPanel
-      dados={vendasAnuncio}
-      loading={vendasAnuncioLoading}
-      investimentoDaCampanha={nome => investimentoPorCampanha.get(nome.trim().toLowerCase()) ?? investimentoPorCampanha.get(nome.trim()) ?? null}
     />
   );
   const blocoGoogle = (
@@ -6933,6 +7001,7 @@ export default function GeneralDashboard() {
                   dateFrom={customDateFrom}
                   dateTo={customDateTo}
                   metaCpl={cplMetaSel}
+                  vendas={comReceita ? vendasAnuncio : null}
                   preencher
                 />
               </Superficie>
@@ -7354,7 +7423,6 @@ export default function GeneralDashboard() {
                 {blocoComercial}
                 {blocoFunilCriativos}
                 {blocoMeta}
-                {blocoVendasAnuncio}
                 {blocoResumoCliente}
               </>
             ) : (
@@ -7512,7 +7580,6 @@ export default function GeneralDashboard() {
                   <>
                     <TituloSecao titulo="Mídia paga" sub="Meta Ads e Google Ads" />
                     {blocoFunilCriativos}
-                    {comReceita && blocoVendasAnuncio}
                     {blocoMeta}
                     {blocoGoogle}
                   </>

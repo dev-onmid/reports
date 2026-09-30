@@ -77,7 +77,9 @@ function montarItens(criativos: TopCreative[], crm: FunilDoCriativo[]): Item[] {
   return itens;
 }
 
-export function FunilCriativosPanel({ criativos, crm, loading, onPreview }: {
+export function FunilCriativosPanel({ criativos, crm, loading, onPreview, receitaTotal = null }: {
+  /** Faturamento do período inteiro — o cabeçalho diz quanto dele veio de anúncio. */
+  receitaTotal?: number | null;
   criativos: TopCreative[];
   crm: FunilDoCriativo[];
   loading: boolean;
@@ -123,6 +125,9 @@ export function FunilCriativosPanel({ criativos, crm, loading, onPreview }: {
         <>
           {itens.length} criativos · {fmtInt(tot.leads)} leads{temCrm ? '' : ' (Meta)'}
           {temCrm && <> · {fmtInt(tot.vendas)} vendas · {formatCurrencyBRL(tot.receita)}</>}
+          {temCrm && receitaTotal !== null && receitaTotal > 0 && (
+            <> ({fmtPct((tot.receita / receitaTotal) * 100)} do faturamento de {formatCurrencyBRL(receitaTotal)})</>
+          )}
         </>
       )}
       direita={(
