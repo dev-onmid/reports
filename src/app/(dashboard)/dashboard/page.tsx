@@ -62,6 +62,8 @@ import { cn, formatCurrencyBRL } from '@/lib/utils';
 import { T } from '@/lib/dashboard-tipografia';
 import { ClientAvatar } from '@/components/client-avatar';
 import { VendasPorAnuncioPanel, MetricasVenda } from '@/components/dashboard/vendas-por-anuncio';
+import { FunilCriativosPanel } from '@/components/dashboard/funil-criativos';
+import type { FunilDoCriativo } from '@/app/api/crm/funil-criativos/route';
 import type { VendasPorAnuncio } from '@/app/api/crm/vendas-por-anuncio/route';
 import { VendedoresCard, CategoriasCard, type LinhaVendedor, type LinhaCategoria } from '@/components/dashboard/desempenho-comercial';
 import type { TopCreative } from '@/app/api/meta/top-creatives/route';
@@ -5360,6 +5362,10 @@ export default function GeneralDashboard() {
   const [vendasAnuncio, setVendasAnuncio] = useState<VendasPorAnuncio | null>(null);
   const [vendasAnuncioLoading, setVendasAnuncioLoading] = useState(false);
   const [previewsVenda, setPreviewsVenda] = useState<Record<string, TopCreative>>({});
+  /** Funil de criativos: TODOS os anúncios que veicularam + o funil de cada um no CRM. */
+  const [criativosTodos, setCriativosTodos] = useState<TopCreative[]>([]);
+  const [funilCriativos, setFunilCriativos] = useState<FunilDoCriativo[]>([]);
+  const [funilCriativosLoading, setFunilCriativosLoading] = useState(false);
   /** Quem vendeu mais e o que mais se vendeu — CRM externo (Agendor). */
   const [vendedores, setVendedores] = useState<LinhaVendedor[]>([]);
   const [categorias, setCategorias] = useState<LinhaCategoria[]>([]);
@@ -6443,6 +6449,30 @@ export default function GeneralDashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedKey, faixaSel.from, faixaSel.to, customReady]);
 
+  // ── Funil de criativos ────────────────────────────────────────────────────
+  // Plataforma (todos os anúncios que veicularam, com vídeo) + CRM (o que cada
+  // anúncio trouxe até a venda), buscados em paralelo e cruzados pelo id do anúncio.
+  useEffect(() => {
+    let cancelado = false;
+    setCriativosTodos([]);
+    setFunilCriativos([]);
+    if (selectedIds.size === 0 || !customReady) { setFunilCriativosLoading(false); return () => { cancelado = true; }; }
+    setFunilCriativosLoading(true);
+    const clientIds = [...selectedIds].join(',');
+    const pMeta = fetch(`/api/meta/top-creatives?${buildPeriodParams({ clientIds, all: '1' }).toString()}`)
+      .then(r => (r.ok ? r.json() as Promise<TopCreative[]> : [])).catch(() => [] as TopCreative[]);
+    const pCrm = fetch(`/api/crm/funil-criativos?${new URLSearchParams({ clientIds, from: faixaSel.from, to: faixaSel.to })}`)
+      .then(r => (r.ok ? r.json() as Promise<{ criativos?: FunilDoCriativo[] }> : { criativos: [] }))
+      .catch(() => ({ criativos: [] as FunilDoCriativo[] }));
+    Promise.all([pMeta, pCrm]).then(([meta, crm]) => {
+      if (cancelado) return;
+      setCriativosTodos(Array.isArray(meta) ? meta : []);
+      setFunilCriativos(crm.criativos ?? []);
+    }).finally(() => { if (!cancelado) setFunilCriativosLoading(false); });
+    return () => { cancelado = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedKey, period, customDateFrom, customDateTo, customReady, faixaSel.from, faixaSel.to]);
+
   // ── Modo Food / Delivery ──────────────────────────────────────────────────
   // O segmento vem de `clients.dashboard_type` (coluna que já existia). O perfil
   // decide KPIs, rótulos e blocos — a tela é a MESMA, só troca de configuração.
@@ -7037,6 +7067,15 @@ export default function GeneralDashboard() {
                 <CreativeHorizontalStrip creatives={creatives} loading={creativesLoading} onPreview={setPreviewCreative} grade />
               </Superficie>
             </div>
+
+            {/* Funil de criativos (pedido do Matheus, 30/09): todos os anúncios, cada um
+                com a prévia e o que aconteceu com quem ele trouxe até o faturamento. */}
+            <FunilCriativosPanel
+              criativos={criativosTodos}
+              crm={funilCriativos}
+              loading={funilCriativosLoading}
+              onPreview={setPreviewCreative}
+            />
 
     </>
   );

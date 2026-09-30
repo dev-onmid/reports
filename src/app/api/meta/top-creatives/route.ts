@@ -60,7 +60,22 @@ export type TopCreative = {
   leads: number;
   ctr: number;
   cpl: number;
+  /** Vídeo: reproduções de 3s (o "gancho") — `actions.video_view`. */
+  views3s?: number;
+  /** Vídeo: ThruPlays (15s ou até o fim) — a "retenção". */
+  thruplays?: number;
+  /** Vídeo: quem assistiu 25/50/75/100% — a curva de retenção. */
+  p25?: number;
+  p50?: number;
+  p75?: number;
+  p100?: number;
 };
+
+/** Soma um campo de vídeo do insights (vem como lista de {action_type, value}). */
+function somaAcao(lista: unknown): number {
+  if (!Array.isArray(lista)) return 0;
+  return lista.reduce((s: number, a: { value?: string }) => s + (parseFloat(a?.value ?? '0') || 0), 0);
+}
 
 // ── Video ID collection ───────────────────────────────────────────────────────
 // Meta Ads has THREE ways a creative can reference a video:
@@ -105,7 +120,10 @@ export async function GET(request: NextRequest) {
   const dateFrom = request.nextUrl.searchParams.get('dateFrom') ?? '';
   const dateTo = request.nextUrl.searchParams.get('dateTo') ?? '';
   const sortBy = request.nextUrl.searchParams.get('sortBy') ?? 'spend';
-  const limit = Math.min(parseInt(request.nextUrl.searchParams.get('limit') ?? '20'), 50);
+  // `all=1`: TODOS os anúncios que veicularam no período (funil de criativos) —
+  // o ranking de "Melhores criativos" continua limitado a 50.
+  const todos = request.nextUrl.searchParams.get('all') === '1';
+  const limit = todos ? 500 : Math.min(parseInt(request.nextUrl.searchParams.get('limit') ?? '20'), 50);
   const metaPeriod = resolveMetaPeriod(period, dateFrom, dateTo);
   const requestedClientIds = (request.nextUrl.searchParams.get('clientIds') ?? '')
     .split(',')
@@ -208,7 +226,7 @@ export async function GET(request: NextRequest) {
           // Fetch top ads insights sorted by spend
           const insightsUrl = new URL(`https://graph.facebook.com/v21.0/${toMetaAccountNodeId(account.id)}/insights`);
           insightsUrl.searchParams.set('level', 'ad');
-          insightsUrl.searchParams.set('fields', 'ad_id,ad_name,campaign_id,campaign_name,adset_id,adset_name,spend,impressions,clicks,actions');
+          insightsUrl.searchParams.set('fields', 'ad_id,ad_name,campaign_id,campaign_name,adset_id,adset_name,spend,impressions,clicks,actions,video_thruplay_watched_actions,video_p25_watched_actions,video_p50_watched_actions,video_p75_watched_actions,video_p100_watched_actions');
           applyMetaDateToUrl(insightsUrl, metaPeriod);
           insightsUrl.searchParams.set('sort', 'spend_descending');
           insightsUrl.searchParams.set('limit', String(adIdsMode ? 50 : limit));
@@ -236,11 +254,16 @@ export async function GET(request: NextRequest) {
             'instagram_permalink_url', 'effective_object_story_id',
           ].join(',');
           const adFields = `name,effective_status${adIdsMode ? ',account_id,campaign{id,name},adset{id,name}' : ''},creative{${creativeFields}}`;
-          const batchRes = await fetch(
-            `https://graph.facebook.com/v21.0/?ids=${adIds.join(',')}&fields=${adFields}&access_token=${token}`
-          );
+          // `?ids=` aceita até 50 por chamada — com `all=1` são centenas.
+          const lotes: string[][] = [];
+          for (let i = 0; i < adIds.length; i += 50) lotes.push(adIds.slice(i, i + 50));
+          const respostas = await Promise.all(lotes.map(l => fetch(
+            `https://graph.facebook.com/v21.0/?ids=${l.join(',')}&fields=${adFields}&access_token=${token}`
+          ).catch(() => null)));
+          const batchRes = { ok: respostas.every(r => r?.ok) };
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          let batchData: Record<string, any> = batchRes.ok ? await batchRes.json() : {};
+          let batchData: Record<string, any> = {};
+          for (const r of respostas) if (r?.ok) Object.assign(batchData, await r.json().catch(() => ({})));
           if (adIdsMode && !batchRes.ok) {
             // `?ids=` falha INTEIRO se um único anúncio foi apagado — cai para um a um.
             const um = await Promise.all(adIds.map(async (id) => {
@@ -279,12 +302,12 @@ export async function GET(request: NextRequest) {
           // unlike creative.thumbnail_url which contains oe= (Unix expiry timestamp).
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const videoBatchData: Record<string, any> = {};
-          if (allVideoIds.length > 0) {
+          for (let i = 0; i < allVideoIds.length; i += 50) {
             const vRes = await fetch(
-              `https://graph.facebook.com/v21.0/?ids=${allVideoIds.join(',')}&fields=source,picture,thumbnails{uri,height,width}&access_token=${token}`
-            );
-            if (vRes.ok) {
-              Object.assign(videoBatchData, await vRes.json());
+              `https://graph.facebook.com/v21.0/?ids=${allVideoIds.slice(i, i + 50).join(',')}&fields=source,picture,thumbnails{uri,height,width}&access_token=${token}`
+            ).catch(() => null);
+            if (vRes?.ok) {
+              Object.assign(videoBatchData, await vRes.json().catch(() => ({})));
             }
           }
 
@@ -390,6 +413,14 @@ export async function GET(request: NextRequest) {
               leads,
               ctr: impressions > 0 ? clicks / impressions * 100 : 0,
               cpl: leads > 0 ? spend / leads : 0,
+              views3s: ((insight.actions ?? []) as Array<{ action_type?: string; value?: string }>)
+                .filter(a => a.action_type === 'video_view')
+                .reduce((s, a) => s + (parseFloat(a.value ?? '0') || 0), 0),
+              thruplays: somaAcao(insight.video_thruplay_watched_actions),
+              p25: somaAcao(insight.video_p25_watched_actions),
+              p50: somaAcao(insight.video_p50_watched_actions),
+              p75: somaAcao(insight.video_p75_watched_actions),
+              p100: somaAcao(insight.video_p100_watched_actions),
             });
           }
         })
@@ -407,6 +438,10 @@ export async function GET(request: NextRequest) {
 
   if (adIdsMode) {
     // A mesma conta pode estar em duas conexões — um anúncio, um card.
+    const vistos = new Set<string>();
+    return Response.json(allCreatives.filter(c => !vistos.has(c.adId) && !!vistos.add(c.adId)));
+  }
+  if (todos) {
     const vistos = new Set<string>();
     return Response.json(allCreatives.filter(c => !vistos.has(c.adId) && !!vistos.add(c.adId)));
   }

@@ -1720,6 +1720,18 @@ Print do Matheus (Cinfel): "+610 no período" apagado sob um traço "— ganho v
 - `IndicadorCard` ganhou `destaque` (linha colorida no lugar da variação). Sem base anterior, o card mostra **"+610 no período" em verde** e a nota "sem comparativo · o Instagram só guarda 30 dias". Com base (janelas dentro dos 30 dias, ex. últimos 7d), segue a variação % como antes.
 - ⚠️ Comparar ganho de seguidores entre meses só seria possível guardando o total diário (o snapshot do monitor é 1 linha por cliente, sobrescrita). Não feito.
 
+## Dashboard — "Funil de criativos": prévia + funil de TODOS os anúncios (2026-09-30)
+
+Pedido do Matheus: funil curto por criativo (leads → o que acontece até o faturamento), com % de retenção e % de conversão, de TODOS os criativos, misturado com a prévia.
+
+- **Card horizontal** (`src/components/dashboard/funil-criativos.tsx`, 440px, 2 linhas rolando para o lado como "Melhores criativos"): miniatura clicável (abre o MESMO modal de preview) + funil em uma linha **Cliques → Leads → Agend. → Compar. → Vendas** com o valor e a % sobre a etapa anterior + rodapé **Faturamento (ROAS) · Conversão (lead→venda) · Gancho (3s÷impressões) · Retenção (ThruPlay÷3s, com barra)**. Imagem = "—" em gancho/retenção. Ordenação por Investimento/Leads/Vendas/Faturamento/Conversão/Retenção. Fica em Mídia paga, logo abaixo de Campanhas + Melhores criativos.
+- **`/api/meta/top-creatives?all=1`**: todos os anúncios que veicularam (até 500), com o batch `?ids=` **fatiado em 50** (limite do Graph) — antes a rota mandava todos os ids numa chamada só. Ganhou métricas de vídeo: `views3s` (`actions.video_view`), `thruplays`, `p25..p100`.
+- **`/api/crm/funil-criativos`**: etapa de cada lead por **`etapaDoLead`**, a MESMA régua do Funil de Performance (classificação própria faria a soma dos criativos não bater com o funil da tela). Funil pelos leads criados no período; vendas/faturamento pelo ganho, venda = pessoa (`COALESCE(origem_lead_id, id)`), igual à caixa de vendas por anúncio.
+- **Leads**: com rastreio no CRM, o número é o do CRM (é dele que o funil segue); quando o Meta reportou MAIS que o CRM rastreou, a célula mostra "Meta N" no lugar da % (caso Cinfel: anúncio com 10 leads no Meta e 0 no CRM, que vende fora do WhatsApp rastreado). Sem CRM nenhum, cai no número do Meta com o rótulo "(Meta)".
+- Anúncio que só o CRM conhece (Google, ou só o nome no rastreio) entra sem prévia, com o funil.
+- ✅ Rotas rodadas contra produção: Sorrifácil Cambé 21 anúncios (18 com vídeo), 13 no CRM, 12 casados por id — "DARK - CAMARGO 02" 149 cliques → 11 leads → 5 → 3 → 2 vendas, R$ 1.700, retenção 19%; Cinfel 43 anúncios, 9 no CRM. Harness no browser com esses dados; tsc limpo. ⚠️ A tela inteira com sessão real não foi aberta (dev sem banco).
+- ⚠️ Custo: +1 chamada de insights por conta + lotes de 50 anúncios a cada carga da dashboard (a de "Melhores criativos" continua separada).
+
 # ONMID Reports — Guia de Contexto
 
 ## O que é este projeto
