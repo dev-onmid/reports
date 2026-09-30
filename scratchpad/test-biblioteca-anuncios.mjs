@@ -23,6 +23,8 @@ eq(cidadesCitadas('Aberta para novas unidades em Joinville e Bauru', CIDADES_BAS
 eq(cidadesCitadas('Está procurando uma casa em Apucarana? Fale com a Atibaia Imóveis', CIDADES_BASE, {textoLivre:true, ignorar:['Atibaia Imóveis']}), ['Apucarana'], 'nome do cliente com cidade dentro é ignorado');
 eq(cidadesCitadas('Mudando para Atibaia? A ATIBAIA IMOVEIS ajuda', CIDADES_BASE, {textoLivre:true, ignorar:['Atibaia Imóveis']}), ['Atibaia'], 'a cidade citada FORA da marca continua contando');
 eq(cidadesCitadas('Panino77 Curitiba abre em Londrina', CIDADES_BASE, {textoLivre:true, ignorar:['Panino77 Curitiba']}), ['Londrina'], 'marca removida, cidade real fica');
+eq(cidadesCitadas('Entre em contato com a Atibaia Corretora de Imóveis', CIDADES_BASE, {textoLivre:true, ignorar:['Atibaia Imóveis','Atibaia']}), [], 'variação da marca: a cidade do nome do cliente nunca conta');
+eq(cidadesCitadas('Atibaia Imóveis', CIDADES_BASE), ['Atibaia'], 'cidades dentro do nome do cliente (para montar a lista de marca)');
 
 // --- alertaDeCidade
 eq(alertaDeCidade(['Joinville'], ['Curitiba']), 'cidade', 'vídeo de Curitiba em campanha de Joinville');

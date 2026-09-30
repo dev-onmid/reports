@@ -14,8 +14,11 @@ import {
 } from '@/lib/biblioteca-anuncios-ui';
 
 export const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+// Conta que falhou (timeout, token) tenta de novo em 10 min, não em 6h — a tela
+// não pode ficar sem a conta o dia todo por uma chamada que estourou.
+export const CACHE_TTL_ERRO_MS = 10 * 60 * 1000;
 const GRAPH = 'https://graph.facebook.com/v21.0';
-const TIMEOUT_MS = 20_000;
+const TIMEOUT_MS = 40_000;
 
 let schemaReady: Promise<void> | null = null;
 export function ensureBibliotecaSchema(pool: Pool): Promise<void> {
@@ -75,7 +78,9 @@ export async function lerCache(pool: Pool, days: number, contas: ContaMeta[]): P
 }
 
 export function cacheFresco(row: CacheRow | undefined): boolean {
-  return !!row && Date.now() - new Date(row.fetched_at).getTime() < CACHE_TTL_MS;
+  if (!row) return false;
+  const idade = Date.now() - new Date(row.fetched_at).getTime();
+  return idade < (row.erro ? CACHE_TTL_ERRO_MS : CACHE_TTL_MS);
 }
 
 async function graphGet<T = unknown>(url: string): Promise<T> {
@@ -205,6 +210,10 @@ export async function coletarAnunciosDaConta(
 
   // Catálogo de cidades = base + tudo que a própria conta segmenta.
   const catalogo = [...new Set([...CIDADES_BASE, ...Object.values(geoPorAdset).flatMap(g => g.nomes)])];
+  // Cidade que faz parte do NOME do cliente é marca, não destino: "Atibaia
+  // Imóveis" fica em Apucarana e assina os anúncios como "Atibaia Corretora de
+  // Imóveis" — nenhuma variação da marca pode virar "cita Atibaia".
+  const marca = [conta.client_name, ...cidadesCitadas(conta.client_name, catalogo)];
 
   return insights.map(ins => {
     const adId = String(ins.ad_id);
@@ -229,7 +238,7 @@ export async function coletarAnunciosDaConta(
     const citadas = cidadesCitadas(
       `${d.name ?? ins.ad_name ?? ''} ${titulo} ${corpo} ${cr.name ?? ''}`,
       catalogo,
-      { textoLivre: true, ignorar: [conta.client_name] },
+      { textoLivre: true, ignorar: marca },
     );
     // Pin cuja cidade não se resolveu: alvo indeterminável, alerta fica mudo.
     const alvoIndefinido = geo.temPin && geo.nomes.length === 0;
