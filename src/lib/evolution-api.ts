@@ -286,6 +286,8 @@ export async function setEvolutionWebhook(
 }
 
 export interface EvolutionInstanceSummary {
+  /** UUID da instância — é o nome do diretório de chaves do Baileys em disco. */
+  id?: string | null;
   name: string;
   connectionStatus: string | null;
   profileName?: string | null;
@@ -312,6 +314,7 @@ export async function fetchEvolutionInstances(): Promise<EvolutionInstanceSummar
     const r = i as Record<string, unknown>;
     const inner = (r.instance ?? {}) as Record<string, unknown>;
     return {
+      id: (r.id ?? inner.instanceId ?? null) as string | null,
       name: String(r.name ?? inner.instanceName ?? r.instanceName ?? ''),
       connectionStatus: (r.connectionStatus ?? inner.state ?? r.status ?? null) as string | null,
       profileName: (r.profileName ?? null) as string | null,

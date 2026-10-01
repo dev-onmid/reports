@@ -15,7 +15,7 @@ import { sendText, sendImage } from '@/lib/zapi';
 import { sendFollowupMessage, type WaInstance } from '@/lib/followup-send';
 import { isWithinWindow, isActiveDayNow } from '@/lib/disparos-schedule';
 import { lerImagens, parDoRodizio } from '@/lib/disparos-rodizio';
-import { handleEvolutionLabel } from '@/lib/evolution-api';
+import { etiquetarQuemRecebeu } from '@/lib/disparos-lid';
 import {
   garantirProtecaoChip, reservarEnvioNoChip, removerOptoutDaFila,
   podeSincronizarOptout, sincronizarOptout,
@@ -305,16 +305,18 @@ async function runWorker(req: NextRequest) {
         // Etiqueta no WhatsApp do cliente: só para quem REALMENTE recebeu, e
         // sempre best-effort. A mensagem já saiu — falhar em pendurar o rótulo
         // não pode marcar o contato como falha nem parar a campanha.
+        let notaEtiqueta: string | null = null;
         if (result.ok && campaign.label_id && isEvolution) {
-          const et = await handleEvolutionLabel(campaign.instance_id, number.phone, campaign.label_id, 'add')
-            .catch(e => ({ ok: false, error: String(e) }));
-          if (!et.ok) etiquetaFalhou++;
+          const et = await etiquetarQuemRecebeu({ instanceName: campaign.instance_id, phone: number.phone, labelId: campaign.label_id });
+          if (!et.aplicada) { etiquetaFalhou++; notaEtiqueta = `etiqueta: ${et.motivo}`; }
         }
 
         const newStatus = result.ok ? 'sent' : 'failed';
+        // `error_msg` guarda a nota da etiqueta SEM mudar o status: a mensagem
+        // foi entregue; o que falhou foi o rótulo, e isso precisa ficar visível.
         await pool.query(
           `UPDATE public.zapi_numbers SET status = $1, sent_at = NOW(), error_msg = $2 WHERE id = $3`,
-          [newStatus, result.error ?? null, number.id],
+          [newStatus, result.error ?? notaEtiqueta ?? null, number.id],
         );
 
         const field = result.ok ? 'sent = sent + 1' : 'failed = failed + 1';

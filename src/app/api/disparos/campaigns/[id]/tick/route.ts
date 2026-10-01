@@ -11,7 +11,7 @@ import { isWithinWindow, isActiveDayNow } from '@/lib/disparos-schedule';
 import { classificarErroEnvio } from '@/lib/disparos-destinos';
 import { pausarCampanhaPorInstancia } from '@/lib/disparos-alerta';
 import { lerImagens, parDoRodizio } from '@/lib/disparos-rodizio';
-import { handleEvolutionLabel } from '@/lib/evolution-api';
+import { etiquetarQuemRecebeu } from '@/lib/disparos-lid';
 import {
   garantirProtecaoChip, reservarEnvioNoChip, removerOptoutDaFila, esperaDoChip,
 } from '@/lib/disparos-chip';
@@ -194,15 +194,16 @@ export async function POST(
     }
 
     // Mesma regra do worker: etiqueta só em quem recebeu, e nunca derruba o envio.
+    let notaEtiqueta: string | null = null;
     if (result.ok && campaign.label_id && isEvolution) {
-      await handleEvolutionLabel(campaign.instance_id, number.phone, campaign.label_id, 'add')
-        .catch(() => undefined);
+      const et = await etiquetarQuemRecebeu({ instanceName: campaign.instance_id, phone: number.phone, labelId: campaign.label_id });
+      if (!et.aplicada) notaEtiqueta = `etiqueta: ${et.motivo}`;
     }
 
     const newStatus = result.ok ? 'sent' : 'failed';
     await pool.query(
       `UPDATE public.zapi_numbers SET status = $1, sent_at = NOW(), error_msg = $2 WHERE id = $3`,
-      [newStatus, result.error ?? null, number.id],
+      [newStatus, result.error ?? notaEtiqueta ?? null, number.id],
     );
 
     const field = result.ok ? 'sent = sent + 1' : 'failed = failed + 1';
