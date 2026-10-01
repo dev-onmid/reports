@@ -15,6 +15,7 @@ import { sendText, sendImage } from '@/lib/zapi';
 import { sendFollowupMessage, type WaInstance } from '@/lib/followup-send';
 import { isWithinWindow, isActiveDayNow } from '@/lib/disparos-schedule';
 import { lerImagens, parDoRodizio } from '@/lib/disparos-rodizio';
+import { handleEvolutionLabel } from '@/lib/evolution-api';
 import {
   garantirProtecaoChip, reservarEnvioNoChip, removerOptoutDaFila,
   podeSincronizarOptout, sincronizarOptout,
@@ -53,6 +54,7 @@ async function runWorker(req: NextRequest) {
   const startTime = Date.now();
   let processed = 0;
   let optout = 0;
+  let etiquetaFalhou = 0;
   let chipOcupado = 0;
 
   try {
@@ -64,6 +66,8 @@ async function runWorker(req: NextRequest) {
     await pool.query(`ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS message_index INT NOT NULL DEFAULT 0`);
     await pool.query(`ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS active_days TEXT`);
     await pool.query(`ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS daily_limit INT`);
+    await pool.query(`ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS label_id TEXT`);
+    await pool.query(`ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS label_nome TEXT`);
     await garantirProtecaoChip(pool);
 
     // Transition pending campaigns whose start time has arrived
@@ -90,6 +94,7 @@ async function runWorker(req: NextRequest) {
       interval_min: number;
       interval_max: number;
       daily_limit: number | null;
+      label_id: string | null;
       client_id: string;
       instance_id: string;
       token: string;
@@ -98,7 +103,7 @@ async function runWorker(req: NextRequest) {
     }>(`
       SELECT c.id, c.name, c.status, c.message, c.messages, c.message_index, c.image_url, c.ends_at,
              c.active_from, c.active_until, c.active_days, c.interval_min, c.interval_max,
-             c.daily_limit, c.client_id,
+             c.daily_limit, c.label_id, c.client_id,
              cl.instance_id, cl.token, cl.security_token, cl.provider, cl.name AS client_name
         FROM public.zapi_campaigns c
         JOIN public.zapi_clients cl ON cl.id = c.client_id
@@ -297,6 +302,15 @@ async function runWorker(req: NextRequest) {
           break;
         }
 
+        // Etiqueta no WhatsApp do cliente: só para quem REALMENTE recebeu, e
+        // sempre best-effort. A mensagem já saiu — falhar em pendurar o rótulo
+        // não pode marcar o contato como falha nem parar a campanha.
+        if (result.ok && campaign.label_id && isEvolution) {
+          const et = await handleEvolutionLabel(campaign.instance_id, number.phone, campaign.label_id, 'add')
+            .catch(e => ({ ok: false, error: String(e) }));
+          if (!et.ok) etiquetaFalhou++;
+        }
+
         const newStatus = result.ok ? 'sent' : 'failed';
         await pool.query(
           `UPDATE public.zapi_numbers SET status = $1, sent_at = NOW(), error_msg = $2 WHERE id = $3`,
@@ -328,7 +342,7 @@ async function runWorker(req: NextRequest) {
       }
     }
 
-    return Response.json({ ok: true, processed, optout, chipOcupado, elapsed: Date.now() - startTime });
+    return Response.json({ ok: true, processed, optout, chipOcupado, etiquetaFalhou, elapsed: Date.now() - startTime });
   } finally {
     await pool.end();
   }

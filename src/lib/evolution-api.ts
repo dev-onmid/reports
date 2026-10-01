@@ -496,3 +496,53 @@ export async function fetchEvolutionChatContacts(
 
   return [];
 }
+
+// ─────────────────────────── Etiquetas (labels) ───────────────────────────
+// Etiqueta é recurso de conta WhatsApp BUSINESS. A Evolution expõe as duas
+// pontas: listar as que já existem e pendurar/tirar de uma conversa.
+//
+// ⚠️ Os nomes voltam SEM ACENTO do servidor — conferido na carteira em
+// 01/10/2026: "Responsvel do aluno(a)" tem 22 bytes para 22 caracteres, sem
+// nenhum multibyte, e "Não lidas" chega como "No lidas". É perda do próprio
+// Evolution/Baileys, não da nossa leitura, e não tem conserto do nosso lado.
+// Por isso a etiqueta é SEMPRE aplicada pelo `id`, nunca pelo nome.
+
+export interface EvolutionLabel {
+  id: string;
+  name: string;
+  /** Índice de cor do WhatsApp (0–19), não um hexadecimal. */
+  color: string;
+}
+
+export async function fetchEvolutionLabels(instanceName: string): Promise<EvolutionLabel[]> {
+  const res = await fetch(
+    `${base()}/label/findLabels/${encodeURIComponent(instanceName)}`,
+    { headers: headers(), cache: 'no-store' },
+  );
+  if (!res.ok) throw new Error(`Evolution findLabels ${res.status}`);
+  const body: unknown = await res.json();
+  const cru = Array.isArray(body)
+    ? body
+    : (body as { labels?: unknown[] } | null)?.labels ?? [];
+  return (cru as Array<Record<string, unknown>>)
+    .map(l => ({ id: String(l.id ?? ''), name: String(l.name ?? '').trim(), color: String(l.color ?? '0') }))
+    .filter(l => l.id !== '' && l.name !== '');
+}
+
+/**
+ * Pendura (ou tira) uma etiqueta na conversa de um número.
+ *
+ * ⚠️ Só funciona DEPOIS que a conversa existe — é o envio que a cria. Chamar
+ * antes de enviar não dá erro, simplesmente não gruda.
+ */
+export async function handleEvolutionLabel(
+  instanceName: string,
+  phone: string,
+  labelId: string,
+  action: 'add' | 'remove' = 'add',
+): Promise<SendResult> {
+  return postEvolution(
+    `${base()}/label/handleLabel/${encodeURIComponent(instanceName)}`,
+    { number: phone, labelId, action },
+  );
+}

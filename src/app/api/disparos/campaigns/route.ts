@@ -15,6 +15,8 @@ async function ensureColumns(pool: ReturnType<typeof makeServerPool>) {
     ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS next_tick_at TIMESTAMPTZ;
     ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS messages JSONB;
     ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS daily_limit INT;
+    ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS label_id TEXT;
+    ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS label_nome TEXT;
   `);
 }
 
@@ -65,9 +67,15 @@ export async function POST(request: NextRequest) {
     activeFrom?: string;
     activeUntil?: string;
     activeDays?: number[];
+    labelId?: string | null;
+    labelNome?: string | null;
   };
 
   const { onmidClientId, instanceId, confirmClientName, name, message, messages, imageUrls, numbers, startsAt, endsAt, activeFrom, activeUntil, activeDays } = body;
+  // Etiqueta é opcional: string vazia vira NULL para não gravar "" e o motor
+  // tentar pendurar um id que não existe em contato nenhum.
+  const labelId = String(body.labelId ?? '').trim() || null;
+  const labelNome = String(body.labelNome ?? '').trim() || null;
   // Piso anti-bloqueio: intervalo aleatório nunca abaixo de 90s (decisão do
   // Matheus, 2026-07-31) — mesmo que o form mande menos, o servidor trava aqui
   // e o motor (worker/tick) trava de novo pra campanhas antigas.
@@ -174,10 +182,10 @@ export async function POST(request: NextRequest) {
 
     const { rows: [campaign] } = await pool.query(
       `INSERT INTO public.zapi_campaigns
-         (client_id, name, message, image_url, status, starts_at, ends_at, interval_min, interval_max, total, active_from, active_until, active_days, messages, daily_limit)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+         (client_id, name, message, image_url, status, starts_at, ends_at, interval_min, interval_max, total, active_from, active_until, active_days, messages, daily_limit, label_id, label_nome)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
        RETURNING *`,
-      [clientId, name, message, imageUrl || null, initialStatus, startsAt, endsAt || null, intervalMin, intervalMax, finalNumbers.length, activeFrom || null, activeUntil || null, activeDaysText, messagesJson, dailyLimit],
+      [clientId, name, message, imageUrl || null, initialStatus, startsAt, endsAt || null, intervalMin, intervalMax, finalNumbers.length, activeFrom || null, activeUntil || null, activeDaysText, messagesJson, dailyLimit, labelId, labelNome],
     );
 
     for (let i = 0; i < finalNumbers.length; i++) {

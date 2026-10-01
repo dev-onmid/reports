@@ -11,6 +11,7 @@ import { isWithinWindow, isActiveDayNow } from '@/lib/disparos-schedule';
 import { classificarErroEnvio } from '@/lib/disparos-destinos';
 import { pausarCampanhaPorInstancia } from '@/lib/disparos-alerta';
 import { lerImagens, parDoRodizio } from '@/lib/disparos-rodizio';
+import { handleEvolutionLabel } from '@/lib/evolution-api';
 import {
   garantirProtecaoChip, reservarEnvioNoChip, removerOptoutDaFila, esperaDoChip,
 } from '@/lib/disparos-chip';
@@ -31,6 +32,8 @@ export async function POST(
     await pool.query(`ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS message_index INT NOT NULL DEFAULT 0`);
     await pool.query(`ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS active_days TEXT`);
     await pool.query(`ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS daily_limit INT`);
+    await pool.query(`ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS label_id TEXT`);
+    await pool.query(`ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS label_nome TEXT`);
     await garantirProtecaoChip(pool);
 
     const { rows: [campaign] } = await pool.query(
@@ -188,6 +191,12 @@ export async function POST(
         paused: true,
         error: `Campanha pausada: ${result.error ?? 'falha na instância'}`,
       });
+    }
+
+    // Mesma regra do worker: etiqueta só em quem recebeu, e nunca derruba o envio.
+    if (result.ok && campaign.label_id && isEvolution) {
+      await handleEvolutionLabel(campaign.instance_id, number.phone, campaign.label_id, 'add')
+        .catch(() => undefined);
     }
 
     const newStatus = result.ok ? 'sent' : 'failed';

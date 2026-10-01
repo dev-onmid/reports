@@ -1114,6 +1114,9 @@ function NovaCampanhaTab({ onCreated, prefill, editCampaign }: { onCreated: () =
   const [variationsError, setVariationsError] = useState('');
   const [previewVariationIdx, setPreviewVariationIdx] = useState<number | null>(null);
   const [previewImgIdx, setPreviewImgIdx] = useState(0);
+  const [etiquetas, setEtiquetas] = useState<{ id: string; name: string; color: string }[]>([]);
+  const [etiquetaErro, setEtiquetaErro] = useState('');
+  const [labelId, setLabelId] = useState('');
   const lastGeneratedMsgRef = useRef('');
   const fileRef   = useRef<HTMLInputElement>(null);
   const csvRef    = useRef<HTMLInputElement>(null);
@@ -1138,6 +1141,20 @@ function NovaCampanhaTab({ onCreated, prefill, editCampaign }: { onCreated: () =
       })
       .catch(() => { /* tela degrada: seletor vazio, criacao bloqueada pelo servidor */ });
   }, []);
+
+  // As etiquetas são da INSTÂNCIA, não do cliente: trocar o número troca a
+  // lista inteira, e um id da instância anterior não existe na nova.
+  useEffect(() => {
+    setLabelId('');
+    setEtiquetaErro('');
+    if (!form.instanceId) { setEtiquetas([]); return; }
+    let vivo = true;
+    void fetch(`/api/disparos/etiquetas?instanceId=${encodeURIComponent(form.instanceId)}`, { headers: callerHeaders() })
+      .then(r => r.json() as Promise<{ etiquetas?: { id: string; name: string; color: string }[]; erro?: string }>)
+      .then(d => { if (!vivo) return; setEtiquetas(d.etiquetas ?? []); setEtiquetaErro(d.erro ?? ''); })
+      .catch(() => { if (vivo) setEtiquetaErro('Não foi possível ler as etiquetas desta instância.'); });
+    return () => { vivo = false; };
+  }, [form.instanceId]);
 
   useEffect(() => {
     if (!prefill) return;
@@ -1317,7 +1334,7 @@ function NovaCampanhaTab({ onCreated, prefill, editCampaign }: { onCreated: () =
       const allMessages = variations.length > 0 ? [form.message, ...variations.map(v => v.text)] : undefined;
       const startsAt = form.isNow ? new Date().toISOString() : toISO(form.startsAt);
 
-      const res = await fetch('/api/disparos/campaigns', { method: 'POST', headers: { 'Content-Type': 'application/json', ...callerHeaders() }, body: JSON.stringify({ onmidClientId: form.onmidClientId, instanceId: form.instanceId, confirmClientName, name: form.name, message: form.message, messages: allMessages, numbers: form.numbers, startsAt, endsAt, activeFrom, activeUntil, activeDays, intervalMin: form.intervalMin, intervalMax: form.intervalMax, dailyLimit: form.dailyLimit, imageUrls: imageUrls.length > 0 ? imageUrls : undefined }) });
+      const res = await fetch('/api/disparos/campaigns', { method: 'POST', headers: { 'Content-Type': 'application/json', ...callerHeaders() }, body: JSON.stringify({ onmidClientId: form.onmidClientId, instanceId: form.instanceId, confirmClientName, name: form.name, message: form.message, messages: allMessages, numbers: form.numbers, startsAt, endsAt, activeFrom, activeUntil, activeDays, intervalMin: form.intervalMin, intervalMax: form.intervalMax, dailyLimit: form.dailyLimit, imageUrls: imageUrls.length > 0 ? imageUrls : undefined, labelId: labelId || null, labelNome: etiquetas.find(e => e.id === labelId)?.name ?? null }) });
       const data = await res.json() as { error?: string; invalid_count?: number };
       if (!res.ok) { setError(data.error ?? 'Erro ao criar campanha.'); return; }
       if (data.invalid_count && data.invalid_count > 0) {
@@ -1394,6 +1411,29 @@ function NovaCampanhaTab({ onCreated, prefill, editCampaign }: { onCreated: () =
                   )}
                 </div>
               </div>
+              {!isEdit && form.instanceId && (
+                <div className="space-y-1.5 mt-3">
+                  <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
+                    Etiqueta no WhatsApp (opcional)
+                  </label>
+                  <div className="relative">
+                    <select value={labelId} onChange={e => setLabelId(e.target.value)}
+                      disabled={etiquetas.length === 0}
+                      className="w-full h-9 rounded-lg border border-border bg-background pl-3 pr-8 text-sm outline-none focus:ring-1 focus:ring-primary appearance-none disabled:opacity-50">
+                      <option value="">Não etiquetar</option>
+                      {etiquetas.map(et => <option key={et.id} value={et.id}>{et.name}</option>)}
+                    </select>
+                    <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+                  </div>
+                  <p className="text-[11px] text-muted-foreground/70">
+                    {etiquetaErro
+                      ? etiquetaErro
+                      : etiquetas.length === 0
+                        ? 'Nenhuma etiqueta criada neste WhatsApp. Crie em: WhatsApp Business → Etiquetas.'
+                        : 'Quem receber a mensagem entra nessa etiqueta, no WhatsApp do cliente.'}
+                  </p>
+                </div>
+              )}
             </div>
 
             {/* Section 2: Mensagem */}
