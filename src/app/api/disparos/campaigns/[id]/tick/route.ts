@@ -10,7 +10,7 @@ import { sendFollowupMessage, type WaInstance } from '@/lib/followup-send';
 import { isWithinWindow, isActiveDayNow } from '@/lib/disparos-schedule';
 import { classificarErroEnvio } from '@/lib/disparos-destinos';
 import { pausarCampanhaPorInstancia } from '@/lib/disparos-alerta';
-import { lerImagens, doRodizio } from '@/lib/disparos-rodizio';
+import { lerImagens, parDoRodizio } from '@/lib/disparos-rodizio';
 import {
   garantirProtecaoChip, reservarEnvioNoChip, removerOptoutDaFila, esperaDoChip,
 } from '@/lib/disparos-chip';
@@ -31,7 +31,6 @@ export async function POST(
     await pool.query(`ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS message_index INT NOT NULL DEFAULT 0`);
     await pool.query(`ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS active_days TEXT`);
     await pool.query(`ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS daily_limit INT`);
-    await pool.query(`ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS image_index INT NOT NULL DEFAULT 0`);
     await garantirProtecaoChip(pool);
 
     const { rows: [campaign] } = await pool.query(
@@ -145,12 +144,14 @@ export async function POST(
         if (Array.isArray(parsed) && parsed.length > 0) messagePool = parsed;
       } catch { /* keep single message */ }
     }
-    const rawMessage = messagePool[(campaign.message_index ?? 0) % messagePool.length];
-    const message = interpolate(rawMessage, number.phone, number.name ?? '');
+    const imagens = lerImagens(campaign.image_url);
+    // Mesmo par do worker — os dois caminhos TÊM que concordar, senão a campanha
+    // rodada pela tela produziria combinações diferentes da rodada pelo cron.
+    const par = parDoRodizio(campaign.message_index ?? 0, messagePool.length, imagens.length);
+    const message = interpolate(messagePool[par.mensagem], number.phone, number.name ?? '');
+    const imagemDaVez = imagens.length > 0 ? imagens[par.imagem] : null;
     const client = { instanceId: campaign.instance_id, token: campaign.token, clientToken: campaign.security_token ?? undefined };
 
-    // Rodízio de imagem: UMA por contato, girando a lista.
-    const imagemDaVez = doRodizio(lerImagens(campaign.image_url), campaign.image_index ?? 0);
 
     const isEvolution = campaign.provider === 'evolution';
     // Evolution routes through the same dispatcher the CRM uses (lib/followup-send.ts).
@@ -198,7 +199,7 @@ export async function POST(
     const field = result.ok ? 'sent = sent + 1' : 'failed = failed + 1';
     await pool.query(
       `UPDATE public.zapi_campaigns
-          SET ${field}, message_index = message_index + 1, image_index = image_index + 1
+          SET ${field}, message_index = message_index + 1
         WHERE id = $1`,
       [id],
     );

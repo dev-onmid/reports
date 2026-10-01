@@ -15,7 +15,6 @@ async function ensureColumns(pool: ReturnType<typeof makeServerPool>) {
     ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS next_tick_at TIMESTAMPTZ;
     ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS messages JSONB;
     ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS daily_limit INT;
-    ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS image_index INT NOT NULL DEFAULT 0;
   `);
 }
 

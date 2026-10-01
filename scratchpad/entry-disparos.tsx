@@ -15,7 +15,22 @@ const real = window.fetch.bind(window);
 window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
   const url = typeof input === 'string' ? input : (input as Request).url ?? String(input);
   if (url.includes('/api/disparos/destinos')) return J(destinos);
-  if (url.includes('/api/disparos/campaigns')) return J([]);
+  if (url.includes('/api/disparos/respostas')) return J({
+    'cmp-1': { campaignId: 'cmp-1', mensuravel: true, enviados: 1288, responderam: 24, taxa: 1.863 },
+    'cmp-2': { campaignId: 'cmp-2', mensuravel: true, enviados: 62, responderam: 3, taxa: 4.838 },
+    'cmp-3': { campaignId: 'cmp-3', mensuravel: false, enviados: 40, responderam: 0, taxa: null },
+  });
+  if (url.includes('/api/disparos/campaigns')) return J([
+    { id: 'cmp-1', name: 'TOUR 2025 | 2 BOWL + PINK', client_name: 'PicoLocos Guanabara', status: 'running',
+      total: 2078, sent: 1288, failed: 20, starts_at: new Date().toISOString(), interval_min: 500, interval_max: 530,
+      message: 'oi', created_at: new Date().toISOString() },
+    { id: 'cmp-2', name: 'PICOLOCOS - CLIENTE DA CASA', client_name: 'PicoLocos Guanabara', status: 'running',
+      total: 515, sent: 62, failed: 0, starts_at: new Date().toISOString(), interval_min: 180, interval_max: 300,
+      message: 'oi', created_at: new Date().toISOString() },
+    { id: 'cmp-3', name: 'CAMPANHA SEM VINCULO NO CRM', client_name: 'Outro', status: 'paused',
+      total: 100, sent: 40, failed: 0, starts_at: new Date().toISOString(), interval_min: 90, interval_max: 210,
+      message: 'oi', created_at: new Date().toISOString() },
+  ]);
   if (url.includes('/api/disparos/clients')) return J([]);
   if (url.includes('/api/clients')) return J([{ id: 'c-pico', name: 'PicoLocos Guanabara', status: 'Ativo' }]);
   if (url.includes('/api/ai/whatsapp-variations')) {

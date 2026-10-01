@@ -14,7 +14,7 @@ import { makeServerPool } from '@/lib/server-db';
 import { sendText, sendImage } from '@/lib/zapi';
 import { sendFollowupMessage, type WaInstance } from '@/lib/followup-send';
 import { isWithinWindow, isActiveDayNow } from '@/lib/disparos-schedule';
-import { lerImagens, doRodizio } from '@/lib/disparos-rodizio';
+import { lerImagens, parDoRodizio } from '@/lib/disparos-rodizio';
 import {
   garantirProtecaoChip, reservarEnvioNoChip, removerOptoutDaFila,
   podeSincronizarOptout, sincronizarOptout,
@@ -64,7 +64,6 @@ async function runWorker(req: NextRequest) {
     await pool.query(`ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS message_index INT NOT NULL DEFAULT 0`);
     await pool.query(`ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS active_days TEXT`);
     await pool.query(`ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS daily_limit INT`);
-    await pool.query(`ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS image_index INT NOT NULL DEFAULT 0`);
     await garantirProtecaoChip(pool);
 
     // Transition pending campaigns whose start time has arrived
@@ -83,7 +82,6 @@ async function runWorker(req: NextRequest) {
       message: string;
       messages: string | null;
       message_index: number;
-      image_index: number;
       image_url: string | null;
       ends_at: string | null;
       active_from: string | null;
@@ -98,7 +96,7 @@ async function runWorker(req: NextRequest) {
       security_token: string | null;
       provider: string;
     }>(`
-      SELECT c.id, c.name, c.status, c.message, c.messages, c.message_index, c.image_index, c.image_url, c.ends_at,
+      SELECT c.id, c.name, c.status, c.message, c.messages, c.message_index, c.image_url, c.ends_at,
              c.active_from, c.active_until, c.active_days, c.interval_min, c.interval_max,
              c.daily_limit, c.client_id,
              cl.instance_id, cl.token, cl.security_token, cl.provider, cl.name AS client_name
@@ -208,11 +206,10 @@ async function runWorker(req: NextRequest) {
           if (Array.isArray(parsed) && parsed.length > 0) messagePool = parsed;
         } catch { /* keep single message */ }
       }
+      // ⚠️ UM contador só para o par. `message_index` é o número de envios da
+      // campanha, e é dele que saem TEXTO e IMAGEM — dois contadores separados
+      // poderiam divergir (uma gravação falha) e quebrar a garantia de m×n.
       let localIndex = campaign.message_index ?? 0;
-      // Índice PRÓPRIO da imagem: anda junto com o da mensagem, mas separado —
-      // campanha antiga que já enviou 800 vezes tem message_index alto e começa
-      // o rodízio de imagem do zero, como deve.
-      let localImgIndex = campaign.image_index ?? 0;
 
       // Process messages for this campaign until time budget runs out.
       // Piso anti-bloqueio de 90s no intervalo — vale também pra campanhas
@@ -258,10 +255,11 @@ async function runWorker(req: NextRequest) {
           break;
         }
 
-        const rawMessage = messagePool[localIndex % messagePool.length];
-        const message = interpolate(rawMessage, number.phone, number.name ?? '');
-        // UMA imagem por contato, rodando a lista — não mais todas de uma vez.
-        const imagemDaVez = doRodizio(imageUrls, localImgIndex);
+        // O par da vez: texto e imagem saem do mesmo contador, combinados de
+        // forma que os (textos × imagens) pares apareçam todos antes de repetir.
+        const par = parDoRodizio(localIndex, messagePool.length, imageUrls.length);
+        const message = interpolate(messagePool[par.mensagem], number.phone, number.name ?? '');
+        const imagemDaVez = imageUrls.length > 0 ? imageUrls[par.imagem] : null;
 
         const isEvolution = campaign.provider === 'evolution';
         // Evolution goes through the exact same dispatcher the CRM uses
@@ -308,12 +306,11 @@ async function runWorker(req: NextRequest) {
         const field = result.ok ? 'sent = sent + 1' : 'failed = failed + 1';
         await pool.query(
           `UPDATE public.zapi_campaigns
-              SET ${field}, message_index = message_index + 1, image_index = image_index + 1
+              SET ${field}, message_index = message_index + 1
             WHERE id = $1`,
           [campaign.id],
         );
         localIndex++;
-        localImgIndex++;
         processed++;
 
         // Re-check status in case it was paused/cancelled externally

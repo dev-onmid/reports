@@ -10,7 +10,7 @@
  * 2026-08-11 com o test-funil-etapas).
  */
 import assert from 'node:assert/strict';
-import { lerImagens, gravarImagens, doRodizio, combinacoesRodizio } from './build/disparos-rodizio.mjs';
+import { lerImagens, gravarImagens, doRodizio, parDoRodizio, combinacoesRodizio } from './build/disparos-rodizio.mjs';
 import { humanizarTexto, tirarMarcacao } from './build/whatsapp-texto.mjs';
 import { pedeParaParar, chaveOptout } from './build/disparos-chip.mjs';
 
@@ -52,13 +52,51 @@ eq(doRodizio(['a', 'b'], NaN), 'a', 'NaN cai no índice 0 em vez de undefined');
 // Campanha antiga: message_index alto e image_index zerado — a imagem começa do início.
 eq(doRodizio(['x', 'y'], 0), 'x', 'image_index próprio começa do zero mesmo com message_index alto');
 
+// ───────────────── parDoRodizio: TODOS os pares, sem repetir ───────────────
+// ⚠️ O teste central desta feature. Simula os envios de verdade e exige que o
+// ciclo produza textos × imagens pares DISTINTOS — 5 textos com 5 imagens têm
+// que dar 25, não 5 (que era o defeito).
+for (const [m, nImg] of [[5,5],[5,4],[5,3],[4,2],[6,4],[3,3],[2,2],[1,5],[5,1],[7,7],[6,6],[8,6],[9,6],[12,8],[1,1]]) {
+  const vistos = new Set();
+  const total = m * nImg;
+  for (let i = 0; i < total; i++) {
+    const { mensagem, imagem } = parDoRodizio(i, m, nImg);
+    ok(mensagem >= 0 && mensagem < m, `texto dentro do intervalo (${m}x${nImg})`);
+    ok(imagem >= 0 && imagem < nImg, `imagem dentro do intervalo (${m}x${nImg})`);
+    vistos.add(mensagem + '|' + imagem);
+  }
+  eq(vistos.size, total, `${m} textos x ${nImg} imagens => ${total} pares distintos`);
+  // E o ciclo tem que FECHAR: o envio seguinte repete o primeiro par.
+  const p0 = parDoRodizio(0, m, nImg);
+  const pN = parDoRodizio(total, m, nImg);
+  eq([pN.mensagem, pN.imagem], [p0.mensagem, p0.imagem], `o ciclo fecha em ${total} (${m}x${nImg})`);
+}
+
+// O caso que originou o pedido: 5 e 5 não pode travar texto1 <-> imagem1.
+const paresDe5 = [...Array(25)].map((_, i) => parDoRodizio(i, 5, 5));
+const imagensDoTexto0 = new Set(paresDe5.filter(p => p.mensagem === 0).map(p => p.imagem));
+eq(imagensDoTexto0.size, 5, 'o texto 1 passa por TODAS as 5 imagens (era sempre a mesma)');
+
+// A imagem precisa trocar a cada envio — senão parece que o rodízio não anda.
+let trocas = 0;
+for (let i = 1; i < 25; i++) if (paresDe5[i].imagem !== paresDe5[i-1].imagem) trocas++;
+eq(trocas, 24, 'a imagem muda em TODOS os envios consecutivos');
+
+// O texto continua girando de um em um, como já girava antes.
+eq(paresDe5.slice(0, 6).map(p => p.mensagem), [0,1,2,3,4,0], 'o texto mantém o giro de sempre');
+
+// Bordas: sem imagem, índice gigante, índice inválido.
+eq(parDoRodizio(10, 5, 0), { mensagem: 0, imagem: 0 }, 'sem imagem não estoura');
+ok(parDoRodizio(999999, 5, 5).imagem < 5, 'índice alto (campanha antiga) continua válido');
+eq(parDoRodizio(NaN, 5, 5), { mensagem: 0, imagem: 0 }, 'índice inválido cai no primeiro par');
+eq(parDoRodizio(-3, 5, 5), { mensagem: 0, imagem: 0 }, 'índice negativo não gera posição fora da lista');
+
 // ───────────────────────── combinacoesRodizio ─────────────────────────────
-// ⚠️ O ponto central: NÃO é textos × imagens.
-eq(combinacoesRodizio(5, 5), 5, '5 textos com 5 imagens = 5 pares (não 25!)');
-eq(combinacoesRodizio(5, 4), 20, '5 textos com 4 imagens = 20 pares');
-eq(combinacoesRodizio(5, 3), 15, '5 textos com 3 imagens = 15 pares');
-eq(combinacoesRodizio(4, 2), 4, '4 com 2 = 4 (um divide o outro)');
-eq(combinacoesRodizio(6, 4), 12, '6 com 4 = 12 (mdc 2)');
+eq(combinacoesRodizio(5, 5), 25, '5 textos com 5 imagens = 25 combinações');
+eq(combinacoesRodizio(5, 4), 20, '5 com 4 = 20');
+eq(combinacoesRodizio(5, 3), 15, '5 com 3 = 15');
+eq(combinacoesRodizio(4, 2), 8, '4 com 2 = 8 (antes travava em 4)');
+eq(combinacoesRodizio(6, 4), 24, '6 com 4 = 24 (antes travava em 12)');
 eq(combinacoesRodizio(5, 1), 5, 'uma imagem só: manda o nº de textos');
 eq(combinacoesRodizio(1, 1), 1, 'um e um = um');
 eq(combinacoesRodizio(5, 0), 5, 'sem imagem: só os textos');

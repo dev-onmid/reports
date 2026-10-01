@@ -22,6 +22,7 @@ import { SeletorCliente } from '@/components/disparos/seletor-cliente';
 import { ConfirmarClienteModal } from '@/components/disparos/confirmar-cliente-modal';
 import type { DestinoCliente, InstanciaOrfa } from '@/lib/disparos-destinos';
 import { lerImagens, gravarImagens, combinacoesRodizio } from '@/lib/disparos-rodizio';
+import { faixaDaTaxa, type RespostasDaCampanha } from '@/lib/disparos-respostas';
 import { useAbaPersistida } from '@/lib/aba-persistida';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -279,8 +280,9 @@ type TickResult = {
   total?: number; sent?: number; failed?: number; lastPhone?: string; lastError?: string | null;
 };
 
-function CampaignCard({ campaign, onAction, onRefresh, onEdit }: {
+function CampaignCard({ campaign, onAction, onRefresh, onEdit, respostas }: {
   campaign: Campaign; onAction: (id: string, action: string) => void; onRefresh: () => void; onEdit: (c: Campaign) => void;
+  respostas?: RespostasDaCampanha;
 }) {
   const [live, setLive] = useState<Progress | null>(null);
   const [tickError, setTickError] = useState('');
@@ -351,6 +353,30 @@ function CampaignCard({ campaign, onAction, onRefresh, onEdit }: {
           <span className="flex items-center gap-1 text-muted-foreground font-mono truncate"><Clock className="h-3 w-3" />{live.currentPhone}</span>
         )}
       </div>
+      {respostas && (respostas.enviados > 0 || !respostas.mensuravel) && (() => {
+        // ⚠️ Instância sem CRM mostra traço, NUNCA 0% — zero diria "ninguém
+        // respondeu" quando a verdade é "não dá para saber daqui".
+        const faixa = faixaDaTaxa(respostas.taxa);
+        const cor = faixa === 'boa' ? 'text-emerald-400' : faixa === 'atencao' ? 'text-amber-400'
+          : faixa === 'ruim' ? 'text-red-400' : 'text-muted-foreground';
+        return (
+          <div className="flex items-center justify-between gap-2 rounded-lg border border-border bg-muted/20 px-3 py-1.5 text-[11px]">
+            <span className="flex items-center gap-1.5 text-muted-foreground">
+              <MessageSquare className="h-3 w-3" />Responderam
+            </span>
+            {respostas.mensuravel ? (
+              <span className={cn('font-semibold', cor)}>
+                {respostas.responderam} de {respostas.enviados}
+                {respostas.taxa !== null && <span className="ml-1">({respostas.taxa.toFixed(1).replace('.', ',')}%)</span>}
+              </span>
+            ) : (
+              <span className="text-muted-foreground" title="Esta instância não está vinculada a um cliente no CRM, então as respostas não chegam até aqui.">
+                — sem leitura do CRM
+              </span>
+            )}
+          </div>
+        );
+      })()}
       {sleeping && status === 'running' && (
         <div className="rounded-lg bg-yellow-500/10 border border-yellow-500/20 px-3 py-2 text-[11px] text-yellow-400 flex items-center gap-1.5">
           <Clock className="h-3 w-3" />Fora do horário de envio — aguardando janela...
@@ -1569,22 +1595,16 @@ function NovaCampanhaTab({ onCreated, prefill, editCampaign }: { onCreated: () =
               {imageUrls.length > 0 && (() => {
                 const textos = variations.length > 0 ? variations.length + 1 : 1;
                 const combos = combinacoesRodizio(textos, imageUrls.length);
-                // ⚠️ Combinações NÃO é textos × imagens: os dois índices andam juntos,
-                // um por envio. 5 textos com 5 imagens dão 5 pares (o texto 1 sai
-                // sempre com a imagem 1); com 4 imagens dão 20. Mostrar o número
-                // real é o que impede o gestor de achar que fez 25.
-                const travado = imageUrls.length > 1 && combos < textos * imageUrls.length;
                 return (
-                  <div className={cn('mt-3 rounded-lg border px-3 py-2 text-[11px]',
-                    travado ? 'border-amber-500/30 bg-amber-500/5' : 'border-border bg-muted/20')}>
+                  <div className="mt-3 rounded-lg border border-border bg-muted/20 px-3 py-2 text-[11px]">
                     <p className="font-semibold text-foreground">
                       {textos} {textos === 1 ? 'texto' : 'textos'} × {imageUrls.length} {imageUrls.length === 1 ? 'imagem' : 'imagens'} ={' '}
-                      <span className={travado ? 'text-amber-400' : 'text-primary'}>{combos}</span>{' '}
-                      {combos === 1 ? 'combinação' : 'combinações'} antes de repetir
+                      <span className="text-primary">{combos}</span>{' '}
+                      {combos === 1 ? 'combinação' : 'combinações diferentes'} antes de repetir
                     </p>
-                    {travado && (
-                      <p className="text-amber-400/80 mt-0.5">
-                        Use um número de imagens diferente do de textos (ex: {imageUrls.length === textos ? textos - 1 || textos + 1 : textos + 1}) para variar mais.
+                    {imageUrls.length > 1 && textos > 1 && (
+                      <p className="text-muted-foreground mt-0.5">
+                        Cada texto passa por todas as imagens — nenhum par se repete antes do fim do ciclo.
                       </p>
                     )}
                   </div>
@@ -1941,6 +1961,19 @@ function DashboardTab({ onReuse, onNewCampaign, onManageInstances, onEdit }: {
   const deliveryRate = useMemo(() => { const t = totalSent + totalFailed; return t > 0 ? (totalSent / t) * 100 : 0; }, [totalSent, totalFailed]);
 
   const activeCampaigns = useMemo(() => campaigns.filter(c => ['running', 'paused', 'pending'].includes(c.status)), [campaigns]);
+  const [respostas, setRespostas] = useState<Record<string, RespostasDaCampanha>>({});
+  const idsParaTaxa = campaigns.map(c => c.id).join(',');
+  useEffect(() => {
+    if (!idsParaTaxa) { setRespostas({}); return; }
+    // ⚠️ Depende da STRING de ids, não do array: `campaigns.map()` devolve um
+    // array novo a cada render e refaria o fetch sem parar (lição de 2026-07-29).
+    let vivo = true;
+    void fetch(`/api/disparos/respostas?ids=${idsParaTaxa}`, { headers: callerHeaders() })
+      .then(r => r.json() as Promise<Record<string, RespostasDaCampanha>>)
+      .then(d => { if (vivo) setRespostas(d ?? {}); })
+      .catch(() => { /* taxa é informativa: falha não derruba a tela */ });
+    return () => { vivo = false; };
+  }, [idsParaTaxa]);
 
   const prevSent = useMemo(() => lastWeek.reduce((s, c) => s + c.sent, 0), [lastWeek]);
   const thisSent = useMemo(() => thisWeek.reduce((s, c) => s + c.sent, 0), [thisWeek]);
@@ -2040,7 +2073,7 @@ function DashboardTab({ onReuse, onNewCampaign, onManageInstances, onEdit }: {
           <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Em andamento agora</p>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {activeCampaigns.filter(c => c.status === 'running').map(c => (
-              <CampaignCard key={c.id} campaign={c} onAction={handleAction} onRefresh={load} onEdit={onEdit} />
+              <CampaignCard key={c.id} campaign={c} onAction={handleAction} onRefresh={load} onEdit={onEdit} respostas={respostas[c.id]} />
             ))}
           </div>
         </div>
@@ -2154,7 +2187,7 @@ function DashboardTab({ onReuse, onNewCampaign, onManageInstances, onEdit }: {
                                 <td colSpan={6} className="px-4 py-3">
                                   {['running','paused','pending'].includes(c.status) && (
                                     <div className="mb-3">
-                                      <CampaignCard campaign={c} onAction={handleAction} onRefresh={load} onEdit={onEdit} />
+                                      <CampaignCard campaign={c} onAction={handleAction} onRefresh={load} onEdit={onEdit} respostas={respostas[c.id]} />
                                     </div>
                                   )}
                                   {loadingDetail === c.id || !nums ? (

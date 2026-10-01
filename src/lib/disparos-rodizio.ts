@@ -53,19 +53,55 @@ export function doRodizio<T>(lista: T[], indice: number): T | null {
 }
 
 /**
- * Quantos pares (texto + imagem) DIFERENTES a campanha produz antes de repetir.
+ * O par (texto, imagem) do envio número `indice`.
  *
- * ⚠️ Não é `mensagens × imagens`: os dois índices andam juntos (um por envio),
- * então o par se repete no mínimo múltiplo comum. 5 textos com 5 imagens dão
- * só **5** pares (texto 1 sempre com a imagem 1) — enquanto 5 textos com 4
- * imagens dão 20. É exatamente isso que a tela precisa mostrar, senão o
- * gestor sobe 5 imagens para 5 textos achando que fez 25 combinações.
+ * ⚠️⚠️ O PULO DO GATO está no `passo`. O caminho ingênuo — cada índice andando
+ * de 1 em 1 — faz o par se repetir no mínimo múltiplo comum, não em m×n: com 5
+ * textos e 5 imagens o texto 1 sairia SEMPRE com a imagem 1, dando 5 pares em
+ * vez de 25 (reclamação do Matheus, 2026-10-01).
+ *
+ * A correção: a imagem ganha um empurrão extra a cada volta completa dos textos
+ * (`passo * voltas`). Fixando o texto em `a`, os envios dele são
+ * `a, a+m, a+2m, …` e a imagem vira `(a + j*(m + passo)) % n` — que percorre as
+ * n imagens se, e só se, `mdc(m + passo, n) = 1`. Por isso o passo é PROCURADO,
+ * não chutado: o menor que satisfaz a condição. Ele sempre existe (no pior caso
+ * o que faz `m + passo ≡ 1`), então m×n combinações valem para QUALQUER
+ * quantidade de textos e imagens.
+ *
+ * E como o passo é pequeno, a imagem continua trocando a cada envio — o gestor
+ * vê rodízio de verdade, não a mesma imagem cinco vezes seguidas.
+ */
+export function parDoRodizio(
+  indice: number, totalMensagens: number, totalImagens: number,
+): { mensagem: number; imagem: number } {
+  const m = Math.max(1, Math.trunc(totalMensagens) || 1);
+  const n = Math.max(0, Math.trunc(totalImagens) || 0);
+  const i = Number.isFinite(indice) ? Math.max(0, Math.trunc(indice)) : 0;
+
+  const mensagem = i % m;
+  if (n <= 0) return { mensagem, imagem: 0 };
+
+  const voltas = Math.floor(i / m);
+  const imagem = ((i + passoDoRodizio(m, n) * voltas) % n + n) % n;
+  return { mensagem, imagem };
+}
+
+/** Menor empurrão por volta que garante percorrer todas as imagens. */
+function passoDoRodizio(m: number, n: number): number {
+  for (let passo = 0; passo < n; passo++) {
+    if (mdc(m + passo, n) === 1) return passo;
+  }
+  return 1; // inalcançável (passo ≡ 1-m mod n sempre serve), mas nunca devolve undefined
+}
+
+/**
+ * Quantos pares (texto + imagem) DIFERENTES a campanha produz antes de repetir.
+ * Com o passo de `parDoRodizio`, é sempre textos × imagens.
  */
 export function combinacoesRodizio(mensagens: number, imagens: number): number {
   const m = Math.max(1, Math.trunc(mensagens) || 1);
   const n = Math.trunc(imagens) || 0;
-  if (n <= 0) return m;
-  return (m * n) / mdc(m, n);
+  return n <= 0 ? m : m * n;
 }
 
 function mdc(a: number, b: number): number {
