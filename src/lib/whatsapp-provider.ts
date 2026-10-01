@@ -1,6 +1,6 @@
-// Abstraction layer for Z-API and Evolution API inbound webhook payloads
+// Abstraction layer for Z-API, Evolution API and Meta Cloud API inbound webhook payloads
 
-export type WhatsAppProvider = 'zapi' | 'evolution';
+export type WhatsAppProvider = 'zapi' | 'evolution' | 'meta';
 
 export type NormalizedMessage = {
   phone: string;
@@ -144,4 +144,87 @@ export function normalizeWebhookPayload(
 ): NormalizedMessage | null {
   if (provider === 'evolution') return normalizeEvolutionPayload(body);
   return normalizeZapiPayload(body);
+}
+
+// ── Meta Cloud API (WhatsApp oficial) ────────────────────────────────────────
+// Uma entrada `changes[].value` traz `metadata` (qual número recebeu), `contacts`
+// (nome do remetente) e `messages` (só o que CHEGA — o que o cliente envia por
+// outro sistema vem apenas como `statuses`, sem texto).
+
+export type MetaMediaKind = 'audio' | 'imagem' | 'video' | 'documento';
+
+export type MetaMedia = {
+  id: string;
+  mimetype: string;
+  kind: MetaMediaKind;
+  caption: string | null;
+};
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function extractMetaText(m: Record<string, any>): string {
+  switch (m.type) {
+    case 'text': return String(m.text?.body ?? '').trim();
+    case 'image': return m.image?.caption ? `[Imagem] ${m.image.caption}` : '[Imagem]';
+    case 'audio': return '[Áudio]';
+    case 'video': return m.video?.caption ? `[Vídeo] ${m.video.caption}` : '[Vídeo]';
+    case 'document': return m.document?.filename ? `[Doc] ${m.document.filename}` : '[Documento]';
+    case 'sticker': return '[Sticker]';
+    case 'location': return `[Localização] ${m.location?.latitude ?? ''}, ${m.location?.longitude ?? ''}`;
+    case 'contacts': return `[Contato] ${m.contacts?.[0]?.name?.formatted_name ?? ''}`.trim();
+    case 'reaction': return m.reaction?.emoji ? `[Reação] ${m.reaction.emoji}` : '[Reação]';
+    case 'button': return String(m.button?.text ?? '').trim();
+    case 'interactive':
+      return String(m.interactive?.button_reply?.title ?? m.interactive?.list_reply?.title ?? '').trim();
+    case 'order': return '[Pedido]';
+    default: return '';
+  }
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function metaMediaOf(m: Record<string, any>): MetaMedia | null {
+  const kind: MetaMediaKind | null = m.type === 'audio' ? 'audio'
+    : m.type === 'image' || m.type === 'sticker' ? 'imagem'
+    : m.type === 'video' ? 'video'
+    : m.type === 'document' ? 'documento'
+    : null;
+  if (!kind) return null;
+  const obj = m[m.type] ?? {};
+  if (!obj.id) return null;
+  return {
+    id: String(obj.id),
+    mimetype: String(obj.mime_type ?? 'application/octet-stream'),
+    kind,
+    caption: String(obj.caption ?? '').trim() || null,
+  };
+}
+
+export function normalizeMetaMessage(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  value: Record<string, any>,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  m: Record<string, any>,
+): NormalizedMessage | null {
+  const phone = normalizePhone(String(m.from ?? ''));
+  if (!phone) return null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const contact = (value.contacts ?? []).find((c: any) => String(c?.wa_id ?? '') === String(m.from)) ?? value.contacts?.[0];
+  const referral = m.referral ?? null;
+  return {
+    phone,
+    lid: undefined,
+    fromMe: false,
+    text: extractMetaText(m),
+    timestamp: m.timestamp ?? undefined,
+    externalId: typeof m.id === 'string' ? m.id : undefined,
+    ctwaClid: referral?.ctwa_clid ?? undefined,
+    sourceId: referral?.source_id ?? undefined,
+    sourceUrl: referral?.source_url ?? undefined,
+    campaignName: undefined,
+    adsetName: undefined,
+    adName: referral?.headline ?? undefined,
+    creativeName: referral?.body ?? undefined,
+    pushName: contact?.profile?.name ?? undefined,
+    profilePictureUrl: undefined,
+    quotedText: undefined,
+  };
 }
