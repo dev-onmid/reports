@@ -21,6 +21,7 @@ import { DictateButton } from '@/components/ui/dictate-button';
 import { SeletorCliente } from '@/components/disparos/seletor-cliente';
 import { ConfirmarClienteModal } from '@/components/disparos/confirmar-cliente-modal';
 import type { DestinoCliente, InstanciaOrfa } from '@/lib/disparos-destinos';
+import { lerImagens, gravarImagens, combinacoesRodizio } from '@/lib/disparos-rodizio';
 import { useAbaPersistida } from '@/lib/aba-persistida';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -211,11 +212,11 @@ function formatWAText(text: string): React.ReactNode[] {
 
 // ─── WhatsApp Preview ─────────────────────────────────────────────────────────
 
-function WhatsAppPreview({ images, message }: { images: string[]; message: string }) {
+function WhatsAppPreview({ image, message }: { image: string | null; message: string }) {
   const preview = message.replace(/\{nome\}/g, 'João Silva').replace(/\{telefone\}/g, '43 9 9999-1111');
   const now = new Date();
   const time = `${now.getHours()}:${String(now.getMinutes()).padStart(2, '0')}`;
-  const hasContent = images.length > 0 || preview.trim();
+  const hasContent = !!image || preview.trim();
 
   return (
     <div className="flex flex-col gap-2 w-[300px]">
@@ -236,17 +237,11 @@ function WhatsAppPreview({ images, message }: { images: string[]; message: strin
           <div className="bg-[#E5DDD5] flex-1 min-h-0 overflow-y-auto flex flex-col justify-end p-4 gap-3">
             {hasContent ? (
               <>
-                {images.slice(1).map((img, idx) => (
-                  <div key={idx} className="self-end rounded-2xl rounded-tr-sm overflow-hidden shadow" style={{ background: '#DCF8C6', maxWidth: '82%' }}>
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={img} alt="" className="w-full object-cover" style={{ maxHeight: '220px' }} />
-                    <div className="flex justify-end px-3 py-1">
-                      <span className="text-[10px] text-black/40">{time} <span className="text-[#53BDEB]">✓✓</span></span>
-                    </div>
-                  </div>
-                ))}
+                {/* Cada contato recebe UMA imagem (a da vez no rodízio) com a
+                    legenda — não a lista toda empilhada, como era antes. */}
                 <div className="self-end rounded-2xl rounded-tr-sm overflow-hidden shadow" style={{ background: '#DCF8C6', maxWidth: '85%' }}>
-                  {images[0] && <img src={images[0]} alt="" className="w-full object-cover" style={{ maxHeight: '240px' }} />}
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  {image && <img src={image} alt="" className="w-full object-cover" style={{ maxHeight: '240px' }} />}
                   {preview.trim() && (
                     <div className="px-3 pt-2 pb-1 text-[14px] text-black/90 leading-snug break-words">{formatWAText(preview)}</div>
                   )}
@@ -1092,6 +1087,7 @@ function NovaCampanhaTab({ onCreated, prefill, editCampaign }: { onCreated: () =
   const [loadingVariations, setLoadingVariations] = useState(false);
   const [variationsError, setVariationsError] = useState('');
   const [previewVariationIdx, setPreviewVariationIdx] = useState<number | null>(null);
+  const [previewImgIdx, setPreviewImgIdx] = useState(0);
   const lastGeneratedMsgRef = useRef('');
   const fileRef   = useRef<HTMLInputElement>(null);
   const csvRef    = useRef<HTMLInputElement>(null);
@@ -1264,7 +1260,7 @@ function NovaCampanhaTab({ onCreated, prefill, editCampaign }: { onCreated: () =
           name: form.name,
           message: form.message,
           messages: allMessages ?? [form.message],
-          image_url: imageUrls.length > 0 ? (imageUrls.length === 1 ? imageUrls[0] : JSON.stringify(imageUrls)) : null,
+          image_url: gravarImagens(imageUrls),
           ends_at: endsAt,
           active_from: activeFrom,
           active_until: activeUntil,
@@ -1527,15 +1523,23 @@ function NovaCampanhaTab({ onCreated, prefill, editCampaign }: { onCreated: () =
                 </div>
                 <p className="font-semibold">3. Mídias (opcional)</p>
               </div>
-              <p className="text-[11px] text-muted-foreground mb-3">Adicione imagens que serão enviadas antes ou junto com a mensagem.</p>
+              <p className="text-[11px] text-muted-foreground mb-3">
+                Cada contato recebe <strong className="text-foreground">uma imagem</strong>. Com mais de uma, elas entram em
+                rodízio — igual às variações de texto.
+              </p>
 
               {imageUrls.length > 0 ? (
                 <div className="flex flex-wrap gap-2 mb-3">
                   {imageUrls.map((url, idx) => (
                     <div key={idx} className="relative group">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={url} alt="" className="h-16 w-16 rounded-lg object-cover border border-border" />
-                      {idx === 0 && <span className="absolute bottom-0 left-0 right-0 text-center text-[8px] bg-black/60 text-white rounded-b-lg py-0.5">1ª</span>}
+                      {/* Clicar escolhe qual par (texto + imagem) o preview mostra. */}
+                      <button type="button" onClick={() => setPreviewImgIdx(idx)} title={`Ver a imagem ${idx + 1} no preview`}
+                        className={cn('block rounded-lg border-2 transition-colors',
+                          previewImgIdx % Math.max(1, imageUrls.length) === idx ? 'border-primary' : 'border-transparent hover:border-border')}>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={url} alt="" className="h-16 w-16 rounded-md object-cover" />
+                      </button>
+                      <span className="absolute bottom-0.5 left-0.5 rounded bg-black/70 px-1 text-[8px] font-bold text-white">{idx + 1}</span>
                       <button type="button" onClick={() => setImageUrls(prev => prev.filter((_,i) => i !== idx))}
                         className="absolute -top-1.5 -right-1.5 h-4 w-4 rounded-full bg-background border border-border flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                         <X className="h-2.5 w-2.5" />
@@ -1562,6 +1566,30 @@ function NovaCampanhaTab({ onCreated, prefill, editCampaign }: { onCreated: () =
                   </p>
                 </div>
               )}
+              {imageUrls.length > 0 && (() => {
+                const textos = variations.length > 0 ? variations.length + 1 : 1;
+                const combos = combinacoesRodizio(textos, imageUrls.length);
+                // ⚠️ Combinações NÃO é textos × imagens: os dois índices andam juntos,
+                // um por envio. 5 textos com 5 imagens dão 5 pares (o texto 1 sai
+                // sempre com a imagem 1); com 4 imagens dão 20. Mostrar o número
+                // real é o que impede o gestor de achar que fez 25.
+                const travado = imageUrls.length > 1 && combos < textos * imageUrls.length;
+                return (
+                  <div className={cn('mt-3 rounded-lg border px-3 py-2 text-[11px]',
+                    travado ? 'border-amber-500/30 bg-amber-500/5' : 'border-border bg-muted/20')}>
+                    <p className="font-semibold text-foreground">
+                      {textos} {textos === 1 ? 'texto' : 'textos'} × {imageUrls.length} {imageUrls.length === 1 ? 'imagem' : 'imagens'} ={' '}
+                      <span className={travado ? 'text-amber-400' : 'text-primary'}>{combos}</span>{' '}
+                      {combos === 1 ? 'combinação' : 'combinações'} antes de repetir
+                    </p>
+                    {travado && (
+                      <p className="text-amber-400/80 mt-0.5">
+                        Use um número de imagens diferente do de textos (ex: {imageUrls.length === textos ? textos - 1 || textos + 1 : textos + 1}) para variar mais.
+                      </p>
+                    )}
+                  </div>
+                );
+              })()}
               <p className="text-[11px] text-muted-foreground/50 mt-2">Formatos aceitos: JPG, PNG, WEBP (máx. 5MB por imagem)</p>
               <input ref={fileRef} type="file" accept="image/*" multiple className="hidden" onChange={e => { addImages(e.target.files); e.target.value = ''; }} />
             </div>
@@ -1757,7 +1785,7 @@ function NovaCampanhaTab({ onCreated, prefill, editCampaign }: { onCreated: () =
               </div>
               <p className="text-xs text-muted-foreground mt-1">Veja como sua mensagem aparecerá para os contatos.</p>
             </div>
-            <WhatsAppPreview images={imageUrls} message={previewVariationIdx !== null && variations[previewVariationIdx] ? variations[previewVariationIdx].text : form.message} />
+            <WhatsAppPreview image={imageUrls.length > 0 ? imageUrls[previewImgIdx % imageUrls.length] : null} message={previewVariationIdx !== null && variations[previewVariationIdx] ? variations[previewVariationIdx].text : form.message} />
             {previewVariationIdx !== null && variations[previewVariationIdx] && (
               <p className="mt-1.5 text-center text-[10px] text-violet-400 font-medium">
                 Prévia: {variations[previewVariationIdx].label || `Variação ${previewVariationIdx + 1}`}
@@ -1895,11 +1923,7 @@ function DashboardTab({ onReuse, onNewCampaign, onManageInstances, onEdit }: {
   async function handleReuse(c: Campaign) {
     const nums = await fetchNumbers(c.id);
     const numbers = nums.map(n => n.name ? `${n.phone},${n.name}` : n.phone).join('\n');
-    let imageUrls: string[] = [];
-    if (c.image_url) {
-      if (c.image_url.startsWith('[')) { try { imageUrls = JSON.parse(c.image_url); } catch { imageUrls = [c.image_url]; } }
-      else { imageUrls = [c.image_url]; }
-    }
+    const imageUrls = lerImagens(c.image_url);
     onReuse({ onmidClientId: c.onmid_client_id ?? '', instanceId: c.instance_id ?? '', name: c.name, message: c.message, numbers, imageUrls, intervalMin: c.interval_min, intervalMax: c.interval_max, dailyLimit: c.daily_limit ?? undefined, activeFrom: c.active_from ?? undefined, activeUntil: c.active_until ?? undefined, activeDays: c.active_days ? parseActiveDaysClient(c.active_days) : undefined });
   }
 
@@ -2149,8 +2173,8 @@ function DashboardTab({ onReuse, onNewCampaign, onManageInstances, onEdit }: {
                                             <tr key={i} className="border-b border-border last:border-0">
                                               <td className="px-3 py-1.5 font-mono">{n.phone}</td>
                                               <td className="px-3 py-1.5 text-muted-foreground">{n.name || '—'}</td>
-                                              <td className={cn('px-3 py-1.5 font-semibold', n.status==='sent'?'text-emerald-400':n.status==='failed'?'text-red-400':'text-muted-foreground')}>
-                                                {n.status==='sent'?'Enviado':n.status==='failed'?'Falha':n.status}
+                                              <td className={cn('px-3 py-1.5 font-semibold', n.status==='sent'?'text-emerald-400':n.status==='failed'?'text-red-400':n.status==='optout'?'text-amber-400':'text-muted-foreground')}>
+                                                {n.status==='sent'?'Enviado':n.status==='failed'?'Falha':n.status==='optout'?'Pediu p/ parar':n.status}
                                               </td>
                                               <td className="px-3 py-1.5 text-muted-foreground break-all">{n.error_msg||(n.sent_at?new Date(n.sent_at).toLocaleString('pt-BR'):'—')}</td>
                                             </tr>

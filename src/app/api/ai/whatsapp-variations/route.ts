@@ -1,5 +1,6 @@
 import type { NextRequest } from 'next/server';
 import { logAiUsage } from '@/lib/ai-usage-logger';
+import { humanizarTexto } from '@/lib/whatsapp-texto';
 
 export type WhatsAppVariation = {
   text: string;
@@ -29,6 +30,16 @@ export async function POST(req: NextRequest) {
     '5. Use português brasileiro informal e natural — como falam as pessoas, não como escrevem relatórios.',
     '6. Mantenha as variáveis {nome} e {telefone} se existirem na mensagem original.',
     '7. NÃO use clichês como "Não perca essa oportunidade" ou "Aproveite agora".',
+    '',
+    'ESCREVA COMO QUEM DIGITA NO CELULAR, NÃO COMO FERRAMENTA DE DISPARO:',
+    '8. ZERO formatação. Nunca use _underscore_, *asterisco*, ~til~, crase ou # — nem para dar',
+    '   ênfase. No WhatsApp isso vira itálico/negrito e entrega na hora que o texto foi montado',
+    '   num sistema. Quem escreve de verdade só digita a palavra.',
+    '9. Nunca use travessão (—). Use hífen, vírgula ou simplesmente outra frase.',
+    '10. Nada de lista com marcador nem item numerado. Pessoa não manda lista formatada numa conversa.',
+    '11. Frase curta, uma ideia por linha, do jeito que sai no teclado. Pode começar com "oi",',
+    '    "olha", "passando pra avisar". Contração é bem-vinda ("tá", "pra", "tô").',
+    '12. No máximo UM emoji por mensagem, e só se couber naturalmente. Pode não ter nenhum.',
     '',
     'MENSAGEM ORIGINAL:',
     `"""`,
@@ -74,6 +85,14 @@ export async function POST(req: NextRequest) {
   } catch {
     return Response.json({ error: 'Resposta inválida da IA.', raw: rawText }, { status: 502 });
   }
+
+  // A regra 8 do prompt pede texto sem marcação, mas o modelo escorrega — e uma
+  // variação com `_grátis_` sai no WhatsApp em itálico, entregando que foi
+  // montada em ferramenta. A faxina fecha a porta; variação que virou vazia
+  // depois dela é descartada em vez de ir para a tela como linha em branco.
+  variations = variations
+    .map(v => ({ text: humanizarTexto(v?.text), label: String(v?.label ?? '').trim() }))
+    .filter(v => v.text.length > 0);
 
   return Response.json(variations);
 }

@@ -14,6 +14,11 @@ import { makeServerPool } from '@/lib/server-db';
 import { sendText, sendImage } from '@/lib/zapi';
 import { sendFollowupMessage, type WaInstance } from '@/lib/followup-send';
 import { isWithinWindow, isActiveDayNow } from '@/lib/disparos-schedule';
+import { lerImagens, doRodizio } from '@/lib/disparos-rodizio';
+import {
+  garantirProtecaoChip, reservarEnvioNoChip, removerOptoutDaFila,
+  podeSincronizarOptout, sincronizarOptout,
+} from '@/lib/disparos-chip';
 import { classificarErroEnvio } from '@/lib/disparos-destinos';
 import { sondarInstancia } from '@/lib/disparos-sonda';
 import { pausarCampanhaPorInstancia } from '@/lib/disparos-alerta';
@@ -47,6 +52,8 @@ async function runWorker(req: NextRequest) {
   const pool = makeServerPool();
   const startTime = Date.now();
   let processed = 0;
+  let optout = 0;
+  let chipOcupado = 0;
 
   try {
     // Inline migration — safe to run every time
@@ -57,6 +64,8 @@ async function runWorker(req: NextRequest) {
     await pool.query(`ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS message_index INT NOT NULL DEFAULT 0`);
     await pool.query(`ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS active_days TEXT`);
     await pool.query(`ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS daily_limit INT`);
+    await pool.query(`ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS image_index INT NOT NULL DEFAULT 0`);
+    await garantirProtecaoChip(pool);
 
     // Transition pending campaigns whose start time has arrived
     await pool.query(`
@@ -74,6 +83,7 @@ async function runWorker(req: NextRequest) {
       message: string;
       messages: string | null;
       message_index: number;
+      image_index: number;
       image_url: string | null;
       ends_at: string | null;
       active_from: string | null;
@@ -88,7 +98,7 @@ async function runWorker(req: NextRequest) {
       security_token: string | null;
       provider: string;
     }>(`
-      SELECT c.id, c.name, c.status, c.message, c.messages, c.message_index, c.image_url, c.ends_at,
+      SELECT c.id, c.name, c.status, c.message, c.messages, c.message_index, c.image_index, c.image_url, c.ends_at,
              c.active_from, c.active_until, c.active_days, c.interval_min, c.interval_max,
              c.daily_limit, c.client_id,
              cl.instance_id, cl.token, cl.security_token, cl.provider, cl.name AS client_name
@@ -175,14 +185,19 @@ async function runWorker(req: NextRequest) {
         clientToken: campaign.security_token ?? undefined,
       };
 
-      let imageUrls: string[] = [];
-      if (campaign.image_url) {
-        if (campaign.image_url.startsWith('[')) {
-          try { imageUrls = JSON.parse(campaign.image_url); } catch { imageUrls = [campaign.image_url]; }
-        } else {
-          imageUrls = [campaign.image_url];
-        }
+      const imageUrls = lerImagens(campaign.image_url);
+
+      // Quem pediu para parar sai da fila ANTES do laço, de uma vez: marcar
+      // dentro do laço gastaria a vez do chip em contato que não vai receber.
+      // A varredura das respostas é claimada por instância (10 min), então
+      // crons sobrepostos não varrem a mesma caixa duas vezes.
+      if (await podeSincronizarOptout(pool, campaign.client_id)) {
+        await sincronizarOptout(pool, { clientId: campaign.client_id, desdeHoras: 6 })
+          .catch(() => ({ novos: 0, analisadas: 0 }));
       }
+      const removidos = await removerOptoutDaFila(pool, { campaignId: campaign.id, clientId: campaign.client_id })
+        .catch(() => 0);
+      optout += removidos;
 
       // Build message pool once per campaign; track local index so within-invocation
       // rotation stays in sync before the DB is updated
@@ -194,6 +209,10 @@ async function runWorker(req: NextRequest) {
         } catch { /* keep single message */ }
       }
       let localIndex = campaign.message_index ?? 0;
+      // Índice PRÓPRIO da imagem: anda junto com o da mensagem, mas separado —
+      // campanha antiga que já enviou 800 vezes tem message_index alto e começa
+      // o rodízio de imagem do zero, como deve.
+      let localImgIndex = campaign.image_index ?? 0;
 
       // Process messages for this campaign until time budget runs out.
       // Piso anti-bloqueio de 90s no intervalo — vale também pra campanhas
@@ -229,8 +248,20 @@ async function runWorker(req: NextRequest) {
           break;
         }
 
+        // ⚠️ A vez do CHIP, não da campanha. O claim acima é por campanha e era
+        // a única trava — com três campanhas na mesma instância, o número levava
+        // as três somadas (medido: 27% dos envios abaixo de 90s, mínimo de 1s).
+        // Chip ocupado: sai do laço desta campanha e deixa a próxima rodada
+        // pegar a vez. O next_tick_at já foi adiado acima, então não gira em falso.
+        if (!await reservarEnvioNoChip(pool, { clientId: campaign.client_id, intervaloSeg: minSec })) {
+          chipOcupado++;
+          break;
+        }
+
         const rawMessage = messagePool[localIndex % messagePool.length];
         const message = interpolate(rawMessage, number.phone, number.name ?? '');
+        // UMA imagem por contato, rodando a lista — não mais todas de uma vez.
+        const imagemDaVez = doRodizio(imageUrls, localImgIndex);
 
         const isEvolution = campaign.provider === 'evolution';
         // Evolution goes through the exact same dispatcher the CRM uses
@@ -240,16 +271,10 @@ async function runWorker(req: NextRequest) {
         const waInstance: WaInstance = { instanceId: campaign.instance_id, token: campaign.token, provider: 'evolution' };
 
         let result;
-        if (imageUrls.length > 0) {
+        if (imagemDaVez) {
           result = isEvolution
-            ? await sendFollowupMessage({ instance: waInstance, phone: number.phone, tipo: 'imagem', conteudo: imageUrls[0], vars: { caption: message } })
-            : await sendImage(client, number.phone, imageUrls[0], message);
-          if (result.ok) {
-            for (let i = 1; i < imageUrls.length; i++) {
-              if (isEvolution) await sendFollowupMessage({ instance: waInstance, phone: number.phone, tipo: 'imagem', conteudo: imageUrls[i], vars: { caption: '' } });
-              else await sendImage(client, number.phone, imageUrls[i], '');
-            }
-          }
+            ? await sendFollowupMessage({ instance: waInstance, phone: number.phone, tipo: 'imagem', conteudo: imagemDaVez, vars: { caption: message } })
+            : await sendImage(client, number.phone, imagemDaVez, message);
         } else {
           result = isEvolution
             ? await sendFollowupMessage({ instance: waInstance, phone: number.phone, tipo: 'texto', conteudo: message, vars: {} })
@@ -281,8 +306,14 @@ async function runWorker(req: NextRequest) {
         );
 
         const field = result.ok ? 'sent = sent + 1' : 'failed = failed + 1';
-        await pool.query(`UPDATE public.zapi_campaigns SET ${field}, message_index = message_index + 1 WHERE id = $1`, [campaign.id]);
+        await pool.query(
+          `UPDATE public.zapi_campaigns
+              SET ${field}, message_index = message_index + 1, image_index = image_index + 1
+            WHERE id = $1`,
+          [campaign.id],
+        );
         localIndex++;
+        localImgIndex++;
         processed++;
 
         // Re-check status in case it was paused/cancelled externally
@@ -300,7 +331,7 @@ async function runWorker(req: NextRequest) {
       }
     }
 
-    return Response.json({ ok: true, processed, elapsed: Date.now() - startTime });
+    return Response.json({ ok: true, processed, optout, chipOcupado, elapsed: Date.now() - startTime });
   } finally {
     await pool.end();
   }

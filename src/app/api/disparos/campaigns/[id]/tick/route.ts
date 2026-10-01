@@ -10,6 +10,10 @@ import { sendFollowupMessage, type WaInstance } from '@/lib/followup-send';
 import { isWithinWindow, isActiveDayNow } from '@/lib/disparos-schedule';
 import { classificarErroEnvio } from '@/lib/disparos-destinos';
 import { pausarCampanhaPorInstancia } from '@/lib/disparos-alerta';
+import { lerImagens, doRodizio } from '@/lib/disparos-rodizio';
+import {
+  garantirProtecaoChip, reservarEnvioNoChip, removerOptoutDaFila, esperaDoChip,
+} from '@/lib/disparos-chip';
 
 function interpolate(template: string, phone: string, name: string) {
   return template.replace(/\{telefone\}/g, phone).replace(/\{nome\}/g, name);
@@ -27,6 +31,8 @@ export async function POST(
     await pool.query(`ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS message_index INT NOT NULL DEFAULT 0`);
     await pool.query(`ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS active_days TEXT`);
     await pool.query(`ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS daily_limit INT`);
+    await pool.query(`ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS image_index INT NOT NULL DEFAULT 0`);
+    await garantirProtecaoChip(pool);
 
     const { rows: [campaign] } = await pool.query(
       `SELECT c.*, cl.instance_id, cl.token, cl.security_token, cl.provider, cl.name AS client_name
@@ -108,6 +114,9 @@ export async function POST(
       return Response.json({ status: 'running', done: false, skipped: true });
     }
 
+    // Quem pediu para parar sai da fila antes de escolhermos o próximo contato.
+    await removerOptoutDaFila(pool, { campaignId: id, clientId: campaign.client_id }).catch(() => 0);
+
     // Grab next pending number
     const { rows: [number] } = await pool.query(
       `SELECT * FROM public.zapi_numbers WHERE campaign_id = $1 AND status = 'pending' ORDER BY position ASC LIMIT 1`,
@@ -118,6 +127,15 @@ export async function POST(
       await pool.query(`UPDATE public.zapi_campaigns SET status = 'done' WHERE id = $1`, [id]);
       const { rows: [final] } = await pool.query(`SELECT total, sent, failed FROM public.zapi_campaigns WHERE id = $1`, [id]);
       return Response.json({ status: 'done', done: true, ...final });
+    }
+
+    // ⚠️ A vez do CHIP, não da campanha — o claim acima é por campanha, e três
+    // campanhas na mesma instância furavam o piso de 90s do número.
+    if (!await reservarEnvioNoChip(pool, { clientId: campaign.client_id, intervaloSeg: minSec })) {
+      return Response.json({
+        status: 'running', done: false, skipped: true,
+        aguardandoChip: await esperaDoChip(pool, campaign.client_id),
+      });
     }
 
     let messagePool: string[] = [campaign.message];
@@ -131,15 +149,8 @@ export async function POST(
     const message = interpolate(rawMessage, number.phone, number.name ?? '');
     const client = { instanceId: campaign.instance_id, token: campaign.token, clientToken: campaign.security_token ?? undefined };
 
-    // Parse image URLs (may be a JSON array for multiple images, or a plain string for single)
-    let imageUrls: string[] = [];
-    if (campaign.image_url) {
-      if (campaign.image_url.startsWith('[')) {
-        try { imageUrls = JSON.parse(campaign.image_url); } catch { imageUrls = [campaign.image_url]; }
-      } else {
-        imageUrls = [campaign.image_url];
-      }
-    }
+    // Rodízio de imagem: UMA por contato, girando a lista.
+    const imagemDaVez = doRodizio(lerImagens(campaign.image_url), campaign.image_index ?? 0);
 
     const isEvolution = campaign.provider === 'evolution';
     // Evolution routes through the same dispatcher the CRM uses (lib/followup-send.ts).
@@ -147,18 +158,10 @@ export async function POST(
     const waInstance: WaInstance = { instanceId: campaign.instance_id, token: campaign.token, provider: 'evolution' };
 
     let result;
-    if (imageUrls.length > 0) {
-      // Send first image with caption
+    if (imagemDaVez) {
       result = isEvolution
-        ? await sendFollowupMessage({ instance: waInstance, phone: number.phone, tipo: 'imagem', conteudo: imageUrls[0], vars: { caption: message } })
-        : await sendImage(client, number.phone, imageUrls[0], message);
-      // Send remaining images without caption (best-effort, don't fail the number)
-      if (result.ok) {
-        for (let i = 1; i < imageUrls.length; i++) {
-          if (isEvolution) await sendFollowupMessage({ instance: waInstance, phone: number.phone, tipo: 'imagem', conteudo: imageUrls[i], vars: { caption: '' } });
-          else await sendImage(client, number.phone, imageUrls[i], '');
-        }
-      }
+        ? await sendFollowupMessage({ instance: waInstance, phone: number.phone, tipo: 'imagem', conteudo: imagemDaVez, vars: { caption: message } })
+        : await sendImage(client, number.phone, imagemDaVez, message);
     } else {
       result = isEvolution
         ? await sendFollowupMessage({ instance: waInstance, phone: number.phone, tipo: 'texto', conteudo: message, vars: {} })
@@ -193,7 +196,12 @@ export async function POST(
     );
 
     const field = result.ok ? 'sent = sent + 1' : 'failed = failed + 1';
-    await pool.query(`UPDATE public.zapi_campaigns SET ${field}, message_index = message_index + 1 WHERE id = $1`, [id]);
+    await pool.query(
+      `UPDATE public.zapi_campaigns
+          SET ${field}, message_index = message_index + 1, image_index = image_index + 1
+        WHERE id = $1`,
+      [id],
+    );
 
     const { rows: [updated] } = await pool.query(
       `SELECT total, sent, failed, status FROM public.zapi_campaigns WHERE id = $1`,

@@ -5,6 +5,7 @@ import { getCallerScope } from '@/lib/disparos-access';
 import { serializeActiveDays } from '@/lib/disparos-schedule';
 import { checkWhatsappNumbers, checkEvolutionStatus } from '@/lib/evolution-api';
 import { resolverDestino, garantirZapiClient, nomeConfere } from '@/lib/disparos-destinos';
+import { gravarImagens } from '@/lib/disparos-rodizio';
 
 async function ensureColumns(pool: ReturnType<typeof makeServerPool>) {
   await pool.query(`
@@ -14,6 +15,7 @@ async function ensureColumns(pool: ReturnType<typeof makeServerPool>) {
     ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS next_tick_at TIMESTAMPTZ;
     ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS messages JSONB;
     ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS daily_limit INT;
+    ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS image_index INT NOT NULL DEFAULT 0;
   `);
 }
 
@@ -75,7 +77,9 @@ export async function POST(request: NextRequest) {
   // Teto diário por número: null = sem limite (explícito); default 120/dia.
   const dailyLimit = body.dailyLimit === null ? null : Math.max(1, Number(body.dailyLimit) || 120);
   const activeDaysText = serializeActiveDays(activeDays);
-  const imageUrl = imageUrls && imageUrls.length > 0 ? JSON.stringify(imageUrls) : null;
+  // `gravarImagens` é o par de `lerImagens` — uma imagem vai como string crua,
+  // várias como array JSON. Sem o par, a tela grava num formato e o motor lê noutro.
+  const imageUrl = gravarImagens(imageUrls ?? []);
   const messagesJson = messages && messages.length > 1 ? JSON.stringify(messages) : null;
 
   if (!onmidClientId || !instanceId) {
