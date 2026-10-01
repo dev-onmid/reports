@@ -41,6 +41,7 @@ type Campaign = {
   status: 'pending' | 'running' | 'paused' | 'done' | 'cancelled';
   starts_at: string; ends_at: string | null;
   interval_min: number; interval_max: number; daily_limit?: number | null;
+  label_id?: string | null; label_nome?: string | null;
   total: number; sent: number; failed: number;
   created_at: string; active_from: string | null; active_until: string | null;
   active_days: string | null;
@@ -1145,7 +1146,9 @@ function NovaCampanhaTab({ onCreated, prefill, editCampaign }: { onCreated: () =
   // As etiquetas são da INSTÂNCIA, não do cliente: trocar o número troca a
   // lista inteira, e um id da instância anterior não existe na nova.
   useEffect(() => {
-    setLabelId('');
+    // ⚠️ Na EDIÇÃO a escolha gravada é o ponto de partida — zerar aqui apagaria
+    // a etiqueta da campanha só por ter aberto a tela.
+    setLabelId(editCampaign?.label_id ?? '');
     setEtiquetaErro('');
     if (!form.instanceId) { setEtiquetas([]); return; }
     let vivo = true;
@@ -1154,7 +1157,7 @@ function NovaCampanhaTab({ onCreated, prefill, editCampaign }: { onCreated: () =
       .then(d => { if (!vivo) return; setEtiquetas(d.etiquetas ?? []); setEtiquetaErro(d.erro ?? ''); })
       .catch(() => { if (vivo) setEtiquetaErro('Não foi possível ler as etiquetas desta instância.'); });
     return () => { vivo = false; };
-  }, [form.instanceId]);
+  }, [form.instanceId, editCampaign?.label_id]);
 
   useEffect(() => {
     if (!prefill) return;
@@ -1311,6 +1314,8 @@ function NovaCampanhaTab({ onCreated, prefill, editCampaign }: { onCreated: () =
           interval_min: form.intervalMin,
           interval_max: form.intervalMax,
           daily_limit: form.dailyLimit,
+          label_id: labelId || null,
+          label_nome: etiquetas.find(e => e.id === labelId)?.name ?? null,
         };
         const res = await fetch(`/api/disparos/campaigns/${editCampaign.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', ...callerHeaders() }, body: JSON.stringify(body) });
         const data = await res.json() as { error?: string };
@@ -1411,17 +1416,20 @@ function NovaCampanhaTab({ onCreated, prefill, editCampaign }: { onCreated: () =
                   )}
                 </div>
               </div>
-              {!isEdit && form.instanceId && (
+              {form.instanceId && (
                 <div className="space-y-1.5 mt-3">
                   <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
                     Etiqueta no WhatsApp (opcional)
                   </label>
                   <div className="relative">
                     <select value={labelId} onChange={e => setLabelId(e.target.value)}
-                      disabled={etiquetas.length === 0}
+                      disabled={etiquetas.length === 0 && !labelId}
                       className="w-full h-9 rounded-lg border border-border bg-background pl-3 pr-8 text-sm outline-none focus:ring-1 focus:ring-primary appearance-none disabled:opacity-50">
                       <option value="">Não etiquetar</option>
                       {etiquetas.map(et => <option key={et.id} value={et.id}>{et.name}</option>)}
+                      {labelId && !etiquetas.some(et => et.id === labelId) && (
+                        <option value={labelId}>{editCampaign?.label_nome ?? `Etiqueta ${labelId}`} (atual)</option>
+                      )}
                     </select>
                     <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
                   </div>

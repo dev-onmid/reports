@@ -16,6 +16,10 @@ const real = window.fetch.bind(window);
 (window as unknown as { __posts: unknown[] }).__posts = [];
 window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
   const url = typeof input === 'string' ? input : (input as Request).url ?? String(input);
+  if (init?.method === 'PATCH' && url.includes('/api/disparos/campaigns')) {
+    (window as unknown as { __posts: unknown[] }).__posts.push({ PATCH: url, body: JSON.parse(String(init.body)) });
+    return J({ ok: true });
+  }
   if (init?.method === 'POST' && url.includes('/api/disparos/campaigns')) {
     (window as unknown as { __posts: unknown[] }).__posts.push(JSON.parse(String(init.body)));
     return J({ id: 'novo', invalid_count: 0 }, 201);
@@ -36,6 +40,8 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
       total: 2078, sent: 1288, failed: 20, starts_at: new Date().toISOString(), interval_min: 500, interval_max: 530,
       message: 'oi', created_at: new Date().toISOString() },
     { id: 'cmp-2', name: 'PICOLOCOS - CLIENTE DA CASA', client_name: 'PicoLocos Guanabara', status: 'running',
+      instance_id: 'picolocos-guanabara---43-9978-0123', onmid_client_id: 'c-pico', onmid_client_name: 'PicoLocos Guanabara',
+      label_id: '12', label_nome: 'LEAD WHATSAPP NORMAL', active_days: null, active_from: null, active_until: null, ends_at: null,
       total: 515, sent: 62, failed: 0, starts_at: new Date().toISOString(), interval_min: 180, interval_max: 300,
       message: 'oi', created_at: new Date().toISOString() },
     { id: 'cmp-3', name: 'CAMPANHA SEM VINCULO NO CRM', client_name: 'Outro', status: 'paused',

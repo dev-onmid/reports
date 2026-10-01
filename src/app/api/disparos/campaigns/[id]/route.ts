@@ -70,6 +70,17 @@ export async function PATCH(
       vals.push(body.daily_limit === null ? null : Math.max(1, Number(body.daily_limit) || 120));
     }
 
+    // Etiqueta pode ser escolhida (ou tirada) com a campanha JÁ rodando: vale
+    // para os contatos que ainda estão na fila, que é onde ela é mais útil.
+    if (body.label_id !== undefined) {
+      await pool.query(`ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS label_id TEXT`);
+      await pool.query(`ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS label_nome TEXT`);
+      sets.push(`label_id = $${i++}`);
+      vals.push(String(body.label_id ?? '').trim() || null);
+      sets.push(`label_nome = $${i++}`);
+      vals.push(String(body.label_nome ?? '').trim() || null);
+    }
+
     if (body.active_days !== undefined) {
       await pool.query(`ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS active_days TEXT`);
       sets.push(`active_days = $${i++}`);
