@@ -29,6 +29,7 @@ import { ClientAvatar, fetchClientPicture } from '@/components/client-avatar';
 import { DictateButton } from '@/components/ui/dictate-button';
 import { notificar } from '@/components/ui/toast';
 import { cn, formatCurrencyBRL } from '@/lib/utils';
+import AnaliseIaModal from './analise-ia-modal';
 import { localDoLead, type RespostaFormulario } from '@/lib/lead-formulario';
 import type { Client } from '@/lib/mock-data';
 import type { AttendanceAudit } from '@/lib/crm-attendance-audit';
@@ -2598,6 +2599,7 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [acaoConfig]);
   const [kanbanEditLead, setKanbanEditLead] = useState<CrmLead | null>(null);
+  const [analiseIaAberta, setAnaliseIaAberta] = useState(false);
 
   useEffect(() => {
     if (lockedClientId) setClientId(lockedClientId);
@@ -3734,6 +3736,21 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
               <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Leads</span>
             </div>
             <div className="flex items-center gap-2">
+              {/* Análise de IA sob demanda — recupera o retroativo que a
+                  automação desligada não fez (pedido do Matheus, 2026-10-02).
+                  Age sobre `filtered`, o recorte da tela: período, busca e
+                  filtros de coluna já aplicados. */}
+              {clientId && (
+                <button
+                  type="button"
+                  onClick={() => setAnaliseIaAberta(true)}
+                  title="A IA lê as conversas do recorte atual e move os leads no Kanban"
+                  className="flex items-center gap-1.5 rounded-lg border border-primary/40 bg-primary/10 px-2.5 py-1.5 text-xs font-semibold text-primary transition-colors hover:bg-primary/20"
+                >
+                  <Sparkles className="h-3.5 w-3.5" />
+                  <span className="hidden sm:inline">Analisar com IA</span>
+                </button>
+              )}
               {/* View toggle */}
               <div className="flex overflow-hidden rounded-lg border border-border bg-background/60 p-0.5">
                 <button type="button" onClick={() => setViewMode('kanban')} title="Kanban"
@@ -4253,6 +4270,17 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
             </div>
           </div>}
         </div>
+      )}
+
+      {analiseIaAberta && clientId && (
+        <AnaliseIaModal
+          clientId={clientId}
+          clientName={clients.find(c => c.id === clientId)?.name ?? 'este cliente'}
+          leadIds={filtered.map(l => l.id)}
+          periodoLabel={periodLabel(datePreset, dateFromFilter, dateToFilter)}
+          onClose={() => setAnaliseIaAberta(false)}
+          onConcluido={() => refreshLeads({ silent: true })}
+        />
       )}
 
       {kanbanEditLead && (
