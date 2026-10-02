@@ -1,5 +1,6 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
+import { listarInstanciasOcultas, salvarInstanciasOcultas } from '@/lib/evolution-instance-alerts';
 import { getEvolutionQrCode, getEvolutionState, deleteEvolutionInstance } from '@/lib/evolution-api';
 
 // Central de instâncias (Configurações → Instâncias, só ADM):
@@ -46,6 +47,7 @@ export async function GET() {
       ).catch(() => ({ rows: [] as never[] })),
     ]);
 
+    const ocultas = new Set(await listarInstanciasOcultas(pool));
     const zapiByInstance = new Map(zapiRows.rows.map(r => [r.instance_id, r]));
     const crmByInstance = new Map<string, typeof crmRows.rows>();
     for (const r of crmRows.rows) {
@@ -80,6 +82,9 @@ export async function GET() {
         phone: inst.ownerJid ? inst.ownerJid.replace('@s.whatsapp.net', '').replace('@c.us', '') : null,
         vinculos,
         active,
+        // Oculta = fora da operação (fica só no painel da Evolution). A tela
+        // recolhe e os alertas ignoram; não é apagada para a decisão ser reversível.
+        oculta: ocultas.has(inst.name),
       };
     }).sort((a, b) => a.name.localeCompare(b.name));
 
@@ -109,11 +114,23 @@ export async function POST(req: NextRequest) {
 
 export async function PATCH(req: NextRequest) {
   const { instanceName, action } = await req.json().catch(() => ({})) as { instanceName?: string; action?: string };
-  if (!instanceName || !['activate', 'deactivate'].includes(action ?? '')) {
-    return Response.json({ error: 'instanceName e action (activate|deactivate) obrigatórios' }, { status: 400 });
+  if (!instanceName || !['activate', 'deactivate', 'hide', 'unhide'].includes(action ?? '')) {
+    return Response.json({ error: 'instanceName e action (activate|deactivate|hide|unhide) obrigatórios' }, { status: 400 });
+  }
+  const pool = makeServerPool();
+  if (action === 'hide' || action === 'unhide') {
+    try {
+      const atuais = await listarInstanciasOcultas(pool);
+      const novas = action === 'hide' ? [...atuais, instanceName] : atuais.filter(n => n !== instanceName);
+      await salvarInstanciasOcultas(pool, novas);
+      return Response.json({ ok: true, oculta: action === 'hide' });
+    } catch (err) {
+      return Response.json({ ok: false, error: String(err) }, { status: 500 });
+    } finally {
+      await pool.end();
+    }
   }
   const active = action === 'activate';
-  const pool = makeServerPool();
   try {
     const [z, c] = await Promise.all([
       pool.query(`UPDATE public.zapi_clients SET active = $1 WHERE instance_id = $2`, [active, instanceName]).catch(() => ({ rowCount: 0 })),

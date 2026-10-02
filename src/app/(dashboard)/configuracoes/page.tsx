@@ -8,7 +8,7 @@ import {
   LayoutDashboard, Users, TableProperties, FileText, BarChart3,
   WalletCards, Bot, ShieldCheck, Zap, Plug, ClipboardList, WandSparkles,
   Wifi, WifiOff, QrCode, RefreshCw, Power, X,
-  Link2, Link2Off, AlertTriangle, CheckCircle2, Loader2,
+  Link2, Link2Off, AlertTriangle, CheckCircle2, Loader2, EyeOff,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -195,6 +195,7 @@ type AdminInstance = {
   phone: string | null;
   vinculos: string[];
   active: boolean | null; // null = órfã (sem registro no banco)
+  oculta?: boolean; // fora da operação: fica só no painel da Evolution
 };
 
 function InstancesTab() {
@@ -207,6 +208,7 @@ function InstancesTab() {
   const [qrData, setQrData] = useState<{ base64?: string; error?: string } | null>(null);
   const [qrPhase, setQrPhase] = useState<'loading' | 'qr' | 'success' | 'error'>('loading');
   const [qrSeconds, setQrSeconds] = useState(40);
+  const [mostrarOcultas, setMostrarOcultas] = useState(false);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -230,6 +232,23 @@ function InstancesTab() {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ instanceName: inst.name, action: inst.active ? 'deactivate' : 'activate' }),
+      });
+      const d = await res.json() as { ok?: boolean; error?: string };
+      if (!d.ok) notificar(d.error ?? 'Não foi possível alterar', 'erro');
+      load();
+    } finally { setBusy(null); }
+  }
+
+  // Ocultar ≠ desativar: desativar silencia uma instância DA operação; ocultar
+  // tira da lista um WhatsApp que nunca foi da operação (ex.: pessoal) e vive
+  // só no painel da Evolution. Reversível pela seção "ocultas" no rodapé.
+  async function toggleOculta(inst: AdminInstance) {
+    setBusy(inst.name);
+    try {
+      const res = await fetch('/api/admin/instances', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ instanceName: inst.name, action: inst.oculta ? 'unhide' : 'hide' }),
       });
       const d = await res.json() as { ok?: boolean; error?: string };
       if (!d.ok) notificar(d.error ?? 'Não foi possível alterar', 'erro');
@@ -350,11 +369,11 @@ function InstancesTab() {
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {instances.map(inst => {
+              {instances.filter(i => mostrarOcultas ? i.oculta : !i.oculta).map(inst => {
                 const si = statusInfo(inst.status);
                 const isBusy = busy === inst.name;
                 return (
-                  <tr key={inst.name} className={cn('hover:bg-muted/30 transition-colors', inst.active === false && 'opacity-50')}>
+                  <tr key={inst.name} className={cn('hover:bg-muted/30 transition-colors', (inst.active === false || inst.oculta) && 'opacity-50')}>
                     <td className="px-6 py-3.5">
                       <p className="font-semibold">{inst.profileName ?? inst.name}</p>
                       <p className="text-[11px] text-muted-foreground">{inst.name}</p>
@@ -409,6 +428,15 @@ function InstancesTab() {
                         <button
                           type="button"
                           disabled={isBusy}
+                          onClick={() => void toggleOculta(inst)}
+                          title={inst.oculta ? 'Voltar a mostrar nesta lista' : 'Ocultar desta lista (fica só no painel da Evolution; alertas ignoram)'}
+                          className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted/40 hover:text-foreground disabled:opacity-50 transition-colors"
+                        >
+                          {inst.oculta ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isBusy}
                           onClick={() => void removeInstance(inst)}
                           title="Excluir da VPS"
                           className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-red-500/10 hover:text-red-400 disabled:opacity-50 transition-colors"
@@ -422,6 +450,19 @@ function InstancesTab() {
               })}
             </tbody>
           </table>
+        )}
+        {!loading && !error && instances.some(i => i.oculta) && (
+          <div className="border-t border-border px-6 py-2.5">
+            <button
+              type="button"
+              onClick={() => setMostrarOcultas(v => !v)}
+              className="text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+            >
+              {mostrarOcultas
+                ? '← Voltar para as instâncias da operação'
+                : `Mostrar ${instances.filter(i => i.oculta).length} oculta(s) — ficam só no painel da Evolution`}
+            </button>
+          </div>
         )}
       </div>
 

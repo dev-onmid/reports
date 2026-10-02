@@ -108,18 +108,51 @@ export async function fetchDisconnectedZapiInstances(
 // Instâncias marcadas como INATIVAS no banco (zapi_clients.active=false ou
 // client_zapi_instances.ativo=false) saem dos alertas — desativar na tela de
 // Instâncias é o jeito oficial de silenciar uma instância morta de propósito.
+/**
+ * Instâncias que existem na VPS mas o sistema deve IGNORAR por completo —
+ * não listar em Configurações → Instâncias nem alertar quando desconectam.
+ * Caso de uso (2026-10-02, pedido do Matheus): `financas`, um WhatsApp pessoal
+ * que mora na mesma Evolution mas não é da operação. Guardado em
+ * `system_settings['instancias_ocultas']` como JSON array de nomes.
+ */
+export const CHAVE_INSTANCIAS_OCULTAS = 'instancias_ocultas';
+
+export async function listarInstanciasOcultas(pool: ReturnType<typeof makeServerPool>): Promise<string[]> {
+  try {
+    const { rows } = await pool.query<{ value: string }>(
+      `SELECT value FROM public.system_settings WHERE key = $1`, [CHAVE_INSTANCIAS_OCULTAS],
+    );
+    const v: unknown = rows[0] ? JSON.parse(rows[0].value) : [];
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string' && x.length > 0) : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function salvarInstanciasOcultas(pool: ReturnType<typeof makeServerPool>, nomes: string[]): Promise<void> {
+  const unicos = [...new Set(nomes.map(n => n.trim()).filter(Boolean))].sort();
+  await pool.query(
+    `INSERT INTO public.system_settings (key, value) VALUES ($1, $2)
+     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+    [CHAVE_INSTANCIAS_OCULTAS, JSON.stringify(unicos)],
+  );
+}
+
 export async function filterMutedInstances(
   pool: ReturnType<typeof makeServerPool>,
   alerts: DisconnectedAlert[],
 ): Promise<DisconnectedAlert[]> {
   if (alerts.length === 0) return alerts;
   try {
-    const { rows } = await pool.query<{ instance_id: string }>(
-      `SELECT instance_id FROM public.zapi_clients WHERE active = FALSE
-       UNION
-       SELECT instance_id FROM public.client_zapi_instances WHERE ativo = FALSE`
-    );
-    const muted = new Set(rows.map(r => r.instance_id));
+    const [{ rows }, ocultas] = await Promise.all([
+      pool.query<{ instance_id: string }>(
+        `SELECT instance_id FROM public.zapi_clients WHERE active = FALSE
+         UNION
+         SELECT instance_id FROM public.client_zapi_instances WHERE ativo = FALSE`
+      ),
+      listarInstanciasOcultas(pool),
+    ]);
+    const muted = new Set([...rows.map(r => r.instance_id), ...ocultas]);
     return alerts.filter(a => !muted.has(a.name));
   } catch {
     return alerts;
