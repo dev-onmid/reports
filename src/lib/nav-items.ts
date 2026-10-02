@@ -1,7 +1,7 @@
 import {
   LayoutDashboard, Users, FileText, WalletCards,
   BarChart3, MessageCircle, TableProperties, Zap, Bot, ShieldCheck, WandSparkles,
-  Download, History, Gift, CalendarClock,
+  Download, History, Gift, CalendarClock, PhoneCall,
 } from 'lucide-react';
 import type { Permission } from '@/lib/mock-data';
 
@@ -41,6 +41,10 @@ export const NAV_ITEMS: NavItem[] = [
   { name: 'Automações',      href: '/automacoes',                icon: Zap,           key: 'automacoes', desc: 'Fluxos automáticos',            group: 'ferramentas' },
   { name: 'Cofre',           href: '/vault',                     icon: ShieldCheck,   key: 'cofre',      desc: 'Credenciais',                   group: 'ferramentas' },
   { name: 'Disparos',        href: '/disparos',                  icon: MessageCircle, key: 'disparos',   desc: 'Campanhas WhatsApp',            group: 'ferramentas' },
+  // Discador (01/10/2026): ligações de prospecção um clique por vez, lead no CRM.
+  // Reusa a permissão `crm` porque é lá que o resultado cai; `mobile` porque a
+  // tela foi pensada para rodar no próprio iPhone (o link tel: disca direto).
+  { name: 'Discador',        href: '/discador',                  icon: PhoneCall,     key: 'crm',        desc: 'Ligações de prospecção',        group: 'ferramentas', mobile: true },
   { name: 'Biblioteca Meta', href: '/ferramentas/biblioteca-meta', icon: Download,    key: 'radar',      desc: 'Baixar criativos de anúncios',  group: 'ferramentas' },
   { name: 'Sorteador',       href: '/ferramentas/sorteador',       icon: Gift,        key: 'radar',      desc: 'Sorteios de comentários IG/FB', group: 'ferramentas' },
   { name: 'Publicações',     href: '/ferramentas/publicacoes',     icon: CalendarClock, key: 'radar',    desc: 'Agendar posts e stories',       group: 'ferramentas' },
