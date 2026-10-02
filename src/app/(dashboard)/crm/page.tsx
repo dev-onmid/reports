@@ -44,6 +44,8 @@ type CrmLead = {
   status: string | null; data_agendada: string | null;
   video_dra: boolean; compareceu: boolean; observacao: string | null;
   orcamento: number | string | null; fechou: boolean; valor_rs: number | string | null;
+  /** Estimativa do negócio em ABERTO. Nunca é receita — ver `valorDoLead`. */
+  valor_negocio?: number | string | null;
   pagamento: string | null; analise_credito: boolean;
   data_nasc: string | null; bairro: string | null;
   motivacoes: string | null; dores: string | null;
@@ -418,6 +420,22 @@ function trackingRows(lead: CrmLead) {
     ['Primeira captura', lead.first_origin_at ? fmtD(lead.first_origin_at) : null],
   ] as const;
 }
+/**
+ * O valor que o Kanban mostra para um lead.
+ *
+ * ⚠️ São DOIS campos de propósito, e misturá-los no banco já inflou a dashboard
+ * da Incorpast em agosto: `valor_rs` é receita de venda FECHADA (o sistema todo
+ * lê "tem valor_rs = vendeu") e `valor_negocio` é a estimativa do negócio em
+ * ABERTO. Aqui eles só se encontram na EXIBIÇÃO: quem fechou mostra a receita,
+ * quem não fechou mostra a negociação. Como cada coluna do board é de um estado
+ * só, o total do cabeçalho nunca soma as duas coisas na mesma caixa.
+ */
+function valorDoLead(lead: CrmLead): { valor: number; emAberto: boolean } {
+  const receita = toMoneyNumber(lead.valor_rs);
+  if (lead.fechou || receita > 0) return { valor: receita, emAberto: false };
+  return { valor: toMoneyNumber(lead.valor_negocio), emAberto: true };
+}
+
 function inferLeadAiTag(lead: CrmLead) {
   const value = toMoneyNumber(lead.valor_rs);
   const text = normalizeChannelText([
@@ -1025,7 +1043,7 @@ function KanbanCard({
   const origin = leadOriginPreview(lead);
   const aiTag = inferLeadAiTag(lead);
   const trackingStatus = leadTrackingStatus(lead);
-  const value = toMoneyNumber(lead.valor_rs);
+  const { valor: value, emAberto: valorEmAberto } = valorDoLead(lead);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -1113,7 +1131,14 @@ function KanbanCard({
       {/* Linha 1: nome + valor */}
       <div className="flex items-center gap-1.5">
         <p className="min-w-0 flex-1 truncate text-[13px] font-semibold text-foreground">{lead.nome ?? lead.numero ?? '—'}</p>
-        {value > 0 && <span className="shrink-0 text-[10px] font-bold text-primary">{fmtN(lead.valor_rs)}</span>}
+        {value > 0 && (
+          <span
+            title={valorEmAberto ? 'Em negociação (ainda não fechado)' : 'Venda fechada'}
+            className={cn('shrink-0 text-[10px] font-bold', valorEmAberto ? 'text-foreground/55' : 'text-primary')}
+          >
+            {valorEmAberto && '~'}{fmtN(value)}
+          </span>
+        )}
       </div>
 
       {/* Linha 2: número + data */}
@@ -1168,7 +1193,9 @@ function KanbanColumn({
   activeFollowupIds: Set<string>;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: status });
-  const total = leads.reduce((s, l) => s + toMoneyNumber(l.valor_rs), 0);
+  // Receita quando a coluna é de ganho; negociação em aberto nas demais.
+  const total = leads.reduce((s, l) => s + valorDoLead(l).valor, 0);
+  const totalEmAberto = leads.every(l => valorDoLead(l).emAberto);
   // Etapa sem lead no período vira uma faixa de 44px: num funil de 10+ colunas
   // as vazias comiam a largura do board e empurravam pra fora da tela justo as
   // que têm lead. Clicar abre de novo — a coluna não some, só encolhe.
@@ -1224,7 +1251,12 @@ function KanbanColumn({
               <ChevronLeft className="h-3.5 w-3.5" />
             </button>
           )}
-          <span className="ml-auto shrink-0 text-[10px] font-semibold text-muted-foreground">{total > 0 ? formatCurrencyBRL(total) : ''}</span>
+          <span
+            title={totalEmAberto ? 'Soma das negociações em aberto nesta etapa' : 'Soma das vendas fechadas nesta etapa'}
+            className="ml-auto shrink-0 text-[10px] font-semibold text-muted-foreground"
+          >
+            {total > 0 ? `${totalEmAberto ? '~' : ''}${formatCurrencyBRL(total)}` : ''}
+          </span>
         </div>
       </div>
       <div
