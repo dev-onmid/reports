@@ -108,11 +108,14 @@ export function perfilDaMensagem(texto: string | null | undefined): PerfilMensag
  * variação crua; original com parágrafos e emoji gera variação igual.
  */
 export function regrasDeFormato(p: PerfilMensagem): string[] {
-  const min = Math.max(40, Math.round(p.caracteres * 0.8));
-  const max = Math.round(p.caracteres * 1.15);
+  // Medido em 02/10 com a régua "80% a 115%": o modelo entregou 372 a 435 chars
+  // para uma original de 330 (até +32%). Ele estoura o teto que recebe, então o
+  // teto declarado é a PRÓPRIA original — assim o excesso pousa perto dela.
+  const min = Math.max(40, Math.round(p.caracteres * 0.75));
+  const max = p.caracteres;
   const regras: string[] = [
     'ESPELHE O FORMATO DA MENSAGEM ORIGINAL - ela é o padrão, não uma sugestão:',
-    `- Tamanho: entre ${min} e ${max} caracteres (a original tem ${p.caracteres}). Mais longo que isso vira texto cansativo no celular.`,
+    `- Tamanho: entre ${min} e ${max} caracteres (a original tem ${p.caracteres}). Variação MAIS LONGA que a original está errada: corte adjetivo e repetição até caber. Conte antes de responder.`,
   ];
   if (p.paragrafos >= 2) {
     regras.push(`- Estrutura: ${p.paragrafos} parágrafos curtos separados por UMA linha em branco (no JSON, use \\n\\n entre eles), como na original. Nunca um bloco único.`);
