@@ -7,7 +7,7 @@ import {
   Users, BarChart2, ChevronDown, Copy, Server,
   Send, AlertTriangle, Monitor, Calendar, Zap,
   Eye, ChevronRight, Info, BookOpen, UserCog,
-  Search, Pencil, ChevronLeft, FileText, Smile, Sparkles,
+  Search, Pencil, Tag, ChevronLeft, FileText, Smile, Sparkles,
   Download, Filter, Hash, ArrowRight, QrCode,
 } from 'lucide-react';
 import {
@@ -286,6 +286,29 @@ function CampaignCard({ campaign, onAction, onRefresh, onEdit, respostas }: {
   respostas?: RespostasDaCampanha;
 }) {
   const [live, setLive] = useState<Progress | null>(null);
+  // Etiqueta retroativa: a sessão do WhatsApp perde a sincronia de etiquetas
+  // sozinha (ver CLAUDE.md 2026-10-02); depois de re-parear, este botão passa
+  // pelos que já receberam sem etiqueta. A resposta fica no card, não em alert.
+  const [etiquetando, setEtiquetando] = useState(false);
+  const [etiquetaMsg, setEtiquetaMsg] = useState<{ tom: 'ok' | 'erro'; texto: string } | null>(null);
+  async function etiquetarRetroativo() {
+    setEtiquetando(true); setEtiquetaMsg(null);
+    try {
+      const res = await fetch(`/api/disparos/campaigns/${campaign.id}/etiquetar`, { method: 'POST', headers: callerHeaders() });
+      const data = await res.json().catch(() => ({})) as { error?: string; aplicadas?: number; pendentes?: number; semLid?: number; falharam?: number; restantes?: number; motivos?: Record<string, number> };
+      if (!res.ok) { setEtiquetaMsg({ tom: 'erro', texto: data.error ?? `Erro ${res.status}` }); return; }
+      const partes = [`${data.aplicadas ?? 0} de ${data.pendentes ?? 0} etiquetados`];
+      if (data.semLid) partes.push(`${data.semLid} sem LID (não dá para etiquetar depois)`);
+      if (data.falharam) partes.push(`${data.falharam} falharam: ${Object.keys(data.motivos ?? {}).join('; ') || 'ver contatos'}`);
+      if (data.restantes) partes.push(`${data.restantes} restantes — clique de novo`);
+      setEtiquetaMsg({ tom: data.falharam ? 'erro' : 'ok', texto: partes.join(' · ') });
+      onRefresh();
+    } catch (e) {
+      setEtiquetaMsg({ tom: 'erro', texto: `Falha de rede: ${String(e).slice(0, 120)}` });
+    } finally {
+      setEtiquetando(false);
+    }
+  }
   const [tickError, setTickError] = useState('');
   const [lastSendError, setLastSendError] = useState<string | null>(null);
   const [sleeping, setSleeping] = useState(false);
@@ -385,7 +408,23 @@ function CampaignCard({ campaign, onAction, onRefresh, onEdit, respostas }: {
       )}
       {tickError && <div className="rounded-lg bg-red-500/10 border border-red-500/20 px-3 py-2 text-[11px] text-red-400">{tickError}</div>}
       {lastSendError && !tickError && <div className="rounded-lg bg-orange-500/10 border border-orange-500/20 px-3 py-2 text-[11px] text-orange-400">Último erro Z-API: {lastSendError}</div>}
+      {etiquetaMsg && (
+        <div className={`rounded-lg border px-3 py-2 text-[11px] ${etiquetaMsg.tom === 'ok' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : 'bg-red-500/10 border-red-500/20 text-red-400'}`}>
+          {etiquetaMsg.texto}
+        </div>
+      )}
       <div className="flex gap-2 pt-1 border-t border-border flex-wrap">
+        {campaign.label_id && (
+          <button
+            type="button"
+            onClick={() => void etiquetarRetroativo()}
+            disabled={etiquetando}
+            title={`Aplica a etiqueta "${campaign.label_nome ?? campaign.label_id}" em quem já recebeu e ainda está sem ela. Use depois de re-parear o WhatsApp.`}
+            className="flex items-center gap-1 rounded-lg border border-violet-500/30 bg-violet-500/10 px-3 py-1.5 text-[11px] font-semibold text-violet-300 hover:bg-violet-500/20 disabled:opacity-50"
+          >
+            <Tag className="h-3 w-3" />{etiquetando ? 'Etiquetando…' : 'Etiquetar quem já recebeu'}
+          </button>
+        )}
         {status === 'running' && (
           <button type="button" onClick={() => onAction(campaign.id, 'pause')} className="flex items-center gap-1 rounded-lg border border-orange-500/30 bg-orange-500/10 px-3 py-1.5 text-[11px] font-semibold text-orange-400 hover:bg-orange-500/20">
             <Pause className="h-3 w-3" />Pausar

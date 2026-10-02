@@ -11,7 +11,7 @@ import { isWithinWindow, isActiveDayNow } from '@/lib/disparos-schedule';
 import { classificarErroEnvio } from '@/lib/disparos-destinos';
 import { pausarCampanhaPorInstancia } from '@/lib/disparos-alerta';
 import { lerImagens, parDoRodizio } from '@/lib/disparos-rodizio';
-import { etiquetarQuemRecebeu } from '@/lib/disparos-lid';
+import { etiquetarQuemRecebeu, lidDoEnvio } from '@/lib/disparos-lid';
 import {
   garantirProtecaoChip, reservarEnvioNoChip, removerOptoutDaFila, esperaDoChip,
 } from '@/lib/disparos-chip';
@@ -34,6 +34,8 @@ export async function POST(
     await pool.query(`ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS daily_limit INT`);
     await pool.query(`ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS label_id TEXT`);
     await pool.query(`ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS label_nome TEXT`);
+    await pool.query(`ALTER TABLE public.zapi_numbers ADD COLUMN IF NOT EXISTS lid TEXT`);
+    await pool.query(`ALTER TABLE public.zapi_numbers ADD COLUMN IF NOT EXISTS etiquetado_em TIMESTAMPTZ`);
     await garantirProtecaoChip(pool);
 
     const { rows: [campaign] } = await pool.query(
@@ -195,15 +197,25 @@ export async function POST(
 
     // Mesma regra do worker: etiqueta só em quem recebeu, e nunca derruba o envio.
     let notaEtiqueta: string | null = null;
-    if (result.ok && campaign.label_id && isEvolution) {
-      const et = await etiquetarQuemRecebeu({ instanceName: campaign.instance_id, phone: number.phone, labelId: campaign.label_id });
-      if (!et.aplicada) notaEtiqueta = `etiqueta: ${et.motivo}`;
+    let lidGravar: string | null = null;
+    let etiquetou = false;
+    if (result.ok && isEvolution) {
+      lidGravar = await lidDoEnvio({ instanceName: campaign.instance_id, phone: number.phone }).catch(() => null);
+      if (campaign.label_id) {
+        const et = await etiquetarQuemRecebeu({ instanceName: campaign.instance_id, phone: number.phone, labelId: campaign.label_id, lid: lidGravar });
+        if (et.aplicada) etiquetou = true;
+        else notaEtiqueta = `etiqueta: ${et.motivo}`;
+      }
     }
 
     const newStatus = result.ok ? 'sent' : 'failed';
     await pool.query(
-      `UPDATE public.zapi_numbers SET status = $1, sent_at = NOW(), error_msg = $2 WHERE id = $3`,
-      [newStatus, result.error ?? notaEtiqueta ?? null, number.id],
+      `UPDATE public.zapi_numbers
+          SET status = $1, sent_at = NOW(), error_msg = $2,
+              lid = COALESCE($4, lid),
+              etiquetado_em = CASE WHEN $5::boolean THEN NOW() ELSE etiquetado_em END
+        WHERE id = $3`,
+      [newStatus, result.error ?? notaEtiqueta ?? null, number.id, lidGravar, etiquetou],
     );
 
     const field = result.ok ? 'sent = sent + 1' : 'failed = failed + 1';

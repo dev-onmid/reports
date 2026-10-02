@@ -148,8 +148,35 @@ export async function uuidDaInstancia(instanceName: string): Promise<string | nu
 }
 
 export type ResultadoEtiqueta =
-  | { aplicada: true; via: 'lid' | 'telefone'; jid: string }
-  | { aplicada: false; motivo: string };
+  | { aplicada: true; via: 'lid' | 'telefone'; jid: string; lid: string | null }
+  | { aplicada: false; motivo: string; lid: string | null };
+
+/**
+ * Saúde da coleção `regular` pelo NOME da instância (resolve o UUID e o
+ * diretório). `null` quando não dá para medir (sem mount/sem UUID) — aí o
+ * chamador decide se segue às cegas ou não.
+ */
+export async function saudeDaInstancia(instanceName: string): Promise<SaudeEtiquetas | null> {
+  const dir = instancesDir();
+  if (!dir) return null;
+  const uuid = await uuidDaInstancia(instanceName);
+  if (!uuid) return null;
+  return saudeEtiquetasDaInstancia({ dir, instanceUuid: uuid });
+}
+
+/**
+ * LID de quem acabou de receber, lido do disco. Vale GUARDAR no banco a cada
+ * envio: logout/re-pareamento apaga os `lid-mapping-*` (2026-10-02 — os 26
+ * sem etiqueta só puderam ser recuperados porque o LID foi copiado a tempo).
+ */
+export async function lidDoEnvio(opts: { instanceName: string; phone: string }): Promise<string | null> {
+  const dir = instancesDir();
+  if (!dir) return null;
+  const uuid = await uuidDaInstancia(opts.instanceName);
+  if (!uuid) return null;
+  const r = await lerLidDoDisco({ dir, instanceUuid: uuid, phone: opts.phone });
+  return r?.lid ?? null;
+}
 
 /**
  * Pendura a etiqueta em quem acabou de receber o disparo — pelo LID quando
@@ -165,30 +192,48 @@ export type ResultadoEtiqueta =
  */
 export async function etiquetarQuemRecebeu(opts: {
   instanceName: string; phone: string; labelId: string;
+  /** LID já conhecido (gravado no envio) — poupa o disco e sobrevive ao re-pareamento. */
+  lid?: string | null;
+  /**
+   * Recusar o fallback por telefone. Na etiqueta RETROATIVA (dias depois do
+   * envio) aplicar pelo telefone é inútil — provado em 01/10 que o celular
+   * ignora — então melhor dizer "sem LID" do que fingir.
+   */
+  exigirLid?: boolean;
+  /** Pular a checagem de saúde (quem chama em lote já checou uma vez). */
+  pularSaude?: boolean;
 }): Promise<ResultadoEtiqueta> {
   const dir = instancesDir();
-  let jid: string | null = null;
+  let lid: string | null = opts.lid?.replace(/\D/g, '') || null;
   let via: 'lid' | 'telefone' = 'telefone';
 
   if (dir) {
     const uuid = await uuidDaInstancia(opts.instanceName);
     if (uuid) {
-      const saude = await saudeEtiquetasDaInstancia({ dir, instanceUuid: uuid });
-      if (!saude.ok) {
-        return { aplicada: false, motivo: `etiqueta indisponível nesta instância (${saude.motivo}: ${saude.detalhe}) — re-pareie o WhatsApp` };
+      if (!opts.pularSaude) {
+        const saude = await saudeEtiquetasDaInstancia({ dir, instanceUuid: uuid });
+        if (!saude.ok) {
+          return { aplicada: false, lid, motivo: `etiqueta indisponível nesta instância (${saude.motivo}: ${saude.detalhe}) — re-pareie o WhatsApp` };
+        }
       }
-      const lid = await lerLidDoDisco({ dir, instanceUuid: uuid, phone: opts.phone });
-      if (lid) { jid = jidLid(lid.lid); via = 'lid'; }
+      if (!lid) {
+        const doDisco = await lerLidDoDisco({ dir, instanceUuid: uuid, phone: opts.phone });
+        if (doDisco) lid = doDisco.lid;
+      }
     }
   }
+  if (lid) via = 'lid';
+  if (!lid && opts.exigirLid) {
+    return { aplicada: false, lid: null, motivo: 'sem LID conhecido para este contato (o mapeamento só nasce no envio)' };
+  }
 
-  const alvo = jid ?? opts.phone;
+  const alvo = lid ? jidLid(lid) : opts.phone;
   let r: SendResult;
   try {
     r = await handleEvolutionLabel(opts.instanceName, alvo, opts.labelId, 'add');
   } catch (e) {
-    return { aplicada: false, motivo: `handleLabel falhou: ${String(e).slice(0, 160)}` };
+    return { aplicada: false, lid, motivo: `handleLabel falhou: ${String(e).slice(0, 160)}` };
   }
-  if (!r.ok) return { aplicada: false, motivo: `handleLabel recusou: ${String(r.error ?? '').slice(0, 160)}` };
-  return { aplicada: true, via, jid: alvo };
+  if (!r.ok) return { aplicada: false, lid, motivo: `handleLabel recusou: ${String(r.error ?? '').slice(0, 160)}` };
+  return { aplicada: true, via, jid: alvo, lid };
 }
