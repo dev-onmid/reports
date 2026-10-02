@@ -37,7 +37,11 @@ export default function AnaliseIaModal({
 }: {
   clientId: string;
   clientName: string;
-  /** Os leads do recorte atual da tela (período + busca + filtros já aplicados). */
+  /**
+   * Os leads do cliente aberto dentro do período escolhido — e só isso
+   * (instrução do Matheus, 2026-10-02). Busca e filtros de coluna da tela NÃO
+   * entram: encolheriam o lote em silêncio e o número mudaria a cada tecla.
+   */
   leadIds: string[];
   periodoLabel: string;
   onClose: () => void;
@@ -58,9 +62,9 @@ export default function AnaliseIaModal({
   // congelado do render em que começou — com estado, "Parar" não pararia.
   const pararRef = useRef(false);
 
-  // ⚠️ Chave de texto, não o array: `leadIds` chega de `filtered.map(...)`, um
-  // array NOVO a cada render do CRM — e o CRM repinta a cada poll de 8s. Com o
-  // array na dependência, a prévia seria refeita sem parar enquanto o modal
+  // ⚠️ Chave de texto, não o array: `leadIds` chega de um `.map(...)`, array
+  // NOVO a cada render do CRM — e o CRM repinta a cada poll de 8s. Com o array
+  // na dependência, a prévia seria refeita sem parar enquanto o modal
   // estivesse aberto.
   const chaveLeads = leadIds.join(',');
 
@@ -158,8 +162,9 @@ export default function AnaliseIaModal({
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
           <p className="text-xs text-muted-foreground">
             A IA lê a conversa de cada lead de <span className="font-semibold text-foreground">{clientName}</span> no
-            recorte <span className="font-semibold text-foreground">{periodoLabel}</span> e, quando tem certeza
-            suficiente, move a etapa no Kanban e ajusta a temperatura.
+            período <span className="font-semibold text-foreground">{periodoLabel}</span> e, quando tem certeza
+            suficiente, move a etapa no Kanban e ajusta a temperatura. Busca e filtros de coluna da tela não
+            encolhem esta lista — vale o cliente e o período.
           </p>
 
           {carregando && (

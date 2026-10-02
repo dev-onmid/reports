@@ -2881,6 +2881,22 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
     return sortConfig.direction === 'asc' ? result : -result;
   }), [leads, search, statusFilter, temperatureFilter, monthFilter, dateFromFilter, dateToFilter, columnFilters, sortConfig]);
 
+  /**
+   * Recorte da análise de IA: CLIENTE + PERÍODO, nada mais (instrução do
+   * Matheus, 2026-10-02).
+   *
+   * ⚠️ De propósito NÃO reusa `filtered`, que também aplica busca, status,
+   * temperatura e filtros de coluna. Uma busca digitada para achar um lead
+   * encolheria o lote sem ninguém perceber, e o número do modal passaria a
+   * mudar enquanto se digita. O lote é sobre o período; a busca é para achar
+   * alguém.
+   */
+  const leadsDoPeriodo = useMemo(() => leads.filter(l => {
+    if (monthFilter && monthFromDate(l.data) !== monthFilter) return false;
+    if ((dateFromFilter || dateToFilter) && !isDateInRange(l.data, dateFromFilter, dateToFilter)) return false;
+    return true;
+  }), [leads, monthFilter, dateFromFilter, dateToFilter]);
+
   const totalPages = pageSize === 0 ? 1 : Math.max(1, Math.ceil(filtered.length / pageSize));
   const paginated  = pageSize === 0 ? filtered : filtered.slice((page - 1) * pageSize, page * pageSize);
   const selectedLeads = useMemo(
@@ -3738,8 +3754,8 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
             <div className="flex items-center gap-2">
               {/* Análise de IA sob demanda — recupera o retroativo que a
                   automação desligada não fez (pedido do Matheus, 2026-10-02).
-                  Age sobre `filtered`, o recorte da tela: período, busca e
-                  filtros de coluna já aplicados. */}
+                  Age sobre `leadsDoPeriodo`: só o cliente aberto e o período
+                  escolhido, sem herdar busca nem filtros de coluna. */}
               {clientId && (
                 <button
                   type="button"
@@ -4276,7 +4292,7 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
         <AnaliseIaModal
           clientId={clientId}
           clientName={clients.find(c => c.id === clientId)?.name ?? 'este cliente'}
-          leadIds={filtered.map(l => l.id)}
+          leadIds={leadsDoPeriodo.map(l => l.id)}
           periodoLabel={periodLabel(datePreset, dateFromFilter, dateToFilter)}
           onClose={() => setAnaliseIaAberta(false)}
           onConcluido={() => refreshLeads({ silent: true })}

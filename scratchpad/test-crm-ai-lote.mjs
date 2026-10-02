@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 // Recompile antes de rodar:
 //   npx esbuild src/lib/crm-ai-lote.ts --bundle --format=esm --outfile=scratchpad/build/crm-ai-lote.mjs \
 //     --alias:@/lib/crm-ai-analysis=$PWD/scratchpad/stub-crm-ai.mjs --external:pg --log-level=error
@@ -101,6 +102,27 @@ t('custo cresce com o volume', estimarCusto(100).brl > estimarCusto(10).brl);
 t('100 conversas custam menos de R$2', estimarCusto(100).brl < 2);
 t('negativo não vira crédito', estimarCusto(-5).brl === 0);
 t('bloco é pequeno o bastante para a barra andar', LEADS_POR_BLOCO > 0 && LEADS_POR_BLOCO <= 50);
+
+// ── guarda de escopo: o lote é CLIENTE + PERÍODO, nunca o recorte da tela ──
+// Não é teste de lógica (os dois filtros são inline no componente, que não
+// monta fora do runtime do Next): é guarda contra a regressão tentadora de
+// reusar `filtered`, que também aplica busca, status, temperatura e colunas.
+{
+  const src = readFileSync(new URL('../src/app/(dashboard)/crm/page.tsx', import.meta.url), 'utf8');
+
+  t('o modal recebe o recorte de período, não `filtered`',
+    src.includes('leadIds={leadsDoPeriodo.map(l => l.id)}') &&
+    !src.includes('leadIds={filtered.map(l => l.id)}'));
+
+  const corpo = src.slice(src.indexOf('const leadsDoPeriodo'), src.indexOf('const totalPages'));
+  t('⚠️ o recorte do lote só olha mês e intervalo de datas',
+    corpo.includes('monthFilter') && corpo.includes('isDateInRange') &&
+    !corpo.includes('search') && !corpo.includes('statusFilter') &&
+    !corpo.includes('temperatureFilter') && !corpo.includes('columnFilters'));
+
+  t('as dependências do recorte são só leads + datas',
+    /\}\), \[leads, monthFilter, dateFromFilter, dateToFilter\]\)/.test(corpo));
+}
 
 console.log(`\n${ok} asserts OK${fail ? `, ${fail} FALHARAM` : ''}`);
 process.exit(fail ? 1 : 0);

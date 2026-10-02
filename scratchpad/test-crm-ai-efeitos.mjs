@@ -1,6 +1,9 @@
 // Prova que `semEfeitosExternos` realmente impede follow-up e conversão DENTRO
 // do motor — o teste do lote só prova que a flag é PEDIDA.
-// Recompile antes de rodar (comando no fim do arquivo).
+// Recompile antes de rodar (comando no fim do arquivo) e passe a env:
+//   ANTHROPIC_API_KEY=chave-de-teste node scratchpad/test-crm-ai-efeitos.mjs
+// ⚠️ Sem a env o motor lança antes de chegar nas asserções e 10 "falham" por
+// motivo errado — o SDK é stubado, mas a checagem da chave é do nosso código.
 import { analisarConversa } from './build/crm-ai-analysis.mjs';
 
 globalThis.__efeitos ??= { followup: [], conversao: [] };
