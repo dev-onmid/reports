@@ -8,7 +8,7 @@ import {
   Send, AlertTriangle, Monitor, Calendar, Zap,
   Eye, ChevronRight, Info, BookOpen, UserCog,
   Search, Pencil, Tag, ChevronLeft, FileText, Smile, Sparkles,
-  Download, Filter, Hash, ArrowRight, QrCode,
+  Download, Filter, Hash, ArrowRight, QrCode, History,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -281,6 +281,111 @@ type TickResult = {
   total?: number; sent?: number; failed?: number; lastPhone?: string; lastError?: string | null;
 };
 
+// ── Histórico de ajustes (auditoria) ────────────────────────────────────────
+// Quem fez, quando e o que mudou — lido de /api/disparos/log. Por campanha
+// (campaignId) ou geral (sem id, com a coluna da campanha).
+type RegistroLogUi = {
+  id: string; campaign_id: string; campaign_name: string | null; user_name: string | null;
+  acao: string; mudancas: { campo: string; rotulo: string; de: unknown; para: unknown }[] | null;
+  detalhes: Record<string, unknown> | null; created_at: string;
+};
+const ROTULO_ACAO_UI: Record<string, string> = {
+  criou: 'criou a campanha', editou: 'editou', iniciou: 'iniciou o envio', pausou: 'pausou',
+  retomou: 'retomou', cancelou: 'cancelou', excluiu: 'excluiu a campanha', etiquetou: 'etiquetou quem já recebeu',
+};
+const COR_ACAO_UI: Record<string, string> = {
+  criou: 'text-emerald-400', editou: 'text-blue-400', iniciou: 'text-emerald-400', pausou: 'text-orange-400',
+  retomou: 'text-emerald-400', cancelou: 'text-red-400', excluiu: 'text-red-400', etiquetou: 'text-violet-300',
+};
+function fmtValorLog(v: unknown): string {
+  if (v === null || v === undefined || v === '') return '(vazio)';
+  if (Array.isArray(v)) return `${v.length} variação(ões)`;
+  if (typeof v === 'object') return JSON.stringify(v);
+  const t = String(v);
+  return t.length > 140 ? t.slice(0, 137) + '...' : t;
+}
+function fmtQuandoLog(iso: string): string {
+  const d = new Date(iso);
+  return d.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' });
+}
+function LogAjustesModal({ campaignId, titulo, onClose }: { campaignId?: string; titulo: string; onClose: () => void }) {
+  const [dias, setDias] = useState(10);
+  // O resultado carrega a CHAVE da consulta: trocar o período invalida sozinho
+  // (sem setState síncrono no efeito só para "zerar" a tela).
+  const chave = `${campaignId ?? 'todas'}:${dias}`;
+  const [res, setRes] = useState<{ chave: string; registros?: RegistroLogUi[]; erro?: string } | null>(null);
+  useEffect(() => {
+    let vivo = true;
+    const q = new URLSearchParams({ dias: String(dias) });
+    if (campaignId) q.set('campaignId', campaignId);
+    fetch(`/api/disparos/log?${q}`, { headers: callerHeaders() })
+      .then(r => r.json())
+      .then((d: { ok?: boolean; registros?: RegistroLogUi[]; error?: string }) => { if (vivo) setRes(d.ok ? { chave, registros: d.registros ?? [] } : { chave, erro: d.error ?? 'Falha ao carregar' }); })
+      .catch(() => { if (vivo) setRes({ chave, erro: 'Falha de rede' }); });
+    return () => { vivo = false; };
+  }, [campaignId, dias, chave]);
+  const atual = res?.chave === chave ? res : null;
+  const registros = atual?.registros ?? null;
+  const erro = atual?.erro ?? '';
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm" onClick={onClose}>
+      <div className="w-full max-w-3xl max-h-[85vh] flex flex-col overflow-hidden rounded-[var(--radius)] border border-border bg-card shadow-2xl" onClick={e => e.stopPropagation()}>
+        <div className="relative flex items-start justify-between gap-3 border-b border-border px-5 py-4">
+          <div className="absolute inset-x-0 top-0 h-[3px] bg-primary" />
+          <div className="min-w-0">
+            <h3 className="font-heading text-2xl uppercase leading-none tracking-wide">Histórico de ajustes</h3>
+            <p className="mt-1 truncate text-[11px] text-muted-foreground">{titulo} · quem fez, quando e o que mudou</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <select value={dias} onChange={e => setDias(Number(e.target.value))} className="h-8 rounded-lg border border-border bg-background px-2 text-xs">
+              {[7, 10, 30, 90].map(d => <option key={d} value={d}>{d} dias</option>)}
+            </select>
+            <button type="button" onClick={onClose} className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted/40 hover:text-foreground"><X className="h-4 w-4" /></button>
+          </div>
+        </div>
+        <div className="overflow-y-auto px-5 py-3">
+          {erro && <p className="py-8 text-center text-sm text-red-400">{erro}</p>}
+          {!erro && registros === null && <p className="py-8 text-center text-sm text-muted-foreground">Carregando…</p>}
+          {!erro && registros && registros.length === 0 && (
+            <p className="py-8 text-center text-sm text-muted-foreground">Nenhum ajuste registrado nos últimos {dias} dias. O registro começou em 02/10/2026 — ajustes anteriores não foram gravados.</p>
+          )}
+          {!erro && registros && registros.length > 0 && (
+            <ul className="divide-y divide-border">
+              {registros.map(r => (
+                <li key={r.id} className="py-3">
+                  <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-sm">
+                    <span className="font-mono text-[11px] text-muted-foreground">{fmtQuandoLog(r.created_at)}</span>
+                    <span className="font-semibold">{r.user_name ?? 'sistema'}</span>
+                    <span className={COR_ACAO_UI[r.acao] ?? 'text-muted-foreground'}>{ROTULO_ACAO_UI[r.acao] ?? r.acao}</span>
+                    {!campaignId && r.campaign_name && <span className="truncate text-xs text-muted-foreground">· {r.campaign_name}</span>}
+                  </div>
+                  {r.mudancas && r.mudancas.length > 0 && (
+                    <ul className="mt-1.5 space-y-1 pl-3 border-l-2 border-border">
+                      {r.mudancas.map(m => (
+                        <li key={m.campo} className="text-xs text-muted-foreground">
+                          <span className="font-semibold text-foreground/80">{m.rotulo}:</span>{' '}
+                          <span className="line-through decoration-red-400/60">{fmtValorLog(m.de)}</span>
+                          <span className="mx-1">→</span>
+                          <span className="text-foreground">{fmtValorLog(m.para)}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {r.detalhes && Object.keys(r.detalhes).length > 0 && (
+                    <p className="mt-1 text-[11px] text-muted-foreground/80">
+                      {Object.entries(r.detalhes).filter(([, v]) => v !== null && v !== undefined).map(([k, v]) => `${k.replace(/_/g, ' ')}: ${fmtValorLog(v)}`).join(' · ')}
+                    </p>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function CampaignCard({ campaign, onAction, onRefresh, onEdit, respostas }: {
   campaign: Campaign; onAction: (id: string, action: string) => void; onRefresh: () => void; onEdit: (c: Campaign) => void;
   respostas?: RespostasDaCampanha;
@@ -291,6 +396,7 @@ function CampaignCard({ campaign, onAction, onRefresh, onEdit, respostas }: {
   // pelos que já receberam sem etiqueta. A resposta fica no card, não em alert.
   const [etiquetando, setEtiquetando] = useState(false);
   const [etiquetaMsg, setEtiquetaMsg] = useState<{ tom: 'ok' | 'erro'; texto: string } | null>(null);
+  const [showLog, setShowLog] = useState(false);
   async function etiquetarRetroativo() {
     setEtiquetando(true); setEtiquetaMsg(null);
     try {
@@ -413,7 +519,16 @@ function CampaignCard({ campaign, onAction, onRefresh, onEdit, respostas }: {
           {etiquetaMsg.texto}
         </div>
       )}
+      {showLog && <LogAjustesModal campaignId={campaign.id} titulo={campaign.name} onClose={() => setShowLog(false)} />}
       <div className="flex gap-2 pt-1 border-t border-border flex-wrap">
+        <button
+          type="button"
+          onClick={() => setShowLog(true)}
+          title="Quem fez, quando e o que mudou nesta campanha"
+          className="flex items-center gap-1 rounded-lg border border-border bg-muted/20 px-3 py-1.5 text-[11px] font-semibold text-muted-foreground hover:bg-muted/40 hover:text-foreground"
+        >
+          <History className="h-3 w-3" />Histórico
+        </button>
         {campaign.label_id && (
           <button
             type="button"
@@ -2870,6 +2985,7 @@ export default function DisparosPage() {
   const [prefill, setPrefill] = useState<CampaignPrefill | null>(null);
   const [editCampaign, setEditCampaign] = useState<Campaign | null>(null);
 
+  const [showLogGeral, setShowLogGeral] = useState(false);
   function handleReuse(p: CampaignPrefill) { setPrefill(p); setEditCampaign(null); setTab('nova'); }
   function handleEdit(c: Campaign) { setEditCampaign(c); setPrefill(null); setTab('nova'); }
 
@@ -2908,6 +3024,11 @@ export default function DisparosPage() {
                 tab === 'extrator' ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400' : 'border-border bg-card text-muted-foreground hover:bg-muted/50')}>
               <Hash className="h-3.5 w-3.5" />Extrator
             </button>
+            <button type="button" onClick={() => setShowLogGeral(true)}
+              title="Histórico de ajustes de todas as campanhas"
+              className="flex items-center gap-1.5 rounded-lg border border-border bg-card px-4 py-2 text-xs font-bold uppercase tracking-wider text-muted-foreground hover:bg-muted/50 transition-colors">
+              <History className="h-3.5 w-3.5" />Histórico
+            </button>
             <button type="button" onClick={() => { setPrefill(null); setTab('nova'); }}
               className="flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-xs font-bold uppercase tracking-wider text-black hover:bg-primary/90 transition-colors">
               <Plus className="h-3.5 w-3.5" />Nova campanha
@@ -2915,6 +3036,7 @@ export default function DisparosPage() {
           </div>
         </div>
       </div>
+      {showLogGeral && <LogAjustesModal titulo="Todas as campanhas" onClose={() => setShowLogGeral(false)} />}
 
       {tab === 'dashboard' && <DashboardTab onReuse={handleReuse} onNewCampaign={() => { setPrefill(null); setEditCampaign(null); setTab('nova'); }} onManageInstances={() => setTab('clientes')} onEdit={handleEdit} />}
       {tab === 'clientes' && <ClientesTab />}

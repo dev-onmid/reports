@@ -2,6 +2,7 @@ import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { parsePhoneList } from '@/lib/phone-formatter';
 import { getCallerScope } from '@/lib/disparos-access';
+import { registrarLogCampanha } from '@/lib/disparos-log';
 import { serializeActiveDays } from '@/lib/disparos-schedule';
 import { checkWhatsappNumbers, checkEvolutionStatus } from '@/lib/evolution-api';
 import { resolverDestino, garantirZapiClient, nomeConfere } from '@/lib/disparos-destinos';
@@ -194,6 +195,15 @@ export async function POST(request: NextRequest) {
         [campaign.id, finalNumbers[i].phone, finalNumbers[i].name || null, i],
       );
     }
+
+    await registrarLogCampanha(pool, {
+      campaignId: campaign.id, campaignName: campaign.name, userId: scope.userId, acao: 'criou',
+      detalhes: {
+        contatos: finalNumbers.length, invalidos_removidos: invalid.length, status_inicial: initialStatus,
+        intervalo: `${intervalMin}-${intervalMax}s`, limite_diario: dailyLimit, etiqueta: labelNome ?? null,
+        variacoes: Array.isArray(body.messages) ? body.messages.length : 1,
+      },
+    });
 
     return Response.json({
       ...campaign,

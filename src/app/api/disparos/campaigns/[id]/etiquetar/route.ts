@@ -2,6 +2,7 @@ import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { getCallerScope } from '@/lib/disparos-access';
 import { etiquetarQuemRecebeu, saudeDaInstancia } from '@/lib/disparos-lid';
+import { registrarLogCampanha } from '@/lib/disparos-log';
 
 export const maxDuration = 120;
 
@@ -84,6 +85,13 @@ export async function POST(
         await pool.query(`UPDATE public.zapi_numbers SET error_msg = $2 WHERE id = $1`, [n.id, `etiqueta: ${et.motivo}`]);
       }
       await new Promise(r => setTimeout(r, 250));
+    }
+
+    if (processadas > 0) {
+      await registrarLogCampanha(pool, {
+        campaignId: id, userId: scope.userId, acao: 'etiquetou',
+        detalhes: { etiqueta: campaign.label_nome ?? campaign.label_id, pendentes: pendentes.length, aplicadas, falharam, sem_lid: semLid },
+      });
     }
 
     return Response.json({

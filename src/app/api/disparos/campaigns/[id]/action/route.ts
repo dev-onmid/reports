@@ -3,6 +3,7 @@ import { makeServerPool } from '@/lib/server-db';
 import { getCallerScope } from '@/lib/disparos-access';
 import { checkEvolutionStatus } from '@/lib/evolution-api';
 import { nomeConfere } from '@/lib/disparos-destinos';
+import { registrarLogCampanha, type AcaoCampanha } from '@/lib/disparos-log';
 
 export async function POST(
   request: NextRequest,
@@ -92,9 +93,15 @@ export async function POST(
     }
 
     const { rows: [updated] } = await pool.query(
-      `SELECT id, status, sent, failed, total FROM public.zapi_campaigns WHERE id = $1`,
+      `SELECT id, name, status, sent, failed, total FROM public.zapi_campaigns WHERE id = $1`,
       [id],
     );
+    const acaoLog: AcaoCampanha = action === 'pause' ? 'pausou' : action === 'cancel' ? 'cancelou' : action === 'start' ? 'iniciou' : 'retomou';
+    await registrarLogCampanha(pool, {
+      campaignId: id, campaignName: updated?.name ?? null, userId: scope.userId, acao: acaoLog,
+      mudancas: campaign.status !== updated?.status ? [{ campo: 'status', rotulo: 'Status', de: campaign.status, para: updated?.status }] : [],
+      detalhes: { enviados: updated?.sent, total: updated?.total },
+    });
     return Response.json(updated);
   } finally {
     await pool.end();

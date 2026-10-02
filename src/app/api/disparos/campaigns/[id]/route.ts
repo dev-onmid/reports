@@ -2,6 +2,7 @@ import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { getCallerScope } from '@/lib/disparos-access';
 import { serializeActiveDays } from '@/lib/disparos-schedule';
+import { diffCampanha, registrarLogCampanha, CAMPOS_AUDITADOS } from '@/lib/disparos-log';
 
 export async function GET(
   request: NextRequest,
@@ -94,7 +95,18 @@ export async function PATCH(
 
     if (!sets.length) return Response.json({ ok: true });
     vals.push(id);
+    // Auditoria: foto antes/depois dos campos que o gestor enxerga → só o que
+    // mudou de verdade entra no histórico (quem, quando, de → para).
+    const colunas = CAMPOS_AUDITADOS.join(', ');
+    const { rows: [antes] } = await pool.query(`SELECT ${colunas} FROM public.zapi_campaigns WHERE id = $1`, [id]);
     await pool.query(`UPDATE public.zapi_campaigns SET ${sets.join(', ')} WHERE id = $${i}`, vals);
+    const { rows: [depois] } = await pool.query(`SELECT ${colunas} FROM public.zapi_campaigns WHERE id = $1`, [id]);
+    if (antes && depois) {
+      const mudancas = diffCampanha(antes, depois);
+      if (mudancas.length) {
+        await registrarLogCampanha(pool, { campaignId: id, campaignName: String(depois.name ?? antes.name ?? ''), userId: scope.userId, acao: 'editou', mudancas });
+      }
+    }
     return Response.json({ ok: true });
   } finally {
     await pool.end();
@@ -109,11 +121,19 @@ export async function DELETE(
   const pool = makeServerPool();
   try {
     const scope = await getCallerScope(request, pool);
+    const { rows: [alvo] } = await pool.query(
+      `SELECT c.name, c.status, c.sent, c.total FROM public.zapi_campaigns c JOIN public.zapi_clients cl ON cl.id = c.client_id
+        WHERE c.id = $1 AND ($2::boolean OR cl.owner_id = $3)`,
+      [id, scope.unrestricted, scope.userId],
+    );
     await pool.query(
       `DELETE FROM public.zapi_campaigns c USING public.zapi_clients cl
         WHERE c.id = $1 AND cl.id = c.client_id AND ($2::boolean OR cl.owner_id = $3)`,
       [id, scope.unrestricted, scope.userId],
     );
+    if (alvo) {
+      await registrarLogCampanha(pool, { campaignId: id, campaignName: alvo.name, userId: scope.userId, acao: 'excluiu', detalhes: { status_na_exclusao: alvo.status, enviados: alvo.sent, total: alvo.total } });
+    }
     return Response.json({ ok: true });
   } finally {
     await pool.end();
