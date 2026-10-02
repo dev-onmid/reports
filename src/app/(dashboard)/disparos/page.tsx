@@ -25,7 +25,7 @@ import { lerImagens, gravarImagens, combinacoesRodizio } from '@/lib/disparos-ro
 import { faixaDaTaxa, type RespostasDaCampanha } from '@/lib/disparos-respostas';
 import { useAbaPersistida } from '@/lib/aba-persistida';
 import { lerArquivoContatos } from '@/lib/contatos-arquivo';
-import { parsePhoneList } from '@/lib/phone-formatter';
+import { parsePhoneList, deduplicarContatos, formatPhone } from '@/lib/phone-formatter';
 import { montarMensagem, formatarNome, usaNome, VARIAVEIS_DISPARO } from '@/lib/disparos-mensagem';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -1410,19 +1410,21 @@ function NovaCampanhaTab({ onCreated, prefill, editCampaign }: { onCreated: () =
         setImportMsg({ tom: 'erro', texto: 'Nenhum telefone encontrado na planilha. Confira se há uma coluna com DDD + número.' });
         return;
       }
-      const linhas = contatos.map(c => {
-        const nome = (c.nome ?? '').replace(/[,;\t]/g, ' ').replace(/\s+/g, ' ').trim();
-        return nome ? `${c.telefone},${nome}` : c.telefone;
-      });
-      setForm(p => ({ ...p, numbers: linhas.join('\n') }));
-      const semNome = contatos.filter(c => !c.nome).length;
-      setImportMsg({ tom: 'ok', texto: `${contatos.length} contatos lidos de "${file.name}"${semNome ? ` · ${semNome} sem nome` : ''}` });
+      const lidos = contatos
+        .map(c => ({ phone: formatPhone(c.telefone) ?? '', name: (c.nome ?? '').replace(/[,;\t]/g, ' ').replace(/\s+/g, ' ').trim() }))
+        .filter(c => c.phone);
+      // Relatório "uma linha por orçamento/pedido" repete a pessoa: entra uma vez só.
+      const { unicos, repetidos } = deduplicarContatos(lidos);
+      setForm(p => ({ ...p, numbers: unicos.map(c => (c.name ? `${c.phone},${c.name}` : c.phone)).join('\n') }));
+      const semNome = unicos.filter(c => !c.name).length;
+      setImportMsg({ tom: 'ok', texto: `${unicos.length} contatos de "${file.name}"${repetidos ? ` · ${repetidos} linhas repetidas juntadas (mesmo número)` : ''}${semNome ? ` · ${semNome} sem nome` : ''}` });
     } catch (e) {
       setImportMsg({ tom: 'erro', texto: `Não consegui ler o arquivo: ${String(e).slice(0, 120)}` });
     }
   }
   // Nome ↔ número exatamente como o motor vai ler (parsePhoneList é o parser do POST).
-  const contatosLista = useMemo(() => parsePhoneList(form.numbers), [form.numbers]);
+  const listaDedup = useMemo(() => deduplicarContatos(parsePhoneList(form.numbers)), [form.numbers]);
+  const contatosLista = listaDedup.unicos;
   const contatoExemplo = useMemo(() => contatosLista.find(c => c.name) ?? null, [contatosLista]);
 
   function insertVariable(v: string) {
@@ -1898,13 +1900,14 @@ function NovaCampanhaTab({ onCreated, prefill, editCampaign }: { onCreated: () =
                   </div>
                   {contactCount > 0 && (() => {
                     const semNome = contatosLista.filter(c => !c.name).length;
-                    const descartadas = contactCount - contatosLista.length;
+                    const descartadas = contactCount - contatosLista.length - listaDedup.repetidos;
                     return (
                       <div className="mt-3 overflow-hidden rounded-lg border border-border">
                         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border bg-emerald-500/10 px-3 py-2">
                           <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
                           <span className="text-xs font-semibold text-emerald-400">{contatosLista.length} contato{contatosLista.length !== 1 ? 's' : ''} válido{contatosLista.length !== 1 ? 's' : ''}</span>
                           {semNome > 0 && <span className="text-[11px] text-orange-400">{semNome} sem nome</span>}
+                          {listaDedup.repetidos > 0 && <span className="text-[11px] text-muted-foreground">{listaDedup.repetidos} repetido{listaDedup.repetidos !== 1 ? 's' : ''} (entram uma vez só)</span>}
                           {descartadas > 0 && <span className="text-[11px] text-red-400">{descartadas} linha{descartadas !== 1 ? 's' : ''} sem telefone válido (ficam de fora)</span>}
                         </div>
                         <div className="max-h-64 overflow-y-auto">

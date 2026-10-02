@@ -22,7 +22,11 @@ export type ContatoLido = {
 const RE_PEDIDOS = /(qtd|quant|n[º°.]?\s*de\s*pedidos?|pedidos?|compras?|frequ)/i;
 const RE_GASTO = /(total|valor|gasto|receita|ticket|faturad)/i;
 const RE_DATA = /(ltima|ultimo|last|data|dt[_ ]|compra|pedido em|acesso)/i;
-const RE_NOME = /(nome|cliente|contato|name)/i;
+const RE_NOME_FORTE = /(\bnome\b|\bname\b)/i;
+// ⚠️ "Paciente" (2026-10-02, relatório da Cost Odonto): o leitor só conhecia
+// nome/cliente/contato e marcou 359 de 359 contatos como "sem nome".
+const RE_NOME = /(nome|cliente|contato|name|paciente|aluno|comprador|consumidor|titular|lead\b)/i;
+const RE_NAO_NOME = /(e-?mail|cpf|cnpj|documento|c[oó]digo|\bid\b)/i;
 const RE_FONE = /(telefone|celular|whats|fone|phone|tel)/i;
 
 function soDigitos(v: string): string { return v.replace(/\D/g, ''); }
@@ -97,9 +101,15 @@ function mapearCabecalho(linha: string[]): Mapa | null {
   const acha = (re: RegExp) => linha.findIndex(c => re.test(c));
   const fone = acha(RE_FONE);
   if (fone < 0) return null; // sem coluna de telefone não é cabeçalho útil
+  // Nome: rótulo "nome" vence; depois os sinônimos. Nunca a coluna de telefone
+  // ("Celular Paciente" casa com "paciente") nem e-mail/CPF/código ("Código do
+  // cliente" casa com "cliente").
+  const podeSerNome = (c: string, i: number) => i !== fone && !RE_FONE.test(c) && !RE_NAO_NOME.test(c);
+  let nome = linha.findIndex((c, i) => podeSerNome(c, i) && RE_NOME_FORTE.test(c));
+  if (nome < 0) nome = linha.findIndex((c, i) => podeSerNome(c, i) && RE_NOME.test(c));
   return {
     fone,
-    nome: acha(RE_NOME),
+    nome,
     // ⚠️ Data primeiro: "última compra" casa com RE_DATA e com nada mais; sem
     // essa ordem, uma coluna "Data do último pedido" cairia em `pedidos`.
     data: acha(RE_DATA),
@@ -108,11 +118,45 @@ function mapearCabecalho(linha: string[]): Mapa | null {
   };
 }
 
+/** Parece nome de gente: letras, 1 a 6 palavras, sem dígito, @ ou barra. */
+function pareceNomeDePessoa(v: string): boolean {
+  const t = v.trim();
+  if (t.length < 2 || t.length > 60) return false;
+  if (/[\d@/\\|#]/.test(t)) return false;
+  const palavras = t.split(/\s+/);
+  return palavras.length <= 6 && palavras.every(p => /^[\p{L}'.-]+$/u.test(p));
+}
+
+/**
+ * Cabeçalho existe mas nenhum rótulo é de nome ("Beneficiário", "Quem",
+ * "Razão")? Escolhe pelo CONTEÚDO a coluna que mais parece nome de pessoa.
+ * ⚠️ Pondera pela variedade: "Em aberto" (status) parece nome mas se repete;
+ * nome de gente quase nunca repete. Só aceita com maioria clara.
+ */
+function inferirColunaNome(dados: string[][], excluir: Set<number>): number {
+  const amostra = dados.slice(0, 50);
+  if (amostra.length === 0) return -1;
+  const largura = Math.max(...amostra.map(r => r.length));
+  let melhor = -1; let melhorScore = 0;
+  for (let j = 0; j < largura; j++) {
+    if (excluir.has(j)) continue;
+    const vals = amostra.map(r => (r[j] ?? '').trim()).filter(Boolean);
+    if (vals.length < amostra.length * 0.5) continue;
+    const nomes = vals.filter(pareceNomeDePessoa);
+    const taxa = nomes.length / amostra.length;
+    const variedade = new Set(nomes.map(v => v.toLowerCase())).size / Math.max(1, nomes.length);
+    const score = taxa * variedade;
+    if (taxa >= 0.6 && variedade >= 0.4 && score > melhorScore) { melhor = j; melhorScore = score; }
+  }
+  return melhor;
+}
+
 export function linhasDaPlanilha(linhas: unknown[][]): ContatoLido[] {
   const saida: ContatoLido[] = [];
   let mapa: Mapa | null = null;
 
-  for (const linha of linhas) {
+  for (let idx = 0; idx < linhas.length; idx++) {
+    const linha = linhas[idx];
     if (!Array.isArray(linha)) continue;
     const celulas = linha.map(c => String(c ?? '').trim());
     if (celulas.every(c => !c)) continue;
@@ -120,6 +164,13 @@ export function linhasDaPlanilha(linhas: unknown[][]): ContatoLido[] {
     // Cabeçalho: primeira linha SEM telefone reconhecível mas COM rótulos.
     if (!mapa && !celulas.some(pareceTelefone)) {
       mapa = mapearCabecalho(celulas);
+      if (mapa && mapa.nome < 0) {
+        const dados = linhas.slice(idx + 1)
+          .filter((l): l is unknown[] => Array.isArray(l))
+          .map(l => l.map(c => String(c ?? '').trim()));
+        const excluir = new Set(celulas.map((c, i) => (RE_FONE.test(c) || RE_NAO_NOME.test(c) ? i : -1)).filter(i => i >= 0));
+        mapa.nome = inferirColunaNome(dados, excluir);
+      }
       continue;
     }
 

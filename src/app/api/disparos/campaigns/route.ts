@@ -1,6 +1,6 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
-import { parsePhoneList } from '@/lib/phone-formatter';
+import { parsePhoneList, deduplicarContatos } from '@/lib/phone-formatter';
 import { getCallerScope } from '@/lib/disparos-access';
 import { registrarLogCampanha } from '@/lib/disparos-log';
 import { serializeActiveDays } from '@/lib/disparos-schedule';
@@ -107,7 +107,9 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  const parsed = parsePhoneList(numbers);
+  // ⚠️ Mesmo número duas vezes = a pessoa recebe a mensagem duas vezes.
+  // A tela já junta na importação; aqui é a rede para lista colada à mão.
+  const parsed = deduplicarContatos(parsePhoneList(numbers)).unicos;
   if (parsed.length === 0) {
     return Response.json({ error: 'Nenhum número válido encontrado.' }, { status: 400 });
   }
