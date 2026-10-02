@@ -12,12 +12,15 @@ import { classificarErroEnvio } from '@/lib/disparos-destinos';
 import { pausarCampanhaPorInstancia } from '@/lib/disparos-alerta';
 import { lerImagens, parDoRodizio } from '@/lib/disparos-rodizio';
 import { etiquetarQuemRecebeu, lidDoEnvio } from '@/lib/disparos-lid';
+import { montarMensagem } from '@/lib/disparos-mensagem';
 import {
   garantirProtecaoChip, reservarEnvioNoChip, removerOptoutDaFila, esperaDoChip,
 } from '@/lib/disparos-chip';
 
+// {nome}/{primeiro_nome}/{telefone} + frase recomposta quando falta o nome —
+// a MESMA função da prévia da tela (disparos-mensagem.ts).
 function interpolate(template: string, phone: string, name: string) {
-  return template.replace(/\{telefone\}/g, phone).replace(/\{nome\}/g, name);
+  return montarMensagem(template, { phone, name });
 }
 
 export async function POST(

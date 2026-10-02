@@ -16,6 +16,7 @@ import { sendFollowupMessage, type WaInstance } from '@/lib/followup-send';
 import { isWithinWindow, isActiveDayNow } from '@/lib/disparos-schedule';
 import { lerImagens, parDoRodizio } from '@/lib/disparos-rodizio';
 import { etiquetarQuemRecebeu, lidDoEnvio } from '@/lib/disparos-lid';
+import { montarMensagem } from '@/lib/disparos-mensagem';
 import {
   garantirProtecaoChip, reservarEnvioNoChip, removerOptoutDaFila,
   podeSincronizarOptout, sincronizarOptout,
@@ -28,8 +29,10 @@ export const maxDuration = 30;
 
 const BUDGET_MS = 25_000;
 
+// {nome}/{primeiro_nome}/{telefone} + frase recomposta quando falta o nome —
+// a MESMA função da prévia da tela (disparos-mensagem.ts).
 function interpolate(template: string, phone: string, name: string) {
-  return template.replace(/\{telefone\}/g, phone).replace(/\{nome\}/g, name);
+  return montarMensagem(template, { phone, name });
 }
 
 function sleep(ms: number) {

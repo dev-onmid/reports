@@ -24,6 +24,9 @@ import type { DestinoCliente, InstanciaOrfa } from '@/lib/disparos-destinos';
 import { lerImagens, gravarImagens, combinacoesRodizio } from '@/lib/disparos-rodizio';
 import { faixaDaTaxa, type RespostasDaCampanha } from '@/lib/disparos-respostas';
 import { useAbaPersistida } from '@/lib/aba-persistida';
+import { lerArquivoContatos } from '@/lib/contatos-arquivo';
+import { parsePhoneList } from '@/lib/phone-formatter';
+import { montarMensagem, formatarNome, usaNome, VARIAVEIS_DISPARO } from '@/lib/disparos-mensagem';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -214,8 +217,15 @@ function formatWAText(text: string): React.ReactNode[] {
 
 // ─── WhatsApp Preview ─────────────────────────────────────────────────────────
 
-function WhatsAppPreview({ image, message }: { image: string | null; message: string }) {
-  const preview = message.replace(/\{nome\}/g, 'João Silva').replace(/\{telefone\}/g, '43 9 9999-1111');
+function WhatsAppPreview({ image, message, contatoExemplo }: {
+  image: string | null; message: string;
+  /** 1º contato COM nome da lista — a prévia mostra gente real, não "João Silva". */
+  contatoExemplo?: { phone: string; name: string } | null;
+}) {
+  // Mesma função do envio (worker/tick): prévia que monta diferente é ilustração.
+  const exemplo = contatoExemplo ?? { phone: '5543999991111', name: 'João Silva' };
+  const preview = montarMensagem(message, exemplo);
+  const semNome = usaNome(message) ? montarMensagem(message, { phone: exemplo.phone, name: '' }) : null;
   const now = new Date();
   const time = `${now.getHours()}:${String(now.getMinutes()).padStart(2, '0')}`;
   const hasContent = !!image || preview.trim();
@@ -270,6 +280,12 @@ function WhatsAppPreview({ image, message }: { image: string | null; message: st
         </div>
       </div>
       <p className="text-center text-[10px] text-muted-foreground/40 shrink-0 mt-1">Simulação — layout pode variar</p>
+      {semNome !== null && semNome.trim() && (
+        <div className="rounded-lg border border-border bg-muted/20 px-3 py-2">
+          <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Contato sem nome na planilha recebe</p>
+          <div className="mt-1 text-[12px] leading-snug text-foreground/80 break-words">{formatWAText(semNome.split('\n').slice(0, 3).join('\n'))}{semNome.split('\n').length > 3 ? '…' : ''}</div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1381,15 +1397,33 @@ function NovaCampanhaTab({ onCreated, prefill, editCampaign }: { onCreated: () =
     });
   }
 
-  function importCSV(file: File) {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const text = (e.target?.result as string) ?? '';
-      const lines = text.split(/\r?\n/).filter(l => l.trim());
-      setForm(p => ({ ...p, numbers: lines.join('\n') }));
-    };
-    reader.readAsText(file);
+  // Planilha COMPLETA do cliente (Excel ou CSV, com ou sem cabeçalho, colunas em
+  // qualquer ordem): o leitor da Fidelidade acha a coluna de telefone e a de nome
+  // sozinho. Vírgula/ponto e vírgula dentro do nome viram espaço — senão o
+  // `telefone,nome` do campo de texto partiria o nome ao meio.
+  const [importMsg, setImportMsg] = useState<{ tom: 'ok' | 'erro'; texto: string } | null>(null);
+  async function importCSV(file: File) {
+    setImportMsg(null);
+    try {
+      const contatos = await lerArquivoContatos(file);
+      if (contatos.length === 0) {
+        setImportMsg({ tom: 'erro', texto: 'Nenhum telefone encontrado na planilha. Confira se há uma coluna com DDD + número.' });
+        return;
+      }
+      const linhas = contatos.map(c => {
+        const nome = (c.nome ?? '').replace(/[,;\t]/g, ' ').replace(/\s+/g, ' ').trim();
+        return nome ? `${c.telefone},${nome}` : c.telefone;
+      });
+      setForm(p => ({ ...p, numbers: linhas.join('\n') }));
+      const semNome = contatos.filter(c => !c.nome).length;
+      setImportMsg({ tom: 'ok', texto: `${contatos.length} contatos lidos de "${file.name}"${semNome ? ` · ${semNome} sem nome` : ''}` });
+    } catch (e) {
+      setImportMsg({ tom: 'erro', texto: `Não consegui ler o arquivo: ${String(e).slice(0, 120)}` });
+    }
   }
+  // Nome ↔ número exatamente como o motor vai ler (parsePhoneList é o parser do POST).
+  const contatosLista = useMemo(() => parsePhoneList(form.numbers), [form.numbers]);
+  const contatoExemplo = useMemo(() => contatosLista.find(c => c.name) ?? null, [contatosLista]);
 
   function insertVariable(v: string) {
     setForm(p => ({ ...p, message: p.message + v }));
@@ -1608,11 +1642,11 @@ function NovaCampanhaTab({ onCreated, prefill, editCampaign }: { onCreated: () =
               </div>
               <div className="space-y-1.5">
                 <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
-                  Mensagem * — use {'{nome}'} e {'{telefone}'} para personalizar
+                  Mensagem * — use {'{primeiro_nome}'}, {'{nome}'} e {'{telefone}'} para personalizar
                 </label>
                 <div className="relative">
                   <textarea value={form.message} onChange={e => setForm(p => ({ ...p, message: e.target.value }))} onBlur={handleMessageBlur}
-                    placeholder="Olá {nome}, temos uma novidade para você!" rows={5}
+                    placeholder="Oi {primeiro_nome}, temos uma novidade para você!" rows={5}
                     className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm outline-none focus:ring-1 focus:ring-primary resize-none pr-10" />
                   <DictateButton className="absolute top-2 right-2" onTranscript={(text) => setForm(p => ({ ...p, message: p.message ? `${p.message} ${text}` : text }))} />
                   <button type="button" className="absolute bottom-3 right-3 text-muted-foreground hover:text-foreground transition-colors">
@@ -1623,7 +1657,7 @@ function NovaCampanhaTab({ onCreated, prefill, editCampaign }: { onCreated: () =
               </div>
               <div className="mt-3 flex items-center gap-2 flex-wrap">
                 <span className="text-[11px] text-muted-foreground">Variáveis disponíveis:</span>
-                {['{nome}','{telefone}'].map(v => (
+                {VARIAVEIS_DISPARO.map(v => (
                   <button key={v} type="button" onClick={() => insertVariable(v)}
                     className="rounded-lg border border-border bg-background px-2.5 py-1 text-xs font-mono text-muted-foreground hover:text-foreground hover:border-primary/40 transition-colors">
                     {v}
@@ -1854,17 +1888,49 @@ function NovaCampanhaTab({ onCreated, prefill, editCampaign }: { onCreated: () =
                         className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-xs text-muted-foreground hover:text-foreground hover:border-primary/40 transition-colors">
                         <Upload className="h-3.5 w-3.5" />Importar arquivo
                       </button>
-                      <span className="text-[11px] text-muted-foreground/50">CSV ou TXT (máx. 5MB)</span>
+                      <span className="text-[11px] text-muted-foreground/50">Excel, CSV ou TXT — a planilha completa, colunas em qualquer ordem</span>
                     </div>
-                    <input ref={csvRef} type="file" accept=".csv,.txt" className="hidden"
-                      onChange={e => { if (e.target.files?.[0]) { importCSV(e.target.files[0]); e.target.value = ''; } }} />
+                    <input ref={csvRef} type="file" accept=".xlsx,.xls,.csv,.txt" className="hidden"
+                      onChange={e => { if (e.target.files?.[0]) { void importCSV(e.target.files[0]); e.target.value = ''; } }} />
+                    {importMsg && (
+                      <p className={cn('text-[11px]', importMsg.tom === 'ok' ? 'text-emerald-400' : 'text-red-400')}>{importMsg.texto}</p>
+                    )}
                   </div>
-                  {contactCount > 0 && (
-                    <div className="mt-3 flex items-center gap-2 rounded-lg border border-emerald-500/25 bg-emerald-500/10 px-3 py-2">
-                      <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
-                      <span className="text-xs font-semibold text-emerald-400">{contactCount} contato{contactCount !== 1 ? 's' : ''} carregado{contactCount !== 1 ? 's' : ''}</span>
-                    </div>
-                  )}
+                  {contactCount > 0 && (() => {
+                    const semNome = contatosLista.filter(c => !c.name).length;
+                    const descartadas = contactCount - contatosLista.length;
+                    return (
+                      <div className="mt-3 overflow-hidden rounded-lg border border-border">
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border bg-emerald-500/10 px-3 py-2">
+                          <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
+                          <span className="text-xs font-semibold text-emerald-400">{contatosLista.length} contato{contatosLista.length !== 1 ? 's' : ''} válido{contatosLista.length !== 1 ? 's' : ''}</span>
+                          {semNome > 0 && <span className="text-[11px] text-orange-400">{semNome} sem nome</span>}
+                          {descartadas > 0 && <span className="text-[11px] text-red-400">{descartadas} linha{descartadas !== 1 ? 's' : ''} sem telefone válido (ficam de fora)</span>}
+                        </div>
+                        <div className="max-h-64 overflow-y-auto">
+                          <table className="w-full text-xs">
+                            <thead className="sticky top-0 bg-card">
+                              <tr className="text-left text-[10px] uppercase tracking-wider text-muted-foreground">
+                                <th className="px-3 py-1.5 font-semibold">Nome</th>
+                                <th className="px-3 py-1.5 font-semibold">Número</th>
+                                <th className="px-3 py-1.5 font-semibold">{'{primeiro_nome}'}</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-border">
+                              {contatosLista.slice(0, 500).map((c, i) => (
+                                <tr key={`${c.phone}-${i}`}>
+                                  <td className="px-3 py-1.5">{c.name ? formatarNome(c.name) : <span className="italic text-orange-400/80">sem nome</span>}</td>
+                                  <td className="px-3 py-1.5 font-mono text-muted-foreground">{c.phone}</td>
+                                  <td className="px-3 py-1.5 text-muted-foreground">{formatarNome(c.name).split(' ')[0] || '—'}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                          {contatosLista.length > 500 && <p className="px-3 py-2 text-[11px] text-muted-foreground">Mostrando 500 de {contatosLista.length}. Todos entram na campanha.</p>}
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </>
               )}
             </div>
@@ -2007,7 +2073,7 @@ function NovaCampanhaTab({ onCreated, prefill, editCampaign }: { onCreated: () =
               </div>
               <p className="text-xs text-muted-foreground mt-1">Veja como sua mensagem aparecerá para os contatos.</p>
             </div>
-            <WhatsAppPreview image={imageUrls.length > 0 ? imageUrls[previewImgIdx % imageUrls.length] : null} message={previewVariationIdx !== null && variations[previewVariationIdx] ? variations[previewVariationIdx].text : form.message} />
+            <WhatsAppPreview image={imageUrls.length > 0 ? imageUrls[previewImgIdx % imageUrls.length] : null} message={previewVariationIdx !== null && variations[previewVariationIdx] ? variations[previewVariationIdx].text : form.message} contatoExemplo={contatoExemplo} />
             {previewVariationIdx !== null && variations[previewVariationIdx] && (
               <p className="mt-1.5 text-center text-[10px] text-violet-400 font-medium">
                 Prévia: {variations[previewVariationIdx].label || `Variação ${previewVariationIdx + 1}`}
