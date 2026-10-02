@@ -1,3 +1,44 @@
+## Discador — ligações de prospecção um clique por vez, lead no CRM (2026-10-01)
+
+Pedido do Matheus: baixar uma lista grande de leads (ON Prospecção) e ligar um a um sem
+copiar número nem anotar em planilha; quem atender já vira lead no CRM. Discador em nuvem
+(Twilio/VICIdial) foi explicado e **descartado por ele** nesta fase: "não precisa ser
+automático, só não precisar ficar copiando já vai ser ótimo". Então é **semiautomático**:
+tela `/discador` (Ferramentas, permissão `crm`), botão **Ligar** = link `tel:` — no Mac o
+FaceTime liga pelo iPhone, no iPhone disca direto; a pessoa só aperta Ligar e um dos 4
+resultados (1 Não atendeu · 2 Caixa postal · 3 Número errado · 4 Atendeu; L liga, P pula).
+
+- **Tabelas** `discador_listas`, `discador_contatos`, `discador_chamadas` (`src/lib/discador.ts`,
+  schema memoizado). Nada de telefonia: `iniciada_at` da chamada é só o clique no Ligar.
+- **Fila** (`proximoContato`): retorno combinado vencido → fila (pulado vai para o fim) →
+  quem não atendeu há mais de 3 h, até 3 tentativas. "Retornar depois" com data vira
+  status `retornar` e volta ao topo na hora marcada.
+- **Lead no CRM** (`contatos/[id]/resultado`): `canal='Telefone'`, `origin='discador'`,
+  observação com lista/empresa/segmento/cidade/CNPJ/interesse/obs; `data_agendada` quando
+  é retorno. **Sem duplicar**: mesmo número já no CRM do cliente → a conversa entra na
+  observação do lead existente. Erro no CRM **não derruba o registro da ligação**
+  (SAVEPOINT) e volta como aviso na tela.
+- ⚠️ **Transação usa `pool.connect()`, nunca `pool.query` para BEGIN/COMMIT**: o `pg`
+  descarta a conexão quando uma query falha, então BEGIN ficava numa conexão e o UPDATE
+  seguinte ia em outra — o teste local perdeu o INSERT da chamada e manteve o UPDATE do
+  contato. Vale para qualquer transação neste repo.
+- ⚠️ Não acrescentar colunas em `crm_leads` a partir do discador (lock da tabela quente —
+  incidente de 16/09). O INSERT usa só colunas garantidas por `ensureCrmConversationSchema`
+  + `data_agendada` (que a rota do CRM cria em produção).
+- **Importação** (`importar-lista.tsx`): CSV/XLSX pelo `xlsx` (o Excel do ON Prospecção
+  entra direto — reconhece "Celular (provável WhatsApp)" antes de "Telefone", ignora
+  "terceiros/contador") ou texto colado (acha o telefone na linha, o resto é a empresa).
+  Telefone normalizado para `55DDDN` (`normalizarTelefone`); repetido no arquivo fica uma
+  vez; por padrão **pula número que já está em outra lista** (`pular_repetidos`).
+- Limites honestos ditos ao Matheus: volume alto do número pessoal pode virar spam nas
+  operadoras (aí entra 0303/telefonia em nuvem — a tela continua a mesma); Mac e iPhone
+  precisam estar na mesma rede com "Chamadas do iPhone em outros dispositivos" ligado.
+- **Testar local sem banco de produção**: Postgres 17 do Homebrew (`brew services start
+  postgresql@17`), base `reports_dev` com `users`/`user_permissions`/`clients` mínimos e
+  `POSTGRES_URL=postgresql://<usuário>@localhost:5432/reports_dev` no `.env.local`; as
+  demais tabelas as rotas criam sozinhas (`GET /api/crm?clientId=…` cria o `crm_leads`
+  completo). Turbopack recusa `node_modules` em symlink — `npm ci` no worktree.
+
 ## CondoStore — os 3 canais da mesma landing page viraram um (2026-09-30)
 
 Decisão do Matheus, fechando a pergunta dele de ontem ("LP | CondoStore, Landing Page (Google) e Google Ads é tudo a mesma coisa"): **unificar em "Landing Page (Google)", só para o CondoStore.**
