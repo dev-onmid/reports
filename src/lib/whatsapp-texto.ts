@@ -30,11 +30,23 @@ export function tirarMarcacao(texto: string): string {
  * ⚠️ O travessão (—) é o mais revelador de todos: praticamente ninguém digita
  * em-dash no teclado do celular. Vira hífen simples.
  */
-export function humanizarTexto(texto: string | null | undefined): string {
+export type OpcoesHumanizar = {
+  /**
+   * Manter negrito, itálico e riscado (asterisco, underscore, til). Ligado quando a mensagem ORIGINAL do
+   * gestor já usa marcação — aí tirar seria descaracterizar o padrão dele
+   * (2026-10-02: a original tinha negrito no produto e emoji por parágrafo; as
+   * variações saíam em bloco liso, "ruim de ler").
+   */
+  manterMarcacao?: boolean;
+  /** Manter marcador de lista no começo da linha (idem: só se a original tem). */
+  manterListas?: boolean;
+};
+
+export function humanizarTexto(texto: string | null | undefined, opts: OpcoesHumanizar = {}): string {
   let t = String(texto ?? '');
   if (!t.trim()) return '';
 
-  t = tirarMarcacao(t);
+  if (!opts.manterMarcacao) t = tirarMarcacao(t);
 
   t = t
     .replace(/[—–]/g, '-')          // — e – viram hífen
@@ -44,8 +56,8 @@ export function humanizarTexto(texto: string | null | undefined): string {
     .replace(/ /g, ' ')                   // espaço duro
     // Bullet de lista ("- item", "• item", "1. item") no começo da linha: pessoa
     // não escreve lista formatada numa conversa.
-    .replace(/^[ \t]*[-•*·]\s+/gm, '')
-    .replace(/^[ \t]*\d+[.)]\s+/gm, '')
+    .replace(opts.manterListas ? /(?!)/g : /^[ \t]*[-•*·]\s+/gm, '')
+    .replace(opts.manterListas ? /(?!)/g : /^[ \t]*\d+[.)]\s+/gm, '')
     // Cabeçalho de markdown, se escapar.
     .replace(/^[ \t]*#{1,6}\s+/gm, '');
 
@@ -56,4 +68,73 @@ export function humanizarTexto(texto: string | null | undefined): string {
     .replace(/\s+([,.!?;:])/g, '$1');          // espaço antes de pontuação
 
   return t.trim();
+}
+
+// ───────────────────────── formato da mensagem original ─────────────────────────
+
+/** O que a mensagem do gestor TEM — é isso que as variações precisam espelhar. */
+export type PerfilMensagem = {
+  caracteres: number;
+  /** Blocos separados por linha em branco. Um bloco só = texto corrido. */
+  paragrafos: number;
+  emojis: number;
+  negrito: boolean;
+  italico: boolean;
+  listas: boolean;
+};
+
+const EMOJI_RE = /\p{Extended_Pictographic}/gu;
+
+export function perfilDaMensagem(texto: string | null | undefined): PerfilMensagem {
+  const t = String(texto ?? '').replace(/\r\n?/g, '\n').trim();
+  const paragrafos = t ? t.split(/\n[ \t]*\n+/).filter(b => b.trim()).length : 0;
+  return {
+    caracteres: t.length,
+    paragrafos,
+    emojis: (t.match(EMOJI_RE) ?? []).length,
+    negrito: /(^|[^\p{L}\p{N}])\*[^*\n]+\*(?=$|[^\p{L}\p{N}])/mu.test(t),
+    italico: /(^|[^\p{L}\p{N}])_[^_\n]+_(?=$|[^\p{L}\p{N}])/mu.test(t),
+    listas: /^[ \t]*(?:[-•·]|\d+[.)])\s+\S/m.test(t),
+  };
+}
+
+/**
+ * Regras de FORMATO para o prompt, derivadas da mensagem original.
+ *
+ * ⚠️ A lição de 2026-10-02: regra fixa ("zero formatação", "no máximo um emoji")
+ * destruiu o padrão de quem já escrevia bem — a original tinha 4 parágrafos,
+ * emoji e negrito, e as variações viraram um bloco liso sem nada. O formato
+ * não é opinião do gerador: é cópia do que o gestor fez. Original crua gera
+ * variação crua; original com parágrafos e emoji gera variação igual.
+ */
+export function regrasDeFormato(p: PerfilMensagem): string[] {
+  const min = Math.max(40, Math.round(p.caracteres * 0.8));
+  const max = Math.round(p.caracteres * 1.15);
+  const regras: string[] = [
+    'ESPELHE O FORMATO DA MENSAGEM ORIGINAL - ela é o padrão, não uma sugestão:',
+    `- Tamanho: entre ${min} e ${max} caracteres (a original tem ${p.caracteres}). Mais longo que isso vira texto cansativo no celular.`,
+  ];
+  if (p.paragrafos >= 2) {
+    regras.push(`- Estrutura: ${p.paragrafos} parágrafos curtos separados por UMA linha em branco (no JSON, use \\n\\n entre eles), como na original. Nunca um bloco único.`);
+  } else {
+    regras.push('- Estrutura: texto corrido como a original, sem quebrar em vários parágrafos.');
+  }
+  if (p.emojis > 0) {
+    const lo = Math.max(1, p.emojis - 1); const hi = p.emojis + 1;
+    regras.push(`- Emojis: entre ${lo} e ${hi} (a original tem ${p.emojis}), nos mesmos lugares que ela usa (abertura, destaque da oferta, chamada final). Emoji diferente a cada variação.`);
+  } else {
+    regras.push('- Emojis: a original não usa. No máximo UM, e só se couber naturalmente.');
+  }
+  if (p.negrito) {
+    regras.push('- Negrito: a original destaca termos com *asteriscos simples* (produto, oferta, prazo). Faça o mesmo nos termos equivalentes - e só neles. Nunca use _itálico_, ~riscado~, crase ou #.');
+  } else {
+    regras.push('- Formatação: ZERO. Nunca use *asterisco*, _underscore_, ~til~, crase ou # - nem para ênfase. A original não tem, e marcação em texto que não tinha denuncia ferramenta.');
+  }
+  if (p.listas) {
+    regras.push('- Lista: a original usa itens em linhas separadas; pode manter o mesmo recurso.');
+  } else {
+    regras.push('- Nada de lista com marcador nem item numerado.');
+  }
+  regras.push('- Nunca use travessão (—). Use hífen, vírgula ou outra frase.');
+  return regras;
 }

@@ -1,6 +1,6 @@
 import type { NextRequest } from 'next/server';
 import { logAiUsage } from '@/lib/ai-usage-logger';
-import { humanizarTexto } from '@/lib/whatsapp-texto';
+import { humanizarTexto, perfilDaMensagem, regrasDeFormato } from '@/lib/whatsapp-texto';
 
 export type WhatsAppVariation = {
   text: string;
@@ -18,6 +18,10 @@ export async function POST(req: NextRequest) {
     return Response.json({ error: 'Mensagem não pode estar vazia.' }, { status: 400 });
   }
 
+  // O formato das variações é CÓPIA do formato da original (parágrafos, emoji,
+  // negrito, tamanho) - ver `regrasDeFormato`. Regra fixa aqui já quebrou uma vez.
+  const perfil = perfilDaMensagem(message);
+
   const prompt = [
     'Você é um especialista em copywriting para WhatsApp no mercado brasileiro.',
     'Sua tarefa: gerar 4 variações de uma mensagem de WhatsApp para campanha de marketing.',
@@ -32,14 +36,11 @@ export async function POST(req: NextRequest) {
     '7. NÃO use clichês como "Não perca essa oportunidade" ou "Aproveite agora".',
     '',
     'ESCREVA COMO QUEM DIGITA NO CELULAR, NÃO COMO FERRAMENTA DE DISPARO:',
-    '8. ZERO formatação. Nunca use _underscore_, *asterisco*, ~til~, crase ou # — nem para dar',
-    '   ênfase. No WhatsApp isso vira itálico/negrito e entrega na hora que o texto foi montado',
-    '   num sistema. Quem escreve de verdade só digita a palavra.',
-    '9. Nunca use travessão (—). Use hífen, vírgula ou simplesmente outra frase.',
-    '10. Nada de lista com marcador nem item numerado. Pessoa não manda lista formatada numa conversa.',
-    '11. Frase curta, uma ideia por linha, do jeito que sai no teclado. Pode começar com "oi",',
-    '    "olha", "passando pra avisar". Contração é bem-vinda ("tá", "pra", "tô").',
-    '12. No máximo UM emoji por mensagem, e só se couber naturalmente. Pode não ter nenhum.',
+    '8. Frase curta, uma ideia por frase. Pode começar com "oi", "olha", "passando pra avisar".',
+    '   Contração é bem-vinda ("tá", "pra", "tô").',
+    '9. Não encha linguiça: nada de explicar a oferta duas vezes nem de repetir as condições.',
+    '',
+    ...regrasDeFormato(perfil),
     '',
     'MENSAGEM ORIGINAL:',
     `"""`,
@@ -91,7 +92,7 @@ export async function POST(req: NextRequest) {
   // montada em ferramenta. A faxina fecha a porta; variação que virou vazia
   // depois dela é descartada em vez de ir para a tela como linha em branco.
   variations = variations
-    .map(v => ({ text: humanizarTexto(v?.text), label: String(v?.label ?? '').trim() }))
+    .map(v => ({ text: humanizarTexto(v?.text, { manterMarcacao: perfil.negrito || perfil.italico, manterListas: perfil.listas }), label: String(v?.label ?? '').trim() }))
     .filter(v => v.text.length > 0);
 
   return Response.json(variations);
