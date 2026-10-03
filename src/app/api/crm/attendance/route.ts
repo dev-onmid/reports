@@ -2,6 +2,7 @@ import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { ensureCrmMessagesSchema, ensureDefaultFunnel } from '@/lib/crm-conversation-sync';
 import { classificarEtapa } from '@/lib/funil-etapas';
+import { carregarEvolucaoMensal, carregarTentativas } from '@/lib/crm-atendimento-evolucao';
 
 /**
  * Uma conversa só pode estar em UM estado — a soma tem de fechar com o total de
@@ -63,6 +64,13 @@ export async function GET(req: NextRequest) {
       AND ($3::date IS NULL OR l.data <= $3::date)
       AND COALESCE(l.time_interno, false) = false
     `;
+    // ⚠️ Retomada e "por atendente" medem o que a EQUIPE fez no período — o
+    // recorte é a data da MENSAGEM, não a de criação do lead. Pelo lead, "este
+    // mês" só olhava quem chegou nos últimos dias, e retomada exige 48h de
+    // silêncio: o painel ficava vazio por construção.
+    const leadsDoCliente = `l.client_id = $1 AND COALESCE(l.time_interno, false) = false`;
+    const naJanela = (col: string) => `($2::date IS NULL OR ${col} >= ($2::date)::timestamp AT TIME ZONE 'America/Sao_Paulo')
+      AND ($3::date IS NULL OR ${col} < ($3::date + 1)::timestamp AT TIME ZONE 'America/Sao_Paulo')`;
 
     type ResumoAtendimento = {
       total_leads: number;
@@ -274,7 +282,7 @@ export async function GET(req: NextRequest) {
     // ── retomada REAL: mensagem nossa após ≥48h de silêncio, e se deu resposta ─
     const { rows: [retomada] } = await pool.query<{ enviadas: number; responderam: number }>(
       `WITH target_leads AS (
-         SELECT l.id FROM public.crm_leads l WHERE ${leadWhere}
+         SELECT l.id FROM public.crm_leads l WHERE ${leadsDoCliente}
        ),
        msg AS (
          SELECT m.lead_id, m.direction, m.created_at,
@@ -286,6 +294,7 @@ export async function GET(req: NextRequest) {
          SELECT lead_id, created_at FROM msg
           WHERE direction = 'out' AND anterior IS NOT NULL
             AND created_at - anterior >= INTERVAL '${PARADO_HORAS} hours'
+            AND ${naJanela('created_at')}
        )
        SELECT COUNT(*)::int AS enviadas,
               COUNT(*) FILTER (WHERE EXISTS (
@@ -306,7 +315,7 @@ export async function GET(req: NextRequest) {
       autor_nome: string; enviadas: number; respostas: number; avg_response_seconds: number | null;
       ate_5min: number; mais_1h: number; leads_atendidos: number;
     }>(
-      `WITH target_leads AS (SELECT l.id FROM public.crm_leads l WHERE ${leadWhere}),
+      `WITH target_leads AS (SELECT l.id FROM public.crm_leads l WHERE ${leadsDoCliente}),
        msg AS (
          SELECT m.lead_id, m.direction, m.created_at, m.autor_nome
            FROM public.crm_messages m JOIN target_leads t ON t.id = m.lead_id
@@ -320,7 +329,7 @@ export async function GET(req: NextRequest) {
                 (SELECT o.autor_nome FROM msg o
                   WHERE o.lead_id = i.lead_id AND o.direction = 'out' AND o.created_at > i.created_at
                   ORDER BY o.created_at LIMIT 1) AS autor_nome
-           FROM msg i WHERE i.direction = 'in'
+           FROM msg i WHERE i.direction = 'in' AND ${naJanela('i.created_at')}
        )
        SELECT m.autor_nome,
               COUNT(*)::int AS enviadas,
@@ -333,7 +342,7 @@ export async function GET(req: NextRequest) {
               (SELECT COUNT(*)::int FROM pares p WHERE p.autor_nome = m.autor_nome
                 AND p.response_at IS NOT NULL AND p.response_at - p.inbound_at > INTERVAL '1 hour') AS mais_1h
          FROM msg m
-        WHERE m.direction = 'out' AND m.autor_nome IS NOT NULL
+        WHERE m.direction = 'out' AND m.autor_nome IS NOT NULL AND ${naJanela('m.created_at')}
         GROUP BY m.autor_nome
         ORDER BY enviadas DESC`,
       params,
@@ -356,7 +365,16 @@ export async function GET(req: NextRequest) {
       params,
     );
 
+    // Evolução fixa (6 meses) + tentativas do período. Falha aqui não derruba a
+    // aba: as seções somem e o resto continua.
+    const [mensal, tentativas] = await Promise.all([
+      carregarEvolucaoMensal(pool, clientId).catch(e => { console.error('[crm attendance] mensal', e); return []; }),
+      carregarTentativas(pool, clientId, from, to).catch(e => { console.error('[crm attendance] tentativas', e); return null; }),
+    ]);
+
     return Response.json({
+      mensal,
+      tentativas,
       atendentes,
       motivosPerda,
       perdidosSemMotivo: semMotivo?.total ?? 0,

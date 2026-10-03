@@ -34,9 +34,9 @@ import MotivoPerdaModal from './motivo-perda-modal';
 import { rotuloMotivo, type MotivoPerdaId } from '@/lib/motivo-perda';
 import { localDoLead, type RespostaFormulario } from '@/lib/lead-formulario';
 import type { Client } from '@/lib/mock-data';
-import type { AttendanceAudit } from '@/lib/crm-attendance-audit';
+import type { AttendanceAudit, ItemHistoricoAuditoria } from '@/lib/crm-attendance-audit';
+import type { MesAtendimento, TentativasContato } from '@/lib/crm-atendimento-evolucao';
 import { classificarEtapa, corDaEtapa, MODELO_PADRAO, OPCOES_EDITOR, opcaoDoValor, ROTULOS_ETAPA, valorOpcaoEditor, type EtapaFunil, type SituacaoStage } from '@/lib/funil-etapas';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 
 type CrmLead = {
   id: string; client_id: string; mes: string | null; data: string | null;
@@ -136,6 +136,10 @@ type AttendanceMetrics = {
   perdidosSemMotivo?: number;
   /** Mensagem nossa após ≥48h de silêncio, e quantas trouxeram resposta. */
   retomada?: { enviadas: number; responderam: number };
+  /** Últimos 6 meses, pelo mês da MENSAGEM (não do lead). */
+  mensal?: MesAtendimento[];
+  /** Quem tentamos alcançar no período e quantas tentativas (dias) fizemos. */
+  tentativas?: TentativasContato | null;
   sources: Array<{ canal: string | null; total: number }>;
   waiting: Array<{
     id: string;
@@ -1469,7 +1473,8 @@ function AttendanceView({
   const [auditLoading, setAuditLoading] = useState(true);
   const [auditGenerating, setAuditGenerating] = useState(false);
   const [auditError, setAuditError] = useState<string | null>(null);
-  const [showAuditModal, setShowAuditModal] = useState(false);
+  const [historico, setHistorico] = useState<ItemHistoricoAuditoria[]>([]);
+  const [leadNomes, setLeadNomes] = useState<Record<string, string>>({});
 
   useEffect(() => {
     const params = new URLSearchParams({ clientId });
@@ -1489,10 +1494,18 @@ function AttendanceView({
     setAuditLoading(true);
     fetch(`/api/crm/attendance/audit?${new URLSearchParams({ clientId })}`)
       .then(r => r.ok ? r.json() : { audit: null })
-      .then(json => setAudit(json.audit ?? null))
+      .then(json => {
+        setAudit(json.audit ?? null);
+        setHistorico(json.historico ?? []);
+        setLeadNomes(json.leadNomes ?? {});
+      })
       .catch(() => setAudit(null))
       .finally(() => setAuditLoading(false));
   }, [clientId]);
+
+  function irParaAuditoria() {
+    requestAnimationFrame(() => document.getElementById('auditoria-completa')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+  }
 
   async function generateAudit() {
     setAuditGenerating(true);
@@ -1510,7 +1523,9 @@ function AttendanceView({
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json.error ?? 'Erro ao gerar auditoria.');
       setAudit(json.audit);
-      setShowAuditModal(true);
+      setHistorico(json.historico ?? []);
+      setLeadNomes(json.leadNomes ?? {});
+      irParaAuditoria();
     } catch (err) {
       setAuditError(err instanceof Error ? err.message : 'Erro ao gerar auditoria.');
     } finally {
@@ -1625,7 +1640,9 @@ function AttendanceView({
                 <span className={cn('mb-2 rounded-lg px-2 py-1 text-xs font-bold', aiStatusTone)}>{aiStatus}</span>
               </div>
               <p className="mt-3 max-w-[210px] text-xs leading-relaxed text-zinc-300">
-                {audit ? `Última auditoria: ${new Date(audit.createdAt).toLocaleDateString('pt-BR')}` : 'Nenhuma auditoria gerada ainda para este período.'}
+                {audit
+                  ? `Última auditoria: ${new Date(audit.createdAt).toLocaleDateString('pt-BR')} · conversas de ${dataBR(audit.periodFrom)} a ${dataBR(audit.periodTo)}`
+                  : 'Nenhuma auditoria gerada ainda para este cliente.'}
               </p>
               <div className="relative z-10 mt-3 flex flex-wrap gap-2">
                 <button
@@ -1637,20 +1654,23 @@ function AttendanceView({
                 </button>
                 {audit && (
                   <button
-                    onClick={() => setShowAuditModal(true)}
+                    onClick={irParaAuditoria}
                     className="rounded-lg border border-white/15 bg-white/5 px-2.5 py-1.5 text-[11px] font-semibold text-zinc-200 transition-colors hover:bg-white/10"
                   >
-                    Ver relatório completo
+                    Ver auditoria completa ↓
                   </button>
                 )}
               </div>
               {auditError && <p className="relative z-10 mt-2 max-w-[220px] text-[11px] text-red-300">{auditError}</p>}
-              <svg className="absolute bottom-0 left-0 h-16 w-full opacity-80" viewBox="0 0 260 70" preserveAspectRatio="none">
-                <path d={`${sparkPath([32, 40, 36, 48, 42, 54, 47], 260, 70)} L 260 70 L 0 70 Z`} fill="rgba(139,92,246,0.28)" />
-                <path d={sparkPath([32, 40, 36, 48, 42, 54, 47], 260, 70)} fill="none" stroke="#8B5CF6" strokeWidth="2.4" />
-              </svg>
+              {/* ⚠️ Esta linha era um desenho fixo no código ([32, 40, 36…]). Agora é a
+                  nota de cada auditoria do cliente; com menos de duas, não há linha. */}
+              {historico.length >= 2 && (
+                <svg className="absolute bottom-0 left-0 h-16 w-full opacity-80" viewBox="0 0 260 70" preserveAspectRatio="none">
+                  <path d={`${sparkPath(historico.map(h => h.nota), 260, 70)} L 260 70 L 0 70 Z`} fill="rgba(139,92,246,0.28)" />
+                  <path d={sparkPath(historico.map(h => h.nota), 260, 70)} fill="none" stroke="#8B5CF6" strokeWidth="2.4" />
+                </svg>
+              )}
             </section>
-            <AttendanceAuditModal open={showAuditModal} onOpenChange={setShowAuditModal} audit={audit} />
 
             {[
               { label: 'Leads no período', value: totalLeads.toLocaleString('pt-BR'), sub: 'leads captados', badge: varLeads?.texto ?? null, badgeBom: varLeads?.bom, Icon: Users, tone: 'border-blue-500/20 bg-[#0D1519]', color: '#A78BFA', badgeTone: 'bg-blue-500/15 text-blue-300' },
@@ -1673,6 +1693,11 @@ function AttendanceView({
                 )}
               </section>
             ))}
+          </div>
+
+          <div className="grid min-w-0 gap-4 xl:grid-cols-[1.6fr_1fr]">
+            <EvolucaoMensal meses={data.mensal ?? []} />
+            <TentativasContatoCard t={data.tentativas ?? null} />
           </div>
 
           <div className="grid gap-4 xl:grid-cols-[1.5fr_0.78fr_0.98fr]">
@@ -1836,7 +1861,7 @@ function AttendanceView({
                 <>
                   <p className="mt-8 font-heading text-5xl leading-none text-zinc-500">—</p>
                   <p className="mt-2 max-w-[200px] text-sm text-zinc-400">
-                    nenhuma conversa foi retomada depois de 48h paradas neste período
+                    nenhuma mensagem foi enviada depois de 48h de silêncio neste período
                   </p>
                 </>
               ) : (
@@ -1933,6 +1958,14 @@ function AttendanceView({
               )}
             </section>
           </div>
+
+          <AttendanceAuditReport
+            audit={audit}
+            loading={auditLoading}
+            clientId={clientId}
+            leadNomes={leadNomes}
+            historico={historico}
+          />
         </div>
 
       </div>
@@ -1940,159 +1973,338 @@ function AttendanceView({
   );
 }
 
-function AuditSection({ title, children }: { title: string; children: React.ReactNode }) {
+/** 'YYYY-MM-DD' (ou ISO) → dd/mm/aaaa sem passar por fuso. */
+function dataBR(iso: string | null | undefined) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso ?? '');
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : '—';
+}
+
+const MESES_CURTOS = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
+function mesCurto(ym: string) {
+  const [y, m] = ym.split('-');
+  return `${MESES_CURTOS[Number(m) - 1] ?? m}/${y.slice(2)}`;
+}
+const pctDe = (parte: number, total: number) => (total > 0 ? Math.round((parte / total) * 100) : null);
+
+/**
+ * Comparação mês a mês do atendimento. ⚠️ O mês é o da MENSAGEM: é quando o
+ * atendimento acontece. Os cards do topo seguem o filtro da tela (que recorta
+ * pela criação do lead) — por isso os números não precisam bater com eles.
+ */
+function EvolucaoMensal({ meses }: { meses: MesAtendimento[] }) {
+  // Esconde os meses antes de existir histórico: zero ali é ausência de dado,
+  // não atendimento ruim.
+  const primeiro = meses.findIndex(m => m.turnos > 0 || m.tentados > 0);
+  const linhas = primeiro < 0 ? [] : meses.slice(primeiro);
+  const mesAtual = meses[meses.length - 1]?.mes;
+
+  type Col = {
+    k: string; titulo: string; dica: string; menorMelhor?: boolean;
+    valor: (m: MesAtendimento) => number | null; fmt: (v: number) => string;
+  };
+  const cols: Col[] = [
+    { k: 'conv', titulo: 'Conversas', dica: 'Pessoas que mandaram mensagem no mês', valor: m => m.conversas, fmt: v => v.toLocaleString('pt-BR') },
+    { k: 'med', titulo: 'Tempo de resposta', dica: 'Mediana do tempo entre o cliente falar e a nossa resposta (cada vez que ele fala, não só a primeira)', menorMelhor: true, valor: m => m.mediana_resposta_seg, fmt: v => formatDuration(v) },
+    { k: 'r5', titulo: 'Até 5 min', dica: '% das respostas dadas em até 5 minutos', valor: m => pctDe(m.ate_5min, m.respondidos), fmt: v => `${v}%` },
+    { k: 'r60', titulo: 'Mais de 1h', dica: '% das respostas que passaram de 1 hora', menorMelhor: true, valor: m => pctDe(m.mais_1h, m.respondidos), fmt: v => `${v}%` },
+    { k: 'sr', titulo: 'Sem resposta', dica: '% das vezes em que o cliente falou e ninguém respondeu', menorMelhor: true, valor: m => pctDe(m.sem_resposta, m.turnos), fmt: v => `${v}%` },
+    { k: 'ret', titulo: 'Retomadas', dica: 'Mensagens nossas depois de 48h de silêncio (entre parênteses, quantas tiveram resposta)', valor: m => m.retomadas, fmt: v => v.toLocaleString('pt-BR') },
+    { k: 'si', titulo: 'Sem interação', dica: '% de quem tentamos contato no mês e nunca respondeu', menorMelhor: true, valor: m => pctDe(m.sem_interacao, m.tentados), fmt: v => `${v}%` },
+  ];
+
   return (
-    <div className="space-y-2">
-      <h4 className="text-sm font-bold text-zinc-100">{title}</h4>
-      {children}
-    </div>
+    <section className="min-w-0 rounded-2xl border border-white/[0.08] bg-[#0D1519] p-5 shadow-[0_24px_70px_rgba(0,0,0,0.26)]">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <h3 className="text-base font-bold">Evolução mês a mês</h3>
+          <p className="mt-1 text-xs text-zinc-500">Pelo mês da mensagem · setas comparam com o mês anterior · não segue o filtro de período</p>
+        </div>
+      </div>
+      {linhas.length === 0 ? (
+        <p className="mt-6 text-sm text-zinc-500">Ainda não há conversas registradas no sistema para este cliente.</p>
+      ) : (
+        <>
+          <div className="mt-4 overflow-x-auto">
+            <table className="w-full min-w-[640px] text-sm">
+              <thead>
+                <tr className="text-left text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+                  <th className="pb-2 pr-3">Mês</th>
+                  {cols.map(c => <th key={c.k} className="pb-2 pr-3" title={c.dica}>{c.titulo}</th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {linhas.map((m, i) => {
+                  const ant = i > 0 ? linhas[i - 1] : null;
+                  return (
+                    <tr key={m.mes} className="border-t border-white/[0.06]">
+                      <td className="py-2.5 pr-3 font-semibold text-zinc-200">
+                        {mesCurto(m.mes)}
+                        {m.mes === mesAtual && <span className="ml-1.5 text-[10px] font-normal text-zinc-500">parcial</span>}
+                      </td>
+                      {cols.map(c => {
+                        const v = c.valor(m);
+                        const va = ant ? c.valor(ant) : null;
+                        let seta: { s: string; bom: boolean } | null = null;
+                        if (v != null && va != null && v !== va && c.k !== 'conv' && c.k !== 'ret') {
+                          const subiu = v > va;
+                          seta = { s: subiu ? '▲' : '▼', bom: c.menorMelhor ? !subiu : subiu };
+                        }
+                        return (
+                          <td key={c.k} className="py-2.5 pr-3 text-zinc-300">
+                            {v == null ? <span className="text-zinc-600">—</span> : c.fmt(v)}
+                            {c.k === 'ret' && m.retomadas > 0 && (
+                              <span className="ml-1 text-[11px] text-zinc-500">({m.retomadas_responderam})</span>
+                            )}
+                            {seta && <span className={cn('ml-1 text-[10px]', seta.bom ? 'text-emerald-400' : 'text-red-400')}>{seta.s}</span>}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          {linhas.length < 2 && (
+            <p className="mt-3 text-xs text-zinc-500">A comparação aparece quando houver o segundo mês com conversas.</p>
+          )}
+        </>
+      )}
+    </section>
   );
 }
 
-function AttendanceAuditModal({
-  open, onOpenChange, audit,
+/**
+ * Quem a loja tentou alcançar e não respondeu. ⚠️ Tentativa = um DIA com
+ * mensagem nossa: cinco mensagens na mesma manhã são uma tentativa só.
+ */
+function TentativasContatoCard({ t }: { t: TentativasContato | null }) {
+  const n1 = (v: number | null) => (v == null ? '—' : v.toLocaleString('pt-BR', { maximumFractionDigits: 1 }));
+  return (
+    <section className="min-w-0 rounded-2xl border border-white/[0.08] bg-[#0D1519] p-5 shadow-[0_24px_70px_rgba(0,0,0,0.26)]">
+      <h3 className="text-base font-bold">Tentativas de contato</h3>
+      <p className="mt-1 text-xs text-zinc-500">Pessoas que receberam a 1ª mensagem nossa no período selecionado</p>
+      {!t || t.tentados === 0 ? (
+        <p className="mt-6 text-sm text-zinc-500">Nenhuma tentativa de contato registrada neste período.</p>
+      ) : (
+        <>
+          <div className="mt-5 grid grid-cols-2 gap-4">
+            <div>
+              <p className="font-heading text-4xl leading-none text-red-300">{t.sem_interacao.toLocaleString('pt-BR')}</p>
+              <p className="mt-1.5 text-xs text-zinc-400">sem nenhuma interação, de {t.tentados.toLocaleString('pt-BR')} que tentamos ({pctDe(t.sem_interacao, t.tentados)}%)</p>
+            </div>
+            <div>
+              <p className="font-heading text-4xl leading-none text-zinc-100">{n1(t.media_tentativas_sem_interacao)}</p>
+              <p className="mt-1.5 text-xs text-zinc-400">tentativas em média antes de parar ({n1(t.media_mensagens_sem_interacao)} mensagens)</p>
+            </div>
+          </div>
+
+          <div className="mt-5 space-y-1.5 text-xs text-zinc-400">
+            <p><span className="font-semibold text-zinc-200">{t.nunca_escreveram.toLocaleString('pt-BR')}</span> nunca escreveram nada (contato ativo nosso)</p>
+            <p><span className="font-semibold text-zinc-200">{t.sumiram_apos_primeira.toLocaleString('pt-BR')}</span> mandaram a 1ª mensagem e sumiram depois da nossa resposta</p>
+            <p><span className="font-semibold text-emerald-300">{t.responderam.toLocaleString('pt-BR')}</span> responderam, depois de {n1(t.media_tentativas_ate_responder)} tentativa(s) em média</p>
+          </div>
+
+          {t.sem_interacao > 0 && (
+            <div className="mt-5">
+              <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-zinc-500">Quem não respondeu, por nº de tentativas</p>
+              <div className="grid grid-cols-4 gap-2">
+                {([['1', t.dist.t1], ['2', t.dist.t2], ['3', t.dist.t3], ['4+', t.dist.t4mais]] as const).map(([k, v]) => (
+                  <div key={k} className="rounded-lg border border-white/[0.06] bg-white/[0.02] p-2 text-center">
+                    <p className="text-[10px] text-zinc-500">{k} tentativa{k === '1' ? '' : 's'}</p>
+                    <p className="font-heading text-xl text-zinc-100">{v.toLocaleString('pt-BR')}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          <p className="mt-4 text-[11px] text-zinc-500">Tentativa = um dia em que mandamos mensagem. Várias mensagens no mesmo dia contam como uma.</p>
+        </>
+      )}
+    </section>
+  );
+}
+
+const PESOS_CRITERIO = [
+  ['velocidade_sla', 'Velocidade e SLA', 25],
+  ['qualidade_conversa', 'Qualidade da conversa', 30],
+  ['conducao_comercial', 'Condução comercial', 30],
+  ['followup_recuperacao', 'Follow-up e recuperação', 10],
+  ['organizacao_crm', 'Organização no CRM', 5],
+] as const;
+
+/** O relatório inteiro da auditoria, aberto na aba (antes ficava num modal). */
+function AttendanceAuditReport({
+  audit, loading, clientId, leadNomes, historico,
 }: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
   audit: { result: AttendanceAudit; periodFrom: string; periodTo: string; createdAt: string } | null;
+  loading: boolean;
+  clientId: string;
+  leadNomes: Record<string, string>;
+  historico: ItemHistoricoAuditoria[];
 }) {
-  if (!audit) return null;
+  const card = 'rounded-2xl border border-white/[0.08] bg-[#0D1519] p-5 shadow-[0_24px_70px_rgba(0,0,0,0.26)]';
+  if (loading) return null;
+  if (!audit) {
+    return (
+      <section id="auditoria-completa" className={card}>
+        <h3 className="flex items-center gap-2 text-base font-bold"><Sparkles className="h-4 w-4 text-purple-300" /> Auditoria de atendimento</h3>
+        <p className="mt-4 text-sm text-zinc-500">Nenhuma auditoria gerada ainda para este cliente.</p>
+      </section>
+    );
+  }
   const r = audit.result;
   const gravidadeTone: Record<string, string> = {
     alta: 'bg-red-500/15 text-red-300 border-red-400/30',
     média: 'bg-amber-500/15 text-amber-300 border-amber-400/30',
     baixa: 'bg-zinc-500/15 text-zinc-300 border-zinc-400/30',
   };
+  const nomeLead = (id: string) => leadNomes[id] ?? 'Lead';
+  const linkLead = (id: string) => `/crm?${new URLSearchParams({ clientId, lead: id })}`;
+  const anterior = historico.length >= 2 ? historico[historico.length - 2] : null;
+  const delta = anterior ? r.nota_geral - anterior.nota : null;
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto bg-[#0A0F12] text-zinc-100 border-white/10">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2"><Sparkles className="h-4 w-4 text-purple-300" /> Auditoria de Atendimento (IA)</DialogTitle>
-          <DialogDescription className="text-zinc-400">
-            Período: {new Date(audit.periodFrom + 'T12:00:00').toLocaleDateString('pt-BR')} a {new Date(audit.periodTo + 'T12:00:00').toLocaleDateString('pt-BR')} · Gerado em {new Date(audit.createdAt).toLocaleString('pt-BR')}
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="space-y-6 pt-2">
-          <div className="flex items-center gap-4 rounded-xl border border-purple-500/30 bg-purple-500/10 p-4">
-            <span className="font-heading text-4xl text-purple-300">{r.nota_geral}/100</span>
-            <span className="rounded-lg bg-purple-500/20 px-2 py-1 text-xs font-bold text-purple-100">{r.classificacao}</span>
-            <p className="flex-1 text-sm text-zinc-300">{r.resumo_semana}</p>
+    <section id="auditoria-completa" className="min-w-0 scroll-mt-4 space-y-4">
+      <div className={cn(card, 'border-purple-500/30 bg-[linear-gradient(135deg,rgba(139,92,246,0.14),rgba(13,21,25,0.96))]')}>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h3 className="flex items-center gap-2 text-base font-bold"><Sparkles className="h-4 w-4 text-purple-300" /> Auditoria de atendimento</h3>
+            <p className="mt-1 text-xs text-zinc-400">
+              Conversas de {dataBR(audit.periodFrom)} a {dataBR(audit.periodTo)} · gerada em {new Date(audit.createdAt).toLocaleString('pt-BR')}
+            </p>
           </div>
-
-          <AuditSection title="Notas por critério">
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
-              {[
-                ['Velocidade/SLA', r.notas_criterios.velocidade_sla, 25],
-                ['Qualidade conversa', r.notas_criterios.qualidade_conversa, 30],
-                ['Condução comercial', r.notas_criterios.conducao_comercial, 30],
-                ['Follow-up', r.notas_criterios.followup_recuperacao, 10],
-                ['CRM organizado', r.notas_criterios.organizacao_crm, 5],
-              ].map(([label, value, max]) => (
-                <div key={label as string} className="rounded-lg border border-white/10 bg-white/5 p-2.5 text-center">
-                  <p className="text-[10px] text-zinc-400">{label}</p>
-                  <p className="font-heading text-lg text-zinc-100">{value}/{max}</p>
-                </div>
-              ))}
-            </div>
-          </AuditSection>
-
-          {r.principais_problemas?.length > 0 && (
-            <AuditSection title="Principais problemas">
-              <ul className="list-disc space-y-1 pl-4 text-sm text-zinc-300">
-                {r.principais_problemas.map((p, i) => <li key={i}>{p}</li>)}
-              </ul>
-            </AuditSection>
-          )}
-
-          {r.oportunidades_perdidas?.length > 0 && (
-            <AuditSection title="Oportunidades perdidas">
-              <div className="space-y-2">
-                {r.oportunidades_perdidas.map((o, i) => (
-                  <div key={i} className="rounded-lg border border-white/10 bg-white/5 p-3 text-sm">
-                    <div className="mb-1 flex items-center justify-between gap-2">
-                      <span className="font-mono text-[11px] text-zinc-500">{o.lead_id} · {o.canal}</span>
-                      <span className={cn('rounded border px-1.5 py-0.5 text-[10px] font-bold', gravidadeTone[o.gravidade] ?? gravidadeTone.baixa)}>{o.gravidade}</span>
-                    </div>
-                    <p className="text-zinc-300"><strong className="text-zinc-100">Queria:</strong> {o.o_que_queria}</p>
-                    <p className="text-zinc-300"><strong className="text-zinc-100">Falha:</strong> {o.onde_falhou}</p>
-                    <p className="text-zinc-300"><strong className="text-zinc-100">Ação:</strong> {o.acao_deveria}</p>
-                  </div>
-                ))}
-              </div>
-            </AuditSection>
-          )}
-
-          {r.bons_exemplos?.length > 0 && (
-            <AuditSection title="Bons exemplos">
-              <div className="space-y-2">
-                {r.bons_exemplos.map((b, i) => (
-                  <div key={i} className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-3 text-sm">
-                    <p className="font-mono text-[11px] text-zinc-500">{b.lead_id}</p>
-                    <p className="text-zinc-300"><strong className="text-zinc-100">Bem feito:</strong> {b.o_que_foi_bem}</p>
-                    <p className="text-zinc-300"><strong className="text-zinc-100">Por quê:</strong> {b.motivo_referencia}</p>
-                  </div>
-                ))}
-              </div>
-            </AuditSection>
-          )}
-
-          {r.analise_fontes?.length > 0 && (
-            <AuditSection title="Análise por fonte de captação">
-              <div className="space-y-2">
-                {r.analise_fontes.map((f, i) => (
-                  <div key={i} className="rounded-lg border border-white/10 bg-white/5 p-3 text-sm">
-                    <p className="font-semibold text-zinc-100">{f.fonte} — {f.quantidade_leads} leads</p>
-                    <p className="text-zinc-300">Qualidade: {f.qualidade_atendimento} · Taxa de avanço: {f.taxa_avanco}</p>
-                    <p className="text-zinc-400">Gargalos: {f.principais_gargalos}</p>
-                  </div>
-                ))}
-              </div>
-            </AuditSection>
-          )}
-
-          <AuditSection title="Análise por atendente">
-            {r.analise_atendentes?.length > 0 ? (
-              <div className="space-y-2">
-                {r.analise_atendentes.map((a, i) => (
-                  <div key={i} className="rounded-lg border border-white/10 bg-white/5 p-3 text-sm text-zinc-300">
-                    <p className="font-semibold text-zinc-100">{a.atendente}</p>
-                    <p>Pontos de melhoria: {a.pontos_melhoria}</p>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-sm text-zinc-400">Não informado — este CRM ainda não rastreia qual atendente enviou cada mensagem.</p>
+          <div className="flex items-center gap-3">
+            <span className="font-heading text-5xl leading-none text-purple-300">{r.nota_geral}<span className="text-2xl text-purple-300/60">/100</span></span>
+            <span className="rounded-lg bg-purple-500/20 px-2 py-1 text-xs font-bold text-purple-100">{r.classificacao}</span>
+            {delta !== null && delta !== 0 && (
+              <span className={cn('text-xs font-semibold', delta > 0 ? 'text-emerald-300' : 'text-red-300')}>
+                {delta > 0 ? '+' : ''}{delta} vs. auditoria anterior
+              </span>
             )}
-          </AuditSection>
-
-          <AuditSection title="Plano de ação para a próxima semana">
-            <div className="grid gap-3 sm:grid-cols-2">
-              {[
-                ['Ações urgentes', r.plano_acao.urgentes],
-                ['Melhorias de processo', r.plano_acao.melhorias_processo],
-                ['Treinamento do time', r.plano_acao.treinamento_time],
-                ['Ajustes de script', r.plano_acao.ajustes_script],
-                ['Ajustes no CRM/automações', r.plano_acao.ajustes_crm_automacoes],
-              ].map(([label, items]) => (
-                <div key={label as string} className="rounded-lg border border-white/10 bg-white/5 p-3">
-                  <p className="mb-1.5 text-xs font-bold text-zinc-200">{label}</p>
-                  <ul className="list-disc space-y-1 pl-4 text-xs text-zinc-300">
-                    {(items as string[]).map((item, i) => <li key={i}>{item}</li>)}
-                  </ul>
-                </div>
-              ))}
-            </div>
-          </AuditSection>
-
-          <div className="rounded-xl border border-purple-500/20 bg-purple-500/5 p-4">
-            <p className="mb-1 text-xs font-bold uppercase tracking-wide text-purple-300">Recomendação final</p>
-            <p className="text-sm text-zinc-200">{r.recomendacao_final}</p>
           </div>
         </div>
-      </DialogContent>
-    </Dialog>
+        <p className="mt-4 text-sm leading-relaxed text-zinc-300">{r.resumo_semana}</p>
+
+        <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+          {PESOS_CRITERIO.map(([k, label, max]) => {
+            const bruto = Number(r.notas_criterios?.[k] ?? 0);
+            // Auditoria antiga gravada em 0–100 por critério: converte para os pontos da régua.
+            const v = bruto > max ? Math.round((bruto * max) / 100) : bruto;
+            const pct = Math.round((v / max) * 100);
+            return (
+              <div key={k} className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-3">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">{label}</p>
+                <p className="mt-1 font-heading text-2xl text-zinc-100">{v}<span className="text-sm text-zinc-500">/{max}</span></p>
+                <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/[0.07]">
+                  <div className={cn('h-full rounded-full', pct >= 70 ? 'bg-emerald-400' : pct >= 55 ? 'bg-amber-400' : 'bg-red-400')} style={{ width: `${pct}%` }} />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-2">
+        <div className={card}>
+          <h4 className="text-sm font-bold text-zinc-100">Principais problemas</h4>
+          <ul className="mt-3 list-disc space-y-2 pl-4 text-sm text-zinc-300">
+            {(r.principais_problemas ?? []).map((p, i) => <li key={i}>{p}</li>)}
+          </ul>
+        </div>
+        <div className={card}>
+          <h4 className="text-sm font-bold text-zinc-100">Plano de ação</h4>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            {([
+              ['Ações urgentes', r.plano_acao?.urgentes],
+              ['Melhorias de processo', r.plano_acao?.melhorias_processo],
+              ['Treinamento do time', r.plano_acao?.treinamento_time],
+              ['Ajustes de script', r.plano_acao?.ajustes_script],
+              ['Ajustes no CRM/automações', r.plano_acao?.ajustes_crm_automacoes],
+            ] as const).filter(([, items]) => (items?.length ?? 0) > 0).map(([label, items]) => (
+              <div key={label} className={cn('rounded-lg border p-3', label === 'Ações urgentes' ? 'border-red-400/25 bg-red-500/5' : 'border-white/[0.08] bg-white/[0.03]')}>
+                <p className="mb-1.5 text-xs font-bold text-zinc-200">{label}</p>
+                <ul className="list-disc space-y-1 pl-4 text-xs text-zinc-300">
+                  {(items ?? []).map((item, i) => <li key={i}>{item}</li>)}
+                </ul>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-2">
+        <div className={card}>
+          <h4 className="text-sm font-bold text-zinc-100">Oportunidades perdidas</h4>
+          <div className="mt-3 space-y-2">
+            {(r.oportunidades_perdidas ?? []).map((o, i) => (
+              <div key={i} className="rounded-lg border border-white/[0.08] bg-white/[0.03] p-3 text-sm">
+                <div className="mb-1 flex items-center justify-between gap-2">
+                  <a href={linkLead(o.lead_id)} className="truncate text-xs font-semibold text-zinc-100 hover:text-primary" title="Abrir conversa no CRM">
+                    {nomeLead(o.lead_id)} <span className="font-normal text-zinc-500">· {o.canal}</span>
+                  </a>
+                  <span className={cn('shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-bold', gravidadeTone[o.gravidade] ?? gravidadeTone.baixa)}>{o.gravidade}</span>
+                </div>
+                <p className="text-zinc-300"><strong className="text-zinc-100">Queria:</strong> {o.o_que_queria}</p>
+                <p className="text-zinc-300"><strong className="text-zinc-100">Falha:</strong> {o.onde_falhou}</p>
+                <p className="text-zinc-300"><strong className="text-zinc-100">Ação:</strong> {o.acao_deveria}</p>
+              </div>
+            ))}
+            {(r.oportunidades_perdidas ?? []).length === 0 && <p className="text-sm text-zinc-500">Nenhuma registrada.</p>}
+          </div>
+        </div>
+        <div className={card}>
+          <h4 className="text-sm font-bold text-zinc-100">Bons exemplos</h4>
+          <div className="mt-3 space-y-2">
+            {(r.bons_exemplos ?? []).map((b, i) => (
+              <div key={i} className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-3 text-sm">
+                <a href={linkLead(b.lead_id)} className="text-xs font-semibold text-zinc-100 hover:text-primary" title="Abrir conversa no CRM">{nomeLead(b.lead_id)}</a>
+                <p className="mt-1 text-zinc-300"><strong className="text-zinc-100">Bem feito:</strong> {b.o_que_foi_bem}</p>
+                <p className="text-zinc-300"><strong className="text-zinc-100">Por quê:</strong> {b.motivo_referencia}</p>
+              </div>
+            ))}
+            {(r.bons_exemplos ?? []).length === 0 && <p className="text-sm text-zinc-500">Nenhum registrado.</p>}
+          </div>
+        </div>
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-2">
+        <div className={card}>
+          <h4 className="text-sm font-bold text-zinc-100">Por fonte de captação</h4>
+          <div className="mt-3 space-y-2">
+            {(r.analise_fontes ?? []).map((f, i) => (
+              <div key={i} className="rounded-lg border border-white/[0.08] bg-white/[0.03] p-3 text-sm">
+                <p className="font-semibold text-zinc-100">{f.fonte} <span className="font-normal text-zinc-500">· {f.quantidade_leads} leads · {f.qualidade_atendimento}</span></p>
+                <p className="text-zinc-400">{f.taxa_avanco}</p>
+                <p className="text-zinc-400">Gargalo: {f.principais_gargalos}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className={card}>
+          <h4 className="text-sm font-bold text-zinc-100">Por atendente</h4>
+          {(r.analise_atendentes ?? []).length > 0 ? (
+            <div className="mt-3 space-y-2">
+              {r.analise_atendentes.map((a, i) => (
+                <div key={i} className="rounded-lg border border-white/[0.08] bg-white/[0.03] p-3 text-sm text-zinc-300">
+                  <p className="font-semibold text-zinc-100">{a.atendente}</p>
+                  {a.pontos_fortes && <p>Pontos fortes: {a.pontos_fortes}</p>}
+                  {a.pontos_melhoria && <p>Pontos de melhoria: {a.pontos_melhoria}</p>}
+                  {a.tempo_medio_resposta && <p className="text-zinc-400">Tempo: {a.tempo_medio_resposta}</p>}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="mt-3 text-sm text-zinc-500">Não informado: as mensagens antigas não guardam quem respondeu.</p>
+          )}
+        </div>
+      </div>
+
+      <div className="rounded-2xl border border-purple-500/20 bg-purple-500/5 p-5">
+        <p className="mb-1 text-[10px] font-bold uppercase tracking-widest text-purple-300">Recomendação final</p>
+        <p className="text-sm text-zinc-200">{r.recomendacao_final}</p>
+      </div>
+    </section>
   );
 }
 

@@ -1,6 +1,6 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
-import { runAttendanceAudit, fetchLatestAudit } from '@/lib/crm-attendance-audit';
+import { runAttendanceAudit, fetchLatestAudit, fetchAuditHistory, fetchAuditLeadNames } from '@/lib/crm-attendance-audit';
 
 function toDateParam(value: string | null) {
   return value && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : null;
@@ -25,7 +25,11 @@ export async function GET(req: NextRequest) {
   const pool = makeServerPool();
   try {
     const latest = await fetchLatestAudit(pool, clientId);
-    return Response.json({ audit: latest });
+    const [historico, leadNomes] = await Promise.all([
+      fetchAuditHistory(pool, clientId),
+      latest ? fetchAuditLeadNames(pool, clientId, latest.result) : Promise.resolve({}),
+    ]);
+    return Response.json({ audit: latest, historico, leadNomes });
   } catch (err) {
     console.error('[crm/attendance/audit GET]', err);
     return Response.json({ error: 'Erro ao buscar auditoria.' }, { status: 500 });
@@ -49,7 +53,11 @@ export async function POST(req: NextRequest) {
   const pool = makeServerPool();
   try {
     const result = await runAttendanceAudit(pool, clientId, from, to);
-    return Response.json({ audit: { result, periodFrom: from, periodTo: to, createdAt: new Date().toISOString() } });
+    const [historico, leadNomes] = await Promise.all([
+      fetchAuditHistory(pool, clientId),
+      fetchAuditLeadNames(pool, clientId, result),
+    ]);
+    return Response.json({ audit: { result, periodFrom: from, periodTo: to, createdAt: new Date().toISOString() }, historico, leadNomes });
   } catch (err) {
     console.error('[crm/attendance/audit POST]', err);
     const message = err instanceof Error ? err.message : 'Erro ao gerar auditoria.';
