@@ -22,7 +22,8 @@ import { SeletorCliente } from '@/components/disparos/seletor-cliente';
 import { ConfirmarClienteModal } from '@/components/disparos/confirmar-cliente-modal';
 import type { DestinoCliente, InstanciaOrfa } from '@/lib/disparos-destinos';
 import { lerImagens, gravarImagens, combinacoesRodizio } from '@/lib/disparos-rodizio';
-import { faixaDaTaxa, type RespostasDaCampanha } from '@/lib/disparos-respostas';
+import { faixaDaTaxa } from '@/lib/disparos-respostas';
+import { ROTULO_CLASSE, type ResumoDisparo, type ContatoResultado, type ClasseResposta } from '@/lib/disparos-resultado';
 import { useAbaPersistida } from '@/lib/aba-persistida';
 import { lerArquivoContatos } from '@/lib/contatos-arquivo';
 import { parsePhoneList, deduplicarContatos, formatPhone } from '@/lib/phone-formatter';
@@ -297,6 +298,192 @@ type TickResult = {
   total?: number; sent?: number; failed?: number; lastPhone?: string; lastError?: string | null;
 };
 
+// ── Respostas e resultado da campanha ───────────────────────────────────────
+// Quem respondeu, COMO (interesse, conversa, parar, robô) e o que virou pedido.
+const COR_CLASSE: Record<ClasseResposta, string> = {
+  interesse: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400',
+  humana: 'border-blue-500/30 bg-blue-500/10 text-blue-400',
+  parar: 'border-red-500/30 bg-red-500/10 text-red-400',
+  automatica: 'border-border bg-muted/30 text-muted-foreground',
+  sem_resposta: 'border-border bg-transparent text-muted-foreground/60',
+};
+const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+function tempoAte(de: string, ate: string): string {
+  const min = Math.max(0, Math.round((Date.parse(ate) - Date.parse(de)) / 60_000));
+  if (min < 1) return 'na hora';
+  if (min < 60) return `em ${min} min`;
+  const h = Math.round(min / 60);
+  return h < 48 ? `em ${h} h` : `em ${Math.round(h / 24)} dias`;
+}
+function fmtFoneBR(p: string): string {
+  const d = p.replace(/\D/g, '').replace(/^55(?=\d{10,11}$)/, '');
+  if (d.length === 11) return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`;
+  if (d.length === 10) return `(${d.slice(0, 2)}) ${d.slice(2, 6)}-${d.slice(6)}`;
+  return p;
+}
+type FiltroResp = 'responderam' | 'compraram' | ClasseResposta | 'todos';
+type ResultadoApi = { ok?: boolean; error?: string; resumo: ResumoDisparo | null; contatos: ContatoResultado[]; onmidClientId: string | null; janelaDias: number };
+
+function RespostasModal({ campaignId, titulo, onClose }: { campaignId: string; titulo: string; onClose: () => void }) {
+  const [res, setRes] = useState<{ id: string; dados?: ResultadoApi; erro?: string } | null>(null);
+  const [filtro, setFiltro] = useState<FiltroResp>('responderam');
+  useEffect(() => {
+    let vivo = true;
+    fetch(`/api/disparos/campaigns/${campaignId}/resultado`, { headers: callerHeaders() })
+      .then(r => r.json() as Promise<ResultadoApi>)
+      .then(d => { if (vivo) setRes(d.ok ? { id: campaignId, dados: d } : { id: campaignId, erro: d.error ?? 'Falha ao carregar' }); })
+      .catch(() => { if (vivo) setRes({ id: campaignId, erro: 'Falha de rede' }); });
+    return () => { vivo = false; };
+  }, [campaignId]);
+  const atual = res?.id === campaignId ? res : null;
+  const dados = atual?.dados ?? null;
+  const r = dados?.resumo ?? null;
+  const contatos = dados?.contatos ?? [];
+  const conta = (f: FiltroResp) => contatos.filter(c => passa(c, f)).length;
+  function passa(c: ContatoResultado, f: FiltroResp): boolean {
+    if (f === 'todos') return true;
+    if (f === 'responderam') return c.classe === 'interesse' || c.classe === 'humana' || c.classe === 'parar' || c.classe === 'automatica';
+    if (f === 'compraram') return !!(c.compra || c.vendaCrm);
+    return c.classe === f;
+  }
+  const visiveis = contatos.filter(c => passa(c, filtro)).slice(0, 400);
+  const kpis = r ? [
+    { rotulo: 'Enviados', valor: r.enviados.toLocaleString('pt-BR') },
+    { rotulo: 'Responderam', valor: `${r.responderam}${r.taxa !== null ? ` (${r.taxa.toFixed(1).replace('.', ',')}%)` : ''}`, dica: 'Pessoas. Resposta só de robô de autoatendimento não conta.' },
+    { rotulo: 'Interesse / pedido', valor: String(r.interesse) },
+    ...(r.fonteVenda === 'delivery' ? [
+      { rotulo: 'Compraram', valor: `${r.compradores} (${r.pedidos} pedido${r.pedidos !== 1 ? 's' : ''})` },
+      { rotulo: 'Receita gerada', valor: brl(r.receita), destaque: true },
+      { rotulo: 'Ticket médio', valor: r.pedidos > 0 ? brl(r.receita / r.pedidos) : '—' },
+    ] : r.fonteVenda === 'crm' ? [
+      { rotulo: 'Vendas no CRM', valor: String(r.vendasCrm) },
+      { rotulo: 'Receita gerada', valor: brl(r.receitaCrm), destaque: true },
+    ] : [
+      { rotulo: 'Receita gerada', valor: '—', dica: 'Este cliente não tem Anota AI/Cardápio Web nem venda marcada no CRM para cruzar.' },
+    ]),
+  ] : [];
+  const filtros: { k: FiltroResp; rotulo: string }[] = [
+    { k: 'responderam', rotulo: 'Responderam' },
+    { k: 'interesse', rotulo: ROTULO_CLASSE.interesse },
+    { k: 'humana', rotulo: ROTULO_CLASSE.humana },
+    { k: 'parar', rotulo: ROTULO_CLASSE.parar },
+    { k: 'automatica', rotulo: ROTULO_CLASSE.automatica },
+    { k: 'compraram', rotulo: 'Compraram' },
+    { k: 'sem_resposta', rotulo: ROTULO_CLASSE.sem_resposta },
+  ];
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm" onClick={onClose}>
+      <div className="w-full max-w-5xl max-h-[88vh] flex flex-col overflow-hidden rounded-[var(--radius)] border border-border bg-card shadow-2xl" onClick={e => e.stopPropagation()}>
+        <div className="relative flex items-start justify-between gap-3 border-b border-border px-5 py-4">
+          <div className="absolute inset-x-0 top-0 h-[3px] bg-primary" />
+          <div className="min-w-0">
+            <h3 className="font-heading text-2xl uppercase leading-none tracking-wide">Respostas e resultado</h3>
+            <p className="mt-1 truncate text-[11px] text-muted-foreground">{titulo}</p>
+          </div>
+          <button type="button" onClick={onClose} className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted/40 hover:text-foreground"><X className="h-4 w-4" /></button>
+        </div>
+        <div className="overflow-y-auto px-5 py-4 space-y-4">
+          {atual?.erro && <p className="py-8 text-center text-sm text-red-400">{atual.erro}</p>}
+          {!atual && <p className="py-8 text-center text-sm text-muted-foreground">Cruzando envios, conversas e pedidos…</p>}
+          {r && !r.mensuravel && (
+            <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">Esta instância não está vinculada a um cliente no CRM, então as respostas não chegam até aqui.</p>
+          )}
+          {r && r.mensuravel && (
+            <>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+                {kpis.map(k => (
+                  <div key={k.rotulo} title={'dica' in k ? k.dica : undefined} className={cn('rounded-lg border px-3 py-2', 'destaque' in k && k.destaque ? 'border-primary/40 bg-primary/10' : 'border-border bg-muted/20')}>
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{k.rotulo}</p>
+                    <p className={cn('mt-0.5 font-heading text-xl leading-tight', 'destaque' in k && k.destaque ? 'text-primary' : 'text-foreground')}>{k.valor}</p>
+                  </div>
+                ))}
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                {r.fonteVenda === 'delivery'
+                  ? `Compra = pedido no Anota AI/Cardápio Web do mesmo telefone até ${dados?.janelaDias ?? 7} dias depois do disparo. Cada pedido conta uma vez só, para o disparo mais recente entre todas as campanhas do cliente.`
+                  : r.fonteVenda === 'crm'
+                    ? 'Venda = lead do mesmo telefone marcado como fechado no CRM até 30 dias depois do disparo.'
+                    : 'Sem fonte de vendas para este cliente: aparecem só as respostas.'}
+                {r.automaticas > 0 && ` ${r.automaticas} contato${r.automaticas !== 1 ? 's' : ''} só teve resposta de robô (autoatendimento) e fica fora da taxa.`}
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {filtros.map(f => (
+                  <button key={f.k} type="button" onClick={() => setFiltro(f.k)}
+                    className={cn('rounded-lg border px-2.5 py-1 text-[11px] font-semibold transition-colors',
+                      filtro === f.k ? 'border-primary/50 bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:text-foreground')}>
+                    {f.rotulo} <span className="opacity-60">{conta(f.k)}</span>
+                  </button>
+                ))}
+              </div>
+              {visiveis.length === 0 ? (
+                <p className="py-6 text-center text-sm text-muted-foreground">Ninguém nesta categoria.</p>
+              ) : (
+                <div className="overflow-x-auto rounded-lg border border-border">
+                  <table className="w-full text-xs">
+                    <thead className="bg-muted/20 text-left text-[10px] uppercase tracking-wider text-muted-foreground">
+                      <tr>
+                        <th className="px-3 py-2 font-semibold">Contato</th>
+                        <th className="px-3 py-2 font-semibold">Resposta</th>
+                        <th className="px-3 py-2 font-semibold">Tipo</th>
+                        <th className="px-3 py-2 font-semibold">Compra</th>
+                        <th className="px-3 py-2" />
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border">
+                      {visiveis.map(c => (
+                        <tr key={c.envioId} className="align-top">
+                          <td className="px-3 py-2 whitespace-nowrap">
+                            <p className="font-semibold">{c.nome || '—'}</p>
+                            <p className="font-mono text-[11px] text-muted-foreground">{fmtFoneBR(c.telefone)}</p>
+                            <p className="text-[10px] text-muted-foreground/70">enviado {fmtQuandoLog(c.enviadoEm)}</p>
+                          </td>
+                          <td className="px-3 py-2 min-w-[260px]">
+                            {c.resposta ? (
+                              <>
+                                <p className="whitespace-pre-line break-words text-foreground/90 line-clamp-3" title={c.resposta.texto}>{c.resposta.texto}</p>
+                                <p className="mt-0.5 text-[10px] text-muted-foreground">{tempoAte(c.enviadoEm, c.resposta.em)}{c.recebidas > 1 ? ` · ${c.recebidas} mensagens` : ''}</p>
+                              </>
+                            ) : <span className="text-muted-foreground/60">—</span>}
+                          </td>
+                          <td className="px-3 py-2 whitespace-nowrap">
+                            <span className={cn('inline-block rounded border px-1.5 py-0.5 text-[10px] font-semibold', COR_CLASSE[c.classe])}>{ROTULO_CLASSE[c.classe]}</span>
+                          </td>
+                          <td className="px-3 py-2 whitespace-nowrap">
+                            {c.compra ? (
+                              <>
+                                <p className="font-semibold text-emerald-400">{brl(c.compra.receita)}</p>
+                                <p className="text-[10px] text-muted-foreground">{c.compra.pedidos} pedido{c.compra.pedidos !== 1 ? 's' : ''} · 1º {fmtQuandoLog(c.compra.primeiroPedidoEm)}</p>
+                              </>
+                            ) : c.vendaCrm ? (
+                              <>
+                                <p className="font-semibold text-emerald-400">{brl(c.vendaCrm.valor)}</p>
+                                <p className="text-[10px] text-muted-foreground">venda no CRM{c.vendaCrm.em ? ` · ${c.vendaCrm.em.split('-').reverse().join('/')}` : ''}</p>
+                              </>
+                            ) : <span className="text-muted-foreground/60">—</span>}
+                          </td>
+                          <td className="px-3 py-2 whitespace-nowrap text-right">
+                            {c.leadId && dados?.onmidClientId && (
+                              <a href={`/crm?clientId=${dados.onmidClientId}&lead=${c.leadId}`} target="_blank" rel="noreferrer"
+                                className="inline-flex items-center gap-1 rounded-lg border border-border px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground hover:border-primary/40">
+                                <MessageSquare className="h-3 w-3" />Conversa
+                              </a>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {contatos.filter(c => passa(c, filtro)).length > 400 && <p className="px-3 py-2 text-[11px] text-muted-foreground">Mostrando 400 de {conta(filtro)}.</p>}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Histórico de ajustes (auditoria) ────────────────────────────────────────
 // Quem fez, quando e o que mudou — lido de /api/disparos/log. Por campanha
 // (campaignId) ou geral (sem id, com a coluna da campanha).
@@ -404,7 +591,7 @@ function LogAjustesModal({ campaignId, titulo, onClose }: { campaignId?: string;
 
 function CampaignCard({ campaign, onAction, onRefresh, onEdit, respostas }: {
   campaign: Campaign; onAction: (id: string, action: string) => void; onRefresh: () => void; onEdit: (c: Campaign) => void;
-  respostas?: RespostasDaCampanha;
+  respostas?: ResumoDisparo;
 }) {
   const [live, setLive] = useState<Progress | null>(null);
   // Etiqueta retroativa: a sessão do WhatsApp perde a sincronia de etiquetas
@@ -413,6 +600,7 @@ function CampaignCard({ campaign, onAction, onRefresh, onEdit, respostas }: {
   const [etiquetando, setEtiquetando] = useState(false);
   const [etiquetaMsg, setEtiquetaMsg] = useState<{ tom: 'ok' | 'erro'; texto: string } | null>(null);
   const [showLog, setShowLog] = useState(false);
+  const [showRespostas, setShowRespostas] = useState(false);
   async function etiquetarRetroativo() {
     setEtiquetando(true); setEtiquetaMsg(null);
     try {
@@ -502,27 +690,51 @@ function CampaignCard({ campaign, onAction, onRefresh, onEdit, respostas }: {
       {respostas && (respostas.enviados > 0 || !respostas.mensuravel) && (() => {
         // ⚠️ Instância sem CRM mostra traço, NUNCA 0% — zero diria "ninguém
         // respondeu" quando a verdade é "não dá para saber daqui".
+        // A taxa conta PESSOAS: resposta só de robô de autoatendimento fica fora.
         const faixa = faixaDaTaxa(respostas.taxa);
         const cor = faixa === 'boa' ? 'text-emerald-400' : faixa === 'atencao' ? 'text-amber-400'
           : faixa === 'ruim' ? 'text-red-400' : 'text-muted-foreground';
         return (
-          <div className="flex items-center justify-between gap-2 rounded-lg border border-border bg-muted/20 px-3 py-1.5 text-[11px]">
-            <span className="flex items-center gap-1.5 text-muted-foreground">
-              <MessageSquare className="h-3 w-3" />Responderam
-            </span>
-            {respostas.mensuravel ? (
-              <span className={cn('font-semibold', cor)}>
-                {respostas.responderam} de {respostas.enviados}
-                {respostas.taxa !== null && <span className="ml-1">({respostas.taxa.toFixed(1).replace('.', ',')}%)</span>}
+          <button type="button" onClick={() => setShowRespostas(true)} disabled={!respostas.mensuravel}
+            title={respostas.mensuravel ? 'Ver quem respondeu, o que respondeu e o que comprou' : undefined}
+            className="w-full space-y-1 rounded-lg border border-border bg-muted/20 px-3 py-1.5 text-left text-[11px] transition-colors enabled:hover:border-primary/40 enabled:hover:bg-muted/40">
+            <div className="flex items-center justify-between gap-2">
+              <span className="flex items-center gap-1.5 text-muted-foreground">
+                <MessageSquare className="h-3 w-3" />Responderam
               </span>
-            ) : (
-              <span className="text-muted-foreground" title="Esta instância não está vinculada a um cliente no CRM, então as respostas não chegam até aqui.">
-                — sem leitura do CRM
-              </span>
+              {respostas.mensuravel ? (
+                <span className={cn('font-semibold', cor)}>
+                  {respostas.responderam} de {respostas.enviados}
+                  {respostas.taxa !== null && <span className="ml-1">({respostas.taxa.toFixed(1).replace('.', ',')}%)</span>}
+                </span>
+              ) : (
+                <span className="text-muted-foreground" title="Esta instância não está vinculada a um cliente no CRM, então as respostas não chegam até aqui.">
+                  — sem leitura do CRM
+                </span>
+              )}
+            </div>
+            {respostas.mensuravel && (respostas.interesse > 0 || respostas.automaticas > 0) && (
+              <p className="text-[10px] text-muted-foreground">
+                {respostas.interesse > 0 && <span className="text-emerald-400">{respostas.interesse} com interesse</span>}
+                {respostas.interesse > 0 && respostas.automaticas > 0 && ' · '}
+                {respostas.automaticas > 0 && <span>+{respostas.automaticas} só robô (fora da taxa)</span>}
+              </p>
             )}
-          </div>
+            {respostas.mensuravel && respostas.fonteVenda && (
+              <div className="flex items-center justify-between gap-2 border-t border-border/60 pt-1">
+                <span className="text-muted-foreground">{respostas.fonteVenda === 'delivery' ? 'Pedidos gerados' : 'Vendas no CRM'}</span>
+                <span className="font-semibold text-foreground">
+                  {respostas.fonteVenda === 'delivery'
+                    ? <>{respostas.pedidos} · <span className="text-emerald-400">{brl(respostas.receita)}</span></>
+                    : <>{respostas.vendasCrm} · <span className="text-emerald-400">{brl(respostas.receitaCrm)}</span></>}
+                </span>
+              </div>
+            )}
+            {respostas.mensuravel && <p className="text-[10px] text-primary/80">Ver respostas →</p>}
+          </button>
         );
       })()}
+      {showRespostas && <RespostasModal campaignId={campaign.id} titulo={campaign.name} onClose={() => setShowRespostas(false)} />}
       {sleeping && status === 'running' && (
         <div className="rounded-lg bg-yellow-500/10 border border-yellow-500/20 px-3 py-2 text-[11px] text-yellow-400 flex items-center gap-1.5">
           <Clock className="h-3 w-3" />Fora do horário de envio — aguardando janela...
@@ -2232,7 +2444,7 @@ function DashboardTab({ onReuse, onNewCampaign, onManageInstances, onEdit }: {
   const deliveryRate = useMemo(() => { const t = totalSent + totalFailed; return t > 0 ? (totalSent / t) * 100 : 0; }, [totalSent, totalFailed]);
 
   const activeCampaigns = useMemo(() => campaigns.filter(c => ['running', 'paused', 'pending'].includes(c.status)), [campaigns]);
-  const [respostas, setRespostas] = useState<Record<string, RespostasDaCampanha>>({});
+  const [respostas, setRespostas] = useState<Record<string, ResumoDisparo>>({});
   const idsParaTaxa = campaigns.map(c => c.id).join(',');
   useEffect(() => {
     if (!idsParaTaxa) { setRespostas({}); return; }
@@ -2240,7 +2452,7 @@ function DashboardTab({ onReuse, onNewCampaign, onManageInstances, onEdit }: {
     // array novo a cada render e refaria o fetch sem parar (lição de 2026-07-29).
     let vivo = true;
     void fetch(`/api/disparos/respostas?ids=${idsParaTaxa}`, { headers: callerHeaders() })
-      .then(r => r.json() as Promise<Record<string, RespostasDaCampanha>>)
+      .then(r => r.json() as Promise<Record<string, ResumoDisparo>>)
       .then(d => { if (vivo) setRespostas(d ?? {}); })
       .catch(() => { /* taxa é informativa: falha não derruba a tela */ });
     return () => { vivo = false; };

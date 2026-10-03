@@ -9,7 +9,7 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { getCallerScope } from '@/lib/disparos-access';
-import { taxaDeRespostaPorCampanha } from '@/lib/disparos-respostas';
+import { analisarCampanhas } from '@/lib/disparos-resultado-server';
 
 export const maxDuration = 30;
 
@@ -32,8 +32,10 @@ export async function GET(request: NextRequest) {
     const permitidos = rows.map(r => r.id);
     if (permitidos.length === 0) return Response.json({});
 
-    const mapa = await taxaDeRespostaPorCampanha(pool, permitidos);
-    return Response.json(Object.fromEntries(mapa));
+    // Resposta HUMANA (robô de autoatendimento fora da taxa) + pedidos/vendas
+    // atribuídos — ver disparos-resultado.ts.
+    const { resumos } = await analisarCampanhas(pool, permitidos);
+    return Response.json(Object.fromEntries(resumos));
   } catch {
     // A taxa é informativa: falhar aqui não pode derrubar a tela de Disparos.
     return Response.json({});
