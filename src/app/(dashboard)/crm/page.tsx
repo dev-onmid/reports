@@ -440,7 +440,10 @@ function trackingRows(lead: CrmLead) {
  * lê "tem valor_rs = vendeu") e `valor_negocio` é a estimativa do negócio em
  * ABERTO. Aqui eles só se encontram na EXIBIÇÃO: quem fechou mostra a receita,
  * quem não fechou mostra a negociação. Como cada coluna do board é de um estado
- * só, o total do cabeçalho nunca soma as duas coisas na mesma caixa.
+ * só, o total do cabeçalho nunca soma as duas coisas na mesma caixa — e é a
+ * própria coluna que diz qual dos dois é, sem precisar de símbolo no número.
+ * ⚠️ Nada de prefixo ("~", "≈"): num valor em reais isso é lido como desconto
+ * ou débito, e oportunidade não é dívida.
  */
 function valorDoLead(lead: CrmLead): { valor: number; emAberto: boolean } {
   const receita = toMoneyNumber(lead.valor_rs);
@@ -1148,7 +1151,7 @@ function KanbanCard({
             title={valorEmAberto ? 'Em negociação (ainda não fechado)' : 'Venda fechada'}
             className={cn('shrink-0 text-[10px] font-bold', valorEmAberto ? 'text-foreground/55' : 'text-primary')}
           >
-            {valorEmAberto && '~'}{fmtN(value)}
+            {fmtN(value)}
           </span>
         )}
       </div>
@@ -1267,7 +1270,7 @@ function KanbanColumn({
             title={totalEmAberto ? 'Soma das negociações em aberto nesta etapa' : 'Soma das vendas fechadas nesta etapa'}
             className="ml-auto shrink-0 text-[10px] font-semibold text-muted-foreground"
           >
-            {total > 0 ? `${totalEmAberto ? '~' : ''}${formatCurrencyBRL(total)}` : ''}
+            {total > 0 ? formatCurrencyBRL(total) : ''}
           </span>
         </div>
       </div>
