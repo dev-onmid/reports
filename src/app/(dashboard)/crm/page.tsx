@@ -111,6 +111,18 @@ type AttendanceMetrics = {
     under_60: number;
     over_60: number;
   };
+  /** Mesmo recorte, janela anterior de igual duração. Null em "todo o período". */
+  previous?: AttendanceMetrics['summary'] | null;
+  previousPeriod?: { from: string; to: string } | null;
+  /** Estado de cada conversa — partição, soma = total de leads. */
+  classification?: {
+    encerrado: number; sem_conversa: number; sem_resposta: number;
+    aguardando_retorno: number; em_atendimento: number;
+  };
+  /** Últimos 7 dias, medidos de `crm_messages` em BRT. */
+  daily?: Array<{ dia: string; avg_response_seconds: number | null; respostas: number; sem_resposta: number }>;
+  /** Mensagem nossa após ≥48h de silêncio, e quantas trouxeram resposta. */
+  retomada?: { enviadas: number; responderam: number };
   sources: Array<{ canal: string | null; total: number }>;
   waiting: Array<{
     id: string;
@@ -1451,7 +1463,12 @@ function AttendanceView({
     : 0;
   const slaRate = responseTotal > 0 ? Math.round((answeredUnderOneHour / responseTotal) * 100) : 0;
   const avgHours = summary?.avg_response_seconds ? Math.max(0.2, summary.avg_response_seconds / 3600) : 0;
-  const unanswered = summary?.unanswered_chats ?? 0;
+  // ⚠️ O card e o donut têm de mostrar o MESMO número. `unanswered_chats` conta
+  // toda conversa cuja última mensagem é do cliente — inclusive de quem já
+  // comprou ou já foi perdido, que não é pendência de ninguém. A classificação
+  // tira esses, e é ela que manda aqui. A TAXA de resposta segue usando o bruto:
+  // ali o que se mede é o atendimento, não a pendência em aberto.
+  const unanswered = data?.classification?.sem_resposta ?? summary?.unanswered_chats ?? 0;
   const totalLeads = summary?.total_leads ?? 0;
   const activeConversations = summary?.active_conversations ?? 0;
   // Real score comes from the AI audit (crm_attendance_audit) — no audit generated
@@ -1465,22 +1482,49 @@ function AttendanceView({
     { label: 'Até 1h', value: summary?.under_60 ?? 0, color: '#FACC15' },
     { label: '+1h', value: summary?.over_60 ?? 0, color: '#EF4444' },
   ];
-  const responseTrend = [0.65, 0.32, 0.44, 0.82, 0.9, 0.62, 0.52].map((factor, index) => ({
-    label: `${12 + index} Mai`,
-    value: Math.max(0.5, avgHours * (0.65 + factor)),
-  }));
-  const riskTrend = [0.78, 0.7, 1.08, 1.02, 0.82, 1.05, 0.92].map((factor, index) => ({
-    label: `${12 + index} Mai`,
-    value: Math.max(0, Math.round(unanswered * factor)),
-  }));
-  const followupRate = Math.max(0, Math.min(100, Math.round(responseRate * 0.72 + slaRate * 0.28)));
-  const classificationRows = [
-    { label: 'Novos', value: Math.max(0, totalLeads - activeConversations - unanswered), color: '#32E843' },
-    { label: 'Em atendimento', value: activeConversations, color: '#3B82F6' },
-    { label: 'Aguardando retorno', value: Math.max(0, Math.round(unanswered * 0.6)), color: '#FACC15' },
-    { label: 'Sem resposta', value: unanswered, color: '#EF4444' },
-    { label: 'Encerrados', value: Math.max(0, Math.round(totalLeads * 0.04)), color: '#8B5CF6' },
-  ];
+  // ⚠️ Estas séries e a classificação JÁ FORAM NÚMEROS INVENTADOS: fatores fixos
+  // multiplicando a média, datas "12 Mai" escritas no código e "Encerrados" como
+  // 4% do total. Agora vêm medidos de `crm_messages`; sem dado, a seção some em
+  // vez de desenhar uma linha bonita que ninguém pode conferir.
+  const diaCurto = (iso: string) => {
+    const [, m, d] = iso.split('-');
+    const meses = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
+    return `${d} ${meses[Number(m) - 1] ?? ''}`;
+  };
+  const daily = data?.daily ?? [];
+  const responseTrend = daily
+    .filter(d => d.avg_response_seconds !== null)
+    .map(d => ({ label: diaCurto(d.dia), value: (d.avg_response_seconds ?? 0) / 3600 }));
+  const riskTrend = daily.map(d => ({ label: diaCurto(d.dia), value: d.sem_resposta }));
+  const retomada = data?.retomada;
+  const followupRate = retomada && retomada.enviadas > 0
+    ? Math.round((retomada.responderam / retomada.enviadas) * 100)
+    : null;
+  // Variação REAL contra a janela anterior. Antes estes selos eram literais
+  // escritos no código ("+18% vs. período anterior"), independentes do dado.
+  const prev = data?.previous ?? null;
+  const variacao = (atual: number | null | undefined, anterior: number | null | undefined, menorEhMelhor = false) => {
+    if (atual == null || anterior == null || anterior <= 0) return null;
+    const pct = Math.round(((atual - anterior) / anterior) * 100);
+    if (pct === 0) return { texto: 'igual ao período anterior', bom: true };
+    const bom = menorEhMelhor ? pct < 0 : pct > 0;
+    return { texto: `${pct > 0 ? '+' : ''}${pct}% vs. período anterior`, bom };
+  };
+  const prevRespTotal = prev ? prev.under_5 + prev.under_15 + prev.under_60 + prev.over_60 : 0;
+  const prevResponseRate = prev && prevRespTotal + prev.unanswered_chats > 0
+    ? Math.round((prevRespTotal / (prevRespTotal + prev.unanswered_chats)) * 100) : null;
+  const varLeads = variacao(totalLeads, prev?.total_leads);
+  const varResposta = variacao(summary?.avg_response_seconds ?? null, prev?.avg_response_seconds ?? null, true);
+  const varTaxa = variacao(responseRate, prevResponseRate);
+  const varAtivas = variacao(activeConversations, prev?.active_conversations);
+  const cls = data?.classification;
+  const classificationRows = cls ? [
+    { label: 'Em atendimento', value: cls.em_atendimento, color: '#3B82F6' },
+    { label: 'Sem resposta', value: cls.sem_resposta, color: '#EF4444' },
+    { label: 'Aguardando retorno', value: cls.aguardando_retorno, color: '#FACC15' },
+    { label: 'Encerrados', value: cls.encerrado, color: '#8B5CF6' },
+    { label: 'Sem conversa', value: cls.sem_conversa, color: '#52525B' },
+  ].filter(r => r.value > 0) : [];
   const classificationTotal = Math.max(1, classificationRows.reduce((sum, row) => sum + row.value, 0));
 
   function sparkPath(points: number[], width = 260, height = 70) {
@@ -1546,18 +1590,24 @@ function AttendanceView({
             <AttendanceAuditModal open={showAuditModal} onOpenChange={setShowAuditModal} audit={audit} />
 
             {[
-              { label: 'Leads no período', value: totalLeads.toLocaleString('pt-BR'), sub: 'leads captados', badge: '+18% vs. período anterior', Icon: Users, tone: 'border-blue-500/20 bg-[#0D1519]', color: '#A78BFA', badgeTone: 'bg-blue-500/15 text-blue-300' },
-              { label: 'Sem resposta', value: unanswered.toLocaleString('pt-BR'), sub: 'leads aguardando retorno', badge: 'Risco alto de perda', Icon: Clock3, tone: 'border-red-500/25 bg-red-500/10', color: '#EF4444', badgeTone: 'bg-red-500/15 text-red-300' },
-              { label: 'Resposta média', value: formatDuration(summary.avg_response_seconds), sub: 'tempo médio', badge: '-18% vs. período anterior', Icon: Sparkles, tone: 'border-emerald-500/20 bg-emerald-500/10', color: '#32E843', badgeTone: 'bg-emerald-500/15 text-emerald-300' },
-              { label: 'Taxa de resposta', value: `${responseRate}%`, sub: 'das conversas', badge: '+12% vs. período anterior', Icon: BarChart3, tone: 'border-emerald-500/20 bg-[#0B1B15]', color: '#32E843', badgeTone: 'bg-emerald-500/15 text-emerald-300' },
-              { label: 'Conversas ativas', value: activeConversations.toLocaleString('pt-BR'), sub: 'ativas agora', badge: '+7% vs. agora há 24h', Icon: MessageCircle, tone: 'border-blue-500/20 bg-blue-500/10', color: '#3B82F6', badgeTone: 'bg-blue-500/15 text-blue-300' },
+              { label: 'Leads no período', value: totalLeads.toLocaleString('pt-BR'), sub: 'leads captados', badge: varLeads?.texto ?? null, badgeBom: varLeads?.bom, Icon: Users, tone: 'border-blue-500/20 bg-[#0D1519]', color: '#A78BFA', badgeTone: 'bg-blue-500/15 text-blue-300' },
+              { label: 'Sem resposta', value: unanswered.toLocaleString('pt-BR'), sub: 'leads aguardando retorno', badge: unanswered > 0 ? 'Risco alto de perda' : null, badgeBom: false, Icon: Clock3, tone: 'border-red-500/25 bg-red-500/10', color: '#EF4444', badgeTone: 'bg-red-500/15 text-red-300' },
+              { label: 'Resposta média', value: formatDuration(summary.avg_response_seconds), sub: 'tempo médio', badge: varResposta?.texto ?? null, badgeBom: varResposta?.bom, Icon: Sparkles, tone: 'border-emerald-500/20 bg-emerald-500/10', color: '#32E843', badgeTone: 'bg-emerald-500/15 text-emerald-300' },
+              { label: 'Taxa de resposta', value: `${responseRate}%`, sub: 'das conversas', badge: varTaxa?.texto ?? null, badgeBom: varTaxa?.bom, Icon: BarChart3, tone: 'border-emerald-500/20 bg-[#0B1B15]', color: '#32E843', badgeTone: 'bg-emerald-500/15 text-emerald-300' },
+              { label: 'Conversas ativas', value: activeConversations.toLocaleString('pt-BR'), sub: 'ativas agora', badge: varAtivas?.texto ?? null, badgeBom: varAtivas?.bom, Icon: MessageCircle, tone: 'border-blue-500/20 bg-blue-500/10', color: '#3B82F6', badgeTone: 'bg-blue-500/15 text-blue-300' },
             ].map(card => (
               <section key={card.label} className={cn('min-h-[178px] rounded-2xl border p-4 shadow-[0_18px_60px_rgba(0,0,0,0.22)]', card.tone)}>
                 <card.Icon className="mb-5 h-5 w-5" style={{ color: card.color }} />
                 <p className="text-sm font-semibold" style={{ color: card.color }}>{card.label}</p>
                 <p className="mt-5 font-heading text-4xl leading-none text-zinc-100">{card.value}</p>
                 <p className="mt-2 text-sm text-zinc-400">{card.sub}</p>
-                <span className={cn('mt-5 inline-flex rounded-lg px-2.5 py-1 text-xs font-semibold', card.badgeTone)}>{card.badge}</span>
+                {card.badge && (
+                  <span className={cn(
+                    'mt-5 inline-flex rounded-lg px-2.5 py-1 text-xs font-semibold',
+                    card.badgeBom === undefined ? card.badgeTone
+                      : card.badgeBom ? 'bg-emerald-500/15 text-emerald-300' : 'bg-red-500/15 text-red-300',
+                  )}>{card.badge}</span>
+                )}
               </section>
             ))}
           </div>
@@ -1574,15 +1624,20 @@ function AttendanceView({
                 </div>
                 <span className="rounded-lg border border-white/[0.08] bg-white/5 px-3 py-2 text-xs font-semibold text-zinc-300">Últimos 7 dias</span>
               </div>
+              {responseTrend.length === 0 ? (
+                <div className="flex h-[250px] items-center justify-center text-center text-sm text-zinc-500">
+                  Nenhuma resposta registrada nos últimos 7 dias.
+                </div>
+              ) : (
               <svg viewBox="0 0 620 240" className="h-[250px] w-full">
                 {[0, 1, 2, 3].map(i => <line key={i} x1="42" x2="600" y1={35 + i * 52} y2={35 + i * 52} stroke="rgba(255,255,255,0.06)" />)}
                 {[0, 1, 2, 3, 4, 5, 6].map(i => <line key={i} x1={70 + i * 83} x2={70 + i * 83} y1="35" y2="192" stroke="rgba(255,255,255,0.04)" />)}
                 <line x1="42" x2="600" y1="116" y2="116" stroke="rgba(154,164,170,0.55)" strokeDasharray="6 7" />
                 {['12h', '8h', '4h', '0h'].map((label, i) => <text key={label} x="0" y={40 + i * 52} fill="#7b8790" fontSize="12">{label}</text>)}
-                {responseTrend.map((point, index) => <text key={point.label} x={52 + index * 83} y="224" fill="#7b8790" fontSize="12">{point.label}</text>)}
+                {responseTrend.map((point, index) => <text key={point.label} x={52 + index * (530 / Math.max(responseTrend.length - 1, 1))} y="224" fill="#7b8790" fontSize="12">{point.label}</text>)}
                 <path
                   d={responseTrend.map((point, index) => {
-                    const x = 70 + index * 83;
+                    const x = 70 + index * (530 / Math.max(responseTrend.length - 1, 1));
                     const y = 192 - Math.min(12, point.value) / 12 * 156;
                     return `${index === 0 ? 'M' : 'L'} ${x} ${y}`;
                   }).join(' ')}
@@ -1593,11 +1648,12 @@ function AttendanceView({
                   strokeLinejoin="round"
                 />
                 {responseTrend.map((point, index) => {
-                  const x = 70 + index * 83;
+                  const x = 70 + index * (530 / Math.max(responseTrend.length - 1, 1));
                   const y = 192 - Math.min(12, point.value) / 12 * 156;
                   return <circle key={point.label} cx={x} cy={y} r="5" fill="#32E843" stroke="#0D1519" strokeWidth="2" />;
                 })}
               </svg>
+              )}
             </section>
 
             <section className="rounded-2xl border border-white/[0.08] bg-[#0D1519] p-5 shadow-[0_24px_70px_rgba(0,0,0,0.26)]">
@@ -1672,7 +1728,11 @@ function AttendanceView({
                   <p className="flex items-center gap-2 text-sm text-zinc-400"><span className="h-2.5 w-2.5 rounded-sm bg-red-400" /> Leads em risco</p>
                   <p className="mt-10 font-heading text-5xl leading-none">{unanswered.toLocaleString('pt-BR')}</p>
                   <p className="mt-2 text-sm text-zinc-400">leads em risco</p>
-                  <span className="mt-5 inline-flex rounded-lg bg-red-500/15 px-3 py-1.5 text-sm font-semibold text-red-300">↑ 23% vs. semana anterior</span>
+                  {riskTrend.length > 0 && (
+                    <span className="mt-5 inline-flex rounded-lg bg-red-500/15 px-3 py-1.5 text-sm font-semibold text-red-300">
+                      {riskTrend.reduce((t, p) => t + p.value, 0)} nos últimos 7 dias
+                    </span>
+                  )}
                 </div>
                 <svg viewBox="0 0 520 180" className="h-[190px] w-full">
                   {[0, 1, 2].map(i => <line key={i} x1="35" x2="500" y1={28 + i * 58} y2={28 + i * 58} stroke="rgba(255,255,255,0.06)" />)}
@@ -1708,14 +1768,23 @@ function AttendanceView({
             </section>
 
             <section className="relative overflow-hidden rounded-2xl border border-white/[0.08] bg-[#0D1519] p-5 shadow-[0_24px_70px_rgba(0,0,0,0.26)]">
-              <h3 className="text-base font-bold">Follow-up em dia</h3>
-              <p className="mt-8 font-heading text-5xl leading-none">{followupRate}%</p>
-              <p className="mt-2 max-w-[170px] text-sm text-zinc-400">dos leads com follow-up em dia</p>
-              <span className="mt-6 inline-flex rounded-lg bg-primary/15 px-3 py-1.5 text-sm font-semibold text-primary">+9% vs. semana anterior</span>
-              <svg className="absolute bottom-5 right-4 h-24 w-44 opacity-90" viewBox="0 0 180 90">
-                <path d={`${sparkPath([20, 30, 26, 54, 68, 41, 50], 180, 80)} L 180 90 L 0 90 Z`} fill="rgba(50,232,67,0.18)" />
-                <path d={sparkPath([20, 30, 26, 54, 68, 41, 50], 180, 80)} fill="none" stroke="#32E843" strokeWidth="3" />
-              </svg>
+              <h3 className="text-base font-bold">Retomada de conversas paradas</h3>
+              {followupRate === null ? (
+                <>
+                  <p className="mt-8 font-heading text-5xl leading-none text-zinc-500">—</p>
+                  <p className="mt-2 max-w-[200px] text-sm text-zinc-400">
+                    nenhuma conversa foi retomada depois de 48h paradas neste período
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p className="mt-8 font-heading text-5xl leading-none">{followupRate}%</p>
+                  <p className="mt-2 max-w-[200px] text-sm text-zinc-400">
+                    das {retomada?.enviadas} retomadas trouxeram resposta do cliente
+                    {retomada ? ` (${retomada.responderam})` : ''}
+                  </p>
+                </>
+              )}
             </section>
           </div>
         </div>
