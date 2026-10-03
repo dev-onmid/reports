@@ -164,6 +164,11 @@ async function aplicarSchemaMensagens(pool: Pool) {
     // minimal version MISSING `direction` (and possibly text/created_at/contact_id), so
     // every INSERT/SELECT referencing `direction` failed ("column direction does not
     // exist") — empty chat for everyone. Add every column the code depends on.
+    // Quem da equipe enviou. Só existe em direction='out' e só quando a mensagem
+    // sai pela TELA — follow-up, disparo e webhook não têm pessoa por trás, e
+    // inventar uma ali faria a nota por atendente mentir.
+    `ALTER TABLE public.crm_messages ADD COLUMN IF NOT EXISTS autor_id TEXT`,
+    `ALTER TABLE public.crm_messages ADD COLUMN IF NOT EXISTS autor_nome TEXT`,
     `ALTER TABLE public.crm_messages ADD COLUMN IF NOT EXISTS contact_id UUID`,
     `ALTER TABLE public.crm_messages ADD COLUMN IF NOT EXISTS direction TEXT`,
     `ALTER TABLE public.crm_messages ADD COLUMN IF NOT EXISTS text TEXT`,

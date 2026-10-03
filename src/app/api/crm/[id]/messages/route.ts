@@ -3,6 +3,7 @@ import { makeServerPool } from '@/lib/server-db';
 import { getClientInstance, sendFollowupMessage } from '@/lib/followup-send';
 import { analisarConversa } from '@/lib/crm-ai-analysis';
 import { ensureCrmMessagesSchema, ensureDefaultFunnel } from '@/lib/crm-conversation-sync';
+import { readSession } from '@/lib/session';
 
 // Ensures crm_messages has all columns the code expects.
 // The original migration only had: id, contact_id, client_id(?), direction, text, created_at.
@@ -227,12 +228,28 @@ export async function POST(
       whatsappStatus = waSent ? 'sent' : 'failed';
     }
 
+    // Autoria: só para mensagem que SAI pela tela, e só da sessão — o proxy
+    // sobrescreve o header com o cookie assinado, então não dá para forjar.
+    // Follow-up, disparo e webhook continuam sem autor de propósito.
+    let autorId: string | null = null;
+    let autorNome: string | null = null;
+    if (direction === 'out') {
+      const sess = readSession(req);
+      if (sess?.uid) {
+        autorId = sess.uid;
+        const { rows: [u] } = await pool.query<{ name: string | null }>(
+          `SELECT name FROM public.users WHERE id = $1`, [sess.uid],
+        ).catch(() => ({ rows: [] as { name: string | null }[] }));
+        autorNome = u?.name ?? null;
+      }
+    }
+
     const { rows: [msg] } = await pool.query(
       `INSERT INTO public.crm_messages
-        (lead_id, client_id, direction, text, tipo, external_id, whatsapp_status, whatsapp_error)
-       VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''), $7, NULLIF($8, ''))
-       RETURNING id, direction, text, tipo, created_at, whatsapp_status, whatsapp_error`,
-      [targetLeadId, lead.client_id, direction, dbText, tipo, waExternalId ?? '', whatsappStatus, waError ?? ''],
+        (lead_id, client_id, direction, text, tipo, external_id, whatsapp_status, whatsapp_error, autor_id, autor_nome)
+       VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''), $7, NULLIF($8, ''), $9, $10)
+       RETURNING id, direction, text, tipo, created_at, whatsapp_status, whatsapp_error, autor_nome`,
+      [targetLeadId, lead.client_id, direction, dbText, tipo, waExternalId ?? '', whatsappStatus, waError ?? '', autorId, autorNome],
     );
     await pool.query(
       `UPDATE public.crm_leads

@@ -30,6 +30,8 @@ import { DictateButton } from '@/components/ui/dictate-button';
 import { notificar } from '@/components/ui/toast';
 import { cn, formatCurrencyBRL } from '@/lib/utils';
 import AnaliseIaModal from './analise-ia-modal';
+import MotivoPerdaModal from './motivo-perda-modal';
+import { rotuloMotivo, type MotivoPerdaId } from '@/lib/motivo-perda';
 import { localDoLead, type RespostaFormulario } from '@/lib/lead-formulario';
 import type { Client } from '@/lib/mock-data';
 import type { AttendanceAudit } from '@/lib/crm-attendance-audit';
@@ -121,6 +123,13 @@ type AttendanceMetrics = {
   };
   /** Últimos 7 dias, medidos de `crm_messages` em BRT. */
   daily?: Array<{ dia: string; avg_response_seconds: number | null; respostas: number; sem_resposta: number }>;
+  /** Só quem enviou PELA TELA tem autoria; follow-up/disparo/webhook ficam fora. */
+  atendentes?: Array<{
+    autor_nome: string; enviadas: number; leads_atendidos: number; respostas: number;
+    avg_response_seconds: number | null; ate_5min: number; mais_1h: number;
+  }>;
+  motivosPerda?: Array<{ motivo: string | null; total: number; detalhes: string[] }>;
+  perdidosSemMotivo?: number;
   /** Mensagem nossa após ≥48h de silêncio, e quantas trouxeram resposta. */
   retomada?: { enviadas: number; responderam: number };
   sources: Array<{ canal: string | null; total: number }>;
@@ -1790,6 +1799,89 @@ function AttendanceView({
               )}
             </section>
           </div>
+
+          <div className="grid gap-4 xl:grid-cols-2">
+            <section className="rounded-2xl border border-white/[0.08] bg-[#0D1519] p-5 shadow-[0_24px_70px_rgba(0,0,0,0.26)]">
+              <h3 className="text-base font-bold">Por atendente</h3>
+              {(data?.atendentes ?? []).length === 0 ? (
+                <p className="mt-6 text-sm text-zinc-500">
+                  Ainda não há mensagem com autor registrado. A partir de agora, toda resposta
+                  enviada pela tela guarda quem respondeu — e este painel passa a comparar a
+                  equipe. Mensagem de follow-up, disparo ou que chega pelo WhatsApp fora do
+                  sistema continua sem autor, de propósito.
+                </p>
+              ) : (
+                <div className="mt-5 space-y-3">
+                  {(data?.atendentes ?? []).map(a => {
+                    const pctRapido = a.respostas > 0 ? Math.round((a.ate_5min / a.respostas) * 100) : 0;
+                    return (
+                      <div key={a.autor_nome} className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="truncate text-sm font-semibold text-zinc-100">{a.autor_nome}</span>
+                          <span className="shrink-0 text-xs text-zinc-400">{formatDuration(a.avg_response_seconds)} em média</span>
+                        </div>
+                        <div className="mt-2 grid grid-cols-4 gap-2 text-center">
+                          {[
+                            ['Leads', a.leads_atendidos.toLocaleString('pt-BR')],
+                            ['Respostas', a.respostas.toLocaleString('pt-BR')],
+                            ['Até 5 min', `${pctRapido}%`],
+                            ['+1h', a.mais_1h.toLocaleString('pt-BR')],
+                          ].map(([k, v]) => (
+                            <div key={k}>
+                              <p className="text-[9px] font-bold uppercase tracking-widest text-zinc-500">{k}</p>
+                              <p className="mt-0.5 text-sm font-semibold text-zinc-200">{v}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+
+            <section className="rounded-2xl border border-white/[0.08] bg-[#0D1519] p-5 shadow-[0_24px_70px_rgba(0,0,0,0.26)]">
+              <h3 className="text-base font-bold">Por que perdemos</h3>
+              {(data?.motivosPerda ?? []).length === 0 ? (
+                <p className="mt-6 text-sm text-zinc-500">
+                  Nenhum motivo registrado ainda. A partir de agora, mover um lead para uma etapa
+                  de perda pede o motivo — e em um mês este painel mostra o que ajustar na compra
+                  e no preço.
+                  {(data?.perdidosSemMotivo ?? 0) > 0 && (
+                    <> Há {data?.perdidosSemMotivo} lead(s) perdido(s) antes disso, sem motivo.</>
+                  )}
+                </p>
+              ) : (
+                <>
+                  <div className="mt-5 space-y-3">
+                    {(data?.motivosPerda ?? []).map(m => {
+                      const totalMotivos = (data?.motivosPerda ?? []).reduce((t, x) => t + x.total, 0) || 1;
+                      const pct = Math.round((m.total / totalMotivos) * 100);
+                      return (
+                        <div key={m.motivo ?? 'sem'}>
+                          <div className="flex items-center justify-between gap-3 text-sm">
+                            <span className="font-semibold text-zinc-300">{rotuloMotivo(m.motivo) ?? 'Sem motivo'}</span>
+                            <span className="text-xs text-zinc-400">{pct}% ({m.total})</span>
+                          </div>
+                          <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-white/[0.07]">
+                            <div className="h-full rounded-full bg-red-400/70" style={{ width: `${pct}%` }} />
+                          </div>
+                          {m.detalhes.slice(0, 2).map((d, i) => (
+                            <p key={i} className="mt-1 truncate text-[11px] text-zinc-500" title={d}>“{d}”</p>
+                          ))}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {(data?.perdidosSemMotivo ?? 0) > 0 && (
+                    <p className="mt-4 text-[11px] text-zinc-500">
+                      {data?.perdidosSemMotivo} perdido(s) sem motivo (de antes deste registro).
+                    </p>
+                  )}
+                </>
+              )}
+            </section>
+          </div>
         </div>
 
       </div>
@@ -2704,6 +2796,8 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
   }, [acaoConfig]);
   const [kanbanEditLead, setKanbanEditLead] = useState<CrmLead | null>(null);
   const [analiseIaAberta, setAnaliseIaAberta] = useState(false);
+  const [perdaPendente, setPerdaPendente] = useState<{ id: string; status: string; nome: string } | null>(null);
+  const [salvandoPerda, setSalvandoPerda] = useState(false);
 
   useEffect(() => {
     if (lockedClientId) setClientId(lockedClientId);
@@ -3158,16 +3252,39 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
     }
   }
 
-  async function changeLeadStatus(id: string, status: string) {
+  // ⚠️ Mover para uma etapa de PERDA abre o modal ANTES de gravar. O servidor
+  // recusa com 422 quem tentar sem motivo (rota PUT), então a tela é só o
+  // caminho amigável — nenhum lead se perde sem registro, nem por aqui nem por
+  // fora. O lead só sai do lugar depois que o motivo é confirmado.
+  async function salvarStatus(id: string, status: string, motivo?: MotivoPerdaId, detalhe?: string | null) {
     const previousStatus = leads.find(l => l.id === id)?.status ?? null;
     setLeads(prev => prev.map(l => l.id === id ? { ...l, status } : l));
     try {
-      const res = await fetch(`/api/crm/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) });
+      const res = await fetch(`/api/crm/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(motivo
+          ? { status, motivo_perda: motivo, motivo_perda_detalhe: detalhe ?? null }
+          : { status }),
+      });
       if (!res.ok) throw new Error(`Erro ${res.status}`);
+      return true;
     } catch {
       setLeads(prev => prev.map(l => l.id === id ? { ...l, status: previousStatus } : l));
       notificar('Não foi possível mover o lead — tente de novo.', 'erro');
+      return false;
     }
+  }
+
+  async function changeLeadStatus(id: string, status: string) {
+    if (classificarEtapa(status) === 'perdido') {
+      const lead = leads.find(l => l.id === id);
+      if (lead && classificarEtapa(lead.status ?? '') !== 'perdido') {
+        setPerdaPendente({ id, status, nome: lead.nome ?? lead.numero ?? 'este lead' });
+        return;
+      }
+    }
+    await salvarStatus(id, status);
   }
 
   function toggleLeadSelection(id: string) {
@@ -4390,6 +4507,21 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
             </div>
           </div>}
         </div>
+      )}
+
+      {perdaPendente && (
+        <MotivoPerdaModal
+          leadNome={perdaPendente.nome}
+          etapaDestino={perdaPendente.status}
+          salvando={salvandoPerda}
+          onCancelar={() => { if (!salvandoPerda) setPerdaPendente(null); }}
+          onConfirmar={async (motivo, detalhe) => {
+            setSalvandoPerda(true);
+            const ok = await salvarStatus(perdaPendente.id, perdaPendente.status, motivo, detalhe);
+            setSalvandoPerda(false);
+            if (ok) setPerdaPendente(null);
+          }}
+        />
       )}
 
       {analiseIaAberta && clientId && (

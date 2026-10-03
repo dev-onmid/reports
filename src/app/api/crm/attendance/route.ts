@@ -297,7 +297,69 @@ export async function GET(req: NextRequest) {
       params,
     );
 
+    // ── por atendente: só quem ENVIOU pela tela tem autoria ──────────────────
+    // ⚠️ A média de resposta é a da PESSOA que respondeu — o par é formado com a
+    // primeira saída depois da mensagem do cliente, e o autor dessa saída é
+    // quem leva o crédito (ou a demora). Mensagem sem autor (follow-up, disparo,
+    // webhook, e todo o histórico anterior a esta versão) fica fora.
+    const { rows: atendentes } = await pool.query<{
+      autor_nome: string; enviadas: number; respostas: number; avg_response_seconds: number | null;
+      ate_5min: number; mais_1h: number; leads_atendidos: number;
+    }>(
+      `WITH target_leads AS (SELECT l.id FROM public.crm_leads l WHERE ${leadWhere}),
+       msg AS (
+         SELECT m.lead_id, m.direction, m.created_at, m.autor_nome
+           FROM public.crm_messages m JOIN target_leads t ON t.id = m.lead_id
+          WHERE m.created_at IS NOT NULL
+       ),
+       pares AS (
+         SELECT i.created_at AS inbound_at,
+                (SELECT o.created_at FROM msg o
+                  WHERE o.lead_id = i.lead_id AND o.direction = 'out' AND o.created_at > i.created_at
+                  ORDER BY o.created_at LIMIT 1) AS response_at,
+                (SELECT o.autor_nome FROM msg o
+                  WHERE o.lead_id = i.lead_id AND o.direction = 'out' AND o.created_at > i.created_at
+                  ORDER BY o.created_at LIMIT 1) AS autor_nome
+           FROM msg i WHERE i.direction = 'in'
+       )
+       SELECT m.autor_nome,
+              COUNT(*)::int AS enviadas,
+              COUNT(DISTINCT m.lead_id)::int AS leads_atendidos,
+              (SELECT COUNT(*)::int FROM pares p WHERE p.autor_nome = m.autor_nome AND p.response_at IS NOT NULL) AS respostas,
+              (SELECT AVG(EXTRACT(EPOCH FROM (p.response_at - p.inbound_at)))::float FROM pares p
+                WHERE p.autor_nome = m.autor_nome AND p.response_at IS NOT NULL) AS avg_response_seconds,
+              (SELECT COUNT(*)::int FROM pares p WHERE p.autor_nome = m.autor_nome
+                AND p.response_at IS NOT NULL AND p.response_at - p.inbound_at <= INTERVAL '5 minutes') AS ate_5min,
+              (SELECT COUNT(*)::int FROM pares p WHERE p.autor_nome = m.autor_nome
+                AND p.response_at IS NOT NULL AND p.response_at - p.inbound_at > INTERVAL '1 hour') AS mais_1h
+         FROM msg m
+        WHERE m.direction = 'out' AND m.autor_nome IS NOT NULL
+        GROUP BY m.autor_nome
+        ORDER BY enviadas DESC`,
+      params,
+    );
+
+    // ── por que perdemos ─────────────────────────────────────────────────────
+    const { rows: motivosPerda } = await pool.query<{ motivo: string | null; total: number; detalhes: string[] }>(
+      `SELECT l.motivo_perda AS motivo, COUNT(*)::int AS total,
+              COALESCE(ARRAY_AGG(l.motivo_perda_detalhe) FILTER (WHERE l.motivo_perda_detalhe IS NOT NULL), '{}') AS detalhes
+         FROM public.crm_leads l
+        WHERE ${leadWhere} AND l.motivo_perda IS NOT NULL
+        GROUP BY l.motivo_perda ORDER BY total DESC`,
+      params,
+    );
+
+    // Perdidos SEM motivo registrado — é o que mostra se o campo está pegando.
+    const { rows: [semMotivo] } = await pool.query<{ total: number }>(
+      `SELECT COUNT(*)::int AS total FROM public.crm_leads l
+        WHERE ${leadWhere} AND l.motivo_perda IS NULL AND l.perdido_em IS NOT NULL`,
+      params,
+    );
+
     return Response.json({
+      atendentes,
+      motivosPerda,
+      perdidosSemMotivo: semMotivo?.total ?? 0,
       previous,
       previousPeriod: prevFrom && prevTo ? { from: prevFrom, to: prevTo } : null,
       classification,

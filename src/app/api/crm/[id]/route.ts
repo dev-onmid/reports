@@ -3,6 +3,8 @@ import { makeServerPool } from '@/lib/server-db';
 import { queueFollowupIfExists } from '@/lib/followup-send';
 import { ensureCrmAiSchema } from '@/lib/crm-ai-analysis';
 import { dispararEventosPorStatus, dispararEventoFechamento, enviarEventoMeta } from '@/lib/conversions';
+import { classificarEtapa } from '@/lib/funil-etapas';
+import { motivoValido, motivoCompleto } from '@/lib/motivo-perda';
 
 /**
  * Um lead inteiro, por id.
@@ -41,6 +43,30 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 
     const next = { ...current, ...f };
 
+    // ── motivo de perda ──────────────────────────────────────────────────────
+    // ⚠️ É aqui, e só aqui, que o motivo entra: o campo existe para ensinar o
+    // que ajustar na compra e no preço, e isso só funciona se for registrado no
+    // ATO de perder. Perguntar depois é perguntar para quem já esqueceu.
+    //
+    // Sair de uma etapa de perda LIMPA o motivo — lead reativado que mantém
+    // "perdeu por preço" envenena o relatório do mês seguinte.
+    const etapaAtual = classificarEtapa(String(next.status ?? ''));
+    const etapaAnterior = classificarEtapa(String(current.status ?? ''));
+    const virouPerdido = etapaAtual === 'perdido' && etapaAnterior !== 'perdido';
+    const deixouDeSerPerdido = etapaAtual !== 'perdido' && etapaAnterior === 'perdido';
+
+    let motivoPerda: string | null = motivoValido(next.motivo_perda) ? String(next.motivo_perda) : null;
+    let motivoDetalhe: string | null = typeof next.motivo_perda_detalhe === 'string'
+      ? next.motivo_perda_detalhe.trim().slice(0, 300) || null : null;
+
+    if (deixouDeSerPerdido) { motivoPerda = null; motivoDetalhe = null; }
+    if (virouPerdido && !motivoCompleto(motivoPerda, motivoDetalhe)) {
+      return Response.json({
+        error: 'motivo_perda_obrigatorio',
+        message: 'Informe o motivo da perda ao mover o lead para esta etapa.',
+      }, { status: 422 });
+    }
+
     // Atualiza SOMENTE a linha do id. O match adicional por telefone que existia aqui
     // cascateava a edição para leads homônimos de OUTROS funis (drag no Funil A movia
     // o lead do Funil B para um status que nem existe lá → lead sumia do Kanban).
@@ -56,6 +82,10 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         -- critério do negócio dele (MQL). Fica ao lado da coluna, como a temperatura.
         -- qualificado_em/_por só são escritos na virada, para o histórico não mentir
         -- sobre quando e quem marcou.
+        motivo_perda=$32, motivo_perda_detalhe=$33,
+        -- Carimbo da perda: só é escrito na VIRADA, para o histórico não mentir
+        -- sobre quando o lead foi dado como perdido.
+        perdido_em = CASE WHEN $34 THEN CURRENT_DATE WHEN $35 THEN NULL ELSE perdido_em END,
         qualificado=$28,
         qualificado_em = CASE WHEN $28 IS DISTINCT FROM qualificado
                               THEN (CASE WHEN $28 THEN NOW() ELSE NULL END)
@@ -79,6 +109,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         next.qualificado === true,
         req.headers.get('x-onmid-user-id') ?? null,
         current.client_id, id,
+        motivoPerda, motivoDetalhe, virouPerdido, deixouDeSerPerdido,
       ]
     );
     if (!lead) return Response.json({ error: 'Not found' }, { status: 404 });

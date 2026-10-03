@@ -67,7 +67,12 @@ export async function ensureCrmAiSchema(pool: Pool) {
       ADD COLUMN IF NOT EXISTS temperatura_atualizada_em TIMESTAMPTZ,
       ADD COLUMN IF NOT EXISTS ia_ultimo_analise TIMESTAMPTZ,
       ADD COLUMN IF NOT EXISTS ia_confianca_ultimo INTEGER,
-      ADD COLUMN IF NOT EXISTS time_interno BOOLEAN NOT NULL DEFAULT false;
+      ADD COLUMN IF NOT EXISTS time_interno BOOLEAN NOT NULL DEFAULT false,
+      -- Por que o lead não virou venda. Ver src/lib/motivo-perda.ts: exigido no
+      -- ATO de mover para uma etapa de perda e LIMPO ao reativar o lead.
+      ADD COLUMN IF NOT EXISTS motivo_perda TEXT,
+      ADD COLUMN IF NOT EXISTS motivo_perda_detalhe TEXT,
+      ADD COLUMN IF NOT EXISTS perdido_em DATE;
 
     CREATE TABLE IF NOT EXISTS public.crm_temperatura_criterios (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
