@@ -1670,6 +1670,36 @@ function NovaCampanhaTab({ onCreated, prefill, editCampaign }: { onCreated: () =
     }
   }
 
+  // Acrescenta versões SEM apagar as existentes (inclusive as editadas à mão),
+  // até 10 mensagens no rodízio contando a original. A IA recebe as atuais para
+  // não repetir nenhuma.
+  const MAX_MENSAGENS = 10;
+  async function gerarMaisVariacoes() {
+    if (!form.message.trim()) return;
+    const faltam = Math.min(5, MAX_MENSAGENS - 1 - variations.length);
+    if (faltam <= 0) return;
+    setLoadingVariations(true);
+    setVariationsError('');
+    try {
+      const res = await fetch('/api/ai/whatsapp-variations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: form.message, quantidade: faltam, existentes: [form.message, ...variations.map(v => v.text)] }),
+      });
+      const data = await res.json() as { text: string; label: string }[] | { error: string };
+      if (!res.ok || 'error' in data) {
+        setVariationsError('error' in data ? data.error : 'Erro ao gerar variações.');
+      } else {
+        const novas = (data as { text: string; label: string }[]).slice(0, faltam).map(v => ({ ...v, editing: false }));
+        setVariations(prev => [...prev, ...novas].slice(0, MAX_MENSAGENS - 1));
+      }
+    } catch {
+      setVariationsError('Erro de conexão ao gerar variações.');
+    } finally {
+      setLoadingVariations(false);
+    }
+  }
+
   function handleMessageBlur(e: React.FocusEvent<HTMLTextAreaElement>) {
     const msg = e.target.value.trim();
     if (msg && msg !== lastGeneratedMsgRef.current) {
@@ -1911,6 +1941,17 @@ function NovaCampanhaTab({ onCreated, prefill, editCampaign }: { onCreated: () =
                     <Sparkles className="h-3.5 w-3.5 text-violet-400" />
                     <p className="text-[11px] font-bold uppercase tracking-widest text-violet-400">Variações geradas pela IA</p>
                     <span className="rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] font-bold text-emerald-400">✓ {variations.length + 1} mensagens prontas para envio aleatório</span>
+                    {variations.length + 1 < MAX_MENSAGENS && (
+                      <button
+                        type="button"
+                        onClick={() => void gerarMaisVariacoes()}
+                        disabled={loadingVariations}
+                        title={`Acrescenta versões novas sem apagar as atuais (máximo ${MAX_MENSAGENS} mensagens no rodízio)`}
+                        className="flex items-center gap-1 rounded-lg border border-violet-500/40 px-2 py-0.5 text-[10px] font-bold text-violet-400 hover:bg-violet-500/10 disabled:opacity-50"
+                      >
+                        <Plus className="h-3 w-3" />Gerar mais {Math.min(5, MAX_MENSAGENS - 1 - variations.length)}
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => { setVariations([]); setPreviewVariationIdx(null); }}
