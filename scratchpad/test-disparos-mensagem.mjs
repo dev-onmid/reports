@@ -25,7 +25,11 @@ eq(primeiroNomeDe('MARIA APARECIDA'), 'Maria', 'primeiro nome formatado');
 
 // montagem com nome
 eq(montarMensagem('Oi {primeiro_nome}, tudo bem?', { phone: P, name: 'MARIA SILVA' }), 'Oi Maria, tudo bem?', 'primeiro_nome');
-eq(montarMensagem('Oi {nome}!', { phone: P, name: 'maria silva' }), 'Oi Maria Silva!', 'nome completo formatado');
+eq(montarMensagem('Oi {nome}!', { phone: P, name: 'maria silva' }), 'Oi Maria!', '{nome} = PRIMEIRO nome (padrão desde 04/10)');
+eq(montarMensagem('Oi {nome_completo}!', { phone: P, name: 'MARIA APARECIDA DA SILVA' }), 'Oi Maria Aparecida da Silva!', '{nome_completo} = nome inteiro formatado');
+eq(montarMensagem('{nome} / {primeiro_nome}', { phone: P, name: 'Ana Paula Souza' }), 'Ana / Ana', '{primeiro_nome} continua igual a {nome}');
+eq(montarMensagem('Oi {nome_completo}, tudo bem?', { phone: P, name: '' }), 'Oi, tudo bem?', 'sem nome também limpa {nome_completo}');
+eq(usaNome('Oi {nome_completo}'), true, 'usaNome reconhece nome_completo');
 eq(montarMensagem('Seu fone {telefone}', { phone: P, name: 'X' }), `Seu fone ${P}`, 'telefone');
 eq(montarMensagem('Oi  {nome} ,  olha *isso*', { phone: P, name: 'Ana' }), 'Oi  Ana ,  olha *isso*', 'com nome a mensagem sai EXATAMENTE como escrita');
 

@@ -1886,11 +1886,11 @@ function NovaCampanhaTab({ onCreated, prefill, editCampaign }: { onCreated: () =
               </div>
               <div className="space-y-1.5">
                 <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
-                  Mensagem * — use {'{primeiro_nome}'}, {'{nome}'} e {'{telefone}'} para personalizar
+                  Mensagem * — use {'{nome}'} (primeiro nome), {'{nome_completo}'} e {'{telefone}'} para personalizar
                 </label>
                 <div className="relative">
                   <textarea value={form.message} onChange={e => setForm(p => ({ ...p, message: e.target.value }))} onBlur={handleMessageBlur}
-                    placeholder="Oi {primeiro_nome}, temos uma novidade para você!" rows={5}
+                    placeholder="Oi {nome}, temos uma novidade para você!" rows={5}
                     className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm outline-none focus:ring-1 focus:ring-primary resize-none pr-10" />
                   <DictateButton className="absolute top-2 right-2" onTranscript={(text) => setForm(p => ({ ...p, message: p.message ? `${p.message} ${text}` : text }))} />
                   <button type="button" className="absolute bottom-3 right-3 text-muted-foreground hover:text-foreground transition-colors">
@@ -2169,7 +2169,7 @@ function NovaCampanhaTab({ onCreated, prefill, editCampaign }: { onCreated: () =
                               <tr className="text-left text-[10px] uppercase tracking-wider text-muted-foreground">
                                 <th className="px-3 py-1.5 font-semibold">Nome</th>
                                 <th className="px-3 py-1.5 font-semibold">Número</th>
-                                <th className="px-3 py-1.5 font-semibold">{'{primeiro_nome}'}</th>
+                                <th className="px-3 py-1.5 font-semibold">Vai ser chamado de</th>
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-border">

@@ -49,7 +49,7 @@ export async function POST(req: NextRequest) {
     `3. Cada variação DEVE ter abertura diferente, uma de cada ângulo: ${ANGULOS.slice(jaExistem.length ? Math.min(jaExistem.length, ANGULOS.length - quantidade) : 0).slice(0, quantidade).join(', ')}.`,
     '4. Cada variação DEVE ter um encerramento diferente antes do CTA: reforço emocional, escassez, exclusividade, benefício secundário.',
     '5. Use português brasileiro informal e natural — como falam as pessoas, não como escrevem relatórios.',
-    '6. Mantenha as variáveis {primeiro_nome}, {nome} e {telefone} EXATAMENTE como estão (com chaves) se existirem na mensagem original.',
+    '6. Mantenha as variáveis {nome}, {primeiro_nome}, {nome_completo} e {telefone} EXATAMENTE como estão (com chaves) se existirem na mensagem original.',
     '7. NÃO use clichês como "Não perca essa oportunidade" ou "Aproveite agora".',
     '',
     'ESCREVA COMO QUEM DIGITA NO CELULAR, NÃO COMO FERRAMENTA DE DISPARO:',

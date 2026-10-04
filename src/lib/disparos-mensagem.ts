@@ -39,9 +39,16 @@ export function primeiroNomeDe(nome: string | null | undefined): string {
   return formatarNome(nome).split(' ')[0] ?? '';
 }
 
-export const VARIAVEIS_DISPARO = ['{primeiro_nome}', '{nome}', '{telefone}'] as const;
+/**
+ * ⚠️ `{nome}` = PRIMEIRO nome (decisão do Matheus, 2026-10-04: "sempre só o
+ * primeiro nome, mesmo que venha o nome completo na planilha"). Mensagem de
+ * WhatsApp com "Oi Maria Aparecida da Silva" soa robô. Quem quiser o completo
+ * de propósito usa `{nome_completo}`. `{primeiro_nome}` segue funcionando
+ * (é o mesmo que `{nome}`) para não quebrar campanha criada antes.
+ */
+export const VARIAVEIS_DISPARO = ['{nome}', '{nome_completo}', '{telefone}'] as const;
 
-const RE_VAR_NOME = /\{(?:primeiro_)?nome\}/;
+const RE_VAR_NOME = /\{(?:primeiro_nome|nome_completo|nome)\}/;
 
 export function usaNome(template: string): boolean {
   return RE_VAR_NOME.test(template);
@@ -57,10 +64,12 @@ export function usaNome(template: string): boolean {
  */
 export function montarMensagem(template: string, contato: { phone: string; name?: string | null }): string {
   const nome = formatarNome(contato.name);
+  const primeiro = nome.split(' ')[0] ?? '';
   const trocado = template
-    .replace(/\{primeiro_nome\}/g, nome.split(' ')[0] ?? '')
-    .replace(/\{nome\}/g, nome)
+    .replace(/\{nome_completo\}/g, nome)
+    .replace(/\{primeiro_nome\}/g, primeiro)
+    .replace(/\{nome\}/g, primeiro)
     .replace(/\{telefone\}/g, contato.phone);
   if (nome || !usaNome(template)) return trocado;
-  return limparPontuacao(trocado, /^\s*\{(?:primeiro_)?nome\}/.test(template));
+  return limparPontuacao(trocado, /^\s*\{(?:primeiro_nome|nome_completo|nome)\}/.test(template));
 }
