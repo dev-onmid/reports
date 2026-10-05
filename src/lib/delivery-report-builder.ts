@@ -187,6 +187,10 @@ export type CampanhaGoogleDetalhada = {
     cliques: number;
     conversoes: number;
     valorConversoes: number;
+    /** Conversões de COMPRA de verdade (categoria PURCHASE/STORE_SALE da ação de conversão). */
+    compras?: number;
+    /** Valor das conversões de compra — o único que pode virar "valor de venda"/ROAS. */
+    valorCompras?: number;
   };
 };
 
@@ -206,6 +210,9 @@ export type GoogleAdsFull = {
   cliques: number;
   conversoes: number;
   valorConversoes: number;
+  /** Compras de verdade e o valor delas, somados das campanhas (ver CampanhaGoogleDetalhada). */
+  compras?: number;
+  valorCompras?: number;
   campanhas: CampanhaGoogleDetalhada[];
   palavrasChave: PalavraChaveGoogle[];
 };
@@ -1220,12 +1227,30 @@ const GOOGLE_CHANNEL_LABEL: Record<string, string> = {
   MULTI_CHANNEL: 'Multicanal', APP: 'App', HOTEL: 'Hotel',
 };
 
-function categorizeGoogleCampaign(channelType: string | undefined, conversions: number, conversionsValue: number): GoogleCampaignKind {
-  const t = (channelType ?? '').toUpperCase();
+// ⚠️ "Vendas" só com COMPRA DE VERDADE (ou campanha de Shopping). A régua antiga era
+// `valorConversoes > 0` — e o Google atribui R$ 1,00 de valor PADRÃO a toda conversão,
+// então qualquer campanha de lead com conversão virava "Vendas / Shopping": a Cinfel
+// (que só capta lead) saiu com "50 compras · valor de venda R$ 50,00 · ROAS 0,06".
+// Valor de conversão não diz o que a conversão É; a categoria da ação de conversão diz.
+/**
+ * Compras que contam como VENDA no relatório. Categoria "Compra" sozinha não basta:
+ * medido na Londrigifts (set/2026), uma ação de conversão cadastrada como Compra
+ * somava 87 "compras" e R$ 16,34 — clique de contato com a categoria errada. Venda
+ * de verdade carrega o valor do pedido; por isso só vale quando o valor médio passa
+ * do R$ 1,00 que o Google atribui por padrão a qualquer conversão.
+ * Shopping é venda por definição e fica como veio.
+ */
+export function comprasReaisGoogle(tipo: string | undefined, compras: number, valor: number): { compras: number; valorCompras: number } {
+  if ((tipo ?? '').toUpperCase() === 'SHOPPING') return { compras, valorCompras: valor };
+  return compras > 0 && valor > compras ? { compras, valorCompras: valor } : { compras: 0, valorCompras: 0 };
+}
+
+export function categorizeGoogleCampaign(c: CampanhaGoogleDetalhada): GoogleCampaignKind {
+  const t = (c.tipo ?? '').toUpperCase();
   if (t === 'SHOPPING') return 'vendas';
   if (['DISPLAY', 'VIDEO', 'DEMAND_GEN', 'DISCOVERY', 'SMART'].includes(t)) return 'alcance';
-  if (conversionsValue > 0) return 'vendas';
-  if (conversions > 0) return 'leads';
+  if ((c.metricas.compras ?? 0) > 0) return 'vendas';
+  if (c.metricas.conversoes > 0) return 'leads';
   return 'trafego'; // SEARCH, PERFORMANCE_MAX, or unrecognized without conversion data
 }
 
@@ -3344,7 +3369,8 @@ export function sPaidTrafficResumo(meta: MetaAdsFull | null, google: GoogleAdsFu
   const googleImpressions = google?.impressoes ?? 0;
   const googleClicks = google?.cliques ?? 0;
   const googleConversions = google?.conversoes ?? 0;
-  const googleRevenue = google?.valorConversoes ?? 0;
+  // Só valor de COMPRA: o valor padrão de R$ 1 por lead não é receita.
+  const googleRevenue = google?.valorCompras ?? 0;
 
   const totalSpend = metaSpend + googleSpend;
   const totalImpressions = metaImpressions + googleImpressions;
@@ -3840,13 +3866,25 @@ export function sInstagramCalendar(posts: InstagramPost[], idx: number, total: n
       </div>
     </div>`;
 
+  // Aviso no topo: o Instagram só devolve o que está no perfil HOJE — post arquivado ou
+  // excluído depois some do calendário e do total. Sem ele, o cliente conta 10 posts que
+  // fez no mês, vê 8 aqui e conclui que o relatório errou.
   const body = `<div data-slide-index="${idx}" data-slide-total="${total}" style="width:1440px;min-height:810px;background:${BG};border:1px solid ${BORDER};margin:0 auto 20px;overflow:hidden;box-sizing:border-box;page-break-after:always;display:flex;flex-direction:column;position:relative">
   <div style="position:absolute;right:-100px;top:-170px;width:610px;height:540px;border-radius:50%;background:linear-gradient(135deg,rgba(226,232,240,.7),rgba(255,255,255,.12));opacity:.8;pointer-events:none"></div>
 
   <div style="position:relative;z-index:1;flex:1;padding:42px 46px 34px;box-sizing:border-box;display:flex;flex-direction:column">
-    <div style="flex-shrink:0;margin:0 0 21px">
-      <h1 style="font-family:${INTER};font-size:52px;font-weight:950;color:#050816;line-height:.95;margin:0 0 15px;letter-spacing:-0.055em">${reportTitle('Calendário de postagens')}</h1>
-      <div style="width:38px;height:3px;border-radius:999px;background:${PRIMARY}"></div>
+    <div style="flex-shrink:0;margin:0 0 21px;display:flex;align-items:center;justify-content:space-between;gap:24px">
+      <div>
+        <h1 style="font-family:${INTER};font-size:52px;font-weight:950;color:#050816;line-height:.95;margin:0 0 15px;letter-spacing:-0.055em">${reportTitle('Calendário de postagens')}</h1>
+        <div style="width:38px;height:3px;border-radius:999px;background:${PRIMARY}"></div>
+      </div>
+      <div style="display:flex;align-items:center;gap:13px;background:#FFF8E6;border:1px solid #F5D37A;border-left:4px solid #F59E0B;border-radius:12px;padding:8px 18px 8px 14px;max-width:470px;flex-shrink:0">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#B45309" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        <div>
+          <p style="font-family:${INTER};font-size:15px;font-weight:900;color:#7C2D12;line-height:1.25;margin:0 0 3px">Publicações arquivadas somem da contagem</p>
+          <p style="font-family:${INTER};font-size:12px;font-weight:600;color:#92400E;line-height:1.35;margin:0">O Instagram só informa o que está no perfil hoje — post arquivado ou excluído não aparece aqui.</p>
+        </div>
+      </div>
     </div>
 
     <div style="display:grid;grid-template-columns:minmax(0,1fr) 292px;gap:24px;flex:1;min-height:0">
@@ -4558,9 +4596,9 @@ export function sGoogleAdsResumo(google: GoogleAdsFull, idx: number, total: numb
   const ctr = google.impressoes > 0 ? (google.cliques / google.impressoes) * 100 : 0;
   const cpc = google.cliques > 0 ? google.investimento / google.cliques : 0;
   const custoConversao = google.conversoes > 0 ? google.investimento / google.conversoes : 0;
-  const roasGeral = google.investimento > 0 ? google.valorConversoes / google.investimento : 0;
+  const roasGeral = google.investimento > 0 ? (google.valorCompras ?? 0) / google.investimento : 0;
 
-  const campaignsBy = (kinds: GoogleCampaignKind[]) => google.campanhas.filter(c => kinds.includes(categorizeGoogleCampaign(c.tipo, c.metricas.conversoes, c.metricas.valorConversoes)));
+  const campaignsBy = (kinds: GoogleCampaignKind[]) => google.campanhas.filter(c => kinds.includes(categorizeGoogleCampaign(c)));
   const sum = (campaigns: CampanhaGoogleDetalhada[], selector: (c: CampanhaGoogleDetalhada) => number) =>
     campaigns.reduce((totalValue, campaign) => totalValue + selector(campaign), 0);
 
@@ -4585,8 +4623,8 @@ export function sGoogleAdsResumo(google: GoogleAdsFull, idx: number, total: numb
   const custoLead = totalLeadConversoes > 0 ? leadInvestment / totalLeadConversoes : 0;
 
   const salesInvestment = sum(salesCampaigns, c => c.metricas.investimento);
-  const totalCompras = sum(salesCampaigns, c => c.metricas.conversoes);
-  const valorCompras = sum(salesCampaigns, c => c.metricas.valorConversoes);
+  const totalCompras = sum(salesCampaigns, c => c.metricas.compras ?? 0);
+  const valorCompras = sum(salesCampaigns, c => c.metricas.valorCompras ?? 0);
   const cpa = totalCompras > 0 ? salesInvestment / totalCompras : 0;
   const roas = salesInvestment > 0 ? valorCompras / salesInvestment : 0;
 
@@ -4681,7 +4719,7 @@ export function sGoogleAdsResumo(google: GoogleAdsFull, idx: number, total: numb
     ? `As campanhas de vendas geraram conversões, mas o ROAS de ${decC(roas)} pede atenção: acompanhar custo por conversão e valor médio antes de ampliar investimento.`
     : totalLeadConversoes > 0
     ? `As campanhas de geração de leads converteram no período. O próximo foco é qualificar esses contatos, acompanhando custo por lead e evolução para venda.`
-    : `${brlOrDash(google.investimento)} investidos com ${numOrDash(google.cliques)} cliques e ${numOrDash(google.conversoes)} conversões no período. Avaliar CTR, CPC e volume de conversões (ROAS geral ${decC(roasGeral)}) para orientar o próximo ciclo.`;
+    : `${brlOrDash(google.investimento)} investidos com ${numOrDash(google.cliques)} cliques e ${numOrDash(google.conversoes)} conversões no período. Avaliar CTR, CPC e volume de conversões${roasGeral > 0 ? ` (ROAS geral ${decC(roasGeral)})` : ''} para orientar o próximo ciclo.`;
 
   const body = `<div style="width:1440px;min-height:810px;background:${BG};border:1px solid ${BORDER};margin:0 auto 20px;overflow:hidden;box-sizing:border-box;page-break-after:always;display:flex;flex-direction:column;position:relative">
   <div style="position:absolute;right:60px;top:-100px;width:560px;height:480px;border-radius:50%;background:linear-gradient(135deg,rgba(219,234,254,.55),rgba(255,255,255,.15));opacity:.7;pointer-events:none"></div>
@@ -4720,7 +4758,7 @@ export function sGoogleAdsResumo(google: GoogleAdsFull, idx: number, total: numb
 // ── Google Ads — Campanhas ────────────────────────────────────────────────────
 
 export function sGoogleAdsCampanhas(google: GoogleAdsFull, idx: number, total: number, periodo = 'Maio/2026', campanhas = google.campanhas): string {
-  const kindFor = (c: CampanhaGoogleDetalhada) => categorizeGoogleCampaign(c.tipo, c.metricas.conversoes, c.metricas.valorConversoes);
+  const kindFor = (c: CampanhaGoogleDetalhada) => categorizeGoogleCampaign(c);
 
   const styleFor = (kind: GoogleCampaignKind) => {
     if (kind === 'vendas') return { bg: '#F7FFF4', border: '#D7F8D0', accent: PRIMARY_TEXT, iconBg: '#ECFCE8' };
@@ -4757,15 +4795,17 @@ export function sGoogleAdsCampanhas(google: GoogleAdsFull, idx: number, total: n
 
     let row1: string, row2: string;
     if (kind === 'vendas') {
-      const cpa = m.conversoes > 0 && m.investimento > 0 ? brlPrecise(m.investimento / m.conversoes) : '—';
-      const roas = m.investimento > 0 && m.valorConversoes > 0 ? m.valorConversoes / m.investimento : 0;
+      const compras = m.compras ?? 0;
+      const valorCompras = m.valorCompras ?? 0;
+      const cpa = compras > 0 && m.investimento > 0 ? brlPrecise(m.investimento / compras) : '—';
+      const roas = m.investimento > 0 && valorCompras > 0 ? valorCompras / m.investimento : 0;
       row1 = [
         metricItem(ICO_MONEY, 'Investimento', brlOrDash(m.investimento), style.accent, style.iconBg),
-        metricItem(ICO_CART, 'Conversões', numOrDash(m.conversoes), style.accent, style.iconBg),
-        metricItem(ICO_MONEY, 'Custo/conversão', cpa, style.accent, style.iconBg),
+        metricItem(ICO_CART, 'Compras', numOrDash(compras), style.accent, style.iconBg),
+        metricItem(ICO_MONEY, 'Custo/compra', cpa, style.accent, style.iconBg),
       ].join('');
       row2 = [
-        metricItem(ICO_MONEY, 'Valor de conversão', brlOrDash(m.valorConversoes), style.accent, style.iconBg),
+        metricItem(ICO_MONEY, 'Valor de venda', brlOrDash(valorCompras), style.accent, style.iconBg),
         metricItem(ICO_TREND, 'ROAS', roas > 0 ? roas.toFixed(2) : '—', style.accent, style.iconBg),
       ].join('');
     } else if (kind === 'leads') {

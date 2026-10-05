@@ -2,7 +2,7 @@ import { makeServerPool } from '@/lib/server-db';
 import { getFreshMetaToken } from '@/lib/meta-token';
 import { RESULT_ACTIONS, NEW_CONTACT_ACTIONS, PURCHASE_ACTIONS, sumActions } from './report-runner';
 import {
-  fetchBairros, fetchMetaData, fetchInstagramData, autoPreviousPeriod, sanitizeJsonValue,
+  fetchBairros, fetchMetaData, fetchInstagramData, autoPreviousPeriod, sanitizeJsonValue, comprasReaisGoogle,
   sCapa, sVisaoGeral, sFunilComercial, sCanais, sRegioes, sPaidTrafficResumo, sMetaAdsResumo, sMetaAdsCampanhas, sCriativos,
   sGoogleAdsResumo, sGoogleAdsCampanhas, sGoogleAdsPalavrasChave,
   sInstagram, sInstagramCalendar, sInstagramPosts, sInstagramSpotlight,
@@ -357,6 +357,9 @@ export async function fetchGoogleAdsTotals(connectionId: string, accountIds: str
 // Campaign-level Google Ads fetch (mirrors fetchMetaData's shape) — each GAQL row
 // already aggregates a campaign's metrics over the whole date range, so no extra
 // per-campaign request is needed beyond what fetchGoogleAdsTotals already does.
+// Categorias de ação de conversão do Google Ads que são VENDA de fato.
+const CATEGORIAS_DE_COMPRA = new Set(['PURCHASE', 'STORE_SALE']);
+
 export async function fetchGoogleAdsDetailed(
   connectionId: string | null | undefined,
   accountIds: string[],
@@ -386,7 +389,7 @@ export async function fetchGoogleAdsDetailed(
       const loginCustomerId = loginCustomerByAccount[customerId];
       const data = await googleAdsSearchWithFallback(
         customerId,
-        `SELECT campaign.name, campaign.advertising_channel_type, campaign.status, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions, metrics.conversions_value
+        `SELECT campaign.id, campaign.name, campaign.advertising_channel_type, campaign.status, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions, metrics.conversions_value
                     FROM campaign
                     WHERE segments.date BETWEEN '${from}' AND '${to}' AND campaign.status = 'ENABLED'
                     LIMIT 50`,
@@ -396,21 +399,59 @@ export async function fetchGoogleAdsDetailed(
       );
       if (!data) return;
       pendingAccounts.delete(customerId);
+
+      // COMPRAS de verdade por campanha, pela CATEGORIA da ação de conversão.
+      // ⚠️ `conversions_value > 0` não serve de sinal: o Google dá R$ 1,00 de valor
+      // padrão a toda conversão, e campanha de lead virava "Vendas / Shopping".
+      // Query à parte porque segmentar por categoria proíbe custo/cliques na mesma.
+      const comprasData = await googleAdsSearchWithFallback(
+        customerId,
+        `SELECT campaign.id, segments.conversion_action_category, metrics.conversions, metrics.conversions_value
+                    FROM campaign
+                    WHERE segments.date BETWEEN '${from}' AND '${to}' AND campaign.status = 'ENABLED'`,
+        candidate.accessToken,
+        devToken,
+        loginCustomerId,
+      );
+      const comprasPorCampanha = new Map<string, { compras: number; valor: number }>();
+      for (const row of (comprasData?.results ?? [])) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const r = row as any;
+        if (!CATEGORIAS_DE_COMPRA.has(String(r.segments?.conversionActionCategory ?? ''))) continue;
+        const id = String(r.campaign?.id ?? '');
+        const atual = comprasPorCampanha.get(id) ?? { compras: 0, valor: 0 };
+        atual.compras += googleMetricNumber(r.metrics?.conversions);
+        atual.valor   += googleMetricNumber(r.metrics?.conversionsValue);
+        comprasPorCampanha.set(id, atual);
+      }
+
       for (const row of (data.results ?? [])) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const r = row as any;
         const m = (r.metrics ?? {}) as Record<string, number>;
+        const tipo = String(r.campaign?.advertisingChannelType ?? '');
+        const conversoes = googleMetricNumber(m.conversions);
+        const valorConversoes = googleMetricNumber(m.conversionsValue);
+        // A consulta por categoria falhou (null) numa campanha de SHOPPING: lá
+        // conversão É compra, então não zera — nas demais, sem prova não há compra.
+        const semCategoria = !comprasData && tipo.toUpperCase() === 'SHOPPING';
+        const c = comprasPorCampanha.get(String(r.campaign?.id ?? ''));
+        const reais = semCategoria
+          ? { compras: conversoes, valorCompras: valorConversoes }
+          : comprasReaisGoogle(tipo, c?.compras ?? 0, c?.valor ?? 0);
         const metricas = {
           investimento:     googleMetricNumber(m.costMicros) / 1_000_000,
           impressoes:       googleMetricNumber(m.impressions),
           cliques:          googleMetricNumber(m.clicks),
-          conversoes:       googleMetricNumber(m.conversions),
-          valorConversoes:  googleMetricNumber(m.conversionsValue),
+          conversoes,
+          valorConversoes,
+          compras:          reais.compras,
+          valorCompras:     reais.valorCompras,
         };
         if (!hasGoogleActivity(metricas)) continue;
         campanhas.push({
           nome: String(r.campaign?.name ?? 'Sem nome'),
-          tipo: String(r.campaign?.advertisingChannelType ?? ''),
+          tipo,
           metricas,
         });
       }
@@ -468,7 +509,9 @@ export async function fetchGoogleAdsDetailed(
     cliques:         acc.cliques         + c.metricas.cliques,
     conversoes:      acc.conversoes      + c.metricas.conversoes,
     valorConversoes: acc.valorConversoes + c.metricas.valorConversoes,
-  }), { investimento: 0, impressoes: 0, cliques: 0, conversoes: 0, valorConversoes: 0 });
+    compras:         acc.compras         + (c.metricas.compras ?? 0),
+    valorCompras:    acc.valorCompras    + (c.metricas.valorCompras ?? 0),
+  }), { investimento: 0, impressoes: 0, cliques: 0, conversoes: 0, valorConversoes: 0, compras: 0, valorCompras: 0 });
 
   return {
     ...totals,

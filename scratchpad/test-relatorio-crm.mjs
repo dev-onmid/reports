@@ -3,7 +3,7 @@
 //   npx esbuild scratchpad/entry-relatorio-crm.ts --bundle --format=esm --platform=node \
 //     --packages=external --tsconfig=tsconfig.json --outfile=scratchpad/build/relatorio-crm.mjs
 import assert from 'node:assert/strict';
-import { ehMesCheio, degrausDoFunil, sFunilComercial, sCanais, sVisaoGeral, sInstagram, ganhoNoPeriodo, serieDaResposta, CRM_PERIODO_SQL } from './build/relatorio-crm.mjs';
+import { ehMesCheio, degrausDoFunil, sFunilComercial, sCanais, sVisaoGeral, sInstagram, sInstagramCalendar, sGoogleAdsResumo, sGoogleAdsCampanhas, sPaidTrafficResumo, categorizeGoogleCampaign, comprasReaisGoogle, ganhoNoPeriodo, serieDaResposta, CRM_PERIODO_SQL } from './build/relatorio-crm.mjs';
 
 let n = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); n++; };
@@ -123,5 +123,35 @@ const semComp = cardDe({ followers_period: 61, followers_cobertura: completo, pr
 ok(semComp.includes('+61 no período') && !semComp.includes('vs anterior<'), 'anterior incompleto → sem percentual');
 ok(cardDe({ followers_period: 0, followers_cobertura: { ...completo, ganho: 0 } }).includes('sem novos seguidores no período'), 'completo e zero → pode afirmar');
 ok(cardDe({ followers_period: 180 }).includes('+180 no período'), 'dado antigo sem cobertura: comportamento de antes');
+
+// ── Google: "Vendas / Shopping" só com COMPRA de verdade ──
+// O Google dá R$ 1,00 de valor padrão a toda conversão; a régua antiga (valor > 0)
+// classificava campanha de lead como venda em 14 de 17 clientes.
+const gc = (tipo, conv, valor, compras = 0, valorCompras = 0, inv = 500) => ({ nome: 'c', tipo, metricas: { investimento: inv, impressoes: 1000, cliques: 100, conversoes: conv, valorConversoes: valor, compras, valorCompras } });
+ok(categorizeGoogleCampaign(gc('SEARCH', 39.5, 39.5)) === 'leads', 'lead com valor padrão (R$1/conv) NÃO é venda');
+ok(categorizeGoogleCampaign(gc('SEARCH', 0, 0)) === 'trafego', 'sem conversão → tráfego');
+ok(categorizeGoogleCampaign(gc('PERFORMANCE_MAX', 20, 20)) === 'leads', 'PMax de lead → leads');
+ok(categorizeGoogleCampaign(gc('SHOPPING', 0, 0)) === 'vendas', 'Shopping é venda por definição');
+ok(categorizeGoogleCampaign(gc('SEARCH', 30, 9000, 30, 9000)) === 'vendas', 'compra com valor real → venda');
+ok(categorizeGoogleCampaign(gc('DISPLAY', 5, 5)) === 'alcance', 'display continua alcance');
+ok(categorizeGoogleCampaign({ nome: 'c', tipo: 'SEARCH', metricas: { investimento: 1, impressoes: 1, cliques: 1, conversoes: 3, valorConversoes: 999 } }) === 'leads', 'sem o campo compras, valor de conversão sozinho nunca vira venda');
+ok(comprasReaisGoogle('SEARCH', 87, 16.335).compras === 0, 'categoria "Compra" com valor de centavos (Londrigifts) não conta');
+ok(comprasReaisGoogle('SEARCH', 50, 50).compras === 0, 'valor = quantidade é o padrão do Google, não venda');
+ok(comprasReaisGoogle('SEARCH', 30, 9000).valorCompras === 9000, 'valor real passa');
+ok(comprasReaisGoogle('SHOPPING', 4, 0).compras === 4, 'Shopping fica como veio');
+ok(comprasReaisGoogle('SEARCH', 0, 0).compras === 0, 'zero é zero');
+const gLeads = { investimento: 1150.77, impressoes: 4817, cliques: 627, conversoes: 50, valorConversoes: 50, compras: 0, valorCompras: 0, palavrasChave: [],
+  campanhas: [gc('SEARCH', 10.5, 10.5, 0, 0, 611.59), gc('SEARCH', 39.5, 39.5, 0, 0, 279.29), gc('SEARCH', 0, 0, 0, 0, 259.89)] };
+const resumoG = sGoogleAdsResumo(gLeads, 8, 18);
+ok(!resumoG.includes('Vendas / Shopping') && !/ROAS/.test(resumoG), 'Cinfel: sem card de vendas e sem ROAS');
+ok(resumoG.includes('Geração de leads') && resumoG.includes('2 campanhas') && resumoG.includes('17,82'), 'vira Geração de leads: 2 campanhas, custo por lead R$ 17,82');
+ok(!/ROAS|Valor de venda|Compras/.test(sGoogleAdsCampanhas(gLeads, 9, 18, 'Setembro/2026')), 'cards por campanha sem ROAS/compras');
+ok(!/receita atribuída/.test(sPaidTrafficResumo(null, gLeads, 4, 18)), 'resumo de tráfego não trata valor padrão como receita');
+const gVenda = { ...gLeads, compras: 30, valorCompras: 9000, campanhas: [gc('SEARCH', 30, 9000, 30, 9000, 1000)] };
+ok(sGoogleAdsResumo(gVenda, 8, 18).includes('Vendas / Shopping') && sGoogleAdsResumo(gVenda, 8, 18).includes('9,00'), 'venda real continua aparecendo, com ROAS');
+
+// ── Calendário: aviso de post arquivado ──
+const cal = sInstagramCalendar([], 12, 18, new Date(2026, 8, 1));
+ok(cal.includes('Publicações arquivadas somem da contagem'), 'aviso presente no calendário');
 
 console.log(`OK — ${n} asserts`);

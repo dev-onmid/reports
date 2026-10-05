@@ -39,6 +39,20 @@ resultados (1 Não atendeu · 2 Caixa postal · 3 Número errado · 4 Atendeu; L
   demais tabelas as rotas criam sozinhas (`GET /api/crm?clientId=…` cria o `crm_leads`
   completo). Turbopack recusa `node_modules` em symlink — `npm ci` no worktree.
 
+## Relatório — "Vendas / Shopping" no Google era invenção do valor padrão (2026-10-05)
+
+Print do Matheus (Cinfel): card "Vendas / Shopping · 2 campanhas · 50 compras · Valor de venda R$ 50,00 · ROAS 0,06". "É mentira, de onde tirou isso? Não temos nenhum cliente com esse objetivo no Google Ads." Estava certo.
+
+- **Causa: `categorizeGoogleCampaign` fazia `if (conversionsValue > 0) return 'vendas'`.** O Google atribui **R$ 1,00 de valor PADRÃO a toda conversão** — então qualquer campanha de lead com conversão tinha "valor > 0" e virava venda. A assinatura do bug é o valor de venda igual à quantidade (50 compras, R$ 50,00).
+- **⚠️ Medido na carteira (setembro): 14 dos 17 clientes com Google saíam com o card falso** (Cinfel, CondoStore, Cost Odonto, Incorpast, Londrigifts, Odonto First, Romanza, Saac, 5 Sorrifácil, SorriLeve). Com a régua nova: **zero**.
+- **Régua nova**: "vendas" só em campanha de **Shopping**, ou com **compra de verdade** — conversão cuja ação tem categoria `PURCHASE`/`STORE_SALE` (query à parte com `segments.conversion_action_category`; segmentar por categoria proíbe custo/cliques na mesma) **E valor médio acima de R$ 1,00** (`comprasReaisGoogle`).
+- **⚠️ A categoria sozinha NÃO basta** — foi a 1ª versão e a Londrigifts derrubou: lá uma ação de conversão está cadastrada como "Compra" e somava 87 "compras" com R$ 16,34 (clique de contato na categoria errada). Venda real carrega o valor do pedido.
+- `metricas.compras`/`valorCompras` (novos, opcionais) alimentam o card de vendas, o ROAS e a receita do "Resultados de Tráfego Pago" — `valorConversoes` não vira mais receita em lugar nenhum.
+- ⚠️ Se a consulta por categoria falhar, campanha de Shopping mantém conversão = compra; nas demais, sem prova não há compra (cai em leads). Errar para "lead" é o lado seguro: o contrário inventa faturamento.
+- **Calendário de postagens** (mesma rodada, pedido dele): aviso âmbar no topo — **"Publicações arquivadas somem da contagem"** + "o Instagram só informa o que está no perfil hoje". Sem ele o cliente conta os posts que fez, vê menos na página e conclui que o relatório errou.
+- ✅ Verificado: Cinfel, Londrigifts e Sorrifácil ingleses pela função real em produção (as três viram "Geração de leads", sem ROAS); varredura das 18 contas; 18 asserts novos (79 no arquivo); páginas renderizadas (Google: "Geração de leads · 2 campanhas · 50 conversões · custo por lead R$ 17,82"; calendário em 810px com o aviso); tsc + `next build` + eslint sem erro novo.
+- ⚠️ A DASHBOARD não foi conferida para o mesmo erro (ela tem lógica própria de campanhas do Google).
+
 ## Relatório de performance — números da dashboard + Funil e Canais (2026-10-05)
 
 Print do Matheus, Cinfel, setembro: o relatório mostrava **R$ 37.511,76 / 24 "pedidos"** e a dashboard **R$ 44.732,93**. "Os dados não batem com o que tá na dash." Pedido original: usar a dashboard da Cinfel de exemplo para levar ao relatório os dados que só ela tinha.
