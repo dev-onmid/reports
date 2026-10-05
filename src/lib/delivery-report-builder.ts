@@ -5,6 +5,7 @@ import { getFreshMetaToken } from '@/lib/meta-token';
 import { randomUUID } from 'crypto';
 import { logAiUsage } from '@/lib/ai-usage-logger';
 import { sectionEnabled } from '@/lib/report-sections';
+import { ROTULOS_CANAL_GA4, ROTULOS_DISPOSITIVO_GA4, seletorContatos, type Ga4Consolidado, type Ga4Seg } from '@/lib/ga4-landing';
 import { buscarSerieSeguidores, registrarSerieSeguidores, lerSerieSeguidores, ganhoNoPeriodo, type GanhoSeguidores } from '@/lib/ig-seguidores';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -213,6 +214,8 @@ export type GoogleAdsFull = {
   /** Compras de verdade e o valor delas, somados das campanhas (ver CampanhaGoogleDetalhada). */
   compras?: number;
   valorCompras?: number;
+  /** Investimento, cliques e conversões por dia — alimenta o gráfico do resumo. */
+  diario?: Array<{ date: string; investimento: number; cliques: number; conversoes: number }>;
   campanhas: CampanhaGoogleDetalhada[];
   palavrasChave: PalavraChaveGoogle[];
 };
@@ -1250,8 +1253,11 @@ export function categorizeGoogleCampaign(c: CampanhaGoogleDetalhada): GoogleCamp
   if (t === 'SHOPPING') return 'vendas';
   if (['DISPLAY', 'VIDEO', 'DEMAND_GEN', 'DISCOVERY', 'SMART'].includes(t)) return 'alcance';
   if ((c.metricas.compras ?? 0) > 0) return 'vendas';
-  if (c.metricas.conversoes > 0) return 'leads';
-  return 'trafego'; // SEARCH, PERFORMANCE_MAX, or unrecognized without conversion data
+  // ⚠️ Não existe "campanha de tráfego" no Google aqui: Pesquisa/PMax são de geração de
+  // lead mesmo no mês em que não converteram. Separar por "tem conversão ou não" criava
+  // dois objetivos diferentes para campanhas com o MESMO objetivo (print do Matheus,
+  // 05/10: "é tudo o mesmo objetivo, que doideira é essa?").
+  return 'leads';
 }
 
 const OBJECTIVE_META: Record<ObjectiveCategory, {
@@ -2389,6 +2395,80 @@ export function sVisaoGeral(
   return auditSlide(body, 'sVisaoGeral');
 }
 
+// ── Gráfico de barras + linha (SVG) ───────────────────────────────────────────
+// Barras numa escala, linha em outra: volume (investimento, sessões) × resultado
+// (conversões, contatos). SVG puro para sair igual no navegador e no PDF.
+
+export type PontoGrafico = { rotulo: string; barra: number; linha: number };
+
+/**
+ * Agrupa uma série diária para caber no gráfico: até 31 dias fica por DIA, até
+ * ~3 meses por SEMANA, acima disso por MÊS. Relatório de 1 ano com 365 barras de
+ * 3px não se lê.
+ */
+export function agruparSerieDiaria(dias: Array<{ date: string; barra: number; linha: number }>): PontoGrafico[] {
+  const ord = [...dias].filter(d => /^\d{4}-\d{2}-\d{2}/.test(d.date)).sort((a, b) => a.date.localeCompare(b.date));
+  const dm = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}`;
+  if (ord.length <= 31) return ord.map(d => ({ rotulo: dm(d.date), barra: d.barra, linha: d.linha }));
+  const MES = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
+  const porMes = ord.length > 93;
+  const grupos = new Map<string, PontoGrafico>();
+  for (const d of ord) {
+    let chave: string, rotulo: string;
+    if (porMes) {
+      chave = d.date.slice(0, 7);
+      rotulo = `${MES[Number(d.date.slice(5, 7)) - 1]}/${d.date.slice(2, 4)}`;
+    } else {
+      // Semana começando na segunda (UTC — a data é só um rótulo de calendário).
+      const t = new Date(d.date.slice(0, 10) + 'T00:00:00Z');
+      t.setUTCDate(t.getUTCDate() - ((t.getUTCDay() + 6) % 7));
+      chave = t.toISOString().slice(0, 10);
+      rotulo = dm(chave);
+    }
+    const g = grupos.get(chave) ?? { rotulo, barra: 0, linha: 0 };
+    g.barra += d.barra; g.linha += d.linha;
+    grupos.set(chave, g);
+  }
+  return [...grupos.values()];
+}
+
+function graficoBarrasLinha(pontos: PontoGrafico[], o: {
+  w: number; h: number; corBarra: string; corLinha: string;
+  fmtBarra: (n: number) => string; fmtLinha: (n: number) => string;
+}): string {
+  const n = pontos.length;
+  if (n === 0) return '';
+  const pl = 62, pr = 40, pt = 14, pb = 26;
+  const iw = o.w - pl - pr, ih = o.h - pt - pb;
+  const maxB = Math.max(...pontos.map(p => p.barra), 0) || 1;
+  const maxL = Math.max(...pontos.map(p => p.linha), 0) || 1;
+  const passo = iw / n;
+  const lb = Math.max(3, Math.min(34, passo * 0.62));
+  const xc = (i: number) => pl + passo * i + passo / 2;
+  const yB = (v: number) => pt + ih - (v / maxB) * ih;
+  const yL = (v: number) => pt + ih - (v / maxL) * ih;
+  const grade = [0, 0.5, 1].map(f => {
+    const y = pt + ih - f * ih;
+    return `<line x1="${pl}" y1="${y.toFixed(1)}" x2="${o.w - pr}" y2="${y.toFixed(1)}" stroke="#E7ECF3" stroke-width="1"></line>
+      <text x="${pl - 8}" y="${(y + 4).toFixed(1)}" text-anchor="end" font-family="Inter, Arial, sans-serif" font-size="11" font-weight="600" fill="${MUTED}">${o.fmtBarra(maxB * f)}</text>
+      <text x="${o.w - pr + 8}" y="${(y + 4).toFixed(1)}" text-anchor="start" font-family="Inter, Arial, sans-serif" font-size="11" font-weight="700" fill="${o.corLinha}">${o.fmtLinha(maxL * f)}</text>`;
+  }).join('');
+  const barras = pontos.map((p, i) => {
+    const y = yB(p.barra);
+    return `<rect x="${(xc(i) - lb / 2).toFixed(1)}" y="${y.toFixed(1)}" width="${lb.toFixed(1)}" height="${Math.max(0, pt + ih - y).toFixed(1)}" rx="2" fill="${o.corBarra}" opacity="0.32"></rect>`;
+  }).join('');
+  const linha = pontos.map((p, i) => `${xc(i).toFixed(1)},${yL(p.linha).toFixed(1)}`).join(' ');
+  const marcas = pontos.map((p, i) => `<circle cx="${xc(i).toFixed(1)}" cy="${yL(p.linha).toFixed(1)}" r="${n > 45 ? 1.6 : 3}" fill="${o.corLinha}"></circle>`).join('');
+  // ~8 rótulos no eixo, sempre com o primeiro e o último.
+  const cada = Math.max(1, Math.ceil(n / 8));
+  const rotulos = pontos.map((p, i) => (i % cada === 0 || i === n - 1) && !(i !== n - 1 && n - 1 - i < cada / 2)
+    ? `<text x="${xc(i).toFixed(1)}" y="${o.h - 7}" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="11" font-weight="600" fill="${MUTED}">${p.rotulo}</text>` : '').join('');
+  return `<svg width="${o.w}" height="${o.h}" viewBox="0 0 ${o.w} ${o.h}">${grade}${barras}<polyline points="${linha}" fill="none" stroke="${o.corLinha}" stroke-width="2.6" stroke-linejoin="round" stroke-linecap="round"></polyline>${marcas}${rotulos}</svg>`;
+}
+
+const legendaGrafico = (cor: string, nome: string, valor: string, linha = false) =>
+  `<span style="display:inline-flex;align-items:center;gap:8px;font-family:${INTER};font-size:13px;font-weight:600;color:#163461;white-space:nowrap"><i style="display:block;width:${linha ? 18 : 12}px;height:${linha ? 3 : 12}px;border-radius:${linha ? 2 : 3}px;background:${cor};opacity:${linha ? 1 : 0.4}"></i>${nome} <b style="color:${FG};font-weight:900">${valor}</b></span>`;
+
 // ── Funil comercial e canais (CRM) ────────────────────────────────────────────
 // Páginas do relatório de performance que espelham dois painéis da dashboard:
 // o Funil de Performance e os donuts de Leads/Faturamento por canal. Os NÚMEROS
@@ -2610,6 +2690,188 @@ export function sCanais(
     ${leituraCrm([p1, p2, p3])}`;
 
   return molduraCrm('Canais', `De onde vieram os leads e o faturamento de ${dados.periodo}`, corpo, 'sCanais');
+}
+
+// ── Site / landing page (GA4) ─────────────────────────────────────────────────
+// Duas páginas com o melhor do painel "Landing page" da dashboard. Os dados chegam
+// prontos da MESMA rota (/api/clients/[id]/ga4) — aqui só se desenha.
+
+const DIAS_SEMANA_GA4 = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+const DIAS_SEMANA_LONGO = ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado'];
+
+function tempoMedio(segundos: number): string {
+  const s = Math.max(0, Math.round(segundos));
+  return s >= 60 ? `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s` : `${s}s`;
+}
+
+function cardSite(titulo: string, corpo: string, sub = ''): string {
+  return `<div style="background:${CARD};border:1px solid #E7ECF3;border-radius:18px;box-shadow:0 12px 30px rgba(15,23,42,.06);padding:16px 22px;min-width:0;display:flex;flex-direction:column">
+    <div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:8px">
+      <p style="font-family:${INTER};font-size:17px;font-weight:900;color:${FG};margin:0;white-space:nowrap">${titulo}</p>
+      ${sub ? `<p style="font-family:${INTER};font-size:12px;font-weight:600;color:${MUTED};margin:0;white-space:nowrap">${sub}</p>` : ''}
+    </div>
+    ${corpo}
+  </div>`;
+}
+
+/** Linha de ranking: nome · valor · % com barra, e uma sublinha de contatos. */
+function linhaSite(nome: string, valor: string, pct: number, largura: number, cor: string, sub = ''): string {
+  return `<div style="padding:4px 0">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:4px">
+      <span style="font-family:${INTER};font-size:14px;font-weight:700;color:${FG};white-space:nowrap">${nome}</span>
+      <span style="font-family:${INTER};font-size:14px;font-weight:800;color:${FG};white-space:nowrap">${valor} <span style="font-weight:600;color:${MUTED}">· ${pctBR(pct)}</span></span>
+    </div>
+    <div style="height:6px;background:${ROW};border-radius:3px"><div style="height:6px;border-radius:3px;background:${cor};width:${Math.max(1.5, Math.min(100, largura)).toFixed(1)}%"></div></div>
+    ${sub ? `<p style="font-family:${INTER};font-size:11.5px;font-weight:500;color:${MUTED};margin:3px 0 0;white-space:nowrap">${sub}</p>` : ''}
+  </div>`;
+}
+
+const cortaTexto = (t: string, max: number) => (Array.from(t).length > max ? `${Array.from(t).slice(0, max - 1).join('')}…` : t);
+
+export function sSiteResumo(
+  g: Ga4Consolidado,
+  o: { periodo: string; prevPeriodo: string; comparar: boolean },
+  idx: number, total: number,
+): string {
+  void idx; void total;
+  const a = g.atual, p = g.anterior;
+  const taxaEng = a.sessoes > 0 ? (a.engajadas / a.sessoes) * 100 : 0;
+  const taxaEngAnt = p.sessoes > 0 ? (p.engajadas / p.sessoes) * 100 : 0;
+  const taxaContato = a.sessoes > 0 ? (a.contatos / a.sessoes) * 100 : 0;
+  const taxaContatoAnt = p.sessoes > 0 ? (p.contatos / p.sessoes) * 100 : 0;
+  const tAtual = a.sessoes > 0 ? a.tempo / a.sessoes : 0;
+  const tAnt = p.sessoes > 0 ? p.tempo / p.sessoes : 0;
+  const mesAnt = o.prevPeriodo.split('/')[0];
+
+  const kpi = (rotulo: string, valor: string, atual: number, anterior: number) => {
+    const d = o.comparar ? deltaInfo(atual, anterior) : { label: '', up: true, hasData: false };
+    return `<div style="background:${CARD};border:1px solid #E7ECF3;border-radius:16px;box-shadow:0 10px 26px rgba(15,23,42,.06);padding:12px 16px;min-width:0">
+      <p style="font-family:${INTER};font-size:13px;font-weight:600;color:#163461;margin:0 0 7px;white-space:nowrap">${rotulo}</p>
+      <p style="font-family:${INTER};font-size:28px;font-weight:900;letter-spacing:-0.03em;color:${FG};line-height:1;margin:0 0 7px;white-space:nowrap">${valor}</p>
+      <p style="font-family:${INTER};font-size:12px;font-weight:700;color:${d.hasData ? (d.up ? PRIMARY_TEXT : BLUE) : MUTED};margin:0;white-space:nowrap">${d.hasData ? `${d.label} ${d.up ? '↑' : '↓'} vs ${mesAnt || 'anterior'}` : '&nbsp;'}</p>
+    </div>`;
+  };
+
+  const serie = agruparSerieDiaria(g.diario.map(d => ({ date: d.date, barra: d.sessoes, linha: d.contatos })));
+  const escala = g.diario.length <= 31 ? 'por dia' : g.diario.length > 93 ? 'por mês' : 'por semana';
+  const dec1 = (v: number) => (Number.isInteger(v) ? num(v) : v.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 }));
+  const grafico = serie.length >= 2
+    ? cardSite(`Visitas e contatos ${escala}`, `<div style="display:flex;gap:22px;margin:-2px 0 4px">
+        ${legendaGrafico(BLUE, 'Visitas', num(a.sessoes))}${legendaGrafico(PRIMARY_TEXT, 'Contatos', num(a.contatos), true)}
+      </div>${graficoBarrasLinha(serie, { w: 772, h: 212, corBarra: BLUE, corLinha: PRIMARY_TEXT, fmtBarra: (v) => num(Math.round(v)), fmtLinha: dec1 })}`)
+    : '';
+
+  const contar = seletorContatos(g.pago.canais);
+  const canais = g.pago.canais.filter(c => c.sessoes > 0).slice(0, 5);
+  const maior = Math.max(...canais.map(c => c.sessoes), 1);
+  const linhasCanais = canais.map(c => {
+    const cont = contar(c);
+    return linhaSite(
+      escapeHtmlAttr(cortaTexto(ROTULOS_CANAL_GA4[c.valor] ?? c.valor, 30)), num(c.sessoes),
+      a.sessoes > 0 ? (c.sessoes / a.sessoes) * 100 : 0, (c.sessoes / maior) * 100, BLUE,
+      cont > 0 ? `${num(cont)} ${cont === 1 ? 'contato' : 'contatos'} · ${pctBR((cont / c.sessoes) * 100)} das visitas` : 'sem contato no período',
+    );
+  }).join('');
+  const origens = cardSite('De onde vieram as visitas', linhasCanais || `<p style="font-family:${INTER};font-size:14px;color:${MUTED}">Sem origem registrada no período.</p>`);
+
+  const partes = [a.whatsapp > 0 ? `${num(a.whatsapp)} pelo WhatsApp` : '', a.leadForm > 0 ? `${num(a.leadForm)} por formulário` : '', a.telefone > 0 ? `${num(a.telefone)} por telefone` : ''].filter(Boolean);
+  const dSess = o.comparar ? deltaInfo(a.sessoes, p.sessoes) : null;
+  const p1 = `O site recebeu ${num(a.sessoes)} visitas de ${num(a.usuarios)} pessoas${dSess?.hasData ? ` (${dSess.label} vs ${mesAnt})` : ''} e gerou ${num(a.contatos)} ${a.contatos === 1 ? 'contato' : 'contatos'}${partes.length ? ` — ${partes.join(', ')}` : ''}. ${pctBR(taxaContato)} das visitas viraram contato.`;
+  const melhorCanal = [...canais].filter(c => contar(c) > 0).sort((x, y) => contar(y) - contar(x))[0];
+  const p2 = melhorCanal
+    ? `${escapeHtmlAttr(ROTULOS_CANAL_GA4[melhorCanal.valor] ?? melhorCanal.valor)} foi a origem que mais gerou contato: ${num(contar(melhorCanal))} em ${num(melhorCanal.sessoes)} visitas (${pctBR((contar(melhorCanal) / melhorCanal.sessoes) * 100)}).`
+    : '';
+
+  const corpo = `<div style="display:grid;grid-template-columns:repeat(6,1fr);gap:14px;margin-bottom:14px">
+      ${kpi('Visitas (sessões)', num(a.sessoes), a.sessoes, p.sessoes)}
+      ${kpi('Pessoas', num(a.usuarios), a.usuarios, p.usuarios)}
+      ${kpi('Taxa de engajamento', pctBR(taxaEng), taxaEng, taxaEngAnt)}
+      ${kpi('Tempo médio', tempoMedio(tAtual), tAtual, tAnt)}
+      ${kpi('Contatos', num(a.contatos), a.contatos, p.contatos)}
+      ${kpi('Taxa de contato', pctBR(taxaContato), taxaContato, taxaContatoAnt)}
+    </div>
+    <div style="display:grid;grid-template-columns:${grafico ? '816px 1fr' : '1fr'};gap:16px;align-items:stretch">
+      ${grafico}${origens}
+    </div>
+    ${leituraCrm([p1, p2])}`;
+  return molduraCrm('Site e landing pages', `O que aconteceu no site em ${o.periodo} — Google Analytics`, corpo, 'sSiteResumo');
+}
+
+export function sSiteAudiencia(g: Ga4Consolidado, o: { periodo: string }, idx: number, total: number): string {
+  void idx; void total;
+  const a = g.atual;
+  const aud = g.audiencia;
+
+  // Cortes de audiência: participação nas visitas + taxa de contato de cada um.
+  const blocoCorte = (linhas: Ga4Seg[], rotulos: Record<string, string>, cor: string) => {
+    const contar = seletorContatos(linhas);
+    const tot = linhas.reduce((s, l) => s + l.sessoes, 0) || 1;
+    const maior = Math.max(...linhas.map(l => l.sessoes), 1);
+    return linhas.filter(l => l.sessoes > 0).slice(0, 4).map(l => linhaSite(
+      escapeHtmlAttr(rotulos[l.valor] ?? l.valor), num(l.sessoes), (l.sessoes / tot) * 100, (l.sessoes / maior) * 100, cor,
+      `${num(contar(l))} ${contar(l) === 1 ? 'contato' : 'contatos'} · ${pctBR((contar(l) / l.sessoes) * 100)} das visitas`,
+    )).join('');
+  };
+  const dispositivos = aud.dispositivos.filter(d => d.sessoes > 0);
+  const novos = aud.novosRecorrentes.filter(d => d.sessoes > 0);
+
+  const tabela = (linhas: Ga4Seg[], max: number, larguraNome: number) => {
+    const contar = seletorContatos(linhas);
+    const cab = `<div style="display:grid;grid-template-columns:1fr 76px 76px 70px;gap:8px;padding:0 0 6px;border-bottom:1px solid ${ROW}">
+      ${['', 'Visitas', 'Contatos', 'Taxa'].map((c, i) => `<span style="font-family:${INTER};font-size:11px;font-weight:800;color:${MUTED};text-transform:uppercase;letter-spacing:.06em;text-align:${i ? 'right' : 'left'}">${c}</span>`).join('')}
+    </div>`;
+    return cab + linhas.filter(l => l.sessoes > 0).slice(0, max).map(l => `<div style="display:grid;grid-template-columns:1fr 76px 76px 70px;gap:8px;padding:5px 0;border-bottom:1px solid ${ROW};align-items:center">
+        <span style="font-family:${INTER};font-size:14px;font-weight:700;color:${FG};white-space:nowrap;overflow:hidden">${escapeHtmlAttr(cortaTexto(l.valor, larguraNome))}</span>
+        <span style="font-family:${INTER};font-size:14px;font-weight:800;color:${FG};text-align:right">${num(l.sessoes)}</span>
+        <span style="font-family:${INTER};font-size:14px;font-weight:800;color:${contar(l) > 0 ? PRIMARY_TEXT : MUTED};text-align:right">${num(contar(l))}</span>
+        <span style="font-family:${INTER};font-size:13px;font-weight:700;color:${MUTED};text-align:right">${l.sessoes > 0 ? pctBR((contar(l) / l.sessoes) * 100) : '—'}</span>
+      </div>`).join('');
+  };
+
+  // Mapa dia × hora: cor = volume de visitas (fuso da propriedade GA4).
+  const celulas = aud.semanaHora;
+  const maxCel = Math.max(...celulas.map(c => c.sessoes), 1);
+  const cel = (dia: number, hora: number) => celulas.find(c => c.dia === dia && c.hora === hora)?.sessoes ?? 0;
+  const ordemDias = [1, 2, 3, 4, 5, 6, 0];
+  const mapa = celulas.length
+    ? `<div style="display:grid;grid-template-columns:34px repeat(24,1fr);gap:2px;align-items:center">
+        ${ordemDias.map(d => `<span style="font-family:${INTER};font-size:11px;font-weight:700;color:${MUTED}">${DIAS_SEMANA_GA4[d]}</span>${Array.from({ length: 24 }, (_, h) => {
+          const v = cel(d, h);
+          return `<i style="display:block;height:15px;border-radius:3px;background:${v > 0 ? BLUE : ROW};opacity:${v > 0 ? (0.14 + 0.86 * (v / maxCel)).toFixed(2) : 1}"></i>`;
+        }).join('')}`).join('')}
+        <span></span>${Array.from({ length: 24 }, (_, h) => `<span style="font-family:${INTER};font-size:10px;font-weight:600;color:${MUTED};text-align:center">${h % 3 === 0 ? `${h}h` : ''}</span>`).join('')}
+      </div>`
+    : '';
+  const pico = celulas.length ? celulas.reduce((x, y) => (y.sessoes > x.sessoes ? y : x)) : null;
+
+  const cartoes = [
+    dispositivos.length ? cardSite('Dispositivos', blocoCorte(dispositivos, ROTULOS_DISPOSITIVO_GA4, BLUE)) : '',
+    novos.length ? cardSite('Novos × recorrentes', blocoCorte(novos, { new: 'Novos visitantes', returning: 'Recorrentes' }, '#8b5cf6')) : '',
+    aud.cidades.some(c => c.sessoes > 0) ? cardSite('Principais cidades', tabela(aud.cidades.filter(c => c.valor && c.valor !== '(not set)'), 5, 22)) : '',
+  ].filter(Boolean);
+  const linha2 = [
+    g.comportamento.paginasEntrada.some(c => c.sessoes > 0) ? cardSite('Páginas de entrada', tabela(g.comportamento.paginasEntrada, 5, 40), 'por onde a visita começou') : '',
+    mapa ? cardSite('Horários de maior movimento', mapa, pico ? `pico: ${DIAS_SEMANA_LONGO[pico.dia]}, ${pico.hora}h` : '') : '',
+  ].filter(Boolean);
+
+  // Leitura: o corte que MAIS converte (com base mínima), não o de maior volume.
+  const contarDisp = seletorContatos(dispositivos);
+  const taxa = (l: Ga4Seg, c: (s: Ga4Seg) => number) => (l.sessoes > 0 ? (c(l) / l.sessoes) * 100 : 0);
+  const dispOrd = dispositivos.filter(d => d.sessoes >= 30).sort((x, y) => taxa(y, contarDisp) - taxa(x, contarDisp));
+  const p1 = dispOrd.length >= 2 && taxa(dispOrd[0], contarDisp) > 0
+    ? `${escapeHtmlAttr(ROTULOS_DISPOSITIVO_GA4[dispOrd[0].valor] ?? dispOrd[0].valor)} converte melhor: ${pctBR(taxa(dispOrd[0], contarDisp))} das visitas viram contato, contra ${pctBR(taxa(dispOrd[dispOrd.length - 1], contarDisp))} no ${escapeHtmlAttr((ROTULOS_DISPOSITIVO_GA4[dispOrd[dispOrd.length - 1].valor] ?? dispOrd[dispOrd.length - 1].valor).toLocaleLowerCase('pt-BR'))}.`
+    : '';
+  const cidades = aud.cidades.filter(c => c.valor && c.valor !== '(not set)');
+  const contarCid = seletorContatos(cidades);
+  const cidadeTop = [...cidades].sort((x, y) => contarCid(y) - contarCid(x))[0];
+  const p2 = cidadeTop && contarCid(cidadeTop) > 0
+    ? `${escapeHtmlAttr(cidadeTop.valor)} foi a cidade que mais gerou contato (${num(contarCid(cidadeTop))})${pico ? `; o maior movimento no site é ${DIAS_SEMANA_LONGO[pico.dia]} por volta das ${pico.hora}h` : ''}.`
+    : (pico ? `O maior movimento no site é ${DIAS_SEMANA_LONGO[pico.dia]} por volta das ${pico.hora}h.` : '');
+
+  const corpo = `${cartoes.length ? `<div style="display:grid;grid-template-columns:repeat(${cartoes.length},1fr);gap:16px;margin-bottom:14px;align-items:stretch">${cartoes.join('')}</div>` : ''}
+    ${linha2.length ? `<div style="display:grid;grid-template-columns:repeat(${linha2.length},1fr);gap:16px;align-items:stretch">${linha2.join('')}</div>` : ''}
+    ${leituraCrm([p1, p2].filter(Boolean).length ? [p1, p2] : [`${num(a.sessoes)} visitas no período.`])}`;
+  return molduraCrm('Comportamento da audiência', `Quem visitou o site em ${o.periodo} e como navegou`, corpo, 'sSiteAudiencia');
 }
 
 function sPorDia(d: ParsedData, idx: number, total: number, periodo = 'Maio/2026'): string {
@@ -4596,42 +4858,21 @@ export function sGoogleAdsResumo(google: GoogleAdsFull, idx: number, total: numb
   const ctr = google.impressoes > 0 ? (google.cliques / google.impressoes) * 100 : 0;
   const cpc = google.cliques > 0 ? google.investimento / google.cliques : 0;
   const custoConversao = google.conversoes > 0 ? google.investimento / google.conversoes : 0;
-  const roasGeral = google.investimento > 0 ? (google.valorCompras ?? 0) / google.investimento : 0;
 
   const campaignsBy = (kinds: GoogleCampaignKind[]) => google.campanhas.filter(c => kinds.includes(categorizeGoogleCampaign(c)));
   const sum = (campaigns: CampanhaGoogleDetalhada[], selector: (c: CampanhaGoogleDetalhada) => number) =>
     campaigns.reduce((totalValue, campaign) => totalValue + selector(campaign), 0);
 
-  const awarenessCampaigns = campaignsBy(['alcance']);
-  const trafficCampaigns = campaignsBy(['trafego']);
-  const leadCampaigns = campaignsBy(['leads']);
   const salesCampaigns = campaignsBy(['vendas']);
-
-  const awarenessInvestment = sum(awarenessCampaigns, c => c.metricas.investimento);
-  const awarenessImpressions = sum(awarenessCampaigns, c => c.metricas.impressoes);
-  const awarenessCliques = sum(awarenessCampaigns, c => c.metricas.cliques);
-  const awarenessCpm = awarenessImpressions > 0 ? awarenessInvestment / (awarenessImpressions / 1000) : 0;
-
-  const trafficInvestment = sum(trafficCampaigns, c => c.metricas.investimento);
-  const trafficClicks = sum(trafficCampaigns, c => c.metricas.cliques);
-  const trafficImpressions = sum(trafficCampaigns, c => c.metricas.impressoes);
-  const trafficCpc = trafficClicks > 0 ? trafficInvestment / trafficClicks : 0;
-  const trafficCtr = trafficImpressions > 0 ? (trafficClicks / trafficImpressions) * 100 : 0;
-
-  const leadInvestment = sum(leadCampaigns, c => c.metricas.investimento);
-  const totalLeadConversoes = sum(leadCampaigns, c => c.metricas.conversoes);
-  const custoLead = totalLeadConversoes > 0 ? leadInvestment / totalLeadConversoes : 0;
 
   const salesInvestment = sum(salesCampaigns, c => c.metricas.investimento);
   const totalCompras = sum(salesCampaigns, c => c.metricas.compras ?? 0);
   const valorCompras = sum(salesCampaigns, c => c.metricas.valorCompras ?? 0);
-  const cpa = totalCompras > 0 ? salesInvestment / totalCompras : 0;
   const roas = salesInvestment > 0 ? valorCompras / salesInvestment : 0;
 
   const brlC = (n: number) => n > 0 ? n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : '—';
   const pctC = (n: number) => n > 0 ? `${n.toFixed(2).replace('.', ',')}%` : '—';
   const decC = (n: number) => n > 0 ? n.toFixed(2).replace('.', ',') : '—';
-  const countLabel = (count: number) => count === 1 ? '1 campanha' : `${count} campanhas`;
 
   const bigKpi = (label: string, value: string, ico: string) =>
     `<div style="background:${CARD};border:1px solid #E7ECF3;border-radius:16px;box-shadow:0 10px 26px rgba(15,23,42,.06);padding:14px 16px;display:flex;align-items:center;gap:12px;min-width:0">
@@ -4647,7 +4888,6 @@ export function sGoogleAdsResumo(google: GoogleAdsFull, idx: number, total: numb
   const ICO_MONEY  = '<line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>';
   const ICO_EYE    = '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>';
   const ICO_CURSOR = '<path d="m3 3 7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/><path d="m13 13 6 6"/>';
-  const ICO_CART   = '<circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/>';
   const ICO_TARGET = '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>';
   const ICO_PERCENT = '<path d="M19 5 5 19"/><circle cx="6.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="17.5" r="2.5"/>';
 
@@ -4661,65 +4901,39 @@ export function sGoogleAdsResumo(google: GoogleAdsFull, idx: number, total: numb
     bigKpi('Custo/conversão', brlC(custoConversao), ICO_MONEY),
   ];
 
-  const segmentLine = (label: string, value: string) =>
-    `<div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px;border-top:1px solid rgba(148,163,184,.18);padding-top:8px">
-      <span style="font-family:${INTER};font-size:11px;font-weight:700;color:${MUTED};line-height:1.15">${label}</span>
-      <span style="font-family:${INTER};font-size:16px;font-weight:900;color:${FG};line-height:1;text-align:right;white-space:nowrap">${value}</span>
-    </div>`;
 
-  const segmentCard = (
-    title: string, subtitle: string, icon: string, tint: string, accent: string, lines: Array<[string, string]>,
-  ) =>
-    `<div style="background:${tint};border:1px solid ${accent}33;border-radius:18px;box-shadow:0 10px 24px rgba(15,23,42,.05);padding:18px;min-width:0;display:flex;flex-direction:column;gap:12px">
-      <div style="display:flex;gap:12px;align-items:flex-start;min-height:52px">
-        <div style="width:42px;height:42px;border-radius:50%;background:#FFFFFFB8;display:flex;align-items:center;justify-content:center;flex-shrink:0">
-          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="${accent}" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${icon}</svg>
+  // ⚠️ A divisão em cards por "objetivo" (Pesquisa/tráfego × Geração de leads × Vendas)
+  // SAIU do resumo do Google: ela era deduzida do RESULTADO da campanha, não do objetivo
+  // — a mesma campanha de Pesquisa virava "tráfego" no mês sem conversão e "leads" no
+  // mês com. No lugar entra a evolução do período, que o resumo não mostrava.
+  const brl0 = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 0, maximumFractionDigits: 0 });
+  const dec1 = (v: number) => (Number.isInteger(v) ? num(v) : v.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 }));
+  const diasSerie = google.diario?.length ?? 0;
+  const serie = agruparSerieDiaria((google.diario ?? []).map(d => ({ date: d.date, barra: d.investimento, linha: d.conversoes })));
+  const escala = diasSerie <= 31 ? 'por dia' : diasSerie > 93 ? 'por mês' : 'por semana';
+  const melhor = serie.length ? serie.reduce((a, b) => (b.linha > a.linha ? b : a)) : null;
+  const chartCard = serie.length >= 2
+    ? `<div style="background:${CARD};border:1px solid #E7ECF3;border-radius:18px;box-shadow:0 10px 26px rgba(15,23,42,.06);padding:16px 22px 10px;flex-shrink:0">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:6px">
+          <p style="font-family:${INTER};font-size:17px;font-weight:900;color:${FG};margin:0">Investimento e conversões ${escala}</p>
+          <div style="display:flex;align-items:center;gap:22px">
+            ${legendaGrafico(GOOGLE_BLUE, 'Investimento', brlC(google.investimento))}
+            ${legendaGrafico(PRIMARY_TEXT, 'Conversões', numOrDash(google.conversoes), true)}
+          </div>
         </div>
-        <div style="min-width:0">
-          <p style="font-family:${INTER};font-size:15px;font-weight:900;color:${FG};margin:0 0 4px;line-height:1.1">${title}</p>
-          <p style="font-family:${INTER};font-size:11px;font-weight:700;color:#475569;margin:0;line-height:1.3">${subtitle}</p>
-        </div>
-      </div>
-      <div style="display:flex;flex-direction:column;gap:8px">
-        ${lines.map(([label, value]) => segmentLine(label, value)).join('')}
-      </div>
-    </div>`;
+        ${graficoBarrasLinha(serie, { w: 1296, h: 232, corBarra: GOOGLE_BLUE, corLinha: PRIMARY_TEXT, fmtBarra: brl0, fmtLinha: dec1 })}
+      </div>`
+    : '';
+  // Só a leitura de vendas ainda depende da classificação por campanha.
+  void valorCompras;
 
-  const hasSegmentData = (campaigns: CampanhaGoogleDetalhada[], values: number[]) =>
-    campaigns.length > 0 || values.some(value => value > 0);
-
-  const segmentCards = [
-    hasSegmentData(awarenessCampaigns, [awarenessInvestment, awarenessImpressions, awarenessCliques]) ? segmentCard('Display e vídeo', countLabel(awarenessCampaigns.length), ICO_TARGET, '#FFFDF2', '#B45309', [
-      ['Investimento', brlC(awarenessInvestment)],
-      ['Impressões', numOrDash(awarenessImpressions)],
-      ['CPM', brlC(awarenessCpm)],
-    ]) : '',
-    hasSegmentData(trafficCampaigns, [trafficInvestment, trafficClicks, trafficImpressions]) ? segmentCard('Pesquisa / tráfego', countLabel(trafficCampaigns.length), ICO_CURSOR, '#F4F8FF', GOOGLE_BLUE, [
-      ['Investimento', brlC(trafficInvestment)],
-      ['Cliques', numOrDash(trafficClicks)],
-      ['CPC / CTR', `${brlC(trafficCpc)} / ${pctC(trafficCtr)}`],
-    ]) : '',
-    hasSegmentData(leadCampaigns, [leadInvestment, totalLeadConversoes]) ? segmentCard('Geração de leads', countLabel(leadCampaigns.length), ICO_TARGET, '#F2FFFB', '#0F766E', [
-      ['Investimento', brlC(leadInvestment)],
-      ['Conversões', numOrDash(totalLeadConversoes)],
-      ['Custo por lead', brlC(custoLead)],
-    ]) : '',
-    hasSegmentData(salesCampaigns, [salesInvestment, totalCompras, valorCompras]) ? segmentCard('Vendas / Shopping', countLabel(salesCampaigns.length), ICO_CART, '#F7FFF4', PRIMARY_TEXT, [
-      ['Investimento', brlC(salesInvestment)],
-      ['Compras / CPA', `${numOrDash(totalCompras)} / ${brlC(cpa)}`],
-      ['Valor de venda', brlC(valorCompras)],
-      ['ROAS', decC(roas)],
-    ]) : '',
-  ].filter(Boolean);
-  const segmentGridColumns = Math.max(1, Math.min(segmentCards.length, 4));
-
-  const recommendation = roas >= 3
-    ? `As campanhas de Shopping/vendas apresentaram retorno positivo, com ROAS de ${decC(roas)}. Acompanhar escala mantendo controle de CPC e custo por conversão.`
+  const recommendation = totalCompras > 0 && roas >= 3
+    ? `As campanhas de vendas apresentaram retorno positivo, com ROAS de ${decC(roas)}. Acompanhar escala mantendo controle de CPC e custo por conversão.`
     : totalCompras > 0
-    ? `As campanhas de vendas geraram conversões, mas o ROAS de ${decC(roas)} pede atenção: acompanhar custo por conversão e valor médio antes de ampliar investimento.`
-    : totalLeadConversoes > 0
-    ? `As campanhas de geração de leads converteram no período. O próximo foco é qualificar esses contatos, acompanhando custo por lead e evolução para venda.`
-    : `${brlOrDash(google.investimento)} investidos com ${numOrDash(google.cliques)} cliques e ${numOrDash(google.conversoes)} conversões no período. Avaliar CTR, CPC e volume de conversões${roasGeral > 0 ? ` (ROAS geral ${decC(roasGeral)})` : ''} para orientar o próximo ciclo.`;
+    ? `As campanhas de vendas geraram ${numOrDash(totalCompras)} compras, mas o ROAS de ${decC(roas)} pede atenção: acompanhar custo por conversão e valor médio antes de ampliar investimento.`
+    : google.conversoes > 0
+    ? `O Google Ads gerou ${numOrDash(google.conversoes)} conversões no período, a ${brlC(custoConversao)} cada${melhor && melhor.linha > 0 ? ` — o melhor ${escala === 'por dia' ? 'dia' : escala === 'por mês' ? 'mês' : 'período'} foi ${melhor.rotulo}, com ${dec1(melhor.linha)}` : ''}. O próximo foco é qualificar esses contatos e acompanhar a evolução deles para venda.`
+    : `${brlOrDash(google.investimento)} investidos com ${numOrDash(google.cliques)} cliques e nenhuma conversão registrada no período. Avaliar CTR, CPC e a medição de conversões antes do próximo ciclo.`;
 
   const body = `<div style="width:1440px;min-height:810px;background:${BG};border:1px solid ${BORDER};margin:0 auto 20px;overflow:hidden;box-sizing:border-box;page-break-after:always;display:flex;flex-direction:column;position:relative">
   <div style="position:absolute;right:60px;top:-100px;width:560px;height:480px;border-radius:50%;background:linear-gradient(135deg,rgba(219,234,254,.55),rgba(255,255,255,.15));opacity:.7;pointer-events:none"></div>
@@ -4728,16 +4942,14 @@ export function sGoogleAdsResumo(google: GoogleAdsFull, idx: number, total: numb
 
     <div style="flex-shrink:0">
       <h1 style="font-family:${INTER};font-size:52px;font-weight:900;color:${FG};line-height:1.05;margin:0 0 8px;letter-spacing:-0.03em">${reportTitle('Resumo Google Ads')}</h1>
-      <p style="font-size:16px;font-weight:500;color:#163461;font-family:${INTER};margin:0">Métricas gerais e resultados separados por tipo de campanha</p>
+      <p style="font-size:16px;font-weight:500;color:#163461;font-family:${INTER};margin:0">Métricas gerais e evolução do período</p>
     </div>
 
     <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;flex-shrink:0">
       ${generalMetrics.join('')}
     </div>
 
-    <div style="display:grid;grid-template-columns:repeat(${segmentGridColumns},1fr);gap:14px;flex-shrink:0">
-      ${segmentCards.join('')}
-    </div>
+    ${chartCard}
 
     <div data-conclusion="1" style="background:${CARD};border:1px solid #E7ECF3;border-radius:18px;box-shadow:0 10px 26px rgba(15,23,42,.06);display:flex;align-items:flex-start;gap:16px;padding:20px 26px">
       <div style="width:40px;height:40px;border-radius:50%;background:${GOOGLE_BLUE}16;display:flex;align-items:center;justify-content:center;flex-shrink:0">

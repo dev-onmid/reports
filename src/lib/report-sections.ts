@@ -41,6 +41,8 @@ export const REPORT_SECTIONS: Record<ReportTemplateKey, ReportSectionDef[]> = {
     { key: 'google_resumo',    label: 'Google Ads — resumo',      desc: 'Investimento, cliques e conversões' },
     { key: 'google_campanhas', label: 'Google Ads — campanhas',   desc: 'Cards por campanha' },
     { key: 'google_keywords',  label: 'Google Ads — palavras-chave', desc: 'Top palavras-chave compradas' },
+    { key: 'site_resumo',      label: 'Site / landing pages',     desc: 'Visitas, contatos e origem (Google Analytics)' },
+    { key: 'site_audiencia',   label: 'Comportamento da audiência', desc: 'Dispositivos, cidades, páginas de entrada e horários' },
     ...CONTEUDO_SECTIONS,
   ],
   delivery: [

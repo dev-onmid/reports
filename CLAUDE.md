@@ -39,6 +39,22 @@ resultados (1 Não atendeu · 2 Caixa postal · 3 Número errado · 4 Atendeu; L
   demais tabelas as rotas criam sozinhas (`GET /api/crm?clientId=…` cria o `crm_leads`
   completo). Turbopack recusa `node_modules` em symlink — `npm ci` no worktree.
 
+## Relatório — Google sem "objetivo" inventado + páginas de Site e Audiência (2026-10-05)
+
+Print do Matheus (resumo do Google, já sem o card falso de vendas): "Pesquisa / tráfego · 1 campanha" ao lado de "Geração de leads · 2 campanhas". "Não faz sentido, é tudo o mesmo objetivo, a campanha de search foi com objetivo de gerar lead. Pode remover isso dos relatórios, e o resumo do Google ter algum gráfico." E: "existem agora informações de site/landing page, comportamento da audiência — as melhores deveriam estar no relatório."
+
+- **A divisão por "objetivo" do Google era deduzida do RESULTADO, não do objetivo**: a mesma campanha de Pesquisa era "tráfego" no mês sem conversão e "leads" no mês com. `categorizeGoogleCampaign` não devolve mais `'trafego'` (Pesquisa/PMax = leads; Shopping/compra real = vendas; Display/Vídeo = alcance) e **os cards por objetivo SAÍRAM do `sGoogleAdsResumo`**. ⚠️ O resumo da META continua com cards por objetivo — lá o objetivo é o da própria campanha, não uma dedução.
+- **No lugar entrou o gráfico** "Investimento e conversões por dia" (`graficoBarrasLinha`, SVG puro: barras numa escala, linha na outra). `fetchGoogleAdsDetailed` ganhou a série diária (`diario`), das MESMAS campanhas ENABLED do total — a soma dos dias fecha com os KPIs do topo (conferido: R$ 1.150,77 / 50). `agruparSerieDiaria`: até 31 dias por dia, até ~3 meses por semana, acima por mês — relatório de 1 ano com 365 barras não se lê.
+- **Páginas novas, do GA4** (catálogo `site_resumo` e `site_audiencia`; entram depois do Google e antes do Instagram):
+  - **Site e landing pages**: visitas, pessoas, taxa de engajamento, tempo médio, contatos e taxa de contato (com variação), gráfico visitas × contatos e "de onde vieram as visitas" (canais traduzidos, com contatos por canal).
+  - **Comportamento da audiência**: dispositivos, novos × recorrentes, principais cidades, páginas de entrada e o mapa dia × hora com o pico.
+- **Dados pela MESMA rota da dashboard** (`/api/clients/[id]/ga4`, HTTP interno em `fetchSiteDoRelatorio`) — soma as propriedades vinculadas ao cliente. Sem propriedade/conexão/token, a rota devolve `null` e as páginas somem.
+- **⚠️ Vocabulário compartilhado foi para `ga4-landing.ts`**: `ROTULOS_CANAL_GA4`, `ROTULOS_DISPOSITIVO_GA4`, `contatosDoSeg`, `seletorContatos` (contatos = WhatsApp + formulário + telefone; sem tipo classificável, todos os eventos-chave). O painel da dashboard passou a IMPORTAR de lá em vez de ter a própria cópia — é o que impede "72 contatos" na tela e "73 conversões" no PDF.
+- ⚠️ O comparativo do GA4 é sempre a janela anterior AUTOMÁTICA da rota: com período de comparação escolhido à mão (ou "não comparar"), as variações das páginas de site ficam de fora em vez de comparar com a janela errada.
+- ⚠️ A leitura de audiência aponta o corte que mais CONVERTE (com base mínima de 30 visitas), não o de maior volume — na Cinfel: computador 13,2% contra 3,7% no celular.
+- ✅ Verificado: `buildOmniReport` real na produção para a Cinfel (setembro) → **20 páginas** na ordem certa, com as duas de site, o gráfico do Google e sem "Vendas / Shopping" nem "Pesquisa / tráfego"; `sections` desligando as páginas novas; 102 asserts (fixture REAL do GA4 da Cinfel em `scratchpad/fixtures/`); as 5 páginas renderizadas em 810px sem texto estourando card; tsc + `next build` + eslint sem erro novo.
+- ⚠️ Não entraram (dado existe no GA4 da Cinfel): peças/veículos mais pedidos, seções vistas, rolagem, campanhas na página com custo por contato e palavras-chave do GA4. Idade e gênero vêm vazios nessa propriedade.
+
 ## Relatório — "Vendas / Shopping" no Google era invenção do valor padrão (2026-10-05)
 
 Print do Matheus (Cinfel): card "Vendas / Shopping · 2 campanhas · 50 compras · Valor de venda R$ 50,00 · ROAS 0,06". "É mentira, de onde tirou isso? Não temos nenhum cliente com esse objetivo no Google Ads." Estava certo.

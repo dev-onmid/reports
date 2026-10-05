@@ -3,7 +3,8 @@
 //   npx esbuild scratchpad/entry-relatorio-crm.ts --bundle --format=esm --platform=node \
 //     --packages=external --tsconfig=tsconfig.json --outfile=scratchpad/build/relatorio-crm.mjs
 import assert from 'node:assert/strict';
-import { ehMesCheio, degrausDoFunil, sFunilComercial, sCanais, sVisaoGeral, sInstagram, sInstagramCalendar, sGoogleAdsResumo, sGoogleAdsCampanhas, sPaidTrafficResumo, categorizeGoogleCampaign, comprasReaisGoogle, ganhoNoPeriodo, serieDaResposta, CRM_PERIODO_SQL } from './build/relatorio-crm.mjs';
+import { readFileSync } from 'node:fs';
+import { ehMesCheio, degrausDoFunil, sFunilComercial, sCanais, sVisaoGeral, sInstagram, sInstagramCalendar, sGoogleAdsResumo, sGoogleAdsCampanhas, sPaidTrafficResumo, sSiteResumo, sSiteAudiencia, agruparSerieDiaria, seletorContatos, categorizeGoogleCampaign, comprasReaisGoogle, ganhoNoPeriodo, serieDaResposta, CRM_PERIODO_SQL } from './build/relatorio-crm.mjs';
 
 let n = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); n++; };
@@ -129,7 +130,7 @@ ok(cardDe({ followers_period: 180 }).includes('+180 no período'), 'dado antigo 
 // classificava campanha de lead como venda em 14 de 17 clientes.
 const gc = (tipo, conv, valor, compras = 0, valorCompras = 0, inv = 500) => ({ nome: 'c', tipo, metricas: { investimento: inv, impressoes: 1000, cliques: 100, conversoes: conv, valorConversoes: valor, compras, valorCompras } });
 ok(categorizeGoogleCampaign(gc('SEARCH', 39.5, 39.5)) === 'leads', 'lead com valor padrão (R$1/conv) NÃO é venda');
-ok(categorizeGoogleCampaign(gc('SEARCH', 0, 0)) === 'trafego', 'sem conversão → tráfego');
+ok(categorizeGoogleCampaign(gc('SEARCH', 0, 0)) === 'leads', 'Pesquisa sem conversão no mês continua sendo campanha de lead (não existe "tráfego" no Google)');
 ok(categorizeGoogleCampaign(gc('PERFORMANCE_MAX', 20, 20)) === 'leads', 'PMax de lead → leads');
 ok(categorizeGoogleCampaign(gc('SHOPPING', 0, 0)) === 'vendas', 'Shopping é venda por definição');
 ok(categorizeGoogleCampaign(gc('SEARCH', 30, 9000, 30, 9000)) === 'vendas', 'compra com valor real → venda');
@@ -144,14 +145,51 @@ const gLeads = { investimento: 1150.77, impressoes: 4817, cliques: 627, converso
   campanhas: [gc('SEARCH', 10.5, 10.5, 0, 0, 611.59), gc('SEARCH', 39.5, 39.5, 0, 0, 279.29), gc('SEARCH', 0, 0, 0, 0, 259.89)] };
 const resumoG = sGoogleAdsResumo(gLeads, 8, 18);
 ok(!resumoG.includes('Vendas / Shopping') && !/ROAS/.test(resumoG), 'Cinfel: sem card de vendas e sem ROAS');
-ok(resumoG.includes('Geração de leads') && resumoG.includes('2 campanhas') && resumoG.includes('17,82'), 'vira Geração de leads: 2 campanhas, custo por lead R$ 17,82');
+ok(!resumoG.includes('Pesquisa / tráfego') && !resumoG.includes('Geração de leads'), 'resumo do Google sem cards por "objetivo"');
+ok(resumoG.includes('23,02'), 'custo por conversão geral continua no topo');
 ok(!/ROAS|Valor de venda|Compras/.test(sGoogleAdsCampanhas(gLeads, 9, 18, 'Setembro/2026')), 'cards por campanha sem ROAS/compras');
 ok(!/receita atribuída/.test(sPaidTrafficResumo(null, gLeads, 4, 18)), 'resumo de tráfego não trata valor padrão como receita');
 const gVenda = { ...gLeads, compras: 30, valorCompras: 9000, campanhas: [gc('SEARCH', 30, 9000, 30, 9000, 1000)] };
-ok(sGoogleAdsResumo(gVenda, 8, 18).includes('Vendas / Shopping') && sGoogleAdsResumo(gVenda, 8, 18).includes('9,00'), 'venda real continua aparecendo, com ROAS');
+ok(/ROAS de 9,00/.test(sGoogleAdsResumo(gVenda, 8, 18)), 'venda real continua na leitura, com ROAS');
 
 // ── Calendário: aviso de post arquivado ──
 const cal = sInstagramCalendar([], 12, 18, new Date(2026, 8, 1));
 ok(cal.includes('Publicações arquivadas somem da contagem'), 'aviso presente no calendário');
+
+// ── Gráfico: agrupamento da série diária ──
+const dias = (n, ini = '2026-01-01') => Array.from({ length: n }, (_, i) => { const d = new Date(ini + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + i); return { date: d.toISOString().slice(0, 10), barra: 10, linha: 1 }; });
+ok(agruparSerieDiaria(dias(30)).length === 30 && agruparSerieDiaria(dias(30))[0].rotulo === '01/01', 'até 31 dias: um ponto por dia');
+const porSemana = agruparSerieDiaria(dias(60));
+ok(porSemana.length >= 9 && porSemana.length <= 10, '60 dias: por semana');
+ok(porSemana.reduce((t, p) => t + p.barra, 0) === 600 && porSemana.reduce((t, p) => t + p.linha, 0) === 60, 'agrupar por semana não perde valor');
+const porMes = agruparSerieDiaria(dias(273));
+ok(porMes.length === 9 && porMes[0].rotulo === 'jan/26' && porMes[8].rotulo === 'set/26', '9 meses: por mês, rótulo mmm/aa');
+ok(porMes.reduce((t, p) => t + p.barra, 0) === 2730, 'agrupar por mês não perde valor');
+ok(agruparSerieDiaria([{ date: 'lixo', barra: 1, linha: 1 }]).length === 0, 'data inválida fica de fora');
+const gDia = { ...gLeads, diario: dias(30, '2026-09-01').map((d, i) => ({ date: d.date, investimento: 30 + i, cliques: 20, conversoes: i % 3 })) };
+const comGrafico = sGoogleAdsResumo(gDia, 8, 18);
+ok(comGrafico.includes('<polyline') && comGrafico.includes('Investimento e conversões por dia'), 'resumo do Google ganha o gráfico diário');
+ok(!sGoogleAdsResumo(gLeads, 8, 18).includes('<polyline'), 'sem série diária, sem gráfico (e sem quebrar)');
+ok(!/NaN|Infinity|undefined/.test(comGrafico), 'gráfico sem NaN/Infinity/undefined');
+
+// ── Site / landing page (GA4) — fixture REAL da Cinfel, set/2026 ──
+const ga4 = JSON.parse(readFileSync(new URL('./fixtures/ga4-cinfel-2026-09.json', import.meta.url), 'utf8')).ga4;
+const site = sSiteResumo(ga4, { periodo: 'Setembro/2026', prevPeriodo: 'Agosto/2026', comparar: true }, 11, 20);
+ok(site.includes('>1.910<') && site.includes('>141<'), 'visitas e contatos do GA4');
+ok(site.includes('7,4%') && site.includes('65,0%') && site.includes('1m 02s'), 'taxa de contato, engajamento e tempo médio');
+ok(site.includes('+14,3% ↑ vs Agosto'), 'variação contra o período anterior');
+ok(site.includes('Pesquisa paga') && site.includes('Busca orgânica') && !site.includes('Paid Search'), 'canais traduzidos');
+ok(site.includes('72 contatos'), 'contatos por canal = WhatsApp + formulário + telefone (a régua da dashboard)');
+ok(!sSiteResumo(ga4, { periodo: 'Setembro/2026', prevPeriodo: '', comparar: false }, 11, 20).includes('↑ vs'), 'sem comparativo, sem variação');
+const audi = sSiteAudiencia(ga4, { periodo: 'Setembro/2026' }, 12, 20);
+ok(audi.includes('Celular') && audi.includes('Computador') && audi.includes('Novos visitantes'), 'dispositivos e novos × recorrentes');
+ok(audi.includes('Sao Paulo') && audi.includes('/pecasoffroad'), 'cidades e páginas de entrada');
+ok(/Computador converte melhor: 13,2%/.test(audi), 'leitura aponta o dispositivo que mais converte');
+ok(audi.includes('pico: terça, 17h'), 'pico de movimento');
+ok(!/NaN|Infinity|undefined/.test(site + audi), 'páginas de site sem NaN/Infinity/undefined');
+const semTipo = [{ valor: 'a', sessoes: 10, engajadas: 5, tempo: 1, conversoes: 4, sessoesConv: 3, whatsapp: 0, formulario: 0, telefone: 0 }];
+ok(seletorContatos(semTipo)(semTipo[0]) === 4, 'sem tipo classificável, contatos = eventos-chave');
+const vazio = { ...ga4, diario: [], pago: { ...ga4.pago, canais: [] }, audiencia: { dispositivos: [], cidades: [], novosRecorrentes: [], idades: [], generos: [], semanaHora: [] }, comportamento: { ...ga4.comportamento, paginasEntrada: [] } };
+ok(sSiteResumo(vazio, { periodo: 'X', prevPeriodo: '', comparar: false }, 1, 2).includes('Sem origem registrada') && sSiteAudiencia(vazio, { periodo: 'X' }, 1, 2).length > 500, 'GA4 sem cortes não quebra as páginas');
 
 console.log(`OK — ${n} asserts`);

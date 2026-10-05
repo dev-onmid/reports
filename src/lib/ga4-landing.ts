@@ -363,6 +363,27 @@ function somaCelulas(listas: Ga4Celula[][]): Ga4Celula[] {
   return [...m.values()];
 }
 
+// ── Vocabulário compartilhado (dashboard e relatório) ─────────────────────────
+/** Tradução dos grupos de canal padrão do GA4. */
+export const ROTULOS_CANAL_GA4: Record<string, string> = {
+  'Paid Search': 'Pesquisa paga', 'Paid Social': 'Social pago', 'Paid Other': 'Outros pagos', 'Paid Shopping': 'Shopping pago', 'Paid Video': 'Vídeo pago',
+  'Cross-network': 'Performance Max / rede cruzada', 'Display': 'Display', 'Organic Search': 'Busca orgânica', 'Organic Social': 'Social orgânico',
+  'Organic Shopping': 'Shopping orgânico', 'Organic Video': 'Vídeo orgânico', 'Direct': 'Direto', 'Referral': 'Outros sites', 'Email': 'E-mail',
+  'SMS': 'SMS', 'AI Assistant': 'Assistentes de IA (ChatGPT etc.)', 'Unassigned': 'Não identificado', '(other)': 'Outros',
+};
+export const ROTULOS_DISPOSITIVO_GA4: Record<string, string> = { mobile: 'Celular', desktop: 'Computador', tablet: 'Tablet', 'smart tv': 'TV' };
+
+/** Contatos de um corte: WhatsApp + formulário + telefone. */
+export const contatosDoSeg = (s: Ga4Seg) => s.whatsapp + s.formulario + s.telefone;
+/**
+ * Como contar "contatos" numa lista de cortes: pelos tipos classificados quando a
+ * propriedade os tem; sem nenhum, todos os eventos-chave (`conversoes`).
+ */
+export function seletorContatos(linhas: Ga4Seg[]): (s: Ga4Seg) => number {
+  const temTipo = linhas.some(s => contatosDoSeg(s) > 0);
+  return (s: Ga4Seg) => (temTipo ? contatosDoSeg(s) : s.conversoes);
+}
+
 export type Ga4Consolidado = Omit<Ga4Relatorio, 'propertyId' | 'nome'> & { propriedades: Array<{ propertyId: string; nome: string; atual: Ga4Totais; anterior: Ga4Totais }> };
 
 export function consolidar(rels: Ga4Relatorio[]): Ga4Consolidado {

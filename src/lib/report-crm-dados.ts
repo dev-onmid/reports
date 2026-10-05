@@ -2,6 +2,7 @@ import { makeServerPool } from '@/lib/server-db';
 import { internalHeaders } from '@/lib/session';
 import { consultarCrmDoPeriodo, type CrmDoPeriodo } from '@/lib/crm-metricas';
 import { CORES_ETAPA, type ContagemFunil, type FunilPorStage } from '@/lib/funil-etapas';
+import type { Ga4Consolidado } from '@/lib/ga4-landing';
 
 /**
  * Dados de CRM do relatório de performance — lidos das MESMAS fontes da
@@ -114,6 +115,19 @@ export async function fetchCrmDoRelatorio(
   } finally {
     await pool.end();
   }
+}
+
+/**
+ * Site / landing pages (GA4) do período — pela MESMA rota do painel "Landing page"
+ * da dashboard (`/api/clients/[id]/ga4`), que soma as propriedades vinculadas ao
+ * cliente. `null` = sem propriedade vinculada, sem conta conectada ou token vencido:
+ * as páginas de site simplesmente não entram.
+ */
+export async function fetchSiteDoRelatorio(clientId: string, from: string, to: string): Promise<Ga4Consolidado | null> {
+  const r = await fetchInterno<{ ga4: Ga4Consolidado | null }>(
+    `/api/clients/${encodeURIComponent(clientId)}/ga4?period=custom&dateFrom=${encodeURIComponent(from)}&dateTo=${encodeURIComponent(to)}`,
+  );
+  return r?.ga4 ?? null;
 }
 
 /** O período é exatamente UM mês-calendário cheio? Só aí a meta mensal se aplica. */

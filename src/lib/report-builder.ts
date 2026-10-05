@@ -3,7 +3,7 @@ import { getFreshMetaToken } from '@/lib/meta-token';
 import { RESULT_ACTIONS, NEW_CONTACT_ACTIONS, PURCHASE_ACTIONS, sumActions } from './report-runner';
 import {
   fetchBairros, fetchMetaData, fetchInstagramData, autoPreviousPeriod, sanitizeJsonValue, comprasReaisGoogle,
-  sCapa, sVisaoGeral, sFunilComercial, sCanais, sRegioes, sPaidTrafficResumo, sMetaAdsResumo, sMetaAdsCampanhas, sCriativos,
+  sCapa, sVisaoGeral, sFunilComercial, sCanais, sSiteResumo, sSiteAudiencia, sRegioes, sPaidTrafficResumo, sMetaAdsResumo, sMetaAdsCampanhas, sCriativos,
   sGoogleAdsResumo, sGoogleAdsCampanhas, sGoogleAdsPalavrasChave,
   sInstagram, sInstagramCalendar, sInstagramPosts, sInstagramSpotlight,
   sInstagramTodosConteudos, ordenarPostsPorData, TODOS_CONTEUDOS_POR_PAGINA,
@@ -12,7 +12,7 @@ import {
   type ParsedData, type DiagJson, type GoogleAdsFull, type CampanhaGoogleDetalhada, type PalavraChaveGoogle, type MetaBreakdownLevel, type CompareOverride,
 } from './delivery-report-builder';
 import { sectionEnabled } from './report-sections';
-import { fetchCrmDoRelatorio, degrausDoFunil, ehMesCheio } from './report-crm-dados';
+import { fetchCrmDoRelatorio, fetchSiteDoRelatorio, degrausDoFunil, ehMesCheio } from './report-crm-dados';
 import type { CrmDoPeriodo } from './crm-metricas';
 
 // ── Persist ───────────────────────────────────────────────────────────────────
@@ -375,6 +375,8 @@ export async function fetchGoogleAdsDetailed(
 
   const devToken = GOOGLE_ADS_DEVELOPER_TOKEN;
   const campanhas: CampanhaGoogleDetalhada[] = [];
+  // Série diária (soma das contas) para o gráfico do resumo.
+  const porDia = new Map<string, { date: string; investimento: number; cliques: number; conversoes: number }>();
   // Palavras-chave agregadas por texto+correspondência (a mesma keyword pode existir
   // em vários grupos de anúncios/campanhas — somamos as métricas de todas as ocorrências).
   const keywordAgg = new Map<string, PalavraChaveGoogle>();
@@ -456,6 +458,29 @@ export async function fetchGoogleAdsDetailed(
         });
       }
 
+      // Evolução diária — mesmas campanhas (ENABLED) do total, para o gráfico fechar
+      // com os KPIs do topo da página.
+      const diaData = await googleAdsSearchWithFallback(
+        customerId,
+        `SELECT segments.date, metrics.cost_micros, metrics.clicks, metrics.conversions
+                    FROM campaign
+                    WHERE segments.date BETWEEN '${from}' AND '${to}' AND campaign.status = 'ENABLED'`,
+        candidate.accessToken,
+        devToken,
+        loginCustomerId,
+      );
+      for (const row of (diaData?.results ?? [])) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const r = row as any;
+        const date = String(r.segments?.date ?? '');
+        if (!date) continue;
+        const d = porDia.get(date) ?? { date, investimento: 0, cliques: 0, conversoes: 0 };
+        d.investimento += googleMetricNumber(r.metrics?.costMicros) / 1_000_000;
+        d.cliques      += googleMetricNumber(r.metrics?.clicks);
+        d.conversoes   += googleMetricNumber(r.metrics?.conversions);
+        porDia.set(date, d);
+      }
+
       // Top palavras-chave (keyword_view) — só campanhas de Pesquisa têm keywords.
       // segments.date fica só no WHERE para agregar o período inteiro por keyword.
       const kwData = await googleAdsSearchWithFallback(
@@ -515,6 +540,7 @@ export async function fetchGoogleAdsDetailed(
 
   return {
     ...totals,
+    diario: [...porDia.values()].sort((a, b) => a.date.localeCompare(b.date)),
     campanhas: campanhas.sort((a, b) => b.metricas.investimento - a.metricas.investimento).slice(0, 8),
     palavrasChave,
   };
@@ -633,8 +659,9 @@ export async function buildOmniReport(input: {
   const prevFromDate = prev ? new Date(prev.from + 'T12:00:00') : null;
   const prevPeriodo  = prevFromDate ? `${MONTHS[prevFromDate.getMonth()]}/${prevFromDate.getFullYear()}` : '';
 
-  const [crm, metaDetailed, googleDetailed, instagramFull, bairros, rotationSeed] = await Promise.all([
+  const [crm, site, metaDetailed, googleDetailed, instagramFull, bairros, rotationSeed] = await Promise.all([
     fetchCrmDoRelatorio(clientId, periodFrom, periodTo, prev),
+    fetchSiteDoRelatorio(clientId, periodFrom, periodTo),
     connectionId && accountIds?.length
       ? fetchMetaData(connectionId, accountIds, periodFrom, periodTo, metaLevel)
       : Promise.resolve({ meta: null, creatives: [] }),
@@ -674,6 +701,9 @@ export async function buildOmniReport(input: {
   const hasFunil              = degraus.length >= 2 && degraus[0].valor > 0 && en('funil');
   const hasCanais             = !!crm.canais && (crm.canais.leadsTotal > 0 || crm.canais.total > 0) && en('canais');
   const hasRegiao             = bairros.length > 0 && en('regioes');
+  // Site (GA4): só com propriedade vinculada E visita no período.
+  const hasSite               = !!site && site.atual.sessoes > 0 && en('site_resumo');
+  const hasSiteAudiencia      = !!site && site.atual.sessoes > 0 && en('site_audiencia');
   const hasMeta               = meta !== null && en('meta_resumo');
   const hasGoogle             = googleDetailed !== null && en('google_resumo');
   const hasPaidTraffic        = (meta !== null || googleDetailed !== null) && en('trafego_resumo');
@@ -707,6 +737,8 @@ export async function buildOmniReport(input: {
     + destaquePages
     + googleDestaquePages
     + (hasGooglePalavras ? 1 : 0)
+    + (hasSite ? 1 : 0)
+    + (hasSiteAudiencia ? 1 : 0)
     + (hasCriativos   ? 1 : 0);
 
   const slides: string[] = [];
@@ -766,6 +798,12 @@ export async function buildOmniReport(input: {
     }
   }
   if (hasGooglePalavras) slides.push(sGoogleAdsPalavrasChave(googleDetailed!, ++i, total, periodo));
+
+  // Site vem depois da mídia paga (é para onde ela manda a visita) e antes do orgânico.
+  // ⚠️ O comparativo do GA4 é sempre a janela anterior automática da rota; com um
+  // período de comparação escolhido à mão (ou desligado), as variações ficam de fora.
+  if (hasSite)          slides.push(sSiteResumo(site!, { periodo, prevPeriodo, comparar: compare === undefined && !!prev }, ++i, total));
+  if (hasSiteAudiencia) slides.push(sSiteAudiencia(site!, { periodo }, ++i, total));
 
   if (hasInstagram)   slides.push(sInstagram(instagram!, ++i, total, periodo));
   if (hasCalendario) {

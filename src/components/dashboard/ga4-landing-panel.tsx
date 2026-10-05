@@ -32,7 +32,10 @@ import {
   ArrowDown, ArrowUp, BarChart3, ChevronDown, ChevronRight, ChevronsUpDown, Clock, FileText, Info, MessageCircle, MessageSquare,
   MousePointerClick, Percent, Phone, Search, UserPlus, Users, Activity, Ban, Smartphone, User, CalendarDays, ArrowRight, CircleDollarSign, DollarSign, Link2, Calculator, Star, Package,
 } from 'lucide-react';
-import type { Ga4Celula, Ga4Consolidado, Ga4Linha, Ga4Seg, Ga4Totais } from '@/lib/ga4-landing';
+import {
+  ROTULOS_CANAL_GA4, ROTULOS_DISPOSITIVO_GA4, contatosDoSeg, seletorContatos,
+  type Ga4Celula, type Ga4Consolidado, type Ga4Linha, type Ga4Seg, type Ga4Totais,
+} from '@/lib/ga4-landing';
 import { EvolucaoDiaria, type Granularidade } from './ga4-landing-graficos';
 import { Donut } from './donut';
 import { SUPERFICIE, CabecalhoCard, GrupoTitulo, useVerMais } from './superficie';
@@ -62,24 +65,18 @@ const NEUTRO = '#8b959b';
 const PALETA = [VERDE, COR_SECUNDARIA, '#a78bfa', '#8a959b'];
 
 // Tradução dos valores padrão do GA4
-const CANAIS: Record<string, string> = {
-  'Paid Search': 'Pesquisa paga', 'Paid Social': 'Social pago', 'Paid Other': 'Outros pagos', 'Paid Shopping': 'Shopping pago', 'Paid Video': 'Vídeo pago',
-  'Cross-network': 'Performance Max / rede cruzada', 'Display': 'Display', 'Organic Search': 'Busca orgânica', 'Organic Social': 'Social orgânico',
-  'Organic Shopping': 'Shopping orgânico', 'Organic Video': 'Vídeo orgânico', 'Direct': 'Direto', 'Referral': 'Outros sites', 'Email': 'E-mail',
-  'SMS': 'SMS', 'AI Assistant': 'Assistentes de IA (ChatGPT etc.)', 'Unassigned': 'Não identificado', '(other)': 'Outros',
-};
-const DISPOSITIVOS: Record<string, string> = { mobile: 'Celular', desktop: 'Computador', tablet: 'Tablet', 'smart tv': 'TV' };
+// Mapas e a régua de "contatos" moram em `ga4-landing.ts`: o relatório de
+// performance usa os mesmos, e duas cópias divergiriam.
+const CANAIS = ROTULOS_CANAL_GA4;
+const DISPOSITIVOS = ROTULOS_DISPOSITIVO_GA4;
 const NOVOS: Record<string, string> = { new: 'Novos', returning: 'Recorrentes' };
 const GENEROS: Record<string, string> = { female: 'Mulheres', male: 'Homens' };
 const DIAS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
 const traduz = (mapa: Record<string, string>) => (s: Ga4Seg): Ga4Seg => ({ ...s, valor: mapa[s.valor] ?? s.valor });
 
 /** Contatos de um corte: WhatsApp + formulário + telefone; sem tipo classificável, todos os eventos-chave. */
-const contatosSeg = (s: Ga4Seg) => s.whatsapp + s.formulario + s.telefone;
-function contador(linhas: Ga4Seg[]) {
-  const temTipo = linhas.some(s => contatosSeg(s) > 0);
-  return (s: Ga4Seg) => (temTipo ? contatosSeg(s) : s.conversoes);
-}
+const contatosSeg = contatosDoSeg;
+const contador = seletorContatos;
 
 /**
  * Amostra mínima para o connect rate virar juízo.
