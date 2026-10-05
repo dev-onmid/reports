@@ -28,7 +28,9 @@
  * lead que já existia antes da coluna e para qualquer porta esquecida.
  *
  * Onde vale: dashboard (summary, metrics/CRM, por-canal, por-regiao,
- * funil-leads). Kanban, CRM, Radar e relatórios continuam vendo todos.
+ * funil-leads) e, desde 2026-10-05, o RELATÓRIO de performance — que passou a
+ * ler das mesmas fontes (o cliente via um faturamento na tela e outro no PDF).
+ * Kanban, CRM e Radar continuam vendo todos.
  */
 
 export const PORTAS_VALIDADAS = ['planilha', 'crm_externo', 'formulario'] as const;

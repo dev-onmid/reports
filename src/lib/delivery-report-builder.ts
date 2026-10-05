@@ -2209,7 +2209,12 @@ export function sCapa(
 export function sVisaoGeral(
   d: ParsedData, prevD: ParsedData | null, idx: number, total: number,
   periodo: string, prevPeriodo: string,
+  // O relatório de performance fala de VENDAS de um funil comercial, não de pedidos
+  // de delivery: troca o rótulo e a leitura final (que citava "frequência de compra"
+  // e "clientes inativos" para um cliente B2B).
+  opts: { rotuloVendas?: string; leituraSemComparativo?: string; leituraFinal?: string } = {},
 ): string {
+  const rotuloVendas = opts.rotuloVendas ?? 'Pedidos';
   const dFat    = deltaInfo(d.faturamento,    prevD?.faturamento    ?? 0);
   const dPed    = deltaInfo(d.pedidos_ativos, prevD?.pedidos_ativos ?? 0);
   const dTicket = deltaInfo(d.ticket,         prevD?.ticket         ?? 0);
@@ -2241,28 +2246,30 @@ export function sVisaoGeral(
     `<div style="width:${size}px;height:${size}px;border-radius:50%;background:${bg};display:flex;align-items:center;justify-content:center;flex-shrink:0">${icon(name, color)}</div>`;
 
   const metricCard = (label: string, value: string, name: 'money'|'cart'|'tag', color: string, bg: string) =>
-    `<div style="background:${CARD};border:1px solid #E7ECF3;border-radius:18px;box-shadow:0 14px 34px rgba(15,23,42,.07);padding:22px 24px;display:flex;align-items:center;gap:22px;min-width:0">
-      ${circle(name, color, bg, 80)}
+    // ⚠️ O valor encolhe conforme o tamanho: "R$ 137.587,69" a 34px passava da borda
+    // do card (a 5 dígitos já encostava).
+    `<div style="background:${CARD};border:1px solid #E7ECF3;border-radius:18px;box-shadow:0 14px 34px rgba(15,23,42,.07);padding:22px 24px;display:flex;align-items:center;gap:18px;min-width:0">
+      ${circle(name, color, bg, 68)}
       <div style="min-width:0">
         <p style="font-family:${INTER};font-size:18px;font-weight:500;color:#163461;margin:0 0 10px">${label}</p>
-        <p style="font-family:${INTER};font-size:34px;font-weight:900;letter-spacing:-0.035em;color:${FG};line-height:1;margin:0;white-space:nowrap">${value}</p>
+        <p style="font-family:${INTER};font-size:${value.length > 14 ? 26 : value.length > 12 ? 30 : 34}px;font-weight:900;letter-spacing:-0.035em;color:${FG};line-height:1;margin:0;white-space:nowrap">${value}</p>
       </div>
     </div>`;
 
   const periodLabel = (label: { month: string; year: string }, color: string, bg: string, borderColor: string) =>
-    `<div style="width:185px;display:flex;align-items:center;gap:16px;padding-left:22px;border-left:3px solid ${borderColor};box-sizing:border-box;flex-shrink:0">
-      ${circle('calendar', color, bg, 72)}
+    `<div style="width:214px;display:flex;align-items:center;gap:12px;padding-left:20px;border-left:3px solid ${borderColor};box-sizing:border-box;flex-shrink:0">
+      ${circle('calendar', color, bg, 56)}
       <div>
-        <p style="font-family:${INTER};font-size:25px;font-weight:900;color:${FG};line-height:1;margin:0 0 8px">${label.month}</p>
-        ${label.year ? `<p style="font-family:${INTER};font-size:20px;font-weight:500;color:#163461;line-height:1;margin:0">${label.year}</p>` : ''}
+        <p style="font-family:${INTER};font-size:22px;font-weight:900;color:${FG};line-height:1;margin:0 0 8px;white-space:nowrap">${label.month}</p>
+        ${label.year ? `<p style="font-family:${INTER};font-size:18px;font-weight:500;color:#163461;line-height:1;margin:0">${label.year}</p>` : ''}
       </div>
     </div>`;
 
   const metricRow = (label: { month: string; year: string }, source: ParsedData, color: string, bg: string, borderColor: string) =>
-    `<div style="display:grid;grid-template-columns:185px repeat(3,1fr);gap:18px;align-items:stretch">
+    `<div style="display:grid;grid-template-columns:214px repeat(3,1fr);gap:18px;align-items:stretch">
       ${periodLabel(label, color, bg, borderColor)}
       ${metricCard('Faturamento', brl2(source.faturamento), 'money', color, bg)}
-      ${metricCard('Pedidos', numOrDash(source.pedidos_ativos), 'cart', color, bg)}
+      ${metricCard(rotuloVendas, numOrDash(source.pedidos_ativos), 'cart', color, bg)}
       ${metricCard('Ticket médio', brl2(source.ticket), 'tag', color, bg)}
     </div>`;
 
@@ -2281,9 +2288,9 @@ export function sVisaoGeral(
   };
 
   const insightPara1 = hasCompare && dFat.hasData
-    ? `${curPeriod.month} ficou ${dFat.up ? 'acima' : 'abaixo'} de ${cmpPeriod.month} em faturamento (${dFat.label}). Pedidos ${dPed.up ? 'subiram' : 'caíram'} ${dPed.hasData ? dPed.label : '—'} e o ticket médio ${dTicket.up ? 'avançou' : 'recuou'} ${dTicket.hasData ? dTicket.label : '—'}.`
-    : `Base ativa de ${numOrDash(d.ativos)} clientes gerou ${brlOrDash(d.faturamento)} com ticket médio de ${brlOrDash(d.ticket)}.`;
-  const insightPara2 = `O foco para o próximo ciclo deve ser aumentar a frequência de compra, recuperar clientes inativos e converter melhor quem já demonstrou interesse.`;
+    ? `${curPeriod.month} ficou ${dFat.up ? 'acima' : 'abaixo'} de ${cmpPeriod.month} em faturamento (${dFat.label}). ${rotuloVendas} ${dPed.up ? 'subiram' : 'caíram'} ${dPed.hasData ? dPed.label : '—'} e o ticket médio ${dTicket.up ? 'avançou' : 'recuou'} ${dTicket.hasData ? dTicket.label : '—'}.`
+    : (opts.leituraSemComparativo ?? `Base ativa de ${numOrDash(d.ativos)} clientes gerou ${brlOrDash(d.faturamento)} com ticket médio de ${brlOrDash(d.ticket)}.`);
+  const insightPara2 = opts.leituraFinal ?? `O foco para o próximo ciclo deve ser aumentar a frequência de compra, recuperar clientes inativos e converter melhor quem já demonstrou interesse.`;
 
   const body = `<div style="width:1440px;min-height:810px;background:${BG};border:1px solid ${BORDER};margin:0 auto 20px;overflow:hidden;box-sizing:border-box;page-break-after:always;display:flex;flex-direction:column;position:relative">
   <div style="position:absolute;right:60px;top:-100px;width:560px;height:480px;border-radius:50%;background:linear-gradient(135deg,rgba(219,234,254,.55),rgba(255,255,255,.15));opacity:.7;pointer-events:none"></div>
@@ -2307,7 +2314,7 @@ export function sVisaoGeral(
         </div>
         ${deltaCell('Faturamento', dFat, 'chart')}
         <div style="width:1px;height:78px;background:${BORDER}"></div>
-        ${deltaCell('Pedidos', dPed, 'cart')}
+        ${deltaCell(rotuloVendas, dPed, 'cart')}
         <div style="width:1px;height:78px;background:${BORDER}"></div>
         ${deltaCell('Ticket médio', dTicket, 'tag')}
       </div>` : ''}
@@ -2325,6 +2332,229 @@ export function sVisaoGeral(
   <div style="height:32px;flex-shrink:0"></div>
 </div>`;
   return auditSlide(body, 'sVisaoGeral');
+}
+
+// ── Funil comercial e canais (CRM) ────────────────────────────────────────────
+// Páginas do relatório de performance que espelham dois painéis da dashboard:
+// o Funil de Performance e os donuts de Leads/Faturamento por canal. Os NÚMEROS
+// chegam prontos de `report-crm-dados.ts` (mesmas rotas da dashboard) — aqui só
+// se desenha.
+
+export type DegrauRelatorio = { label: string; cor: string; valor: number };
+
+function pctBR(n: number, casas = 1): string {
+  return `${n.toLocaleString('pt-BR', { minimumFractionDigits: casas, maximumFractionDigits: casas })}%`;
+}
+
+function luminancia(hex: string): number {
+  const h = hex.replace('#', '');
+  const canal = (i: number) => {
+    const v = parseInt(h.slice(i, i + 2), 16) / 255;
+    return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+  };
+  return 0.2126 * canal(0) + 0.7152 * canal(2) + 0.0722 * canal(4);
+}
+
+/** Texto escuro ou branco — o que tiver MAIS contraste sobre a cor do degrau. */
+function textoSobre(hex: string): string {
+  const l = luminancia(hex);
+  const comBranco = 1.05 / (l + 0.05);
+  const comEscuro = (l + 0.05) / (luminancia(FG) + 0.05);
+  return comEscuro >= comBranco ? FG : '#FFFFFF';
+}
+
+function molduraCrm(titulo: string, subtitulo: string, corpo: string, id: string): string {
+  const body = `<div style="width:1440px;min-height:810px;background:${BG};border:1px solid ${BORDER};margin:0 auto 20px;overflow:hidden;box-sizing:border-box;page-break-after:always;display:flex;flex-direction:column;position:relative">
+  <div style="position:absolute;right:60px;top:-100px;width:560px;height:480px;border-radius:50%;background:linear-gradient(135deg,rgba(219,234,254,.55),rgba(255,255,255,.15));opacity:.7;pointer-events:none"></div>
+  <div style="position:relative;z-index:1;flex:1;padding:50px 48px 0;display:flex;flex-direction:column">
+    <div style="margin-bottom:22px">
+      <h1 style="font-family:${INTER};font-size:52px;font-weight:900;letter-spacing:-0.045em;color:${FG};line-height:1.04;margin:0 0 10px">${reportTitle(titulo)}</h1>
+      <p style="font-family:${INTER};font-size:22px;font-weight:500;color:#163461;line-height:1.35;margin:0">${subtitulo}</p>
+    </div>
+    ${corpo}
+  </div>
+  <div style="height:30px;flex-shrink:0"></div>
+</div>`;
+  return auditSlide(body, id);
+}
+
+function leituraCrm(paragrafos: string[]): string {
+  const ps = paragrafos.filter(Boolean)
+    .map((t, i, arr) => `<p style="font-family:${INTER};font-size:16px;font-weight:500;color:#163461;line-height:1.5;margin:0 0 ${i === arr.length - 1 ? 0 : 7}px">${t}</p>`)
+    .join('');
+  return `<div data-conclusion="1" style="background:${CARD};border:1px solid #E7ECF3;border-radius:18px;box-shadow:0 14px 34px rgba(15,23,42,.06);display:grid;grid-template-columns:92px 1fr;align-items:center;padding:18px 28px;margin-top:16px">
+    <div style="width:60px;height:60px;border-radius:50%;background:${PRIMARY}16;display:flex;align-items:center;justify-content:center"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="${PRIMARY_TEXT}" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6"></path><path d="M10 22h4"></path><path d="M12 2a7 7 0 0 0-4 12.74V17h8v-2.26A7 7 0 0 0 12 2z"></path></svg></div>
+    <div style="border-left:2px solid ${PRIMARY};padding-left:24px">
+      <p style="font-family:${INTER};font-size:20px;font-weight:900;color:${FG};line-height:1;margin:0 0 10px">Leitura principal</p>
+      ${ps}
+    </div>
+  </div>`;
+}
+
+export function sFunilComercial(
+  degraus: DegrauRelatorio[],
+  extra: { vendasDoMes: number; vendasDeLeadsAnteriores: number; periodo: string },
+  idx: number, total: number,
+): string {
+  void idx; void total;
+  const n = degraus.length;
+  const topo = degraus[0]?.valor ?? 0;
+  const fundo = degraus[n - 1]?.valor ?? 0;
+  const conversaoGeral = topo > 0 ? (fundo / topo) * 100 : 0;
+
+  // Funil em trapézios: a largura cai em passos IGUAIS (é o desenho de um funil,
+  // não um gráfico de barras — a proporção real está nos percentuais ao lado).
+  const W = 500, AREA = 388, GAP = 6;
+  const h = Math.min(84, Math.floor((AREA - GAP * (n - 1)) / n));
+  const altura = h * n + GAP * (n - 1);
+  const passo = (W * 0.56) / n;
+  const trapezios = degraus.map((d, i) => {
+    const wTop = W - i * passo, wBot = W - (i + 1) * passo;
+    const y = i * (h + GAP), cx = W / 2;
+    const txt = textoSobre(d.cor);
+    // Maiúsculas ANTES de escapar: depois, "&amp;" viraria "&AMP;".
+    const rotulo = escapeHtmlAttr((d.label.length > 26 ? `${d.label.slice(0, 25)}…` : d.label).toLocaleUpperCase('pt-BR'));
+    return `<polygon points="${(cx - wTop / 2).toFixed(1)},${y} ${(cx + wTop / 2).toFixed(1)},${y} ${(cx + wBot / 2).toFixed(1)},${y + h} ${(cx - wBot / 2).toFixed(1)},${y + h}" fill="${d.cor}"></polygon>
+      <text x="${cx}" y="${y + h / 2 - 3}" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="${h >= 70 ? 30 : 25}" font-weight="900" fill="${txt}">${num(d.valor)}</text>
+      <text x="${cx}" y="${y + h / 2 + (h >= 70 ? 19 : 16)}" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="11.5" font-weight="800" letter-spacing="1" fill="${txt}">${rotulo}</text>`;
+  }).join('');
+
+  const kpi = (rotulo: string, valor: string, cor = FG) =>
+    `<div style="background:${CARD};border:1px solid #E7ECF3;border-radius:16px;box-shadow:0 10px 26px rgba(15,23,42,.06);padding:16px 20px;min-width:0">
+      <p style="font-family:${INTER};font-size:14px;font-weight:500;color:#163461;margin:0 0 8px;white-space:nowrap">${rotulo}</p>
+      <p style="font-family:${INTER};font-size:30px;font-weight:900;letter-spacing:-0.03em;color:${cor};line-height:1;margin:0;white-space:nowrap">${valor}</p>
+    </div>`;
+
+  // Conversão de cada degrau em relação ao ANTERIOR — a mesma conta da dashboard.
+  const passagens = degraus.slice(1).map((d, i) => {
+    const ant = degraus[i];
+    const taxa = ant.valor > 0 ? (d.valor / ant.valor) * 100 : null;
+    return { de: ant, para: d, taxa };
+  });
+  const linhas = passagens.map((p, i) => `<div style="display:grid;grid-template-columns:14px 118px 1fr auto;align-items:center;gap:14px;padding:${n > 5 ? 9 : 12}px 0;${i ? `border-top:1px solid ${ROW}` : ''}">
+      <span style="width:12px;height:12px;border-radius:50%;background:${p.para.cor};display:inline-block"></span>
+      <span style="font-family:${INTER};font-size:26px;font-weight:900;letter-spacing:-0.03em;color:${PRIMARY_TEXT};line-height:1;white-space:nowrap">${p.taxa === null ? '—' : pctBR(p.taxa)}</span>
+      <span style="font-family:${INTER};font-size:15px;font-weight:500;color:#163461;line-height:1.3">de ${escapeHtmlAttr(p.de.label.toLocaleLowerCase('pt-BR'))} para ${escapeHtmlAttr(p.para.label.toLocaleLowerCase('pt-BR'))}</span>
+      <span style="font-family:${INTER};font-size:14px;font-weight:700;color:${MUTED};white-space:nowrap">${num(p.de.valor)} → ${num(p.para.valor)}</span>
+    </div>`).join('');
+
+  // Maior gargalo = a passagem que MENOS converte (entre as que têm base).
+  const comBase = passagens.filter(p => p.taxa !== null && p.de.valor >= 5);
+  const gargalo = comBase.length ? comBase.reduce((a, b) => (b.taxa! < a.taxa! ? b : a)) : null;
+  const leitura1 = `De ${num(topo)} leads que entraram em ${extra.periodo}, ${num(fundo)} chegaram a ${escapeHtmlAttr((degraus[n - 1]?.label ?? 'fechamento').toLocaleLowerCase('pt-BR'))} — conversão geral de ${pctBR(conversaoGeral)}.${gargalo ? ` A maior perda está de ${escapeHtmlAttr(gargalo.de.label.toLocaleLowerCase('pt-BR'))} para ${escapeHtmlAttr(gargalo.para.label.toLocaleLowerCase('pt-BR'))}: ${pctBR(gargalo.taxa!)} avançam.` : ''}`;
+  // ⚠️ O funil acompanha quem ENTROU no período; as vendas do mês (página de visão
+  // geral) contam pelo dia do fechamento. Sem dizer isso, o cliente vê dois números
+  // de venda diferentes e conclui que um está errado.
+  const leitura2 = extra.vendasDoMes > fundo && extra.vendasDeLeadsAnteriores > 0
+    ? `As ${num(extra.vendasDoMes)} vendas fechadas no mês incluem ${num(extra.vendasDeLeadsAnteriores)} de leads que entraram em meses anteriores — o funil acompanha só quem chegou neste período.`
+    : '';
+
+  const corpo = `<div style="display:grid;grid-template-columns:580px 1fr;gap:18px;align-items:stretch">
+      <div style="background:${CARD};border:1px solid #E7ECF3;border-radius:18px;box-shadow:0 14px 34px rgba(15,23,42,.07);padding:18px 0;display:flex;align-items:center;justify-content:center">
+        <svg width="${W}" height="${altura}" viewBox="0 0 ${W} ${altura}">${trapezios}</svg>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:16px;min-width:0">
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px">
+          ${kpi('Leads no período', num(topo))}
+          ${kpi(escapeHtmlAttr(degraus[n - 1]?.label ?? 'Fechamentos'), num(fundo))}
+          ${kpi('Conversão geral', pctBR(conversaoGeral, 2), PRIMARY_TEXT)}
+        </div>
+        <div style="background:${CARD};border:1px solid #E7ECF3;border-radius:18px;box-shadow:0 14px 34px rgba(15,23,42,.07);padding:14px 24px;flex:1;display:flex;flex-direction:column;justify-content:center">
+          <p style="font-family:${INTER};font-size:13px;font-weight:800;color:${MUTED};text-transform:uppercase;letter-spacing:.08em;margin:0 0 4px">Conversão entre etapas</p>
+          ${linhas}
+        </div>
+      </div>
+    </div>
+    ${leituraCrm([leitura1, leitura2])}`;
+
+  return molduraCrm('Funil comercial', `Do lead à venda — leads que entraram em ${extra.periodo}`, corpo, 'sFunilComercial');
+}
+
+export type CanalRelatorio = { label: string; valor: number };
+
+const CORES_CANAL = ['#0B84FF', '#1a8a00', '#8b5cf6', '#f59e0b', '#ec4899', '#0ea5e9', '#ef4444', '#14b8a6'];
+const CINZA_CANAL = '#94A3B8';
+const ehCanalSemNome = (label: string) => /^(outros|canal não informado)/i.test(label);
+
+export function sCanais(
+  dados: {
+    leads: CanalRelatorio[]; leadsTotal: number;
+    receita: Array<CanalRelatorio & { vendas: number }>; receitaTotal: number;
+    semAtribuicao: number; periodo: string;
+  },
+  idx: number, total: number,
+): string {
+  void idx; void total;
+  const brl2 = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  // Mesma cor para o mesmo canal nos DOIS cards: atribuída pela ordem alfabética
+  // da união dos rótulos, não pelo ranking de cada lista.
+  const nomes = [...new Set([...dados.leads, ...dados.receita].map(c => c.label))]
+    .filter(l => !ehCanalSemNome(l)).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  const corDe = (label: string) => ehCanalSemNome(label) ? CINZA_CANAL : CORES_CANAL[nomes.indexOf(label) % CORES_CANAL.length];
+
+  // Top 6 + "Outros (N)" com o RESTO exato, para a lista fechar com o total do card.
+  const compactar = (lista: CanalRelatorio[], totalCard: number): CanalRelatorio[] => {
+    const ord = lista.filter(c => c.valor > 0).sort((a, b) => b.valor - a.valor);
+    const topo = ord.slice(0, 6);
+    const resto = totalCard - topo.reduce((s, c) => s + c.valor, 0);
+    const n = ord.length - topo.length;
+    // Sobrou UM canal: mostra o próprio (um "Outros (1)" esconderia o nome à toa).
+    if (n === 1 && Math.abs(resto - ord[6].valor) < 0.005) return ord;
+    return resto > 0.004 ? [...topo, { label: n > 0 ? `Outros (${n})` : 'Outros', valor: resto }] : topo;
+  };
+
+  const card = (titulo: string, totalTxt: string, lista: CanalRelatorio[], totalCard: number, fmt: (v: number) => string, detalhe?: (label: string) => string) => {
+    const maior = Math.max(...lista.map(c => c.valor), 1);
+    const linhas = lista.map(c => {
+      const pct = totalCard > 0 ? (c.valor / totalCard) * 100 : 0;
+      const cor = corDe(c.label);
+      return `<div style="padding:8px 0">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:6px">
+          <span style="display:flex;align-items:center;gap:9px;min-width:0"><span style="width:11px;height:11px;border-radius:50%;background:${cor};flex-shrink:0"></span><span style="font-family:${INTER};font-size:15px;font-weight:700;color:${FG};white-space:nowrap">${escapeHtmlAttr(c.label.length > 30 ? `${c.label.slice(0, 29)}…` : c.label)}</span></span>
+          <span style="font-family:${INTER};font-size:15px;font-weight:800;color:${FG};white-space:nowrap">${fmt(c.valor)} <span style="font-weight:600;color:${MUTED}">· ${pctBR(pct)}</span></span>
+        </div>
+        <div style="height:7px;background:${ROW};border-radius:4px"><div style="height:7px;border-radius:4px;background:${cor};width:${Math.max(1.5, (c.valor / maior) * 100).toFixed(1)}%"></div></div>
+        ${detalhe && detalhe(c.label) ? `<p style="font-family:${INTER};font-size:12.5px;font-weight:500;color:${MUTED};margin:6px 0 0;white-space:nowrap">${detalhe(c.label)}</p>` : ''}
+      </div>`;
+    }).join('');
+    return `<div style="background:${CARD};border:1px solid #E7ECF3;border-radius:18px;box-shadow:0 14px 34px rgba(15,23,42,.07);padding:20px 26px;min-width:0">
+      <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:12px;margin-bottom:8px;padding-bottom:12px;border-bottom:1px solid ${ROW}">
+        <p style="font-family:${INTER};font-size:20px;font-weight:900;color:${FG};margin:0;line-height:1.1">${titulo}</p>
+        <p style="font-family:${INTER};font-size:28px;font-weight:900;letter-spacing:-0.03em;color:${FG};margin:0;line-height:1;white-space:nowrap">${totalTxt}</p>
+      </div>
+      ${linhas || `<p style="font-family:${INTER};font-size:15px;color:${MUTED};margin:18px 0">Sem registro no período.</p>`}
+    </div>`;
+  };
+
+  const leadsLista = compactar(dados.leads, dados.leadsTotal);
+  const receitaLista = compactar(dados.receita, dados.receitaTotal);
+
+  // Leitura: o canal que mais fatura, e o que traz volume sem vender.
+  const comNome = (l: CanalRelatorio[]) => l.filter(c => !ehCanalSemNome(c.label) && c.valor > 0).sort((a, b) => b.valor - a.valor);
+  const topReceita = comNome(dados.receita)[0];
+  const leadsDe = (label: string) => dados.leads.find(c => c.label === label)?.valor ?? 0;
+  const p1 = topReceita && dados.receitaTotal > 0
+    ? `${escapeHtmlAttr(topReceita.label)} respondeu por ${pctBR((topReceita.valor / dados.receitaTotal) * 100)} do faturamento (${brl2(topReceita.valor)})${dados.leadsTotal > 0 && leadsDe(topReceita.label) > 0 ? ` com ${pctBR((leadsDe(topReceita.label) / dados.leadsTotal) * 100)} dos leads` : ''}.`
+    : (comNome(dados.leads)[0] ? `${escapeHtmlAttr(comNome(dados.leads)[0].label)} foi o canal que mais trouxe leads em ${dados.periodo} (${num(comNome(dados.leads)[0].valor)}).` : '');
+  const semVenda = comNome(dados.leads).find(c => !dados.receita.some(r => r.label === c.label && r.valor > 0));
+  const p2 = semVenda && dados.receitaTotal > 0 && semVenda.valor >= Math.max(5, dados.leadsTotal * 0.1)
+    ? `${escapeHtmlAttr(semVenda.label)} trouxe ${num(semVenda.valor)} leads e ainda não registrou venda no período — vale acompanhar o atendimento desse canal.`
+    : '';
+  const p3 = dados.receitaTotal > 0 && dados.semAtribuicao / dados.receitaTotal > 0.2
+    ? `${pctBR((dados.semAtribuicao / dados.receitaTotal) * 100)} do faturamento está sem canal registrado no CRM — é lacuna de cadastro, não um canal.`
+    : '';
+
+  const corpo = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:start">
+      ${card('Leads por canal', num(dados.leadsTotal), leadsLista, dados.leadsTotal, num)}
+      ${card('Faturamento por canal', brl2(dados.receitaTotal), receitaLista, dados.receitaTotal, brl2, (label) => {
+        const r = dados.receita.find(c => c.label === label);
+        return r && r.vendas > 0 ? `${num(r.vendas)} ${r.vendas === 1 ? 'venda' : 'vendas'} · ticket médio ${brl2(r.valor / r.vendas)}` : '';
+      })}
+    </div>
+    ${leituraCrm([p1, p2, p3])}`;
+
+  return molduraCrm('Canais', `De onde vieram os leads e o faturamento de ${dados.periodo}`, corpo, 'sCanais');
 }
 
 function sPorDia(d: ParsedData, idx: number, total: number, periodo = 'Maio/2026'): string {

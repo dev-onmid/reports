@@ -3,7 +3,7 @@ import { getFreshMetaToken } from '@/lib/meta-token';
 import { RESULT_ACTIONS, NEW_CONTACT_ACTIONS, PURCHASE_ACTIONS, sumActions } from './report-runner';
 import {
   fetchBairros, fetchMetaData, fetchInstagramData, autoPreviousPeriod, sanitizeJsonValue,
-  sCapa, sVisaoGeral, sRegioes, sPaidTrafficResumo, sMetaAdsResumo, sMetaAdsCampanhas, sCriativos,
+  sCapa, sVisaoGeral, sFunilComercial, sCanais, sRegioes, sPaidTrafficResumo, sMetaAdsResumo, sMetaAdsCampanhas, sCriativos,
   sGoogleAdsResumo, sGoogleAdsCampanhas, sGoogleAdsPalavrasChave,
   sInstagram, sInstagramCalendar, sInstagramPosts, sInstagramSpotlight,
   sInstagramTodosConteudos, ordenarPostsPorData, TODOS_CONTEUDOS_POR_PAGINA,
@@ -12,6 +12,8 @@ import {
   type ParsedData, type DiagJson, type GoogleAdsFull, type CampanhaGoogleDetalhada, type PalavraChaveGoogle, type MetaBreakdownLevel, type CompareOverride,
 } from './delivery-report-builder';
 import { sectionEnabled } from './report-sections';
+import { fetchCrmDoRelatorio, degrausDoFunil, ehMesCheio } from './report-crm-dados';
+import type { CrmDoPeriodo } from './crm-metricas';
 
 // ── Persist ───────────────────────────────────────────────────────────────────
 
@@ -541,55 +543,19 @@ export async function fetchMonthlyMeta(connectionId: string, accountIds: string[
   return Array.from(monthly.values()).sort((a, b) => a.month.localeCompare(b.month));
 }
 
-// ── Monthly CRM fetch ─────────────────────────────────────────────────────────
+// ── CRM do período ────────────────────────────────────────────────────────────
 
-type MonthlyCrm = {
-  month: string; label: string;
-  registros: number; novosClientes: number; fechados: number; faturamento: number;
-};
-
-async function fetchMonthlyCrm(clientId: string, from: string, to: string): Promise<MonthlyCrm[]> {
-  const pool = makeServerPool();
-  try {
-    const { rows } = await pool.query(
-      `SELECT
-         TO_CHAR(DATE_TRUNC('month', COALESCE(data::date, lead_date, created_at::date)), 'YYYY-MM') AS month,
-         COUNT(*) AS registros,
-         COUNT(*) FILTER (WHERE fechou = true OR COALESCE(NULLIF(valor_rs,0), 0) > 0) AS fechados,
-         COALESCE(SUM(COALESCE(NULLIF(valor_rs,0), 0)), 0) AS faturamento
-       FROM public.crm_leads
-       WHERE client_id = $1
-         AND COALESCE(data::date, lead_date, created_at::date) BETWEEN $2 AND $3
-       GROUP BY 1 ORDER BY 1`,
-      [clientId, from, to],
-    ).catch(() => ({ rows: [] as Array<{ month: string; registros: string; fechados: string; faturamento: string }> }));
-
-    return rows.map(r => ({
-      month:         r.month,
-      label:         fmtMonth(r.month + '-01'),
-      registros:     parseInt(r.registros,  10) || 0,
-      novosClientes: parseInt(r.fechados,   10) || 0,
-      fechados:      parseInt(r.fechados,   10) || 0,
-      faturamento:   parseFloat(r.faturamento)  || 0,
-    }));
-  } finally {
-    await pool.end();
-  }
-}
-
-// Aggregates CRM rows into the same shape the delivery report builds from CSVs
-// (faturamento/pedidos/ticket), so the performance report reuses the exact same
-// slide builders — "pedidos" maps to closed deals (fechados) since there's no order count.
-function toParsedData(rows: MonthlyCrm[]): ParsedData {
-  const totals = rows.reduce(
-    (acc, r) => ({ faturamento: acc.faturamento + r.faturamento, pedidos: acc.pedidos + r.fechados }),
-    { faturamento: 0, pedidos: 0 },
-  );
+// CRM do período no shape que os slides de visão geral consomem ("pedidos" = vendas
+// fechadas). Os números vêm de `consultarCrmDoPeriodo` — a MESMA conta do card de
+// Faturamento da dashboard (venda pelo mês do GANHO + lei de contagem). A query
+// própria que havia aqui contava pelo mês de criação do lead e fazia o relatório
+// divergir da tela.
+function toParsedData(crm: CrmDoPeriodo | null): ParsedData {
   return {
     ativos: 0, inativos: 0, potenciais: 0,
-    faturamento: totals.faturamento,
-    pedidos_ativos: totals.pedidos,
-    ticket: totals.pedidos > 0 ? totals.faturamento / totals.pedidos : 0,
+    faturamento: crm?.revenue ?? 0,
+    pedidos_ativos: crm?.sales ?? 0,
+    ticket: crm?.ticket ?? 0,
     uma_compra: 0, recorrentes: 0,
     produtos: [], inativos_faixas: [], por_dia: [],
   };
@@ -624,9 +590,8 @@ export async function buildOmniReport(input: {
   const prevFromDate = prev ? new Date(prev.from + 'T12:00:00') : null;
   const prevPeriodo  = prevFromDate ? `${MONTHS[prevFromDate.getMonth()]}/${prevFromDate.getFullYear()}` : '';
 
-  const [monthlyCrm, prevMonthlyCrm, metaDetailed, googleDetailed, instagramFull, bairros, rotationSeed] = await Promise.all([
-    fetchMonthlyCrm(clientId, periodFrom, periodTo),
-    prev ? fetchMonthlyCrm(clientId, prev.from, prev.to) : Promise.resolve([]),
+  const [crm, metaDetailed, googleDetailed, instagramFull, bairros, rotationSeed] = await Promise.all([
+    fetchCrmDoRelatorio(clientId, periodFrom, periodTo, prev),
     connectionId && accountIds?.length
       ? fetchMetaData(connectionId, accountIds, periodFrom, periodTo, metaLevel)
       : Promise.resolve({ meta: null, creatives: [] }),
@@ -640,9 +605,13 @@ export async function buildOmniReport(input: {
   ]);
   const cover = resolveReportCover(coverId, rotationSeed);
 
-  const data    = toParsedData(monthlyCrm);
-  const hasPrevData = prevMonthlyCrm.some(m => m.faturamento > 0 || m.fechados > 0);
-  const prevData = hasPrevData ? toParsedData(prevMonthlyCrm) : null;
+  const data    = toParsedData(crm.atual);
+  const hasPrevData = !!crm.anterior && (crm.anterior.revenue > 0 || crm.anterior.sales > 0);
+  const prevData = hasPrevData ? toParsedData(crm.anterior) : null;
+
+  const degraus = crm.funil ? degrausDoFunil(crm.funil) : [];
+  const canaisLeads   = (crm.canais?.leads ?? []).map(c => ({ label: c.label, valor: c.leads }));
+  const canaisReceita = (crm.canais?.origens ?? []).map(c => ({ label: c.label, valor: c.receita, vendas: c.vendas }));
 
   const { meta, creatives } = metaDetailed;
   const instagram = instagramFull?.insights ?? null;
@@ -658,6 +627,9 @@ export async function buildOmniReport(input: {
   const en = (key: string) => sectionEnabled(sections, key);
 
   const hasVisao              = (data.faturamento > 0 || data.pedidos_ativos > 0) && en('visao_geral');
+  // Funil só com gente no topo; canais só com algum lead ou receita no período.
+  const hasFunil              = degraus.length >= 2 && degraus[0].valor > 0 && en('funil');
+  const hasCanais             = !!crm.canais && (crm.canais.leadsTotal > 0 || crm.canais.total > 0) && en('canais');
   const hasRegiao             = bairros.length > 0 && en('regioes');
   const hasMeta               = meta !== null && en('meta_resumo');
   const hasGoogle             = googleDetailed !== null && en('google_resumo');
@@ -678,6 +650,8 @@ export async function buildOmniReport(input: {
 
   const total = 1
     + (hasVisao      ? 1 : 0)
+    + (hasFunil      ? 1 : 0)
+    + (hasCanais     ? 1 : 0)
     + (hasRegiao     ? 1 : 0)
     + (hasPaidTraffic ? 1 : 0)
     + (hasMeta       ? 1 : 0)
@@ -697,7 +671,39 @@ export async function buildOmniReport(input: {
 
   slides.push(sCapa(data, meta, clientName, periodo, prevPeriodo, diag, total, cover));
 
-  if (hasVisao)   slides.push(sVisaoGeral(data, prevData, ++i, total, periodo, prevPeriodo));
+  if (hasVisao) {
+    const brl2 = (n: number) => n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const leads = crm.atual?.leads ?? 0;
+    const leadsAnt = crm.anterior?.leads ?? 0;
+    const mesAtual = periodo.split('/')[0];
+    const mesAnt = prevPeriodo.split('/')[0];
+    const fraseLeads = leads > 0
+      ? `Entraram ${leads.toLocaleString('pt-BR')} leads em ${mesAtual}${hasPrevData && leadsAnt > 0 ? ` (${leadsAnt.toLocaleString('pt-BR')} em ${mesAnt})` : ''}.`
+      : '';
+    // A meta cadastrada é MENSAL: só vale comparar quando o período é um mês cheio.
+    const fraseMeta = crm.metaFaturamento && ehMesCheio(periodFrom, periodTo)
+      ? ` A meta de faturamento do mês era ${brl2(crm.metaFaturamento)} — o realizado chegou a ${((data.faturamento / crm.metaFaturamento) * 100).toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}% dela.`
+      : '';
+    slides.push(sVisaoGeral(data, prevData, ++i, total, periodo, prevPeriodo, {
+      rotuloVendas: 'Vendas',
+      leituraSemComparativo: `${periodo} fechou com ${brl2(data.faturamento)} em ${data.pedidos_ativos.toLocaleString('pt-BR')} vendas, ticket médio de ${brl2(data.ticket)}.`,
+      leituraFinal: `${fraseLeads}${fraseMeta}`.trim(),
+    }));
+  }
+  if (hasFunil) {
+    slides.push(sFunilComercial(degraus, {
+      vendasDoMes: crm.atual?.sales ?? 0,
+      vendasDeLeadsAnteriores: crm.funil?.vendasCohort?.anteriores ?? 0,
+      periodo,
+    }, ++i, total));
+  }
+  if (hasCanais) {
+    slides.push(sCanais({
+      leads: canaisLeads, leadsTotal: crm.canais!.leadsTotal,
+      receita: canaisReceita, receitaTotal: crm.canais!.total,
+      semAtribuicao: crm.canais!.semAtribuicao, periodo,
+    }, ++i, total));
+  }
   if (hasRegiao)  slides.push(sRegioes(bairros, ++i, total));
 
   if (hasPaidTraffic) slides.push(sPaidTrafficResumo(meta, googleDetailed, ++i, total));
