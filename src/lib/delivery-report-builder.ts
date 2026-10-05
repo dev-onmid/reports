@@ -5,6 +5,7 @@ import { getFreshMetaToken } from '@/lib/meta-token';
 import { randomUUID } from 'crypto';
 import { logAiUsage } from '@/lib/ai-usage-logger';
 import { sectionEnabled } from '@/lib/report-sections';
+import { buscarSerieSeguidores, registrarSerieSeguidores, lerSerieSeguidores, ganhoNoPeriodo, type GanhoSeguidores } from '@/lib/ig-seguidores';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -229,6 +230,8 @@ export type InstagramData = {
   username: string;
   followers: number;
   followers_period?: number;
+  /** Quantos dias do período o ganho de seguidores cobre (a Meta só entrega 30 dias). */
+  followers_cobertura?: GanhoSeguidores;
   reach: number;
   impressions: number;
   profile_views: number;
@@ -239,6 +242,7 @@ export type InstagramData = {
 
 export type InstagramPeriodMetrics = {
   followers_period: number;
+  followers_cobertura?: GanhoSeguidores;
   reach: number;
   impressions: number;
   profile_views: number;
@@ -1903,23 +1907,48 @@ export async function fetchInstagramData(
     return fallbackTotals.reduce((sum, value) => sum + value, 0);
   }
 
-  async function fetchIgPeriodMetrics(periodFrom: string, periodTo: string): Promise<InstagramPeriodMetrics> {
+  // ⚠️ Ganho de seguidores NÃO sai mais de uma chamada por período: a Meta só
+  // entrega `follower_count` dos últimos 30 dias e recusava o bloco inteiro quando
+  // o período começava antes (relatório de setembro gerado em 05/10 somava 2 dias e
+  // chamava de "no período"). Agora: lê o que a API ainda tem, GRAVA dia a dia e
+  // soma o período a partir do banco + API — com a cobertura junto, para o card
+  // dizer "desde DD/MM" quando faltar dia em vez de afirmar o que não mediu.
+  const serieApi = await buscarSerieSeguidores(ig.id, pageToken);
+  const seguidoresDe = await (async () => {
+    const poolSeg = makeServerPool();
+    try {
+      await registrarSerieSeguidores(poolSeg, ig.id, serieApi);
+      const ler = (a: string, b: string) => lerSerieSeguidores(poolSeg, ig.id, a, b);
+      const [atual, anterior] = await Promise.all([
+        ler(from, to),
+        compareFrom && compareTo ? ler(compareFrom, compareTo) : Promise.resolve([]),
+      ]);
+      return { atual, anterior };
+    } catch {
+      return { atual: [], anterior: [] };
+    } finally { await poolSeg.end().catch(() => {}); }
+  })();
+  const ganhoSeguidores = (periodFrom: string, periodTo: string, doBanco: Array<{ dia: string; ganho: number }>) =>
+    ganhoNoPeriodo(periodFrom, periodTo, [doBanco, serieApi ?? []]);
+
+  async function fetchIgPeriodMetrics(periodFrom: string, periodTo: string, doBanco: Array<{ dia: string; ganho: number }>): Promise<InstagramPeriodMetrics> {
     const chunks = makePeriodChunks(periodFrom, periodTo);
-    const [followers_period, reach, views, profile_views, website_clicks, accounts_engaged] = await Promise.all([
-      fetchIgProfileMetric('follower_count', chunks),
+    const followers_cobertura = ganhoSeguidores(periodFrom, periodTo, doBanco);
+    const followers_period = followers_cobertura.ganho;
+    const [reach, views, profile_views, website_clicks, accounts_engaged] = await Promise.all([
       fetchIgProfileMetric('reach', chunks),
       fetchIgProfileMetric('views', chunks, 'total_value'),
       fetchIgProfileMetric('profile_views', chunks, 'total_value'),
       fetchIgProfileMetric('website_clicks', chunks, 'total_value'),
       fetchIgProfileMetric('accounts_engaged', chunks, 'total_value'),
     ]);
-    return { followers_period, reach, impressions: views, profile_views, website_clicks, accounts_engaged };
+    return { followers_period, followers_cobertura, reach, impressions: views, profile_views, website_clicks, accounts_engaged };
   }
 
   const [currentMetrics, previousMetrics] = await Promise.all([
-    fetchIgPeriodMetrics(from, to),
+    fetchIgPeriodMetrics(from, to, seguidoresDe.atual),
     compareFrom && compareTo
-      ? fetchIgPeriodMetrics(compareFrom, compareTo)
+      ? fetchIgPeriodMetrics(compareFrom, compareTo, seguidoresDe.anterior)
       : Promise.resolve<InstagramPeriodMetrics | undefined>(undefined),
   ]);
   const { reach, impressions, profile_views, website_clicks, accounts_engaged } = currentMetrics;
@@ -1930,6 +1959,7 @@ export async function fetchInstagramData(
     username: ig.username ?? ig.id,
     followers: ig.followers_count ?? 0,
     followers_period: currentMetrics.followers_period,
+    followers_cobertura: currentMetrics.followers_cobertura,
     reach,
     impressions,
     profile_views,
@@ -3525,12 +3555,26 @@ export function sInstagram(ig: InstagramData, idx: number, total: number, period
   // em vez de colapsar para "sem comparativo anterior" quando o período anterior é 0.
   const followersGain = ig.followers_period ?? 0;
   const prevFollowersGain = ig.previous?.followers_period;
+  // Cobertura do ganho: a Meta só guarda 30 dias. Sem todos os dias do período,
+  // o número NÃO é "do período" — vira "desde DD/MM"; sem dia nenhum, não se afirma
+  // "sem novos seguidores" (seria inventar um zero). Dado antigo sem o campo cai no
+  // comportamento de antes.
+  const cob = ig.followers_cobertura;
+  const prevCompleto = ig.previous?.followers_cobertura ? ig.previous.followers_cobertura.completo : true;
+  const sinal = (n: number) => `${n > 0 ? '+' : ''}${num(n)}`;
   const followersLine = (() => {
+    if (cob && cob.dias === 0) {
+      return { text: 'ganho do período indisponível', color: MUTED, mark: BORDER };
+    }
+    if (cob && !cob.completo && cob.desde) {
+      const [, mm, dd] = cob.desde.split('-');
+      return { text: `${sinal(followersGain)} desde ${dd}/${mm}`, color: followersGain > 0 ? PRIMARY_TEXT : MUTED, mark: followersGain > 0 ? PRIMARY : BORDER };
+    }
     if (followersGain <= 0) {
-      return { text: 'sem novos seguidores no período', color: MUTED, mark: BORDER };
+      return { text: followersGain < 0 ? `${num(followersGain)} no período` : 'sem novos seguidores no período', color: MUTED, mark: BORDER };
     }
     let text = `+${num(followersGain)} no período`;
-    if (prevFollowersGain && prevFollowersGain > 0) {
+    if (prevCompleto && prevFollowersGain && prevFollowersGain > 0) {
       const diff = followersGain - prevFollowersGain;
       const pct = (diff / prevFollowersGain) * 100;
       const sign = diff >= 0 ? '+' : '';

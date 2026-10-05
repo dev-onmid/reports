@@ -3,7 +3,7 @@
 //   npx esbuild scratchpad/entry-relatorio-crm.ts --bundle --format=esm --platform=node \
 //     --packages=external --tsconfig=tsconfig.json --outfile=scratchpad/build/relatorio-crm.mjs
 import assert from 'node:assert/strict';
-import { ehMesCheio, degrausDoFunil, sFunilComercial, sCanais, sVisaoGeral, CRM_PERIODO_SQL } from './build/relatorio-crm.mjs';
+import { ehMesCheio, degrausDoFunil, sFunilComercial, sCanais, sVisaoGeral, sInstagram, ganhoNoPeriodo, serieDaResposta, CRM_PERIODO_SQL } from './build/relatorio-crm.mjs';
 
 let n = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); n++; };
@@ -87,5 +87,41 @@ ok(deliv.includes('>Pedidos<') && deliv.includes('clientes inativos'), 'delivery
 const grande = sVisaoGeral(pd(1234567.89, 800), null, 2, 9, 'Maio/2026', '');
 ok(/font-size:26px[^>]*>R\$ 1\.234\.567,89/.test(grande), 'valor de 7 dígitos encolhe para caber no card');
 ok(/font-size:34px[^>]*>R\$ 44\.732,93/.test(perf), 'valor de 5 dígitos fica no tamanho cheio');
+
+// ── Seguidores do Instagram: a Meta só entrega 30 dias ──
+const AGORA = Date.parse('2026-10-05T15:00:00Z');   // "hoje" fixo: o teste não depende do relógio
+const serie = serieDaResposta([
+  { value: 8, end_time: '2026-09-05T07:00:00+0000' }, { value: 27, end_time: '2026-09-06T07:00:00+0000' },
+  { value: 15, end_time: '2026-09-30T07:00:00+0000' }, { value: 20, end_time: '2026-10-01T07:00:00+0000' },
+  { value: 0, end_time: '2026-10-04T07:00:00+0000' }, { value: 99, end_time: 'lixo' }, { end_time: '2026-10-02T07:00:00+0000' },
+]);
+ok(serie.length === 5 && serie[0].dia === '2026-09-05' && serie[0].ganho === 8, 'série: um por dia, pela data do end_time; lixo fora');
+ok(serieDaResposta([{ value: 1, end_time: '2026-09-05T07:00:00+0000' }, { value: 7, end_time: '2026-09-05T07:00:00+0000' }]).length === 1, 'dia repetido não duplica');
+const set = ganhoNoPeriodo('2026-09-01', '2026-09-30', [serie], AGORA);
+ok(set.ganho === 50 && set.dias === 3 && set.esperados === 30 && set.desde === '2026-09-05' && !set.completo, 'setembro em 05/10: parcial, com "desde"');
+const cheio = Array.from({ length: 30 }, (_, i) => ({ dia: `2026-09-${String(i + 1).padStart(2, '0')}`, ganho: 2 }));
+const setCheio = ganhoNoPeriodo('2026-09-01', '2026-09-30', [cheio, serie], AGORA);
+ok(setCheio.completo && setCheio.dias === 30, 'com o mês todo gravado, é completo');
+ok(setCheio.ganho === 2 * 27 + 8 + 27 + 15, 'no mesmo dia, a série mais nova (API) vence a do banco');
+const out = ganhoNoPeriodo('2026-10-01', '2026-10-05', [serie.concat([{ dia: '2026-10-02', ganho: 1 }, { dia: '2026-10-03', ganho: 1 }, { dia: '2026-10-05', ganho: 500 }])], AGORA);
+ok(out.esperados === 4 && out.completo && out.ganho === 22, 'mês corrente: conta até ONTEM, hoje nunca entra');
+const ago = ganhoNoPeriodo('2026-08-01', '2026-08-31', [serie], AGORA);
+ok(ago.dias === 0 && ago.desde === null && !ago.completo && ago.ganho === 0, 'sem dia nenhum: indisponível');
+ok(ganhoNoPeriodo('2026-10-05', '2026-10-05', [serie], AGORA).esperados === 0, 'período só de hoje: nada esperado, nunca "completo"');
+ok(!ganhoNoPeriodo('2026-10-05', '2026-10-05', [serie], AGORA).completo, 'e não é completo');
+
+const igBase = { username: 'x', followers: 14452, reach: 1000, impressions: 2000, profile_views: 10, website_clicks: 5, accounts_engaged: 50 };
+const cardDe = (extra) => sInstagram({ ...igBase, ...extra }, 5, 18, 'Setembro/2026');
+ok(cardDe({ followers_period: 517, followers_cobertura: { ganho: 517, dias: 26, esperados: 30, desde: '2026-09-05', completo: false } }).includes('+517 desde 05/09'), 'parcial → "desde DD/MM"');
+ok(!cardDe({ followers_period: 517, followers_cobertura: { ganho: 517, dias: 26, esperados: 30, desde: '2026-09-05', completo: false } }).includes('517 no período'), 'parcial nunca é chamado de "no período"');
+ok(cardDe({ followers_period: 0, followers_cobertura: { ganho: 0, dias: 0, esperados: 31, desde: null, completo: false } }).includes('ganho do período indisponível'), 'sem dado → indisponível, não "sem novos seguidores"');
+const completo = { ganho: 61, dias: 4, esperados: 4, desde: '2026-10-01', completo: true };
+const prevOk = { followers_period: 71, followers_cobertura: { ganho: 71, dias: 5, esperados: 5, desde: '2026-09-26', completo: true }, reach: 1, impressions: 1, profile_views: 1, website_clicks: 1, accounts_engaged: 1 };
+ok(cardDe({ followers_period: 61, followers_cobertura: completo, previous: prevOk }).includes('+61 no período · -14,1% vs anterior'), 'os dois completos → compara');
+const prevParcial = { ...prevOk, followers_cobertura: { ...prevOk.followers_cobertura, completo: false } };
+const semComp = cardDe({ followers_period: 61, followers_cobertura: completo, previous: prevParcial });
+ok(semComp.includes('+61 no período') && !semComp.includes('vs anterior<'), 'anterior incompleto → sem percentual');
+ok(cardDe({ followers_period: 0, followers_cobertura: { ...completo, ganho: 0 } }).includes('sem novos seguidores no período'), 'completo e zero → pode afirmar');
+ok(cardDe({ followers_period: 180 }).includes('+180 no período'), 'dado antigo sem cobertura: comportamento de antes');
 
 console.log(`OK — ${n} asserts`);

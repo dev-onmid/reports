@@ -1,3 +1,4 @@
+import { buscarSerieSeguidores, type DiaSeguidores } from '@/lib/ig-seguidores';
 import type { Pool } from 'pg';
 
 // ── Resolução cliente → conta Instagram ──────────────────────────────────────
@@ -186,6 +187,12 @@ export type SocialSnapshot = {
   pageId: string | null;
   pageName: string | null;
   error: string | null;
+  /**
+   * Ganho de seguidores dia a dia (últimos 30 dias) — NÃO vai para o snapshot:
+   * quem coleta grava em `ig_seguidores_dia`, porque a Meta apaga depois de 30
+   * dias e o relatório mensal precisa do mês inteiro.
+   */
+  seguidoresSerie?: DiaSeguidores[] | null;
 };
 
 export type SnapshotTarget = {
@@ -305,13 +312,16 @@ export async function fetchClientSnapshot(target: SnapshotTarget): Promise<Socia
     return snap;
   }
 
-  // As duas séries em paralelo — +1 chamada Graph por conta por coleta.
-  const [reach, ganho] = await Promise.all([
+  // As duas séries em paralelo — +1 chamada Graph por conta por coleta. A de
+  // seguidores vem DIA A DIA (mesma chamada de antes, só não é mais somada na
+  // hora): os 28 dias do card saem dela e a série inteira é devolvida para gravar.
+  const [reach, serie] = await Promise.all([
     fetchMetricSum28d(ig.igId, ig.pageToken, 'reach'),
-    fetchMetricSum28d(ig.igId, ig.pageToken, 'follower_count'),
+    buscarSerieSeguidores(ig.igId, ig.pageToken),
   ]);
   snap.reach28d = reach;
-  snap.followersGained28d = ganho;
+  snap.followersGained28d = serie ? serie.slice(-28).reduce((sum, d) => sum + d.ganho, 0) : null;   // falha ≠ zero
+  snap.seguidoresSerie = serie;
   return snap;
 }
 

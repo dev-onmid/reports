@@ -2,9 +2,10 @@ import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { getFreshMetaToken } from '@/lib/meta-token';
 import {
-  ensureSocialMonitorSchema, fetchClientSnapshot, resolverInsumosMeta, upsertSnapshot,
+  ensureSocialMonitorSchema, fetchClientSnapshot, getIgAccount, resolverInsumosMeta, upsertSnapshot,
   type SocialSnapshot,
 } from '@/lib/instagram-monitor';
+import { buscarSerieSeguidores, registrarSerieSeguidores } from '@/lib/ig-seguidores';
 import { sendSocialMonitorAlert, type AlertSendResult } from '@/lib/social-monitor-alert';
 
 export const dynamic = 'force-dynamic';
@@ -80,11 +81,47 @@ async function runRefresh(clientIds: string[] | null) {
         const snap = { ...(await snapshotCache.get(cacheKey)!), clientId };
 
         await upsertSnapshot(pool, snap);
+        // Histórico diário de seguidores: a Meta só guarda 30 dias, o relatório
+        // mensal precisa do mês todo. Idempotente; nunca lança.
+        if (snap.igId) await registrarSerieSeguidores(pool, snap.igId, snap.seguidoresSerie);
         if (snap.error) errors++; else updated++;
       }));
     }
 
-    return { ok: true, updated, errors, skipped, tookMs: Date.now() - started };
+    // Clientes OCULTOS do monitor (só tráfego pago) ficam fora da coleta acima —
+    // mas também recebem relatório com a página de Instagram. Passada leve só no
+    // cron: resolve a conta e grava a série de seguidores (2 chamadas por conta),
+    // sem tocar no snapshot nem no `monitored`.
+    let seguidoresOcultos = 0;
+    if (!clientIds?.length) {
+      try {
+        const { rows: ocultos } = await pool.query(
+          `SELECT c.id FROM public.clients c
+             JOIN public.social_monitor_snapshots s ON s.client_id = c.id AND s.monitored = FALSE
+            WHERE c.status NOT IN ('Arquivado','Inativo')`,
+        );
+        const idsOcultos = (ocultos as { id: string }[]).map(c => c.id);
+        const insumosOcultos = idsOcultos.length ? await resolverInsumosMeta(pool, idsOcultos, getFreshMetaToken) : [];
+        const feitos = new Set<string>();
+        for (const ins of insumosOcultos) {
+          if (Date.now() > deadline) break;
+          if (feitos.has(ins.cacheKey)) continue;
+          feitos.add(ins.cacheKey);
+          try {
+            const token = await ins.token;
+            if (!token) continue;
+            const ig = await getIgAccount(ins.accountId, token, ins.directIgId ?? undefined);
+            if (!ig) continue;
+            await registrarSerieSeguidores(pool, ig.igId, await buscarSerieSeguidores(ig.igId, ig.pageToken));
+            seguidoresOcultos++;
+          } catch { /* best-effort por cliente */ }
+        }
+      } catch (e) {
+        console.error('[social-monitor] seguidores dos ocultos', e);
+      }
+    }
+
+    return { ok: true, updated, errors, skipped, seguidoresOcultos, tookMs: Date.now() - started };
   } finally {
     await pool.end();
   }
