@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+# Única porta que o Claude da rotina tem para o banco. Cada subcomando roda um
+# script fixo dentro do container onmid-reports; nada de SQL livre.
+set -euo pipefail
+BASE=/opt/onmid-rotina
+DIA=$(TZ=America/Sao_Paulo date +%F)
+WORK=$BASE/work/$DIA
+mkdir -p "$WORK"
+CONTAINER=onmid-reports
+
+no_container() { # script args...
+  local s=$1; shift
+  docker exec -i -w /app -e NODE_PATH=/app/node_modules "$CONTAINER" node - "$@" < "$BASE/lib/$s"
+}
+copia() { # arquivo-local -> caminho no container
+  local dst="/tmp/rotina-$(basename "$1")-$$"
+  docker cp "$1" "$CONTAINER:$dst" >/dev/null
+  echo "$dst"
+}
+cliente_ok() {
+  [[ "${1:-}" =~ ^client-[0-9]+$ ]] || { echo "clientId inválido" >&2; exit 2; }
+}
+na_lista() { # lista cid
+  python3 -c "import json,sys; c=json.load(open('$BASE/config.json')); sys.exit(0 if sys.argv[2] in c[sys.argv[1]] else 1)" "$1" "$2"
+}
+
+cmd=${1:-}; shift || true
+case "$cmd" in
+  kanban-ler)
+    cliente_ok "${1:-}"; cid=$1
+    na_lista kanban "$cid" || { echo "cliente fora da lista do Kanban (config.json)" >&2; exit 3; }
+    no_container kanban-pull.cjs "$cid" "$(python3 -c "import json;print(json.load(open('$BASE/config.json')).get('max_leads_por_dia',150))")" > "$WORK/$cid-pull.json"
+    rm -f "$WORK/$cid"-parte-*.txt
+    python3 "$BASE/lib/formata.py" pull "$WORK/$cid-pull.json" "$WORK" "$cid"
+    echo "Escreva as decisões em: $WORK/$cid-decisoes-<parte>.jsonl"
+    ;;
+  kanban-aplicar)
+    cliente_ok "${1:-}"; cid=$1; flag=${2:-}
+    na_lista kanban "$cid" || { echo "cliente fora da lista do Kanban" >&2; exit 3; }
+    [[ "$flag" == "" || "$flag" == "--dry" ]] || { echo "opção inválida" >&2; exit 2; }
+    [[ -f "$WORK/$cid-manifesto.json" ]] || { echo "rode kanban-ler antes" >&2; exit 4; }
+    cat "$WORK/$cid"-decisoes-*.jsonl > "$WORK/$cid-decisoes.todas" 2>/dev/null || { echo "nenhum arquivo de decisões" >&2; exit 4; }
+    d=$(copia "$WORK/$cid-decisoes.todas"); m=$(copia "$WORK/$cid-manifesto.json")
+    no_container kanban-aplica.cjs "$cid" "$d" "$m" $flag | tee "$WORK/$cid-aplicacao${flag:+-dry}.json"
+    docker exec -u root "$CONTAINER" rm -f "$d" "$m"
+    ;;
+  metricas)
+    cliente_ok "${1:-}"; cid=$1
+    no_container metricas.cjs "$cid" > "$WORK/$cid-metricas.json"
+    python3 "$BASE/lib/formata.py" metricas "$WORK/$cid-metricas.json" "$WORK" "$cid"
+    ;;
+  amostra)
+    cliente_ok "${1:-}"; cid=$1
+    no_container amostra.cjs "$cid" > "$WORK/$cid-amostra.json"
+    python3 "$BASE/lib/formata.py" amostra "$WORK/$cid-amostra.json" "$WORK" "$cid"
+    ;;
+  auditoria-gravar)
+    cliente_ok "${1:-}"; cid=$1; flag=${2:-}
+    [[ "$flag" == "" || "$flag" == "--dry" ]] || { echo "opção inválida" >&2; exit 2; }
+    [[ -f "$WORK/$cid-auditoria.json" ]] || { echo "falta $WORK/$cid-auditoria.json" >&2; exit 4; }
+    total=$(python3 -c "import json;print(json.load(open('$WORK/$cid-amostra.json'))['conversas_ativas_7d'])")
+    lidas=$(python3 -c "import json;print(len(json.load(open('$WORK/$cid-amostra.json'))['amostra']))")
+    a=$(copia "$WORK/$cid-auditoria.json")
+    no_container auditoria-grava.cjs "$cid" "$a" "$total" "$lidas" $flag
+    docker exec -u root "$CONTAINER" rm -f "$a"
+    ;;
+  *)
+    echo "uso: rotina {kanban-ler|kanban-aplicar [--dry]|metricas|amostra|auditoria-gravar [--dry]} <clientId>" >&2; exit 2 ;;
+esac
