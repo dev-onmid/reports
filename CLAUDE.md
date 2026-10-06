@@ -668,6 +668,21 @@ abrir o painel, o `lps/bin/gtag ads destinos <cliente>` consulta o reports.
 
 @AGENTS.md
 
+## Painel de Rotinas — saber o que a VPS está rodando, sem adivinhar (2026-10-06)
+
+Pedido do Matheus: "um painel só para os ADM que mostra se estão ativas as rotinas que alimentam o CRM… análise de atendimento, pontuação, Agendor, Cardápio Web, baixar e indexar planilha da Sorrifácil… e a conexão da Meta Ads, Google Ads e Analytics. Queria ver por aqui e te aviso quando não funcionar."
+
+- **Configurações → Rotinas** (`RotinasPanel`, aba nova; `GET /api/admin/rotinas` exige `role='Administrador'` **no servidor**, não só o proxy — ela devolve o corpo bruto das respostas dos crons, que carrega nome de cliente e erro de integração).
+- **⚠️ O painel cruza DOIS sinais porque cada um sozinho MENTE.** (1) **Execução**: os `/tmp/onmid-*.last` que cada linha da crontab já gravava. (2) **Efeito**: a última gravação na tabela que a rotina alimenta. Só o efeito faria rotina sem trabalho (disparo sem campanha, follow-up sem lead vencendo) parecer morta; só a execução esconderia cron rodando há semanas devolvendo erro em silêncio — foi assim que a duplicação do SULTS e o alerta de saldo passaram batidos. Daí o estado **`ocioso`**, que diz "rodando, sem trabalho" em vez de alarme.
+- **⚠️ ZERO rotas tocadas.** A ponte é um cron de UMA linha (`*/2`) que copia os `.last` com `cp -pf` (preserva o mtime, que é a hora em que o cron terminou) para `/opt/onmid-reports/cron-status`, montado **read-only** em `/app/cron-status` pelo compose. Heartbeat dentro de cada rota seriam 25 edições; registrar no `proxy.ts` daria um write por chamada de cron e ele nem vê o resultado.
+- **⚠️ Corpo VAZIO não é sucesso.** Medido em 06/10: **5 arquivos com 0 byte** — saldo de mídia, relatórios mensais, relatório diário, termos de busca do Google e planilhas. Como todas usam `curl -s` (que silencia **também a mensagem de erro**), falha de rede ou timeout deixa exatamente isso: nada. Não investiguei a causa porque disparar essas rotas manda WhatsApp e aplica negativação — o painel reporta, a decisão é do Matheus.
+- **⚠️ Falha do `curl` não contém a palavra "erro"** — `curl: (28) Operation timed out` passava como resposta boa. Pego por assert, não por leitura. A régua cobre `^curl:`, `timed out`, `could not resolve`, `empty reply`.
+- **⚠️ "Sem leitura" nunca vira "parado"**: volume não montado ou rotina nova (o `.last` só nasce na 1ª passada) renderiam 25 alarmes falsos. E a folga antes de acusar parada é `max(3× intervalo, intervalo+20min)` — rotina de minuto em minuto não pode alarmar por um atraso de 2 min, já que o `flock` segura a próxima de propósito.
+- **O que está quebrado fica no TOPO** e SAI dos grupos abaixo (sem duplicar): com 25 rotinas, o vermelho some no meio da lista.
+- **⚠️ `ROTINAS` em `src/lib/rotinas-saude.ts` espelha a crontab à mão.** Cron novo na VPS sem linha nova aqui = rotina invisível no painel, que é exatamente o problema que ele existe para resolver.
+- ✅ Verificado: **36 asserts** (`scratchpad/test-rotinas-saude.mjs`: corpo vazio, falha do curl, "parado" vencendo um último corpo bom, ocioso × atenção, catálogo sem id/arquivo repetido, tolerância do rastro sempre maior que a cadência, SQL de rastro somente leitura); tsc + `next build` + eslint limpos; browser com os dois estados (6 problemas no topo / tudo saudável com o aviso de sem leitura) e 375px sem overflow. Backups na VPS: `/root/crontab-backup-antes-painel-rotinas.txt` e `docker-compose.yml.bak-antes-painel-rotinas`.
+- ⚠️ **Não há alerta automático** — o painel só mostra. Ele disse que avisa quando algo parar; alarme por WhatsApp é a próxima rodada natural.
+
 ## Datalytics virou WEBHOOK genérico — N por cliente, com nome (2026-09-22)
 
 Pedido do Matheus: "essa integração do Datalitics, na verdade tem que virar Webhook, genérico, e dentro do webhook eu posso categorizar o nome sendo Datalitics ou criar um novo. **Mas precisamos fazer isso sem mexer com o que já tem configurado e funcionando.**" Escolha dele sobre o alcance do nome: **só na tela de integrações**.
