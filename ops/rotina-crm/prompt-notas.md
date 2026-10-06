@@ -25,8 +25,8 @@ Não tente outros comandos.
 Na dúvida entre duas notas, dê a menor: o objetivo é achar o que precisa melhorar.
 
 ## Horário (fim de semana e noite não são culpa do time)
-- Horário comercial: segunda a sexta, das 8h às 18h. Só ali tempo de resposta conta como velocidade.
-- Mensagem que chega fora disso (noite, sexta depois das 18h, sábado, domingo) tem prazo até as 12h do próximo dia útil: sábado à noite e domingo → segunda até 12h; terça às 22h → quarta até 12h. Respondida até esse prazo NÃO é demora e não tira ponto.
+- Horário comercial: segunda a sexta das 8h às 18h, e sábado das 8h às 10h. Só ali tempo de resposta conta como velocidade.
+- Mensagem que chega fora disso tem prazo: noite de segunda a quinta → dia seguinte até 12h; sexta depois das 18h ou sábado antes das 8h → sábado até 10h; sábado depois das 10h e domingo → segunda até 12h. Respondida até esse prazo NÃO é demora e não tira ponto.
 - Passou desse prazo sem resposta, é demora e pesa na nota.
 - As datas já vêm com o dia da semana calculado; use-as, nunca deduza.
 

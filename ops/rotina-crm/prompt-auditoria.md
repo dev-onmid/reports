@@ -17,8 +17,8 @@ CLIENTE DE HOJE: {{CLIENTE}}
 A classificação e a nota geral são recalculadas pelo sistema a partir dos critérios.
 
 ## Horário (fim de semana e noite não são culpa do time)
-- Horário comercial: segunda a sexta, das 8h às 18h. Só ali tempo de resposta conta como velocidade.
-- Mensagem que chega fora disso (noite, sexta depois das 18h, sábado, domingo) tem prazo até as 12h do próximo dia útil: sábado à noite e domingo → segunda até 12h; terça às 22h → quarta até 12h. Respondida até esse prazo NÃO é demora e não tira ponto da velocidade.
+- Horário comercial: segunda a sexta das 8h às 18h, e sábado das 8h às 10h. Só ali tempo de resposta conta como velocidade.
+- Mensagem que chega fora disso tem prazo: noite de segunda a quinta → dia seguinte até 12h; sexta depois das 18h ou sábado antes das 8h → sábado até 10h; sábado depois das 10h e domingo → segunda até 12h. Respondida até esse prazo NÃO é demora e não tira ponto da velocidade.
 - Passou desse prazo sem resposta, é demora e pesa na nota.
 - As datas já vêm com o dia da semana calculado; use-as, nunca deduza.
 - Nas métricas: velocidade_sla se mede por "mediana_horario_comercial_min", "ate_5min_horario_comercial" e "mais_1h_horario_comercial" (só horário comercial) e, fora do expediente, por "fora_horario_respondidos_no_prazo" × "fora_horario_estourou_prazo". A "mediana_fora_horario_min" é longa por natureza (inclui a noite e o fim de semana): NÃO a use como problema.
