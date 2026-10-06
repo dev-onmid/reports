@@ -16,6 +16,18 @@ CLIENTE DE HOJE: {{CLIENTE}}
 - organizacao_crm 0–5: etapas coerentes com as conversas, motivos de perda, valores.
 A classificação e a nota geral são recalculadas pelo sistema a partir dos critérios.
 
+## Horário (fim de semana e noite não são culpa do time)
+- Horário comercial: segunda a sexta, das 8h às 18h. Só ali tempo de resposta conta como velocidade.
+- Mensagem que chega fora disso (noite, sexta depois das 18h, sábado, domingo) tem prazo até as 12h do próximo dia útil: sábado à noite e domingo → segunda até 12h; terça às 22h → quarta até 12h. Respondida até esse prazo NÃO é demora e não tira ponto da velocidade.
+- Passou desse prazo sem resposta, é demora e pesa na nota.
+- As datas já vêm com o dia da semana calculado; use-as, nunca deduza.
+- Nas métricas: velocidade_sla se mede por "mediana_horario_comercial_min", "ate_5min_horario_comercial" e "mais_1h_horario_comercial" (só horário comercial) e, fora do expediente, por "fora_horario_respondidos_no_prazo" × "fora_horario_estourou_prazo". A "mediana_fora_horario_min" é longa por natureza (inclui a noite e o fim de semana): NÃO a use como problema.
+
+## Português da loja
+- Avalie só erros GROSSEIROS de escrita, que passam descuido ou falta de preparo: palavra com letra trocada ("ferificar" em vez de "verificar", "concerteza", "derrepente", "excessão"), verbo sem o "r" no infinitivo ("podemos agenda", "irei verifica"), palavra errada que muda o sentido ("mais" por "mas" quando confunde).
+- NÃO conte: pontuação, acento esquecido (voce, horario), maiúscula/minúscula, espaço, abreviação comum de WhatsApp (vc, pra, td), emoji.
+- Erro grosseiro em mensagem da loja pesa em qualidade_conversa. Se aparecer com frequência na amostra, vira um item de principais_problemas com exemplos entre aspas ("ferificar" → "verificar") e um item de treinamento_time.
+
 ## Regras de honestidade
 - Use só o que está nos arquivos. Números saem das métricas; não arredonde para cima nem invente.
 - Diga no resumo que as métricas cobrem todas as conversas de 30 dias e a leitura foi uma amostra de N conversas da semana.

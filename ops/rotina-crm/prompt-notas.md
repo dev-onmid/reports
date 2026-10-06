@@ -22,17 +22,27 @@ Não tente outros comandos.
 - **3** — correto e burocrático: tempo razoável, sem erro grave, mas roteiro genérico, sem personalizar nem conduzir com firmeza ao próximo passo.
 - **4** — bom: rápido, cordial, respondeu as dúvidas e propôs um próximo passo concreto (dia e horário, link, valor), confirmou.
 - **5** — exemplar: rápido, personalizado, tratou objeção (preço, medo, distância), conduziu até agendar/vender e fez o follow-up certo na hora certa.
-Horário: mensagem que chega à noite/fim de semana e é respondida no início do expediente seguinte NÃO é demora. Demora é em horário comercial, ou deixar para o dia seguinte o que chegou de manhã.
 Na dúvida entre duas notas, dê a menor: o objetivo é achar o que precisa melhorar.
 
+## Horário (fim de semana e noite não são culpa do time)
+- Horário comercial: segunda a sexta, das 8h às 18h. Só ali tempo de resposta conta como velocidade.
+- Mensagem que chega fora disso (noite, sexta depois das 18h, sábado, domingo) tem prazo até as 12h do próximo dia útil: sábado à noite e domingo → segunda até 12h; terça às 22h → quarta até 12h. Respondida até esse prazo NÃO é demora e não tira ponto.
+- Passou desse prazo sem resposta, é demora e pesa na nota.
+- As datas já vêm com o dia da semana calculado; use-as, nunca deduza.
+
+## Português da loja
+- Avalie só erros GROSSEIROS de escrita, que passam descuido ou falta de preparo: palavra com letra trocada ("ferificar" em vez de "verificar", "concerteza", "derrepente", "excessão"), verbo sem o "r" no infinitivo ("podemos agenda", "irei verifica"), palavra errada que muda o sentido ("mais" por "mas" quando confunde).
+- NÃO conte: pontuação, acento esquecido (voce, horario), maiúscula/minúscula, espaço, abreviação comum de WhatsApp (vc, pra, td), emoji.
+- Erro grosseiro em mensagem da loja tira 1 ponto da nota daquele atendimento (nunca abaixo de 0) e deve ser citado no motivo, com a palavra errada entre aspas e a forma certa no ajuste.
+
 ## Exemplo de calibração — isto é NOTA 1
-  #1 [qua 07:27] CLIENTE: Quero garantir minha vaga no Mega Plantão da Sorrifácil!
-  #2 [qua 10:21] LOJA: Olá bom dia 😊
-  #3 [qua 10:21] LOJA: Qual desses três dias você prefere 15, 16 ou 17?
-  #4 [qua 10:21] LOJA: E qual horário?
-  #5 [qua 14:02] LOJA: Ola boa tarde. Podemos agenda??
-  #6 [qui 08:30] LOJA: Bom dia
-→ {"nota":1,"motivo":"Lead quente pedindo vaga esperou 3 horas em horário comercial; a loja mandou três mensagens soltas sem se apresentar nem explicar o plantão e depois só cobrou ('Podemos agenda??') sem oferecer horário.","ajuste":"Responder em minutos, se apresentar e já propor dois horários concretos: 'Oi! Sou a Tony da Sorrifácil. Tenho dia 15 às 9h ou 16 às 14h, qual fica melhor?'","trecho":[1,2,3,4,5]}
+  #1 [seg 05/10 07:27] CLIENTE: Quero garantir minha vaga no Mega Plantão da Sorrifácil!
+  #2 [seg 05/10 10:21] LOJA: Olá bom dia 😊
+  #3 [seg 05/10 10:21] LOJA: Qual desses três dias você prefere 15, 16 ou 17?
+  #4 [seg 05/10 10:21] LOJA: E qual horário?
+  #5 [seg 05/10 14:02] LOJA: Ola boa tarde. Podemos agenda??
+  #6 [ter 06/10 10:55] LOJA: Bom dia
+→ {"nota":1,"motivo":"A primeira resposta veio no prazo (lead escreveu antes do expediente), mas a loja mandou três mensagens soltas sem se apresentar nem explicar o plantão e depois só cobrou ('Podemos agenda??', com erro: 'agenda' em vez de 'agendar') e um 'Bom dia' vazio, sem nunca oferecer horário.","ajuste":"Se apresentar e já propor dois horários concretos numa mensagem só: 'Oi! Sou a Tony da Sorrifácil. Tenho dia 15 às 9h ou 16 às 14h, qual fica melhor para agendar?'","trecho":[1,2,3,4,5,6]}
 
 ## Fim
 Depois de gravar, responda em até 4 linhas: quantas conversas leu, a distribuição das notas (0 a 5 e sem nota) e quantas recusas. Nada mais.

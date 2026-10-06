@@ -23,7 +23,14 @@ const { Pool } = require('pg');
     `WITH ${BASE},
      t AS (SELECT *, EXTRACT(EPOCH FROM (prox_out - created_at))::float AS resp,
                   EXTRACT(HOUR FROM created_at AT TIME ZONE 'America/Sao_Paulo') AS hora,
-                  EXTRACT(DOW FROM created_at AT TIME ZONE 'America/Sao_Paulo') AS dow
+                  EXTRACT(DOW FROM created_at AT TIME ZONE 'America/Sao_Paulo') AS dow,
+                  -- Prazo de quem escreve fora do expediente: 12h do próximo dia útil
+                  -- (sexta à noite, sábado e domingo → segunda 12h). Fim de semana não é culpa do time.
+                  (((CASE WHEN EXTRACT(DOW FROM created_at AT TIME ZONE 'America/Sao_Paulo') BETWEEN 1 AND 5
+                               AND EXTRACT(HOUR FROM created_at AT TIME ZONE 'America/Sao_Paulo') < 8 THEN 0
+                          WHEN EXTRACT(DOW FROM created_at AT TIME ZONE 'America/Sao_Paulo') = 5 THEN 3
+                          WHEN EXTRACT(DOW FROM created_at AT TIME ZONE 'America/Sao_Paulo') = 6 THEN 2
+                          ELSE 1 END) + (created_at AT TIME ZONE 'America/Sao_Paulo')::date) + TIME '12:00') AT TIME ZONE 'America/Sao_Paulo' AS prazo
              FROM msg WHERE created_at >= NOW() - $2::interval AND created_at < NOW() - $3::interval)
      SELECT COUNT(DISTINCT lead_id) FILTER (WHERE direction = 'in')::int AS conversas_cliente,
             COUNT(*) FILTER (WHERE direction = 'in')::int AS msgs_cliente,
@@ -36,6 +43,12 @@ const { Pool } = require('pg');
             COUNT(*) FILTER (WHERE direction = 'in' AND (dir_ant IS NULL OR dir_ant = 'out') AND resp IS NOT NULL)::int AS respondidos,
             ROUND((percentile_cont(0.5) WITHIN GROUP (ORDER BY resp) FILTER (WHERE direction = 'in' AND (dir_ant IS NULL OR dir_ant = 'out') AND resp IS NOT NULL AND (hora < 8 OR hora >= 18 OR dow IN (0,6))) / 60)::numeric, 1) AS mediana_fora_horario_min,
             COUNT(*) FILTER (WHERE direction = 'in' AND (dir_ant IS NULL OR dir_ant = 'out') AND (hora < 8 OR hora >= 18 OR dow IN (0,6)))::int AS turnos_fora_horario,
+            COUNT(*) FILTER (WHERE direction = 'in' AND (dir_ant IS NULL OR dir_ant = 'out') AND hora >= 8 AND hora < 18 AND dow BETWEEN 1 AND 5)::int AS turnos_horario_comercial,
+            ROUND((percentile_cont(0.5) WITHIN GROUP (ORDER BY resp) FILTER (WHERE direction = 'in' AND (dir_ant IS NULL OR dir_ant = 'out') AND resp IS NOT NULL AND hora >= 8 AND hora < 18 AND dow BETWEEN 1 AND 5) / 60)::numeric, 1) AS mediana_horario_comercial_min,
+            COUNT(*) FILTER (WHERE direction = 'in' AND (dir_ant IS NULL OR dir_ant = 'out') AND hora >= 8 AND hora < 18 AND dow BETWEEN 1 AND 5 AND resp <= 300)::int AS ate_5min_horario_comercial,
+            COUNT(*) FILTER (WHERE direction = 'in' AND (dir_ant IS NULL OR dir_ant = 'out') AND hora >= 8 AND hora < 18 AND dow BETWEEN 1 AND 5 AND resp > 3600)::int AS mais_1h_horario_comercial,
+            COUNT(*) FILTER (WHERE direction = 'in' AND (dir_ant IS NULL OR dir_ant = 'out') AND (hora < 8 OR hora >= 18 OR dow IN (0,6)) AND prox_out IS NOT NULL AND prox_out <= prazo)::int AS fora_horario_respondidos_no_prazo,
+            COUNT(*) FILTER (WHERE direction = 'in' AND (dir_ant IS NULL OR dir_ant = 'out') AND (hora < 8 OR hora >= 18 OR dow IN (0,6)) AND ((prox_out IS NOT NULL AND prox_out > prazo) OR (prox_out IS NULL AND NOW() > prazo)))::int AS fora_horario_estourou_prazo,
             COUNT(*) FILTER (WHERE direction = 'out' AND em_ant IS NOT NULL AND created_at - em_ant >= INTERVAL '48 hours')::int AS retomadas,
             COUNT(*) FILTER (WHERE direction = 'out' AND em_ant IS NOT NULL AND created_at - em_ant >= INTERVAL '48 hours' AND prox_in IS NOT NULL)::int AS retomadas_responderam
        FROM t`, [clientId, desde, ate])).rows[0];
