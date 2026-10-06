@@ -38,6 +38,9 @@ import type { AttendanceAudit, ItemHistoricoAuditoria } from '@/lib/crm-attendan
 import type { MesAtendimento, TentativasContato } from '@/lib/crm-atendimento-evolucao';
 import { classificarEtapa, corDaEtapa, MODELO_PADRAO, OPCOES_EDITOR, opcaoDoValor, ROTULOS_ETAPA, valorOpcaoEditor, type EtapaFunil, type SituacaoStage } from '@/lib/funil-etapas';
 
+/** Mensagens copiadas da conversa que provam a nota (o "print"). */
+type TrechoAtendimento = { d: 'in' | 'out'; em: string; t: string | null; autor?: string | null };
+
 type CrmLead = {
   id: string; client_id: string; mes: string | null; data: string | null;
   link_criativo: string | null; nome: string | null; numero: string | null;
@@ -60,6 +63,8 @@ type CrmLead = {
   /** Nota 0–5 do ATENDIMENTO deste lead (rotina diária). null = ainda sem nota ou não é lead. */
   nota_atendimento?: number | null;
   nota_atendimento_motivo?: string | null;
+  nota_atendimento_ajuste?: string | null;
+  nota_atendimento_trecho?: TrechoAtendimento[] | null;
   nota_atendimento_em?: string | null;
   time_interno?: boolean;
   ctwa_clid?: string | null;
@@ -653,7 +658,20 @@ function NotaAtendimentoPanel({ lead }: { lead: CrmLead }) {
           <Star className="h-3 w-3 fill-current" />{n} de 5
         </span>
       </div>
-      {lead.nota_atendimento_motivo && <p className="mt-2 text-xs text-foreground/85">{lead.nota_atendimento_motivo}</p>}
+      {lead.nota_atendimento_motivo && <p className="mt-2 text-xs text-foreground/85"><span className="font-semibold">Por quê:</span> {lead.nota_atendimento_motivo}</p>}
+      {lead.nota_atendimento_ajuste && <p className="mt-1 text-xs text-foreground/85"><span className="font-semibold text-primary">Ajuste:</span> {lead.nota_atendimento_ajuste}</p>}
+      {!!lead.nota_atendimento_trecho?.length && (
+        <div className="mt-2 space-y-1 rounded border border-border/60 bg-card p-2">
+          {lead.nota_atendimento_trecho.map((m, i) => (
+            <div key={i} className={cn('flex', m.d === 'out' ? 'justify-end' : 'justify-start')}>
+              <div className={cn('max-w-[85%] rounded-md px-2 py-1 text-[11px] leading-snug', m.d === 'out' ? 'bg-primary/15 text-foreground' : 'bg-muted text-foreground')}>
+                <span className="whitespace-pre-wrap break-words">{m.t || '[sem texto]'}</span>
+                <span className="ml-1.5 text-[9px] text-muted-foreground">{new Date(m.em).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
       {lead.nota_atendimento_em && (
         <p className="mt-1 text-[10px] text-muted-foreground">Avaliado em {new Date(lead.nota_atendimento_em).toLocaleDateString('pt-BR')} pela rotina diária</p>
       )}
@@ -1652,6 +1670,15 @@ function AttendanceView({
                 >
                   {auditGenerating ? 'Gerando…' : audit ? 'Gerar nova auditoria' : 'Gerar auditoria'}
                 </button>
+                <a
+                  href={`/relatorio-atendimento?${new URLSearchParams({ clientId, ...(month ? { month } : {}), ...(!month && from ? { from } : {}), ...(!month && to ? { to } : {}) })}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title="Piores, intermediários e melhores atendimentos do período, com o trecho da conversa, o porquê e o ajuste — pronto para salvar em PDF"
+                  className="rounded-lg border border-emerald-400/40 bg-emerald-500/15 px-2.5 py-1.5 text-[11px] font-semibold text-emerald-100 transition-colors hover:bg-emerald-500/25"
+                >
+                  Relatório com prints (PDF)
+                </a>
                 {audit && (
                   <button
                     onClick={irParaAuditoria}

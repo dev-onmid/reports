@@ -80,6 +80,8 @@ async function ensureTableInterno(pool: ReturnType<typeof makeServerPool>) {
       ADD COLUMN IF NOT EXISTS ia_confianca_ultimo INTEGER,
       ADD COLUMN IF NOT EXISTS nota_atendimento SMALLINT,
       ADD COLUMN IF NOT EXISTS nota_atendimento_motivo TEXT,
+      ADD COLUMN IF NOT EXISTS nota_atendimento_ajuste TEXT,
+      ADD COLUMN IF NOT EXISTS nota_atendimento_trecho JSONB,
       ADD COLUMN IF NOT EXISTS nota_atendimento_em TIMESTAMPTZ,
       ADD COLUMN IF NOT EXISTS time_interno BOOLEAN NOT NULL DEFAULT false;
   `);
