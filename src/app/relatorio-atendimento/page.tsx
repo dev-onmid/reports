@@ -25,13 +25,15 @@ function Print({ trecho }: { trecho: Msg[] }) {
   return (
     <div className="rounded-lg p-3" style={{ background: '#efeae2' }}>
       {trecho.map((m, i) => (
-        <div key={i} className={`mb-1.5 flex ${m.d === 'out' ? 'justify-end' : 'justify-start'}`}>
-          <div className="max-w-[80%] rounded-lg px-2.5 py-1.5 text-[12.5px] leading-snug shadow-sm" style={{ background: m.d === 'out' ? '#d9fdd3' : '#ffffff', color: '#111b21' }}>
-            <p className="mb-0.5 text-[10px] font-semibold" style={{ color: m.d === 'out' ? '#027a48' : '#6b7280' }}>
-              {m.d === 'out' ? `Loja${m.autor ? ` · ${m.autor}` : ''}` : 'Cliente'}
+        <div key={i} className={`mb-1 flex ${m.d === 'out' ? 'justify-end' : 'justify-start'}`}>
+          <div className="max-w-[85%] rounded-lg px-2 py-1 text-[12px] leading-snug shadow-sm" style={{ background: m.d === 'out' ? '#d9fdd3' : '#ffffff', color: '#111b21' }}>
+            <p className="flex items-baseline justify-between gap-3 text-[9.5px]">
+              <span className="font-semibold" style={{ color: m.d === 'out' ? '#027a48' : '#6b7280' }}>
+                {m.d === 'out' ? `Loja${m.autor ? ` · ${m.autor}` : ''}` : 'Cliente'}
+              </span>
+              <span style={{ color: '#667781' }}>{hora(m.em)}</span>
             </p>
             <p className="whitespace-pre-wrap break-words">{m.t || '[sem texto]'}</p>
-            <p className="mt-0.5 text-right text-[9.5px]" style={{ color: '#667781' }}>{hora(m.em)}</p>
           </div>
         </div>
       ))}
@@ -49,7 +51,7 @@ function Caso({ item }: { item: Item }) {
         </div>
         <span className="rounded-md px-2.5 py-1 text-sm font-black text-white" style={{ background: COR[item.nota] }}>{item.nota}/5</span>
       </header>
-      <div className="grid gap-3 md:grid-cols-[1.15fr_1fr]">
+      <div className="grid gap-3 md:grid-cols-[1.15fr_1fr] print:grid-cols-[1.15fr_1fr]">
         <Print trecho={item.trecho} />
         <div className="space-y-2.5 text-[13px] leading-relaxed text-zinc-800">
           <div>
@@ -72,11 +74,15 @@ function Secao({ titulo, sub, cor, itens }: { titulo: string; sub: string; cor: 
   if (!itens.length) return null;
   return (
     <section className="mb-8">
-      <div className="mb-3 border-b-2 pb-1.5" style={{ borderColor: cor }}>
-        <h2 className="text-lg font-black uppercase tracking-wide" style={{ color: cor }}>{titulo}</h2>
-        <p className="text-xs text-zinc-500">{sub}</p>
+      {/* Título preso ao 1º caso: senão a impressão deixa o título sozinho no pé da página. */}
+      <div className="caso">
+        <div className="mb-3 border-b-2 pb-1.5" style={{ borderColor: cor }}>
+          <h2 className="text-lg font-black uppercase tracking-wide" style={{ color: cor }}>{titulo}</h2>
+          <p className="text-xs text-zinc-500">{sub}</p>
+        </div>
+        <Caso item={itens[0]} />
       </div>
-      {itens.map(i => <Caso key={i.id} item={i} />)}
+      {itens.slice(1).map(i => <Caso key={i.id} item={i} />)}
     </section>
   );
 }
@@ -131,7 +137,7 @@ function Relatorio() {
         </p>
       ) : (
         <>
-          <section className="caso mb-8 grid gap-4 md:grid-cols-3">
+          <section className="caso mb-8 grid gap-4 md:grid-cols-3 print:grid-cols-3">
             <div className="rounded-xl border border-zinc-200 p-4">
               <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">Média dos atendimentos</p>
               <p className="mt-1 text-4xl font-black">{dados.media?.toString().replace('.', ',')}<span className="text-lg text-zinc-400">/5</span></p>
@@ -159,7 +165,7 @@ function Relatorio() {
           </section>
 
           {a && (a.problemas.length > 0 || ajustes.length > 0) && (
-            <section className="caso mb-8 grid gap-4 md:grid-cols-2">
+            <section className="mb-8 grid gap-4 md:grid-cols-2 print:grid-cols-2">
               <div className="rounded-xl border border-red-200 bg-red-50/60 p-4">
                 <h2 className="mb-2 text-sm font-black uppercase tracking-wide text-red-700">Pontos de atenção</h2>
                 <ul className="list-disc space-y-1.5 pl-4 text-[13px] leading-relaxed text-zinc-800">
