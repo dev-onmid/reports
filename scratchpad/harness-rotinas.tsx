@@ -1,4 +1,5 @@
 import { createRoot } from 'react-dom/client';
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { RotinasPanel } from '../src/components/settings/rotinas-panel';
 
 const agora = new Date('2026-10-06T22:00:00Z').toISOString();
@@ -6,7 +7,7 @@ const atras = (min: number) => new Date(Date.parse(agora) - min * 60_000).toISOS
 
 // Estado REAL medido na VPS em 06/10: 5 arquivos de 0 byte, Cardápio Web sem
 // pedido há 20h, rotina de atendimento ainda sem .last.
-const resposta = {
+const resposta: any = {
   agora,
   resumo: { total: 25, problemas: 6, atencao: 1, conexoesComProblema: 0 },
   leituraIndisponivel: false,
@@ -37,8 +38,8 @@ const tudoOk = new URLSearchParams(location.search).get('ok') === '1';
 if (tudoOk) {
   resposta.leituraIndisponivel = true;
   resposta.resumo = { total: 25, problemas: 0, atencao: 0, conexoesComProblema: 0 };
-  resposta.conexoes = resposta.conexoes.map((c) => ({ ...c, estado: 'ok', motivo: 'Conectada.' }));
-  resposta.rotinas = resposta.rotinas.map((r) => ({
+  resposta.conexoes = resposta.conexoes.map((c: any) => ({ ...c, estado: 'ok', motivo: 'Conectada.' }));
+  resposta.rotinas = resposta.rotinas.map((r: any) => ({
     ...r, estado: 'sem_leitura', ultimaExecucao: null, ultimaResposta: null,
     motivo: 'Ainda sem leitura do servidor para esta rotina.',
   }));
