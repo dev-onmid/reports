@@ -255,6 +255,8 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ token: str
           cpf: txt(c.cpf) ?? null,
           utmSource: tracking.utm_source ?? null,
           utmMedium: tracking.utm_medium ?? null,
+          campanha: nomes.campaign ?? tracking.utm_campaign ?? null,
+          pageUrl: tracking.source_url ?? null,
         },
       ).catch(err => ({ ok: false as const, motivo: String(err) }));
       // ⚠️ Vai para o log da TELA, não só para o console. Esta feature existe
