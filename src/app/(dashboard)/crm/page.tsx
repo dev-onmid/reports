@@ -15,7 +15,7 @@ import {
   ChevronLeft, ChevronRight, ChevronDown, SlidersHorizontal,
   AlignJustify, Trash2, Pencil, Sparkles, Clock3, LayoutGrid, List, ArrowUpDown,
   BarChart3, UserRound, MessageCircle, X, Send, GripVertical, Layers, WifiOff, Link2,
-  Globe2, Clapperboard, Info, MapPin, ClipboardList, BadgeCheck, BookmarkPlus, Check } from 'lucide-react';
+  Globe2, Clapperboard, Info, MapPin, ClipboardList, BadgeCheck, BookmarkPlus, Check, Star } from 'lucide-react';
 import { ChatView } from './chat-view';
 import { LeadChatPanel } from './lead-chat-panel';
 import { PortalLinkModal } from './portal-link-modal';
@@ -57,6 +57,10 @@ type CrmLead = {
   temperatura_atualizada_em?: string | null;
   ia_ultimo_analise?: string | null;
   ia_confianca_ultimo?: number | null;
+  /** Nota 0–5 do ATENDIMENTO deste lead (rotina diária). null = ainda sem nota ou não é lead. */
+  nota_atendimento?: number | null;
+  nota_atendimento_motivo?: string | null;
+  nota_atendimento_em?: string | null;
   time_interno?: boolean;
   ctwa_clid?: string | null;
   source_id?: string | null;
@@ -608,6 +612,51 @@ function RespostasFormulario({ leadId }: { leadId: string }) {
   );
 }
 
+// Nota 0–5 do atendimento do lead, dada pela rotina diária lendo a conversa.
+// Vermelho até 1, laranja 2, âmbar 3, verde 4–5: os ruins saltam no board.
+function notaClasse(n: number) {
+  return n <= 1 ? 'bg-red-500/15 text-red-400 ring-red-500/30'
+    : n === 2 ? 'bg-orange-500/15 text-orange-400 ring-orange-500/30'
+    : n === 3 ? 'bg-amber-500/15 text-amber-300 ring-amber-500/30'
+    : 'bg-emerald-500/15 text-emerald-400 ring-emerald-500/30';
+}
+
+function temNota(lead: CrmLead): lead is CrmLead & { nota_atendimento: number } {
+  return typeof lead.nota_atendimento === 'number' && lead.nota_atendimento >= 0 && lead.nota_atendimento <= 5;
+}
+
+function NotaAtendimentoBadge({ lead }: { lead: CrmLead }) {
+  if (!temNota(lead)) return null;
+  const n = lead.nota_atendimento;
+  return (
+    <span
+      title={`Atendimento ${n}/5${lead.nota_atendimento_motivo ? ` — ${lead.nota_atendimento_motivo}` : ''}`}
+      className={cn('inline-flex shrink-0 items-center gap-0.5 rounded px-1 py-px text-[10px] font-bold leading-tight ring-1 ring-inset', notaClasse(n))}
+    >
+      <Star className="h-2.5 w-2.5 fill-current" />{n}/5
+    </span>
+  );
+}
+
+function NotaAtendimentoPanel({ lead }: { lead: CrmLead }) {
+  if (!temNota(lead)) return null;
+  const n = lead.nota_atendimento;
+  return (
+    <div className="rounded-lg border border-border bg-background/50 p-3">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Nota do atendimento</p>
+        <span className={cn('inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs font-bold ring-1 ring-inset', notaClasse(n))}>
+          <Star className="h-3 w-3 fill-current" />{n} de 5
+        </span>
+      </div>
+      {lead.nota_atendimento_motivo && <p className="mt-2 text-xs text-foreground/85">{lead.nota_atendimento_motivo}</p>}
+      {lead.nota_atendimento_em && (
+        <p className="mt-1 text-[10px] text-muted-foreground">Avaliado em {new Date(lead.nota_atendimento_em).toLocaleDateString('pt-BR')} pela rotina diária</p>
+      )}
+    </div>
+  );
+}
+
 function TrackingSourcePanel({ lead }: { lead: CrmLead }) {
   const status = leadTrackingStatus(lead);
   const rows = trackingRows(lead);
@@ -912,6 +961,7 @@ function QuickEditModal({
               </select>
             </label>
           </div>
+          <NotaAtendimentoPanel lead={lead} />
           <TrackingSourcePanel lead={lead} />
           <RespostasFormulario leadId={lead.id} />
           <div className={cn(showChat && 'lg:hidden')}>
@@ -1155,6 +1205,7 @@ function KanbanCard({
       {/* Linha 1: nome + valor */}
       <div className="flex items-center gap-1.5">
         <p className="min-w-0 flex-1 truncate text-[13px] font-semibold text-foreground">{lead.nome ?? lead.numero ?? '—'}</p>
+        <NotaAtendimentoBadge lead={lead} />
         {value > 0 && (
           <span
             title={valorEmAberto ? 'Em negociação (ainda não fechado)' : 'Venda fechada'}
@@ -2746,6 +2797,7 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
   const [loading, setLoading]       = useState(false);
   const [leadsErro, setLeadsErro]   = useState(false);
   const [search, setSearch]         = useState('');
+  const [soAtendimentoRuim, setSoAtendimentoRuim] = useState(false);
   const [statusFilter, setStatusFilter] = useState('');
   const [temperatureFilter, setTemperatureFilter] = useState('');
   const [monthFilter, setMonthFilter] = useState('');
@@ -3062,6 +3114,7 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
       if (temperatureFilter === 'sem' && l.temperatura) return false;
       if (temperatureFilter !== 'sem' && l.temperatura !== temperatureFilter) return false;
     }
+    if (soAtendimentoRuim && !(temNota(l) && l.nota_atendimento <= 2)) return false;
     if (search) {
       const q = search.toLowerCase();
       const found = l.nome?.toLowerCase().includes(q) || l.numero?.includes(q) ||
@@ -3077,7 +3130,7 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
     if (a.time_interno !== b.time_interno) return a.time_interno ? 1 : -1;
     const result = compareSortValues(sortValue(a, sortConfig.key), sortValue(b, sortConfig.key));
     return sortConfig.direction === 'asc' ? result : -result;
-  }), [leads, search, statusFilter, temperatureFilter, monthFilter, dateFromFilter, dateToFilter, columnFilters, sortConfig]);
+  }), [leads, search, soAtendimentoRuim, statusFilter, temperatureFilter, monthFilter, dateFromFilter, dateToFilter, columnFilters, sortConfig]);
 
   /**
    * Recorte da análise de IA: CLIENTE + PERÍODO, nada mais (instrução do
@@ -3850,6 +3903,22 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
                   <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar leads..."
                     className="w-full pl-8 pr-3 py-2 rounded-lg border border-border bg-card text-sm focus:outline-none focus:ring-1 focus:ring-primary" />
                 </div>
+
+                {(() => {
+                  const ruins = leads.filter(l => temNota(l) && l.nota_atendimento <= 2).length;
+                  if (!ruins && !soAtendimentoRuim) return null;
+                  return (
+                    <button
+                      type="button"
+                      onClick={() => setSoAtendimentoRuim(v => !v)}
+                      title="Mostra só os leads com nota de atendimento 0, 1 ou 2"
+                      className={cn('flex shrink-0 items-center gap-1.5 rounded-lg border px-3 py-2 text-sm font-semibold transition-colors',
+                        soAtendimentoRuim ? 'border-red-500/50 bg-red-500/15 text-red-300' : 'border-border bg-card text-muted-foreground hover:text-foreground')}
+                    >
+                      <Star className="h-3.5 w-3.5" /> Atendimento ruim <span className="rounded bg-red-500/20 px-1.5 text-[11px] text-red-300">{ruins}</span>
+                    </button>
+                  );
+                })()}
 
                 <button onClick={() => void saveNew()}
                   className="flex shrink-0 items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors"

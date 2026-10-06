@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# Gera o token de longa duração do Claude Code e grava em /opt/onmid-rotina/.token
+# sem precisar copiar nada: captura a saída do `claude setup-token`.
+set -uo pipefail
+BASE=/opt/onmid-rotina
+CLAUDE=/root/.local/bin/claude
+LOG=$(mktemp /root/.st-XXXXXX); chmod 600 "$LOG"
+trap 'rm -f "$LOG"' EXIT
+echo "1) Vai abrir um link. Abra no navegador, autorize e copie o CÓDIGO que aparecer."
+echo "2) Cole o código AQUI, quando o terminal pedir, e aperte Enter."
+echo
+script -q -c "stty cols 500; $CLAUDE setup-token" "$LOG"
+TOK=$(sed 's/\x1b\[[0-9;?]*[a-zA-Z]//g' "$LOG" | tr -d '\r' | grep -ao 'sk-ant-oat01-[A-Za-z0-9_-]*' | tail -1)
+clear
+if [[ -z "$TOK" ]]; then echo "❌ Não encontrei o token na saída. Rode de novo: /opt/onmid-rotina/bin/gerar-token"; exit 1; fi
+printf 'CLAUDE_CODE_OAUTH_TOKEN=%s\n' "$TOK" > "$BASE/.token"; chmod 600 "$BASE/.token"
+echo "Token salvo (${#TOK} caracteres). Testando…"
+R=$(cd /tmp && CLAUDE_CODE_OAUTH_TOKEN="$TOK" timeout 90 "$CLAUDE" -p "Responda só: ok" 2>&1 | tail -1)
+if echo "$R" | grep -qi ok; then echo "✅ TOKEN OK — pode fechar este terminal."; else echo "❌ Token salvo mas o teste falhou: $R"; exit 1; fi
