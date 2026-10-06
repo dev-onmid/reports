@@ -7,7 +7,7 @@ CLIENTE DE HOJE: {{CLIENTE}}
 - Leia cada parte INTEIRA com a ferramenta Read (em pedaços se for grande).
 - Escreva as notas de cada parte com Write em `/opt/onmid-rotina/work/{{DIA}}/{{CLIENTE}}-notas-N.jsonl` (N = número da parte).
 - `/opt/onmid-rotina/bin/rotina notas-aplicar {{CLIENTE}}` — grava tudo. Rode UMA vez, no fim.
-Não tente outros comandos.
+Não tente outros comandos nem crie scripts (python, node, shell): eles são bloqueados. Escreva cada `.jsonl` DIRETAMENTE com a ferramenta Write, uma linha por lead.
 
 ## Formato — uma linha JSON por lead, para TODO lead lido
 {"lead":"<uuid completo>","nota":<0..5 ou null>,"motivo":"<o porquê, 1-2 frases concretas>","ajuste":"<o que a loja deveria ter feito/escrito, 1-2 frases>","trecho":[<números #N das mensagens que provam a nota>]}

@@ -88,7 +88,10 @@ def metricas(arq, dest, cid):
     p = os.path.join(dest, f'{cid}-metricas.txt')
     hist = j.get('auditoria_anterior')
     linhas = [f"CLIENTE: {j['cliente']} ({cid}) · gerado {quando(j['gerado_em'])}",
-              f"Histórico de mensagens no sistema desde: {dia(j['historico_no_sistema_desde'])}", '']
+              f"Histórico de mensagens no sistema desde: {dia(j['historico_no_sistema_desde'])}"]
+    if j.get('avaliacao_desde'):
+        linhas.append(f"AVALIAÇÃO SÓ A PARTIR DE {j['avaliacao_desde']}: antes disso o atendimento era feito em outro WhatsApp; nada anterior entra nas métricas nem na amostra. Diga isso no resumo e NÃO compare com a auditoria anterior se ela cobria o período antigo.")
+    linhas.append('')
     for k in ['ultimos_30_dias', 'ultimos_7_dias', 'semana_anterior', 'captura_e_fila', 'tentativas_contato_30d']:
         linhas.append(k.upper() + ': ' + json.dumps(j[k], ensure_ascii=False))
     linhas.append('CANAIS 30D: ' + json.dumps(j['canais_30d'], ensure_ascii=False))

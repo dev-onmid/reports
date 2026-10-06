@@ -2,6 +2,10 @@
 // mais os últimos 7 dias contra os 7 anteriores. Saída JSON.
 // Uso: node - <clientId>
 const { Pool } = require('pg');
+// Início da avaliação por cliente (config.json → inicio_avaliacao): mensagens de antes
+// não contam — ex.: Incorpast atendia por OUTRO WhatsApp até set/2026.
+const INICIO = /^\d{4}-\d{2}-\d{2}$/.test(process.env.INICIO_AVALIACAO || '') ? process.env.INICIO_AVALIACAO : null;
+const DESDE = (col) => INICIO ? `AND ${col} >= ('${INICIO}'::date::timestamp AT TIME ZONE 'America/Sao_Paulo')` : '';
 (async () => {
   const [clientId] = process.argv.slice(2);
   if (!/^client-\d+$/.test(clientId || '')) throw new Error('clientId inválido');
@@ -11,7 +15,7 @@ const { Pool } = require('pg');
       SELECT m.id, m.lead_id, m.direction, m.created_at, m.autor_nome
         FROM public.crm_messages m JOIN public.crm_leads l ON l.id = m.lead_id
        WHERE l.client_id = $1 AND COALESCE(l.time_interno, false) = false AND m.created_at IS NOT NULL
-         AND m.created_at > NOW() - INTERVAL '75 days'
+         AND m.created_at > NOW() - INTERVAL '75 days' ${DESDE('m.created_at')}
     ),
     msg AS (
       SELECT b.*, LAG(b.direction) OVER w AS dir_ant, LAG(b.created_at) OVER w AS em_ant,
@@ -79,7 +83,7 @@ const { Pool } = require('pg');
     [clientId])).rows[0];
   const tent = (await pool.query(
     `WITH b AS (SELECT m.lead_id, m.direction, m.created_at FROM public.crm_messages m JOIN public.crm_leads l ON l.id = m.lead_id
-                 WHERE l.client_id = $1 AND COALESCE(l.time_interno, false) = false),
+                 WHERE l.client_id = $1 AND COALESCE(l.time_interno, false) = false ${DESDE('m.created_at')}),
           fo AS (SELECT lead_id, MIN(created_at) AS fo FROM b WHERE direction = 'out' GROUP BY lead_id HAVING MIN(created_at) > NOW() - INTERVAL '30 days'),
           r AS (SELECT fo.lead_id, (SELECT MIN(created_at) FROM b WHERE b.lead_id = fo.lead_id AND direction = 'in' AND created_at > fo.fo) AS resp,
                        EXISTS (SELECT 1 FROM b WHERE b.lead_id = fo.lead_id AND direction = 'in' AND created_at < fo.fo) AS escreveu_antes FROM fo),
@@ -90,22 +94,22 @@ const { Pool } = require('pg');
   const canais = (await pool.query(
     `SELECT COALESCE(NULLIF(l.canal, ''), 'sem canal') AS canal, COUNT(DISTINCT l.id)::int AS conversas,
             COUNT(DISTINCT l.id) FILTER (WHERE l.fechou)::int AS fecharam
-       FROM public.crm_leads l JOIN public.crm_messages m ON m.lead_id = l.id AND m.created_at > NOW() - INTERVAL '30 days'
+       FROM public.crm_leads l JOIN public.crm_messages m ON m.lead_id = l.id AND m.created_at > NOW() - INTERVAL '30 days' ${DESDE('m.created_at')}
       WHERE l.client_id = $1 AND COALESCE(l.time_interno, false) = false GROUP BY 1 ORDER BY 2 DESC LIMIT 8`, [clientId])).rows;
   const etapas = (await pool.query(
     `SELECT COALESCE(NULLIF(l.status, ''), 'sem etapa') AS etapa, COUNT(DISTINCT l.id)::int AS leads
-       FROM public.crm_leads l JOIN public.crm_messages m ON m.lead_id = l.id AND m.created_at > NOW() - INTERVAL '30 days'
+       FROM public.crm_leads l JOIN public.crm_messages m ON m.lead_id = l.id AND m.created_at > NOW() - INTERVAL '30 days' ${DESDE('m.created_at')}
       WHERE l.client_id = $1 AND COALESCE(l.time_interno, false) = false GROUP BY 1 ORDER BY 2 DESC LIMIT 12`, [clientId])).rows;
   const autores = (await pool.query(
     `SELECT m.autor_nome, COUNT(*)::int AS msgs FROM public.crm_messages m JOIN public.crm_leads l ON l.id = m.lead_id
-      WHERE l.client_id = $1 AND m.direction = 'out' AND m.autor_nome IS NOT NULL AND m.created_at > NOW() - INTERVAL '30 days'
+      WHERE l.client_id = $1 AND m.direction = 'out' AND m.autor_nome IS NOT NULL AND m.created_at > NOW() - INTERVAL '30 days' ${DESDE('m.created_at')}
       GROUP BY 1 ORDER BY 2 DESC`, [clientId])).rows;
   const hist = (await pool.query(
     `SELECT created_at, nota_geral, classificacao, resultado->'notas_criterios' AS criterios, resultado->'principais_problemas' AS problemas
        FROM public.crm_atendimento_auditorias WHERE client_id = $1 ORDER BY created_at DESC LIMIT 1`, [clientId])).rows[0] || null;
   const primeira = (await pool.query(`SELECT MIN(m.created_at) AS desde FROM public.crm_messages m JOIN public.crm_leads l ON l.id = m.lead_id WHERE l.client_id = $1`, [clientId])).rows[0];
   const nome = (await pool.query(`SELECT name FROM public.clients WHERE id = $1`, [clientId])).rows[0]?.name;
-  process.stdout.write(JSON.stringify({ clientId, cliente: nome, gerado_em: new Date().toISOString(), historico_no_sistema_desde: primeira.desde,
+  process.stdout.write(JSON.stringify({ clientId, cliente: nome, gerado_em: new Date().toISOString(), historico_no_sistema_desde: primeira.desde, avaliacao_desde: INICIO,
     ultimos_30_dias: ult30, ultimos_7_dias: ult7, semana_anterior: ant7, captura_e_fila: extra, tentativas_contato_30d: tent,
     canais_30d: canais, etapas_dos_leads_ativos_30d: etapas, autores_registrados_30d: autores, auditoria_anterior: hist }));
   await pool.end();

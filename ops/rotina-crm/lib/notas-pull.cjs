@@ -3,6 +3,10 @@
 // e o lead escreveu pelo menos uma vez — disparo sem resposta não é atendimento.
 // Uso: node - <clientId> [maxLeads]
 const { Pool } = require('pg');
+// Início da avaliação por cliente (config.json → inicio_avaliacao): mensagens de antes
+// não contam — ex.: Incorpast atendia por OUTRO WhatsApp até set/2026.
+const INICIO = /^\d{4}-\d{2}-\d{2}$/.test(process.env.INICIO_AVALIACAO || '') ? process.env.INICIO_AVALIACAO : null;
+const DESDE = (col) => INICIO ? `AND ${col} >= ('${INICIO}'::date::timestamp AT TIME ZONE 'America/Sao_Paulo')` : '';
 (async () => {
   const [clientId, maxArg] = process.argv.slice(2);
   if (!/^client-\d+$/.test(clientId || '')) throw new Error('clientId inválido');
@@ -21,9 +25,9 @@ const { Pool } = require('pg');
        FROM public.crm_leads l
        JOIN public.crm_messages m ON m.lead_id = l.id
       WHERE l.client_id = $1 AND COALESCE(l.time_interno, false) = false
-        AND m.created_at > COALESCE(l.nota_atendimento_em, NOW() - INTERVAL '30 days')
+        AND m.created_at > COALESCE(l.nota_atendimento_em, NOW() - INTERVAL '30 days') ${DESDE('m.created_at')}
         AND EXISTS (SELECT 1 FROM public.crm_messages i WHERE i.lead_id = l.id AND i.direction = 'in'
-                     AND i.created_at > NOW() - INTERVAL '30 days')
+                     AND i.created_at > NOW() - INTERVAL '30 days' ${DESDE('i.created_at')})
       GROUP BY l.id
       ORDER BY MAX(m.created_at) DESC
       LIMIT $2`, [clientId, max])).rows;
@@ -31,7 +35,7 @@ const { Pool } = require('pg');
   const msgs = ids.length ? (await pool.query(
     `SELECT lead_id::text AS lead_id, direction, created_at, LEFT(COALESCE(text, ''), 500) AS text, autor_nome
        FROM (SELECT m.*, ROW_NUMBER() OVER (PARTITION BY m.lead_id ORDER BY m.created_at DESC) rn
-               FROM public.crm_messages m WHERE m.lead_id = ANY($1::uuid[])) x
+               FROM public.crm_messages m WHERE m.lead_id = ANY($1::uuid[]) ${DESDE('m.created_at')}) x
       WHERE rn <= 40 ORDER BY lead_id, created_at`, [ids])).rows : [];
   const porLead = new Map();
   for (const m of msgs) { if (!porLead.has(m.lead_id)) porLead.set(m.lead_id, []); porLead.get(m.lead_id).push(m); }

@@ -10,7 +10,7 @@ CONTAINER=onmid-reports
 
 no_container() { # script args...
   local s=$1; shift
-  docker exec -i -w /app -e NODE_PATH=/app/node_modules "$CONTAINER" node - "$@" < "$BASE/lib/$s"
+  docker exec -i -w /app -e NODE_PATH=/app/node_modules -e INICIO_AVALIACAO="${INICIO:-}" "$CONTAINER" node - "$@" < "$BASE/lib/$s"
 }
 copia() { # arquivo-local -> caminho no container
   local dst="/tmp/rotina-$(basename "$1")-$$"
@@ -25,6 +25,8 @@ na_lista() { # lista cid
 }
 
 cmd=${1:-}; shift || true
+# Data a partir da qual as conversas deste cliente contam (config.json → inicio_avaliacao).
+INICIO=$(python3 -c "import json,sys; print(json.load(open('$BASE/config.json')).get('inicio_avaliacao',{}).get(sys.argv[1],''))" "${1:-}" 2>/dev/null)
 case "$cmd" in
   kanban-ler)
     cliente_ok "${1:-}"; cid=$1

@@ -12,12 +12,29 @@
   ],
   "_auditoria": "Clientes que recebem a nota diária de atendimento.",
   "auditoria": [
-    "client-1778639870042", "client-1778639579313", "client-1778639586687", "client-1778639879146",
-    "client-1778639715710", "client-1788987948836", "client-1789748020716", "client-1778639860142",
-    "client-1778639668562", "client-1778639630240", "client-1778639535689", "client-1778639693102",
-    "client-1778639756911", "client-1779884361664", "client-1778591834317", "client-1778591737887",
-    "client-1778639900852", "client-1778887096322"
+    "client-1778639870042",
+    "client-1778639579313",
+    "client-1778639586687",
+    "client-1778639879146",
+    "client-1778639715710",
+    "client-1788987948836",
+    "client-1789748020716",
+    "client-1778639860142",
+    "client-1778639668562",
+    "client-1778639630240",
+    "client-1778639535689",
+    "client-1778639693102",
+    "client-1778639756911",
+    "client-1779884361664",
+    "client-1778591834317",
+    "client-1778591737887",
+    "client-1778639900852",
+    "client-1778887096322"
   ],
   "max_leads_por_dia": 150,
-  "modelo": "sonnet"
+  "modelo": "sonnet",
+  "_inicio_avaliacao": "Por cliente: data (AAAA-MM-DD) a partir da qual as conversas contam para nota e auditoria. Incorpast atendia por outro WhatsApp até set/2026.",
+  "inicio_avaliacao": {
+    "client-1778639630240": "2026-10-01"
+  }
 }
