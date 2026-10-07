@@ -16,7 +16,7 @@ import { extrairSheetId } from '@/lib/google-sheets';
 import {
   baixarPlanilha, ensureSheetsSchema, lerConfig, registrarErroSheets, sincronizarSheets,
 } from '@/lib/sheets-sync';
-import { normalizarMapeamento } from '@/lib/sheets-mapeamento';
+import { normalizarMapeamento, casarColunasDaAba, abaUtilizavel, type Mapeamento } from '@/lib/sheets-mapeamento';
 
 export const maxDuration = 300;
 
@@ -48,6 +48,10 @@ export async function PUT(req: NextRequest, { params }: Ctx) {
     abas?: string[]; seguirMes?: boolean; colunas?: string[];
     /** Campos que o gestor acabou de apontar à mão, para a IA não desfazer. */
     manuais?: string[];
+    /** Ajuste de coluna para UMA aba: `{ "AGT24": { date: "Data Entrada" } }`. */
+    mapeamentoPorAba?: Record<string, Record<string, string | string[] | null>>;
+    /** Cabeçalho de cada aba, para validar o ajuste contra o que existe nela. */
+    colunasPorAba?: Record<string, string[]>;
   };
   // ⚠️ Nunca grava o que a tela mandou cru: campo fora do catálogo viraria um
   // override que a importação ignora, e coluna inexistente derruba a aba inteira
@@ -55,6 +59,20 @@ export async function PUT(req: NextRequest, { params }: Ctx) {
   const mapa = body.mapeamento === undefined
     ? null
     : normalizarMapeamento(body.mapeamento, body.colunas);
+
+  // ⚠️ Cada aba valida contra o PRÓPRIO cabeçalho: apontar numa aba uma coluna
+  // que só existe em outra faria a importação procurar um texto inexistente.
+  let porAba: Record<string, Mapeamento> | null = null;
+  if (body.mapeamentoPorAba && typeof body.mapeamentoPorAba === 'object') {
+    porAba = {};
+    for (const [aba, mapa] of Object.entries(body.mapeamentoPorAba).slice(0, 80)) {
+      const limpo = normalizarMapeamento(mapa, body.colunasPorAba?.[aba]);
+      // Só guarda o que o gestor realmente apontou — campo nulo é "deixa o
+      // automático resolver", e gravá-lo congelaria a aba sem aquele campo.
+      const util = Object.fromEntries(Object.entries(limpo ?? {}).filter(([, v]) => v !== null));
+      if (Object.keys(util).length) porAba[aba] = util;
+    }
+  }
 
   const sheetId = extrairSheetId(body.sheetsUrl);
   if (!sheetId) return Response.json({ error: 'Cole o link de uma planilha do Google Sheets.' }, { status: 400 });
@@ -92,6 +110,9 @@ export async function PUT(req: NextRequest, { params }: Ctx) {
          mapeamento = COALESCE($7::jsonb, public.client_sheets.mapeamento),
          -- União, nunca substituição: cada ajuste marca mais um campo como do
          -- gestor, e nenhum deles se perde ao salvar outra coisa.
+         -- Mescla por aba: ajustar AGT24 não pode apagar o ajuste de MAI24.
+         mapeamento_por_aba = CASE WHEN $11::jsonb IS NULL THEN public.client_sheets.mapeamento_por_aba
+           ELSE COALESCE(public.client_sheets.mapeamento_por_aba, '{}'::jsonb) || $11::jsonb END,
          campos_manuais = CASE WHEN $10::jsonb IS NULL THEN public.client_sheets.campos_manuais
            ELSE (SELECT COALESCE(jsonb_agg(DISTINCT v), '[]'::jsonb)
                    FROM jsonb_array_elements(COALESCE(public.client_sheets.campos_manuais, '[]'::jsonb) || $10::jsonb) AS v) END,
@@ -106,7 +127,8 @@ export async function PUT(req: NextRequest, { params }: Ctx) {
        body.abas === undefined ? null : JSON.stringify(body.abas.filter(a => typeof a === 'string').slice(0, 60)),
        body.seguirMes === undefined ? null : body.seguirMes,
        Array.isArray(body.manuais) && body.manuais.length
-         ? JSON.stringify(body.manuais.filter(c => typeof c === 'string').slice(0, 40)) : null]
+         ? JSON.stringify(body.manuais.filter(c => typeof c === 'string').slice(0, 40)) : null,
+       porAba ? JSON.stringify(porAba) : null]
     );
     return Response.json({ ok: true });
   } catch (e) {
@@ -126,6 +148,32 @@ export async function POST(req: NextRequest, { params }: Ctx) {
     const { rows } = await pool.query(`SELECT * FROM public.client_sheets WHERE client_id = $1`, [id]);
     if (!rows[0]) return Response.json({ error: 'Vincule a planilha antes.' }, { status: 400 });
     const cfg = lerConfig(rows[0]);
+
+    // ── diagnóstico: o que cada aba entrega, sem gastar IA ────────────────────
+    if (body.acao === 'diagnostico') {
+      const XLSX = await import('xlsx');
+      let buf: Buffer;
+      try { buf = await baixarPlanilha(cfg.sheetId); }
+      catch (e) { return Response.json({ error: e instanceof Error ? e.message : 'Falha ao baixar.' }, { status: 422 }); }
+      const wb = XLSX.read(buf, { type: 'buffer' });
+      const { escolherAbas } = await import('@/lib/google-sheets');
+      const escolha = escolherAbas(wb.SheetNames, { fixas: cfg.abas, seguirMes: cfg.seguirMes });
+      // ⚠️ Diagnostica TODAS as abas da planilha, não só as escolhidas: é aqui
+      // que o gestor descobre que uma aba que ele não marcou está pronta para
+      // entrar, ou por que a que ele marcou não entra.
+      const abas = wb.SheetNames.map((nome) => {
+        const linha = XLSX.utils.sheet_to_json<unknown[]>(wb.Sheets[nome], { header: 1, defval: '' })[0] ?? [];
+        const colunas = (linha as unknown[]).map(c => String(c ?? '')).filter(c => c.trim().length > 0);
+        const casado = casarColunasDaAba(colunas, cfg.mapeamento, cfg.mapeamentoPorAba?.[nome] ?? null);
+        const { ok, faltamEssenciais } = abaUtilizavel(casado, cfg.fonteFaturamento);
+        return {
+          nome, colunas, ok, faltamEssenciais,
+          escolhida: escolha.abas.includes(nome),
+          mapa: casado.mapa, origem: casado.origem, faltam: casado.faltam,
+        };
+      });
+      return Response.json({ ok: true, abas, abaDoMes: escolha.abaDoMes });
+    }
 
     if (body.acao === 'importar') {
       const r = await sincronizarSheets(pool, cfg);

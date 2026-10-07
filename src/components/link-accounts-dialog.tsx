@@ -812,6 +812,11 @@ function MetaPagesContent({
   );
 }
 
+type DiagAba = {
+  nome: string; colunas: string[]; ok: boolean; faltamEssenciais: string[];
+  escolhida: boolean; mapa: Mapeamento; origem: Record<string, string>; faltam: string[];
+};
+
 type SheetsCfg = {
   sheetUrl: string; tipoPlanilha: string; fonteFaturamento: boolean; ativo: boolean;
   abaExemplo: string | null; ultimaSync: string | null; ultimoErro: string | null;
@@ -842,6 +847,9 @@ function GoogleSheetsContent({ clientId, onDone, onCancel }: { clientId: string;
   // gestor só consegue ver o de-para, não corrigir.
   const [cabecalho, setCabecalho] = useState<string[]>([]);
   const [editandoColunas, setEditandoColunas] = useState(false);
+  // Diagnóstico por aba: qual coluna cada aba entrega para cada campo.
+  const [diag, setDiag] = useState<DiagAba[] | null>(null);
+  const [abaAberta, setAbaAberta] = useState<string | null>(null);
   const [fatura, setFatura] = useState(false);
   const [ativo, setAtivo] = useState(false);
   const [resumo, setResumo] = useState('');
@@ -869,7 +877,10 @@ function GoogleSheetsContent({ clientId, onDone, onCancel }: { clientId: string;
       });
   }, [clientId]);
 
-  async function salvar(extra: Partial<{ ativo: boolean; mapeamento: Mapeamento; manuais: string[] }> = {}) {
+  async function salvar(extra: Partial<{
+    ativo: boolean; mapeamento: Mapeamento; manuais: string[];
+    mapeamentoPorAba: Record<string, Mapeamento>; colunasPorAba: Record<string, string[]>;
+  }> = {}) {
     const res = await fetch(`/api/clients/${clientId}/sheets`, {
       method: 'PUT', headers: { 'Content-Type': 'application/json' },
       // `colunas` vai junto para o servidor poder recusar coluna que não existe
@@ -926,6 +937,32 @@ function GoogleSheetsContent({ clientId, onDone, onCancel }: { clientId: string;
     // `manuais` é o que faz a reanálise respeitar esta escolha depois.
     void salvar({ mapeamento: novo, manuais: [campo] })
       .catch(() => setError('Não consegui salvar o ajuste de colunas.'));
+  }
+
+  async function carregarDiagnostico() {
+    setError(''); setStatus('analyzing');
+    const res = await fetch(`/api/clients/${clientId}/sheets`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ acao: 'diagnostico' }),
+    });
+    const d = await res.json() as { error?: string; abas?: DiagAba[] };
+    setStatus('idle');
+    if (!res.ok) { setError(d.error ?? 'Não consegui ler a planilha.'); return; }
+    setDiag(d.abas ?? []);
+  }
+
+  /**
+   * Aponta uma coluna para um campo DESTA aba.
+   *
+   * ⚠️ Manda só o ajuste da aba mexida, mais o cabeçalho dela — o servidor
+   * valida contra as colunas que existem ali. Apontar numa aba uma coluna que só
+   * existe em outra faria a importação procurar um texto inexistente.
+   */
+  function ajustarColunaDaAba(aba: DiagAba, campo: string, valor: string | null) {
+    const mapa = { ...aba.mapa, [campo]: valor };
+    setDiag(prev => prev?.map(a => a.nome === aba.nome ? { ...a, mapa, origem: { ...a.origem, [campo]: 'manual' } } : a) ?? prev);
+    void salvar({ mapeamentoPorAba: { [aba.nome]: { [campo]: valor } }, colunasPorAba: { [aba.nome]: aba.colunas } })
+      .then(() => carregarDiagnostico())
+      .catch(() => setError('Não consegui salvar o ajuste desta aba.'));
   }
 
   async function handleImportar() {
@@ -1113,6 +1150,92 @@ function GoogleSheetsContent({ clientId, onDone, onCancel }: { clientId: string;
             ))}
           </div>
         )}
+        {/* ── Colunas aba a aba ───────────────────────────────────────────
+            ⚠️ Existe porque o de-para é POR COLUNA: a aba de 2024 chama a data
+            de "Data Entrada" e a de hoje chama de "DATA". O automático resolve a
+            maioria; aqui o gestor conserta o que sobrou, sem mexer na planilha. */}
+        {temMapa && (
+          <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs font-semibold">Colunas aba a aba</p>
+              <button
+                type="button"
+                onClick={() => diag ? setDiag(null) : void carregarDiagnostico()}
+                disabled={busy}
+                className="text-[11px] font-semibold text-primary hover:underline disabled:opacity-50"
+              >
+                {status === 'analyzing' && !diag ? 'Lendo…' : diag ? 'Fechar' : 'Conferir abas'}
+              </button>
+            </div>
+
+            {!diag ? (
+              <p className="text-[11px] leading-snug text-muted-foreground">
+                Veja o que cada aba entrega e aponte a coluna certa quando o nome for diferente do padrão.
+              </p>
+            ) : diag.length === 0 ? (
+              <p className="text-[11px] text-muted-foreground">Nenhuma aba encontrada.</p>
+            ) : (
+              <div className="max-h-80 space-y-1.5 overflow-y-auto pr-1">
+                {[...diag].sort((a, b) => Number(a.ok) - Number(b.ok) || Number(b.escolhida) - Number(a.escolhida)).map((aba) => {
+                  const aberta = abaAberta === aba.nome;
+                  const pendencias = aba.ok ? aba.faltam.length : aba.faltamEssenciais.length;
+                  return (
+                    <div key={aba.nome} className={cn('rounded border bg-background/40', aba.ok ? 'border-border' : 'border-destructive/50')}>
+                      <button
+                        type="button"
+                        onClick={() => setAbaAberta(aberta ? null : aba.nome)}
+                        className="flex w-full items-center gap-2 px-2 py-1.5 text-left"
+                      >
+                        <span className={cn('h-1.5 w-1.5 shrink-0 rounded-full', aba.ok ? 'bg-emerald-400' : 'bg-destructive')} />
+                        <span className="min-w-0 flex-1 truncate text-[11px] text-foreground">{aba.nome}</span>
+                        {!aba.escolhida && <span className="shrink-0 text-[9px] uppercase tracking-widest text-muted-foreground/70">não marcada</span>}
+                        <span className={cn('shrink-0 text-[10px]', aba.ok ? 'text-muted-foreground' : 'text-destructive')}>
+                          {aba.ok ? (pendencias ? `faltam ${pendencias}` : 'completa') : `falta ${aba.faltamEssenciais.map(k => CAMPOS.find(c => c.chave === k)?.rotulo ?? k).join(', ')}`}
+                        </span>
+                      </button>
+                      {aberta && (
+                        <div className="space-y-1.5 border-t border-border/60 px-2 py-2">
+                          {aba.colunas.length === 0 && (
+                            <p className="text-[10px] leading-snug text-amber-400/90">
+                              Esta aba não tem cabeçalho na primeira linha — normalmente é um título ocupando o lugar. Sem cabeçalho não há coluna para apontar.
+                            </p>
+                          )}
+                          {CAMPOS.filter(c => !c.lista).map((campo) => {
+                            const v = aba.mapa[campo.chave];
+                            const marcado = typeof v === 'string' ? v : '';
+                            const auto = aba.origem[campo.chave];
+                            return (
+                              <div key={campo.chave} className="flex items-center gap-2">
+                                <span className="w-32 shrink-0 truncate text-[10px] text-muted-foreground" title={campo.ajuda}>
+                                  {campo.rotulo}{campo.essencial && <span className="text-primary"> *</span>}
+                                </span>
+                                <select
+                                  value={marcado}
+                                  onChange={(e) => ajustarColunaDaAba(aba, campo.chave, e.target.value || null)}
+                                  className={cn(
+                                    'h-7 min-w-0 flex-1 rounded border bg-background px-1.5 text-[11px] text-foreground',
+                                    campo.essencial && !marcado ? 'border-destructive/60' : 'border-border',
+                                  )}
+                                >
+                                  <option value="">— não usar —</option>
+                                  {aba.colunas.map(col => <option key={col} value={col}>{col}</option>)}
+                                </select>
+                                <span className="w-14 shrink-0 text-[9px] uppercase tracking-widest text-muted-foreground/60">
+                                  {auto === 'manual' ? 'você' : auto === 'sinonimo' ? 'auto' : auto === 'padrao' ? '' : ''}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
         {resumo && <p className="text-xs text-emerald-400">{resumo}</p>}
         {aviso && <p className="text-xs text-amber-400/90">{aviso}</p>}
         {error && <p className="text-xs text-destructive">{error}</p>}

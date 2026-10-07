@@ -705,6 +705,18 @@ abrir o painel, o `lps/bin/gtag ads destinos <cliente>` consulta o reports.
 
 @AGENTS.md
 
+## Planilhas — tela de "Colunas aba a aba" para apontar o que o automático não achou (2026-10-07)
+
+Segunda metade do pedido do Matheus: *"quando a IA não conseguir identificar qual é qual, a gente escolher manualmente"*.
+
+- **`POST /sheets { acao: 'diagnostico' }`** baixa a planilha e devolve, **por aba**, o cabeçalho, o de-para resolvido, de onde veio cada campo (`padrao` | `sinonimo` | `manual`) e o que falta. **Não gasta IA** — é só o casamento determinístico.
+- **⚠️ Diagnostica TODAS as abas, não só as marcadas**: é aqui que o gestor descobre que uma aba que ele não marcou já está pronta, ou por que a marcada não entra.
+- **Tela**: seção "Colunas aba a aba" com as abas problemáticas no topo (ponto vermelho + o que falta) e, ao abrir, um `<select>` por campo com **as colunas daquela aba**. Campo essencial sem coluna fica com borda vermelha; o que o automático resolveu por sinônimo aparece como `AUTO`.
+- **⚠️ Salva só o AJUSTE daquela aba, com o cabeçalho dela junto** (`mapeamentoPorAba` + `colunasPorAba`): o servidor valida contra as colunas que existem ali, porque apontar numa aba uma coluna que só existe em outra faria a importação procurar um texto inexistente. No SQL é `||` (mescla), não substituição — ajustar AGT24 não pode apagar o ajuste de MAI24.
+- **⚠️ Campo deixado em "— não usar —" NÃO é gravado**: nulo ali significa "deixa o automático resolver". Gravá-lo congelaria a aba sem aquele campo para sempre, mesmo depois de a planilha ganhar a coluna.
+- **Aba sem cabeçalho na linha 1** (caso das 7 abas de 2024 da Romanza, com um título ocupando a primeira linha) mostra a explicação em vez de um seletor vazio — não há coluna para apontar.
+- ✅ Verificado no browser com os casos reais: AGT24 com `Data Entrada` marcada como `AUTO`, FEV24 e OUT2025 no topo em vermelho, e o ajuste manual disparando o PUT com `{mapeamentoPorAba: {AGT24: {status: 'Canal'}}, colunasPorAba: {AGT24: [...]}}`. tsc + `next build` limpos; eslint igual ao HEAD.
+
 ## Planilhas — o de-para passou a ser POR ABA e POR COLUNA (2026-10-07)
 
 Correção de rumo pedida pelo Matheus: *"cada coluna deve ser individual, não deve ser uma importação sequencial. Às vezes a coluna de data vai estar na A, às vezes na B, às vezes na C. O importante é que a coluna data vai ser puxada e usada no campo data do CRM"*.
