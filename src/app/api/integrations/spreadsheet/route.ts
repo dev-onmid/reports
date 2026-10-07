@@ -1071,7 +1071,14 @@ export async function POST(req: NextRequest) {
     const neighborhoodCol = neighborhoodColumnOverride || null;
     const notesCol = notesColumnOverride || null;
     const scheduledDateCol = scheduledDateColumnOverride || null;
-    const statusCol = statusColumnOverride || null;
+    // ⚠️⚠️ `stage` vira `status` quando não há coluna de status própria. O
+    // Kanban, o funil e `sinaisDoStatus` leem `status`; `stage` só é gravado no
+    // caminho com ID de negócio, que quase nenhuma planilha tem. Medido na
+    // Romanza: a coluna STATUS estava mapeada em `stage`, `stage` ficou 100%
+    // VAZIO nos 6.858 leads e 6.095 entraram sem status nenhum — o board tinha
+    // 284 leads com Engajados, Aprovações, Agendamentos e Cadastros zerados.
+    // Quando a planilha tem as DUAS colunas, nada muda: o status próprio vence.
+    const statusCol = statusColumnOverride || stageColumnOverride || null;
     const dealIdCol = dealIdColumnOverride || null;
     const stageCol = stageColumnOverride || null;
     const updatedDateCol = updatedDateColumnOverride || null;
