@@ -104,9 +104,17 @@ export async function GET(req: NextRequest) {
     await ensureTable(pool);
     await ensureDefaultFunnel(pool, clientId);
     await ensureCrmMessagesSchema(pool);
+    // Modo incremental: o CRM busca a lista completa ao abrir e, entre uma carga e
+    // outra, só o que mudou. A Atmos tem 3.500+ leads (8,5 MB): baixar tudo a cada
+    // 8 s travava a tela e, chegando no meio de um arraste, jogava o lead de volta.
+    // ⚠️ Mesmos filtros da lista completa (funil + número válido + lead visível),
+    // senão o incremental traz linha que a carga completa não mostra.
     if (since) {
       const { rows } = await pool.query(
         `SELECT l.*,
+                COALESCE(l.lead_date, l.data) AS normalized_date,
+                COALESCE(l.lead_name, l.nome) AS normalized_name,
+                COALESCE(NULLIF(l.revenue, 0), l.valor_rs, 0)::float AS normalized_revenue,
                 COALESCE(l.whatsapp_last_message_at, lm.last_contact_at, l.updated_at, l.created_at) AS last_contact_at
            FROM public.crm_leads l
            LEFT JOIN LATERAL (
@@ -115,9 +123,14 @@ export async function GET(req: NextRequest) {
               WHERE m.lead_id = l.id
            ) lm ON true
           WHERE l.client_id = $1 AND l.updated_at > $2
+            AND ($3::uuid IS NULL OR l.funnel_id = $3::uuid)
+            AND (
+              NULLIF(regexp_replace(COALESCE(l.numero, ''), '\\D', '', 'g'), '') IS NULL
+              OR regexp_replace(l.numero, '\\D', '', 'g') ~ '^[0-9]{8,15}$'
+            )
             AND ${leadVisivelCrmSql('l')}
           ORDER BY l.updated_at DESC`,
-        [clientId, since],
+        [clientId, since, funnelId ?? null],
       );
       return Response.json(rows);
     }

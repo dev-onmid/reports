@@ -1276,6 +1276,8 @@ function KanbanCard({
 }
 
 // ── Kanban Column (droppable) ────────────────────────────────────────────────
+const CARDS_POR_COLUNA = 50;
+
 function KanbanColumn({
   status, color, leads, onEdit, onDelete, onToggleInternal, onToggleQualificado, activeLead, activeFollowupIds,
 }: {
@@ -1298,6 +1300,11 @@ function KanbanColumn({
   // que têm lead. Clicar abre de novo — a coluna não some, só encolhe.
   const [expandida, setExpandida] = useState(false);
   const recolhida = leads.length === 0 && !expandida;
+  // ⚠️ Coluna com milhares de leads (Entrada da Atmos: 3.446) desenhava todos os
+  // cards, cada um arrastável — pegar um card fazia o dnd-kit mexer em milhares.
+  // Mostra 50 por vez; o número da coluna continua sendo o total.
+  const [limite, setLimite] = useState(CARDS_POR_COLUNA);
+  const visiveis = leads.length > limite ? leads.slice(0, limite) : leads;
 
   if (recolhida) {
     return (
@@ -1363,7 +1370,7 @@ function KanbanColumn({
           isOver && "bg-primary/5 border-primary/30",
         )}
       >
-        {leads.map(lead => (
+        {visiveis.map(lead => (
           <KanbanCard
             key={lead.id}
             lead={lead}
@@ -1374,6 +1381,15 @@ function KanbanColumn({
             hasActiveFollowup={activeFollowupIds.has(lead.id)}
           />
         ))}
+        {leads.length > visiveis.length && (
+          <button
+            type="button"
+            onClick={() => setLimite(v => v + CARDS_POR_COLUNA)}
+            className="shrink-0 rounded-md border border-dashed border-border px-2 py-1.5 text-[11px] font-semibold text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
+          >
+            Mostrar mais {Math.min(CARDS_POR_COLUNA, leads.length - visiveis.length)} · faltam {(leads.length - visiveis.length).toLocaleString('pt-BR')}
+          </button>
+        )}
         {leads.length === 0 && (
           <div className="flex items-center justify-center py-6">
             <p className="text-[10px] text-muted-foreground/40 italic">
@@ -1388,10 +1404,11 @@ function KanbanColumn({
 
 // ── Kanban View ──────────────────────────────────────────────────────────────
 function KanbanView({
-  leads, stages, onEdit, onDelete, onStatusChange, onToggleInternal, onToggleQualificado, activeFollowupIds,
+  leads, stages, onEdit, onDelete, onStatusChange, onToggleInternal, onToggleQualificado, activeFollowupIds, onArrasteMudou,
 }: {
   leads: CrmLead[];
   stages: CrmStage[];
+  onArrasteMudou?: (arrastando: boolean) => void;
   onEdit: (lead: CrmLead) => void;
   onDelete: (id: string) => void;
   onStatusChange: (id: string, status: string) => void;
@@ -1417,10 +1434,12 @@ function KanbanView({
   function handleDragStart(event: DragStartEvent) {
     const lead = leads.find(l => l.id === event.active.id);
     setActiveLead(lead ?? null);
+    onArrasteMudou?.(true);
   }
 
   function handleDragEnd(event: DragEndEvent) {
     setActiveLead(null);
+    onArrasteMudou?.(false);
     const { active, over } = event;
     if (!over || active.id === over.id) return;
     const targetStatus = String(over.id);
@@ -1430,7 +1449,8 @@ function KanbanView({
   }
 
   return (
-    <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+    <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}
+      onDragCancel={() => { setActiveLead(null); onArrasteMudou?.(false); }}>
       <div className="flex h-full min-h-0 flex-1 items-stretch gap-2.5 overflow-x-auto pb-1">
         {stages.map(stage => (
           <KanbanColumn
@@ -3033,6 +3053,22 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
   const [showAiCriteria, setShowAiCriteria] = useState(false);
 
   const [leads, setLeads]           = useState<CrmLead[]>([]);
+  // ── Recarga leve e à prova de corrida ──────────────────────────────────────
+  // A lista completa vem ao abrir e a cada 2 min; entre uma e outra, o poll de
+  // 8 s busca só o que mudou (`since`). Com 3.500 leads (Atmos, 8,5 MB) baixar
+  // tudo a cada 8 s travava a tela.
+  const leadsRef = useRef<CrmLead[]>([]);
+  useEffect(() => { leadsRef.current = leads; }, [leads]);
+  const chaveCarregada = useRef('');
+  const chaveAtual = useRef('');
+  const ultimaCargaCompleta = useRef(0);
+  // ⚠️ Mudança feita na tela (ex.: arrastar de etapa) vence qualquer resposta de
+  // recarga que tenha COMEÇADO antes de o servidor confirmar a gravação — senão
+  // o poll que já estava no ar devolve a etapa antiga e o card "volta" sozinho.
+  const edicoesLocais = useRef(new Map<string, { campos: Partial<CrmLead>; salvoEm: number | null }>());
+  // Durante o arraste a lista não é trocada: re-renderizar o board no meio do
+  // gesto derrubava o drop.
+  const arrastandoRef = useRef(false);
   const [loading, setLoading]       = useState(false);
   const [leadsErro, setLeadsErro]   = useState(false);
   const [search, setSearch]         = useState('');
@@ -3217,21 +3253,70 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
     });
   }
 
-  function refreshLeads(options?: { silent?: boolean }) {
+  function aplicarEdicoesLocais(rows: CrmLead[], inicio: number) {
+    const mapa = edicoesLocais.current;
+    if (!mapa.size) return rows;
+    return rows.map(l => {
+      const e = mapa.get(l.id);
+      if (!e) return l;
+      // Ainda não confirmado, ou confirmado depois que esta recarga começou: a
+      // resposta pode estar velha — vale o que está na tela.
+      if (e.salvoEm === null || e.salvoEm >= inicio) return { ...l, ...e.campos };
+      mapa.delete(l.id);
+      return l;
+    });
+  }
+
+  function refreshLeads(options?: { silent?: boolean; incremental?: boolean }) {
     if (!clientId || !selectedFunnelId) {
       setLeads([]);
       return;
     }
+    const chave = `${clientId}:${selectedFunnelId}`;
+    const inicio = Date.now();
+    let since: string | null = null;
+    if (options?.incremental && chaveCarregada.current === chave && inicio - ultimaCargaCompleta.current < 120_000) {
+      for (const l of leadsRef.current) {
+        const u = (l as { updated_at?: string | null }).updated_at;
+        if (u && (!since || u > since)) since = u;
+      }
+    }
     if (!options?.silent) setLoading(true);
-    setLeadsErro(false);
-    fetch(`/api/crm?clientId=${clientId}&funnelId=${selectedFunnelId}`)
+    if (!since) setLeadsErro(false);
+    const qs = new URLSearchParams({ clientId, funnelId: selectedFunnelId });
+    if (since) qs.set('since', since);
+    fetch(`/api/crm?${qs}`)
       .then(async r => {
         if (!r.ok) throw new Error('falha');
         return await r.json() as CrmLead[];
       })
-      .then(data => setLeads(data))
+      .then(data => {
+        // Resposta de outro cliente/funil (trocou no meio): descarta.
+        if (chaveAtual.current !== chave) return;
+        // No meio de um arraste não troca a lista; a próxima rodada traz de novo.
+        if (arrastandoRef.current) return;
+        if (since) {
+          if (!data.length) return;
+          setLeads(prev => {
+            const porId = new Map(prev.map(l => [l.id, l]));
+            const numeros = new Set(prev.map(l => (l.numero ?? '').replace(/\D/g, '')).filter(Boolean));
+            for (const novo of data) {
+              if (porId.has(novo.id)) porId.set(novo.id, novo);
+              // Lead novo: entra, a não ser que o número já esteja na lista
+              // (a carga completa deduplica por telefone; a próxima resolve).
+              else if (!numeros.has((novo.numero ?? '').replace(/\D/g, ''))) porId.set(novo.id, novo);
+            }
+            return aplicarEdicoesLocais([...porId.values()], inicio);
+          });
+        } else {
+          chaveCarregada.current = chave;
+          ultimaCargaCompleta.current = Date.now();
+          setLeads(aplicarEdicoesLocais(data, inicio));
+        }
+      })
       // Falha de servidor não pode virar "nenhum lead" — a lista vazia mentiria.
-      .catch(() => { setLeads([]); setLeadsErro(true); })
+      // No incremental, falhar só significa tentar de novo na próxima rodada.
+      .catch(() => { if (!since) { setLeads([]); setLeadsErro(true); } })
       .finally(() => {
         if (!options?.silent) setLoading(false);
       });
@@ -3265,6 +3350,7 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
   }, [selectedFunnelId]);
 
   useEffect(() => {
+    chaveAtual.current = `${clientId}:${selectedFunnelId}`;
     refreshLeads();
   }, [clientId, selectedFunnelId]);
 
@@ -3275,8 +3361,8 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
 
   useEffect(() => {
     if (!clientId || !selectedFunnelId) return;
-    const timer = window.setInterval(() => refreshLeads({ silent: true }), 8_000);
-    function onFocus() { refreshLeads({ silent: true }); }
+    const timer = window.setInterval(() => refreshLeads({ silent: true, incremental: true }), 8_000);
+    function onFocus() { refreshLeads({ silent: true, incremental: true }); }
     window.addEventListener('focus', onFocus);
     document.addEventListener('visibilitychange', onFocus);
     return () => {
@@ -3550,6 +3636,7 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
   // fora. O lead só sai do lugar depois que o motivo é confirmado.
   async function salvarStatus(id: string, status: string, motivo?: MotivoPerdaId, detalhe?: string | null) {
     const previousStatus = leads.find(l => l.id === id)?.status ?? null;
+    edicoesLocais.current.set(id, { campos: { status }, salvoEm: null });
     setLeads(prev => prev.map(l => l.id === id ? { ...l, status } : l));
     try {
       const res = await fetch(`/api/crm/${id}`, {
@@ -3560,8 +3647,11 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
           : { status }),
       });
       if (!res.ok) throw new Error(`Erro ${res.status}`);
+      const e = edicoesLocais.current.get(id);
+      if (e && e.campos.status === status) e.salvoEm = Date.now();
       return true;
     } catch {
+      edicoesLocais.current.delete(id);
       setLeads(prev => prev.map(l => l.id === id ? { ...l, status: previousStatus } : l));
       notificar('Não foi possível mover o lead — tente de novo.', 'erro');
       return false;
@@ -4419,6 +4509,7 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
                 onToggleQualificado={lead => void toggleLeadQualificado(lead)}
                 onToggleInternal={lead => void toggleLeadInternal(lead)}
                 activeFollowupIds={activeFollowupLeadIds}
+                onArrasteMudou={v => { arrastandoRef.current = v; }}
               />
             </div>
           )}
