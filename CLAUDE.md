@@ -39,6 +39,16 @@ resultados (1 Não atendeu · 2 Caixa postal · 3 Número errado · 4 Atendeu; L
   demais tabelas as rotas criam sozinhas (`GET /api/crm?clientId=…` cria o `crm_leads`
   completo). Turbopack recusa `node_modules` em symlink — `npm ci` no worktree.
 
+## Relatório — período de vários meses era chamado pelo mês INICIAL (2026-10-07)
+
+Print do Matheus (Incorpast): "Julho não faturou 123.880,20, a dashboard atualiza certinho". **O número estava certo; o rótulo mentia.** O relatório tinha sido gerado para 01/07–30/09 (três meses) e a página dizia "Julho 2026" — R$ 123.880,20 / 35 vendas / 512 leads é o TRIMESTRE (conferido na produção pela mesma query da dashboard: julho sozinho = R$ 29.857,30, igual à tela). E o comparativo saía como "Março": a janela anterior automática era 92 dias corridos a partir de 31/03.
+
+- **`rotuloPeriodo(from, to)`** (delivery-report-builder, exportada) é a fonte única do rótulo nos 3 montadores: "Julho/2026" (mês cheio, inalterado), "Julho a Setembro/2026" (vários meses), "Novembro de 2025 a Janeiro/2026" (atravessando o ano), "1 de jul a 15 de set/2026" (intervalo quebrado). ⚠️ Mantém o formato `"<nome>/<ano>"` porque ~8 slides leem o período com `split('/')[0]` — por isso o intervalo quebrado NÃO usa `dd/mm`.
+- **`autoPreviousPeriod` entende N meses cheios**: Jul–Set compara com Abr–Jun (antes só o mês único era tratado; o resto caía em janela corrida). `mesesCheios(from, to)` é o critério; `ehMesCheio` (meta mensal) continua = 1 mês.
+- **Textos que assumiam mês**: título "Visão Geral do Mês" → "do Período" (`opts.unidade`), funil "vendas fechadas no mês / meses anteriores" → "no período / antes dele" (`extra.mesCheio`), `nextMonthName` passa a olhar o ÚLTIMO mês do rótulo (antes "Oportunidade para junho" num trimestre Jul–Set), KPIs do site encurtam "vs Abril a Junho" para "vs anterior".
+- Cards da Visão Geral reduzem a fonte do rótulo conforme o tamanho (22→18→14→12px). ⚠️ O caso extremo (intervalo quebrado atravessando o ano nos DOIS lados) ainda passa 12px dos 810 — o PDF encaixa por "contain", aceito.
+- ✅ Verificado: 15 asserts novos (117 no arquivo); páginas renderizadas (trimestre em 810px); tsc + `next build` + eslint sem erro novo. ⚠️ Relatórios JÁ gerados guardam o HTML pronto — o da Incorpast de 07/10 continua dizendo "Julho" até ser gerado de novo.
+
 ## Relatório — Google sem "objetivo" inventado + páginas de Site e Audiência (2026-10-05)
 
 Print do Matheus (resumo do Google, já sem o card falso de vendas): "Pesquisa / tráfego · 1 campanha" ao lado de "Geração de leads · 2 campanhas". "Não faz sentido, é tudo o mesmo objetivo, a campanha de search foi com objetivo de gerar lead. Pode remover isso dos relatórios, e o resumo do Google ter algum gráfico." E: "existem agora informações de site/landing page, comportamento da audiência — as melhores deveriam estar no relatório."

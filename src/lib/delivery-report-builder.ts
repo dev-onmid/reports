@@ -99,8 +99,14 @@ export const FONT_LINK = `<style>@import url('https://fonts.googleapis.com/css2?
 const REPORT_MONTHS = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
 
 function nextMonthName(periodo: string): string {
-  const [monthName] = periodo.split('/');
-  const index = REPORT_MONTHS.findIndex((month) => month.toLowerCase() === monthName.toLowerCase());
+  // O rótulo pode cobrir vários meses ("Julho a Setembro/2026", "1 de jul a 15 de set/2026"):
+  // o "próximo mês" é o seguinte ao ÚLTIMO citado.
+  const texto = periodo.split('/')[0].toLowerCase();
+  let index = -1;
+  for (const m of texto.match(/[a-zç]+/g) ?? []) {
+    const i = REPORT_MONTHS.findIndex((month) => month.toLowerCase() === m || (m.length === 3 && month.toLowerCase().startsWith(m)));
+    if (i >= 0) index = i;
+  }
   return REPORT_MONTHS[(index >= 0 ? index + 1 : 5) % REPORT_MONTHS.length];
 }
 
@@ -278,9 +284,13 @@ export function autoPreviousPeriod(from: string, to: string): { from: string; to
   const isFirst = d1.getUTCDate() === 1;
   const lastDayOfEndMonth = new Date(Date.UTC(d2.getUTCFullYear(), d2.getUTCMonth() + 1, 0)).getUTCDate();
   const isLast = d2.getUTCDate() === lastDayOfEndMonth;
-  const sameMonth = d1.getUTCFullYear() === d2.getUTCFullYear() && d1.getUTCMonth() === d2.getUTCMonth();
-  if (isFirst && isLast && sameMonth) {
-    const prevFirst = new Date(Date.UTC(d1.getUTCFullYear(), d1.getUTCMonth() - 1, 1));
+  // Período de meses-calendário CHEIOS (um ou vários): o anterior é o MESMO número de
+  // meses cheios logo antes. Jul→Jun; Jul–Set→Abr–Jun. Sem isso, um trimestre comparava
+  // com 92 dias corridos começando em 31/03, e a página chamava o comparativo de "Março"
+  // (caso Incorpast, 07/10/2026).
+  const meses = mesesCheios(from, to);
+  if (isFirst && isLast && meses > 0) {
+    const prevFirst = new Date(Date.UTC(d1.getUTCFullYear(), d1.getUTCMonth() - meses, 1));
     const prevLast  = new Date(Date.UTC(d1.getUTCFullYear(), d1.getUTCMonth(), 0));
     return { from: fmt(prevFirst), to: fmt(prevLast) };
   }
@@ -288,6 +298,40 @@ export function autoPreviousPeriod(from: string, to: string): { from: string; to
   const prevTo = new Date(d1.getTime() - 86400000);
   const prevFrom = new Date(prevTo.getTime() - durationMs + 86400000);
   return { from: fmt(prevFrom), to: fmt(prevTo) };
+}
+
+/** Quantos meses-calendário CHEIOS [from, to] cobre; 0 se as pontas não fecham meses. */
+export function mesesCheios(from: string, to: string): number {
+  const [fy, fm, fd] = from.split('-').map(Number);
+  const [ty, tm, td] = to.split('-').map(Number);
+  if (!fy || !ty || fd !== 1) return 0;
+  if (td !== new Date(Date.UTC(ty, tm, 0)).getUTCDate()) return 0;
+  const n = (ty - fy) * 12 + (tm - fm) + 1;
+  return n > 0 ? n : 0;
+}
+
+/**
+ * Rótulo do período no formato que TODO slide consome (`"<nome>/<ano>"`, lido com
+ * `split('/')[0]`): "Julho/2026" para um mês cheio, "Julho a Setembro/2026" para vários,
+ * "1 de jul a 15 de set/2026" para intervalo quebrado. Antes o rótulo era sempre o mês
+ * da data INICIAL — um relatório de Jul–Set saía como "Julho" e o cliente lia o
+ * faturamento do trimestre como se fosse de um mês.
+ */
+export function rotuloPeriodo(from: string, to: string): string {
+  const [fy, fm, fd] = from.split('-').map(Number);
+  const [ty, tm, td] = to.split('-').map(Number);
+  if (!fy || !ty) return from;
+  const n = mesesCheios(from, to);
+  if (n === 1) return `${REPORT_MONTHS[fm - 1]}/${fy}`;
+  if (n > 1) {
+    return fy === ty
+      ? `${REPORT_MONTHS[fm - 1]} a ${REPORT_MONTHS[tm - 1]}/${ty}`
+      : `${REPORT_MONTHS[fm - 1]} de ${fy} a ${REPORT_MONTHS[tm - 1]}/${ty}`;
+  }
+  const curto = (m: number) => REPORT_MONTHS[m - 1].slice(0, 3).toLowerCase();
+  return fy === ty
+    ? `${fd} de ${curto(fm)} a ${td} de ${curto(tm)}/${ty}`
+    : `${fd} de ${curto(fm)} de ${fy} a ${td} de ${curto(tm)}/${ty}`;
 }
 
 export type ParsedData = {
@@ -2273,7 +2317,7 @@ export function sVisaoGeral(
   // O relatório de performance fala de VENDAS de um funil comercial, não de pedidos
   // de delivery: troca o rótulo e a leitura final (que citava "frequência de compra"
   // e "clientes inativos" para um cliente B2B).
-  opts: { rotuloVendas?: string; leituraSemComparativo?: string; leituraFinal?: string } = {},
+  opts: { rotuloVendas?: string; leituraSemComparativo?: string; leituraFinal?: string; /** "mês" (padrão) ou "período" — muda o título da página. */ unidade?: 'mês' | 'período' } = {},
 ): string {
   const rotuloVendas = opts.rotuloVendas ?? 'Pedidos';
   const dFat    = deltaInfo(d.faturamento,    prevD?.faturamento    ?? 0);
@@ -2321,7 +2365,7 @@ export function sVisaoGeral(
     `<div style="width:214px;display:flex;align-items:center;gap:12px;padding-left:20px;border-left:3px solid ${borderColor};box-sizing:border-box;flex-shrink:0">
       ${circle('calendar', color, bg, 56)}
       <div>
-        <p style="font-family:${INTER};font-size:22px;font-weight:900;color:${FG};line-height:1;margin:0 0 8px;white-space:nowrap">${label.month}</p>
+        <p style="font-family:${INTER};font-size:${label.month.length > 24 ? 12 : label.month.length > 16 ? 14 : label.month.length > 9 ? 18 : 22}px;font-weight:900;color:${FG};line-height:1.1;margin:0 0 ${label.month.length > 16 ? 4 : 8}px">${label.month}</p>
         ${label.year ? `<p style="font-family:${INTER};font-size:18px;font-weight:500;color:#163461;line-height:1;margin:0">${label.year}</p>` : ''}
       </div>
     </div>`;
@@ -2358,7 +2402,7 @@ export function sVisaoGeral(
 
   <div style="position:relative;z-index:1;flex:1;padding:56px 48px 0;display:flex;flex-direction:column">
     <div style="margin-bottom:26px">
-      <h1 style="font-family:${INTER};font-size:52px;font-weight:900;letter-spacing:-0.045em;color:${FG};line-height:1.04;margin:0 0 10px">${reportTitle('Visão geral do mês')}</h1>
+      <h1 style="font-family:${INTER};font-size:52px;font-weight:900;letter-spacing:-0.045em;color:${FG};line-height:1.04;margin:0 0 10px">${reportTitle(opts.unidade === 'período' ? 'Visão geral do período' : 'Visão geral do mês')}</h1>
       <p style="font-family:${INTER};font-size:22px;font-weight:500;color:#163461;line-height:1.35;margin:0">
         ${hasCompare ? `Comparativo de ${curPeriod.month} com ${cmpPeriod.month}${curPeriod.year ? ` de ${curPeriod.year}` : ''}` : `Resultado de ${periodo}`}
       </p>
@@ -2371,7 +2415,7 @@ export function sVisaoGeral(
       ${hasCompare ? `<div style="background:${CARD};border:1px solid #E7ECF3;border-radius:18px;box-shadow:0 14px 34px rgba(15,23,42,.06);min-height:118px;display:flex;align-items:center;overflow:hidden">
         <div style="width:210px;padding:0 34px;box-sizing:border-box">
           <p style="font-family:${INTER};font-size:22px;font-weight:900;color:${FG};line-height:1.1;margin:0 0 10px">Comparativo</p>
-          <p style="font-family:${INTER};font-size:18px;font-weight:500;color:#163461;line-height:1;margin:0">${curPeriod.month} vs. ${cmpPeriod.month}</p>
+          <p style="font-family:${INTER};font-size:${curPeriod.month.length + cmpPeriod.month.length > 24 ? 13 : 18}px;font-weight:500;color:#163461;line-height:1.15;margin:0">${curPeriod.month.length + cmpPeriod.month.length > 40 ? 'período vs. anterior' : `${curPeriod.month} vs. ${cmpPeriod.month}`}</p>
         </div>
         ${deltaCell('Faturamento', dFat, 'chart')}
         <div style="width:1px;height:78px;background:${BORDER}"></div>
@@ -2528,7 +2572,7 @@ function leituraCrm(paragrafos: string[]): string {
 
 export function sFunilComercial(
   degraus: DegrauRelatorio[],
-  extra: { vendasDoMes: number; vendasDeLeadsAnteriores: number; periodo: string },
+  extra: { vendasDoMes: number; vendasDeLeadsAnteriores: number; periodo: string; /** false = período de vários meses/quebrado: o texto deixa de dizer "no mês". */ mesCheio?: boolean },
   idx: number, total: number,
 ): string {
   void idx; void total;
@@ -2581,7 +2625,7 @@ export function sFunilComercial(
   // geral) contam pelo dia do fechamento. Sem dizer isso, o cliente vê dois números
   // de venda diferentes e conclui que um está errado.
   const leitura2 = extra.vendasDoMes > fundo && extra.vendasDeLeadsAnteriores > 0
-    ? `As ${num(extra.vendasDoMes)} vendas fechadas no mês incluem ${num(extra.vendasDeLeadsAnteriores)} de leads que entraram em meses anteriores — o funil acompanha só quem chegou neste período.`
+    ? `As ${num(extra.vendasDoMes)} vendas fechadas ${extra.mesCheio === false ? 'no período' : 'no mês'} incluem ${num(extra.vendasDeLeadsAnteriores)} de leads que entraram ${extra.mesCheio === false ? 'antes dele' : 'em meses anteriores'} — o funil acompanha só quem chegou neste período.`
     : '';
 
   const corpo = `<div style="display:grid;grid-template-columns:580px 1fr;gap:18px;align-items:stretch">
@@ -2742,13 +2786,15 @@ export function sSiteResumo(
   const tAtual = a.sessoes > 0 ? a.tempo / a.sessoes : 0;
   const tAnt = p.sessoes > 0 ? p.tempo / p.sessoes : 0;
   const mesAnt = o.prevPeriodo.split('/')[0];
+  // "vs Abril a Junho" não cabe na linha de 12px do KPI.
+  const vsAnt = mesAnt.length > 10 ? 'anterior' : mesAnt;
 
   const kpi = (rotulo: string, valor: string, atual: number, anterior: number) => {
     const d = o.comparar ? deltaInfo(atual, anterior) : { label: '', up: true, hasData: false };
     return `<div style="background:${CARD};border:1px solid #E7ECF3;border-radius:16px;box-shadow:0 10px 26px rgba(15,23,42,.06);padding:12px 16px;min-width:0">
       <p style="font-family:${INTER};font-size:13px;font-weight:600;color:#163461;margin:0 0 7px;white-space:nowrap">${rotulo}</p>
       <p style="font-family:${INTER};font-size:28px;font-weight:900;letter-spacing:-0.03em;color:${FG};line-height:1;margin:0 0 7px;white-space:nowrap">${valor}</p>
-      <p style="font-family:${INTER};font-size:12px;font-weight:700;color:${d.hasData ? (d.up ? PRIMARY_TEXT : BLUE) : MUTED};margin:0;white-space:nowrap">${d.hasData ? `${d.label} ${d.up ? '↑' : '↓'} vs ${mesAnt || 'anterior'}` : '&nbsp;'}</p>
+      <p style="font-family:${INTER};font-size:12px;font-weight:700;color:${d.hasData ? (d.up ? PRIMARY_TEXT : BLUE) : MUTED};margin:0;white-space:nowrap">${d.hasData ? `${d.label} ${d.up ? '↑' : '↓'} vs ${vsAnt || 'anterior'}` : '&nbsp;'}</p>
     </div>`;
   };
 
@@ -5283,8 +5329,8 @@ export async function buildDeliveryReport(opts: {
 
   const fromDate = new Date(from + 'T12:00:00');
   const toDate   = new Date(to   + 'T12:00:00');
-  const MONTHS   = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
-  const periodo  = `${MONTHS[fromDate.getMonth()]}/${fromDate.getFullYear()}`;
+  const MONTHS   = REPORT_MONTHS;
+  const periodo  = rotuloPeriodo(from, to);
   const instagramPeriodLabel = fromDate.getMonth() === toDate.getMonth() && fromDate.getFullYear() === toDate.getFullYear()
     ? periodo
     : `${periodo} a ${MONTHS[toDate.getMonth()]}/${toDate.getFullYear()}`;

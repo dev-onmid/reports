@@ -4,7 +4,7 @@
 //     --packages=external --tsconfig=tsconfig.json --outfile=scratchpad/build/relatorio-crm.mjs
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { ehMesCheio, degrausDoFunil, sFunilComercial, sCanais, sVisaoGeral, sInstagram, sInstagramCalendar, sGoogleAdsResumo, sGoogleAdsCampanhas, sPaidTrafficResumo, sSiteResumo, sSiteAudiencia, agruparSerieDiaria, seletorContatos, categorizeGoogleCampaign, comprasReaisGoogle, ganhoNoPeriodo, serieDaResposta, CRM_PERIODO_SQL } from './build/relatorio-crm.mjs';
+import { ehMesCheio, degrausDoFunil, sFunilComercial, sCanais, sVisaoGeral, sInstagram, sInstagramCalendar, sGoogleAdsResumo, sGoogleAdsCampanhas, sPaidTrafficResumo, sSiteResumo, sSiteAudiencia, agruparSerieDiaria, seletorContatos, categorizeGoogleCampaign, comprasReaisGoogle, rotuloPeriodo, mesesCheios, autoPreviousPeriod, ganhoNoPeriodo, serieDaResposta, CRM_PERIODO_SQL } from './build/relatorio-crm.mjs';
 
 let n = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); n++; };
@@ -191,5 +191,24 @@ const semTipo = [{ valor: 'a', sessoes: 10, engajadas: 5, tempo: 1, conversoes: 
 ok(seletorContatos(semTipo)(semTipo[0]) === 4, 'sem tipo classificável, contatos = eventos-chave');
 const vazio = { ...ga4, diario: [], pago: { ...ga4.pago, canais: [] }, audiencia: { dispositivos: [], cidades: [], novosRecorrentes: [], idades: [], generos: [], semanaHora: [] }, comportamento: { ...ga4.comportamento, paginasEntrada: [] } };
 ok(sSiteResumo(vazio, { periodo: 'X', prevPeriodo: '', comparar: false }, 1, 2).includes('Sem origem registrada') && sSiteAudiencia(vazio, { periodo: 'X' }, 1, 2).length > 500, 'GA4 sem cortes não quebra as páginas');
+
+// ── Rótulo do período e comparativo automático (caso Incorpast: trimestre chamado de "Julho") ──
+ok(mesesCheios('2026-07-01', '2026-07-31') === 1 && mesesCheios('2026-07-01', '2026-09-30') === 3, 'conta meses cheios');
+ok(mesesCheios('2026-07-01', '2026-09-15') === 0 && mesesCheios('2026-07-02', '2026-07-31') === 0, 'ponta quebrada não é mês cheio');
+ok(mesesCheios('2025-11-01', '2026-01-31') === 3, 'meses cheios atravessando o ano');
+ok(rotuloPeriodo('2026-07-01', '2026-07-31') === 'Julho/2026', 'mês cheio continua "Julho/2026"');
+ok(rotuloPeriodo('2026-07-01', '2026-09-30') === 'Julho a Setembro/2026', 'trimestre vira "Julho a Setembro/2026"');
+ok(rotuloPeriodo('2025-11-01', '2026-01-31') === 'Novembro de 2025 a Janeiro/2026', 'vários meses atravessando o ano');
+ok(rotuloPeriodo('2026-07-01', '2026-09-15') === '1 de jul a 15 de set/2026', 'intervalo quebrado mostra os dias');
+ok(rotuloPeriodo('2026-07-01', '2026-09-30').split('/')[0] === 'Julho a Setembro', 'o split("/")[0] dos slides continua funcionando');
+ok(JSON.stringify(autoPreviousPeriod('2026-07-01', '2026-09-30')) === JSON.stringify({ from: '2026-04-01', to: '2026-06-30' }), 'trimestre compara com o trimestre anterior (não com 92 dias a partir de 31/03)');
+ok(JSON.stringify(autoPreviousPeriod('2026-07-01', '2026-07-31')) === JSON.stringify({ from: '2026-06-01', to: '2026-06-30' }), 'mês cheio continua comparando com o mês anterior');
+ok(JSON.stringify(autoPreviousPeriod('2026-01-01', '2026-03-31')) === JSON.stringify({ from: '2025-10-01', to: '2025-12-31' }), 'trimestre no início do ano recua para o ano anterior');
+ok(JSON.stringify(autoPreviousPeriod('2026-07-01', '2026-09-15')) === JSON.stringify({ from: '2026-04-15', to: '2026-06-30' }), 'intervalo quebrado mantém a janela corrida');
+const vgTri = sVisaoGeral({ ativos: 0, inativos: 0, potenciais: 0, faturamento: 123880.2, pedidos_ativos: 35, ticket: 3539.43, mensagens: 0, taxa_resposta: 0, entregas_por_dia: [], regioes: [], clientes_inativos: [] }, { ativos: 0, inativos: 0, potenciais: 0, faturamento: 50479.35, pedidos_ativos: 19, ticket: 2656.81, mensagens: 0, taxa_resposta: 0, entregas_por_dia: [], regioes: [], clientes_inativos: [] }, 2, 20, 'Julho a Setembro/2026', 'Abril a Junho/2026', { unidade: 'período', rotuloVendas: 'Vendas' });
+ok(vgTri.includes('Visão Geral do Período') && vgTri.includes('Comparativo de Julho a Setembro com Abril a Junho de 2026'), 'Visão Geral do trimestre: título e comparativo falam do período inteiro');
+ok(!vgTri.includes('Visão Geral do Mês'), 'trimestre não se chama "mês"');
+const vgMes = sVisaoGeral({ ativos: 0, inativos: 0, potenciais: 0, faturamento: 1, pedidos_ativos: 1, ticket: 1, mensagens: 0, taxa_resposta: 0, entregas_por_dia: [], regioes: [], clientes_inativos: [] }, null, 2, 20, 'Julho/2026', 'Junho/2026', { rotuloVendas: 'Vendas' });
+ok(vgMes.includes('Visão Geral do Mês'), 'mês cheio continua "Visão geral do mês"');
 
 console.log(`OK — ${n} asserts`);

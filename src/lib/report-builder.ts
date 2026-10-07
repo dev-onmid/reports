@@ -2,7 +2,7 @@ import { makeServerPool } from '@/lib/server-db';
 import { getFreshMetaToken } from '@/lib/meta-token';
 import { RESULT_ACTIONS, NEW_CONTACT_ACTIONS, PURCHASE_ACTIONS, sumActions } from './report-runner';
 import {
-  fetchBairros, fetchMetaData, fetchInstagramData, autoPreviousPeriod, sanitizeJsonValue, comprasReaisGoogle,
+  fetchBairros, fetchMetaData, fetchInstagramData, autoPreviousPeriod, rotuloPeriodo, mesesCheios, sanitizeJsonValue, comprasReaisGoogle,
   sCapa, sVisaoGeral, sFunilComercial, sCanais, sSiteResumo, sSiteAudiencia, sRegioes, sPaidTrafficResumo, sMetaAdsResumo, sMetaAdsCampanhas, sCriativos,
   sGoogleAdsResumo, sGoogleAdsCampanhas, sGoogleAdsPalavrasChave,
   sInstagram, sInstagramCalendar, sInstagramPosts, sInstagramSpotlight,
@@ -654,10 +654,11 @@ export async function buildOmniReport(input: {
   const prev = compare === null ? null : (compare ?? calcPrevPeriod(periodFrom, periodTo));
   const fromDate = new Date(periodFrom + 'T12:00:00');
   const toDate   = new Date(periodTo   + 'T12:00:00');
-  const MONTHS   = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
-  const periodo     = `${MONTHS[fromDate.getMonth()]}/${fromDate.getFullYear()}`;
-  const prevFromDate = prev ? new Date(prev.from + 'T12:00:00') : null;
-  const prevPeriodo  = prevFromDate ? `${MONTHS[prevFromDate.getMonth()]}/${prevFromDate.getFullYear()}` : '';
+  // Rótulo cobre o período INTEIRO ("Julho a Setembro/2026"), não só o mês inicial.
+  const periodo     = rotuloPeriodo(periodFrom, periodTo);
+  const prevPeriodo = prev ? rotuloPeriodo(prev.from, prev.to) : '';
+  // Um mês cheio é a unidade natural do relatório; fora disso as páginas dizem "período".
+  const periodoEhMes = mesesCheios(periodFrom, periodTo) === 1;
 
   const [crm, site, metaDetailed, googleDetailed, instagramFull, bairros, rotationSeed] = await Promise.all([
     fetchCrmDoRelatorio(clientId, periodFrom, periodTo, prev),
@@ -760,6 +761,7 @@ export async function buildOmniReport(input: {
       ? ` A meta de faturamento do mês era ${brl2(crm.metaFaturamento)} — o realizado chegou a ${((data.faturamento / crm.metaFaturamento) * 100).toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}% dela.`
       : '';
     slides.push(sVisaoGeral(data, prevData, ++i, total, periodo, prevPeriodo, {
+      unidade: periodoEhMes ? 'mês' : 'período',
       rotuloVendas: 'Vendas',
       leituraSemComparativo: `${periodo} fechou com ${brl2(data.faturamento)} em ${data.pedidos_ativos.toLocaleString('pt-BR')} vendas, ticket médio de ${brl2(data.ticket)}.`,
       leituraFinal: `${fraseLeads}${fraseMeta}`.trim(),
@@ -767,6 +769,7 @@ export async function buildOmniReport(input: {
   }
   if (hasFunil) {
     slides.push(sFunilComercial(degraus, {
+      mesCheio: periodoEhMes,
       vendasDoMes: crm.atual?.sales ?? 0,
       vendasDeLeadsAnteriores: crm.funil?.vendasCohort?.anteriores ?? 0,
       periodo,
