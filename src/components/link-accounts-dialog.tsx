@@ -818,6 +818,7 @@ type SheetsCfg = {
   mapeamento: Mapeamento | null;
   abas: string[] | null; abasVistas: string[] | null; seguirMes: boolean;
   colunasVistas: string[] | null;
+  camposManuais: string[] | null;
 };
 
 /**
@@ -868,7 +869,7 @@ function GoogleSheetsContent({ clientId, onDone, onCancel }: { clientId: string;
       });
   }, [clientId]);
 
-  async function salvar(extra: Partial<{ ativo: boolean; mapeamento: Mapeamento }> = {}) {
+  async function salvar(extra: Partial<{ ativo: boolean; mapeamento: Mapeamento; manuais: string[] }> = {}) {
     const res = await fetch(`/api/clients/${clientId}/sheets`, {
       method: 'PUT', headers: { 'Content-Type': 'application/json' },
       // `colunas` vai junto para o servidor poder recusar coluna que não existe
@@ -890,6 +891,7 @@ function GoogleSheetsContent({ clientId, onDone, onCancel }: { clientId: string;
     });
     const d = await res.json() as {
       error?: string; abas?: string[]; colunas?: string[]; abaDoMes?: string | null; analisada?: string;
+      preservados?: string[];
       analise?: { mapping?: Mapeamento; rowCount?: number };
     };
     setStatus('idle');
@@ -903,7 +905,12 @@ function GoogleSheetsContent({ clientId, onDone, onCancel }: { clientId: string;
     // ⚠️ Sem a aba do mês a rotina NÃO inventa outra: avisa aqui, na configuração,
     // em vez de deixar o gestor descobrir por um número errado na dashboard.
     if (!d.abaDoMes) setAviso(`A aba do mês atual ainda não existe na planilha. Analisei "${d.analisada}" só para descobrir as colunas — a rotina diária vai esperar a aba do mês nascer.`);
-    setResumo(`${d.analise?.rowCount ?? 0} linhas lidas em "${d.analisada}".`);
+    const mantidos = (d.preservados ?? [])
+      .map(k => CAMPOS.find(c => c.chave === k)?.rotulo ?? k);
+    setResumo(
+      `${d.analise?.rowCount ?? 0} linhas lidas em "${d.analisada}".` +
+      (mantidos.length ? ` Mantive o que você ajustou à mão: ${mantidos.join(', ')}.` : '')
+    );
   }
 
   /**
@@ -916,7 +923,9 @@ function GoogleSheetsContent({ clientId, onDone, onCancel }: { clientId: string;
   function trocarColuna(campo: string, valor: string | string[] | null) {
     const novo: Mapeamento = { ...(colunas ?? {}), [campo]: valor };
     setColunas(novo);
-    void salvar({ mapeamento: novo }).catch(() => setError('Não consegui salvar o ajuste de colunas.'));
+    // `manuais` é o que faz a reanálise respeitar esta escolha depois.
+    void salvar({ mapeamento: novo, manuais: [campo] })
+      .catch(() => setError('Não consegui salvar o ajuste de colunas.'));
   }
 
   async function handleImportar() {

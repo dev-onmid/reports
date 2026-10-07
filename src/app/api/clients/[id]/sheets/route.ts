@@ -46,6 +46,8 @@ export async function PUT(req: NextRequest, { params }: Ctx) {
     sheetsUrl?: string; tipoPlanilha?: string; fonteFaturamento?: boolean;
     ativo?: boolean; mapeamento?: Record<string, string | string[] | null>;
     abas?: string[]; seguirMes?: boolean; colunas?: string[];
+    /** Campos que o gestor acabou de apontar à mão, para a IA não desfazer. */
+    manuais?: string[];
   };
   // ⚠️ Nunca grava o que a tela mandou cru: campo fora do catálogo viraria um
   // override que a importação ignora, e coluna inexistente derruba a aba inteira
@@ -88,6 +90,11 @@ export async function PUT(req: NextRequest, { params }: Ctx) {
          -- Mapeamento só é sobrescrito quando vem preenchido: salvar a URL de
          -- novo não pode apagar o de-para de colunas que a IA já resolveu.
          mapeamento = COALESCE($7::jsonb, public.client_sheets.mapeamento),
+         -- União, nunca substituição: cada ajuste marca mais um campo como do
+         -- gestor, e nenhum deles se perde ao salvar outra coisa.
+         campos_manuais = CASE WHEN $10::jsonb IS NULL THEN public.client_sheets.campos_manuais
+           ELSE (SELECT COALESCE(jsonb_agg(DISTINCT v), '[]'::jsonb)
+                   FROM jsonb_array_elements(COALESCE(public.client_sheets.campos_manuais, '[]'::jsonb) || $10::jsonb) AS v) END,
          abas = COALESCE($8::jsonb, public.client_sheets.abas),
          seguir_mes = COALESCE($9, public.client_sheets.seguir_mes),
          atualizado_em = NOW()`,
@@ -97,7 +104,9 @@ export async function PUT(req: NextRequest, { params }: Ctx) {
        // ⚠️ Lista VAZIA é uma escolha ("nenhuma aba fixa, só o mês") e precisa
        // gravar `[]`; `undefined` é "não mexi nisso" e preserva o que está lá.
        body.abas === undefined ? null : JSON.stringify(body.abas.filter(a => typeof a === 'string').slice(0, 60)),
-       body.seguirMes === undefined ? null : body.seguirMes]
+       body.seguirMes === undefined ? null : body.seguirMes,
+       Array.isArray(body.manuais) && body.manuais.length
+         ? JSON.stringify(body.manuais.filter(c => typeof c === 'string').slice(0, 40)) : null]
     );
     return Response.json({ ok: true });
   } catch (e) {
@@ -164,7 +173,15 @@ export async function POST(req: NextRequest, { params }: Ctx) {
     // Cabeçalho da aba analisada: é o que a tela oferece no seletor de coluna.
     const linha0 = XLSX.utils.sheet_to_json<unknown[]>(wb.Sheets[alvo], { header: 1, defval: '' })[0] ?? [];
     const colunas = (linha0 as unknown[]).map((c) => String(c ?? '')).filter((c) => c.trim().length > 0);
-    const mapa = normalizarMapeamento(mapaIa, colunas);
+    // ⚠️⚠️ O ajuste do gestor VENCE a IA. Sem isto, um clique em "Reanalisar
+    // colunas" desfaz em silêncio o de-para corrigido à mão — e o motivo de
+    // existir o editor é justamente a IA errar em coluna ambígua.
+    const daIa = normalizarMapeamento(mapaIa, colunas) ?? {};
+    const preservados: Record<string, unknown> = {};
+    for (const campo of cfg.camposManuais ?? []) {
+      if (cfg.mapeamento && campo in cfg.mapeamento) preservados[campo] = cfg.mapeamento[campo];
+    }
+    const mapa = normalizarMapeamento({ ...daIa, ...preservados }, colunas);
     await pool.query(
       `UPDATE public.client_sheets
           SET aba_exemplo = $2, mapeamento = COALESCE($3::jsonb, mapeamento),
@@ -173,7 +190,13 @@ export async function POST(req: NextRequest, { params }: Ctx) {
         WHERE client_id = $1`,
       [id, alvo, mapa ? JSON.stringify(mapa) : null, JSON.stringify(wb.SheetNames), JSON.stringify(colunas)]
     );
-    return Response.json({ ok: true, abas: wb.SheetNames, colunas, abaDoMes: aba, motivoAba: motivo, analisada: alvo, analise: { ...analise, mapping: mapa } });
+    return Response.json({
+      ok: true, abas: wb.SheetNames, colunas, abaDoMes: aba, motivoAba: motivo, analisada: alvo,
+      // A tela avisa o que foi mantido — preservar em silêncio confunde tanto
+      // quanto sobrescrever em silêncio.
+      preservados: Object.keys(preservados),
+      analise: { ...analise, mapping: mapa },
+    });
   } catch (e) {
     console.error('[sheets POST]', e);
     return Response.json({ error: 'Erro ao analisar a planilha.' }, { status: 500 });

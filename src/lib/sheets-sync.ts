@@ -35,6 +35,8 @@ export type SheetsConfig = {
    * isto — ela sempre olha o cabeçalho real de cada aba.
    */
   colunasVistas: string[] | null;
+  /** Campos cujo de-para foi escolhido pelo gestor — a IA não os sobrescreve. */
+  camposManuais: string[] | null;
   /** Somar a aba do mês atual às escolhidas. Padrão true — ver `escolherAbas`. */
   seguirMes: boolean;
   tipoPlanilha: 'lead' | 'venda' | 'hibrido';
@@ -75,7 +77,10 @@ export const ensureSheetsSchema = memoizarSchema(async (pool: Pool) => {
       -- rotina diária nunca lê isto, ela sempre olha a planilha de verdade.
       ADD COLUMN IF NOT EXISTS abas_vistas JSONB,
       -- Cabeçalho visto na última análise, para o editor de colunas (2026-10-07).
-      ADD COLUMN IF NOT EXISTS colunas_vistas JSONB
+      ADD COLUMN IF NOT EXISTS colunas_vistas JSONB,
+      -- Campos que o gestor apontou à mão. A reanálise preserva estes: sem isso,
+      -- um clique em "Reanalisar colunas" desfaz o ajuste e ninguém percebe.
+      ADD COLUMN IF NOT EXISTS campos_manuais JSONB
   `);
 });
 
@@ -267,11 +272,19 @@ export async function sincronizarSheets(
   }
   const body = corpos.length === 1 ? corpos[0] : { formatos: corpos };
 
+  // ⚠️ Guarda o cabeçalho da aba MAIS RECENTE que importou (a lista está em ordem
+  // crescente, então é a última). É o que faz o editor de colunas da tela
+  // funcionar sem o gestor precisar reanalisar a planilha — a rodada diária já
+  // tem o arquivo em mãos, pedir uma análise só para descobrir isso seria
+  // gastar IA para responder o que acabamos de ler.
+  const cabAtual = cabecalhos[abasOk[abasOk.length - 1]] ?? [];
   await pool.query(
     `UPDATE public.client_sheets
-        SET ultima_sync = NOW(), ultimo_resultado = $2::jsonb, ultimo_erro = NULL, atualizado_em = NOW()
+        SET ultima_sync = NOW(), ultimo_resultado = $2::jsonb, ultimo_erro = NULL,
+            colunas_vistas = COALESCE($3::jsonb, colunas_vistas), atualizado_em = NOW()
       WHERE client_id = $1`,
-    [cfg.clientId, JSON.stringify({ aba, abas: abasOk, motivo, linhas, avisos, ...(body as object) })]
+    [cfg.clientId, JSON.stringify({ aba, abas: abasOk, motivo, linhas, avisos, ...(body as object) }),
+     cabAtual.length ? JSON.stringify(cabAtual.filter(c => c.trim().length > 0)) : null]
   );
   return { ok: true, aba, abas: abasOk, motivoAba: motivo, linhas, avisos, resultado: body };
 }
@@ -294,6 +307,7 @@ export function lerConfig(row: Record<string, unknown>): SheetsConfig {
     abas: Array.isArray(row.abas) ? (row.abas as string[]) : null,
     abasVistas: Array.isArray(row.abas_vistas) ? (row.abas_vistas as string[]) : null,
     colunasVistas: Array.isArray(row.colunas_vistas) ? (row.colunas_vistas as string[]) : null,
+    camposManuais: Array.isArray(row.campos_manuais) ? (row.campos_manuais as string[]) : null,
     seguirMes: row.seguir_mes !== false,
     tipoPlanilha: (row.tipo_planilha as SheetsConfig['tipoPlanilha']) ?? 'lead',
     fonteFaturamento: row.fonte_faturamento === true,
