@@ -253,6 +253,8 @@ export type InstagramData = {
   profile_views: number;
   website_clicks: number;
   accounts_engaged: number;
+  /** Métricas parciais do período atual (ver InstagramPeriodMetrics.incompletas). */
+  incompletas?: string[];
   previous?: InstagramPeriodMetrics | null;
 };
 
@@ -264,6 +266,12 @@ export type InstagramPeriodMetrics = {
   profile_views: number;
   website_clicks: number;
   accounts_engaged: number;
+  /**
+   * Métricas cujo valor é PARCIAL: algum pedaço do período a Meta não devolveu (ela
+   * só guarda 2 anos de insights, e o comparativo de um relatório anual cai fora).
+   * Parcial não entra em comparativo — era daí que saía "+3022% de visualizações".
+   */
+  incompletas?: string[];
 };
 
 // Período de comparação escolhido na geração do relatório.
@@ -1782,7 +1790,15 @@ async function fetchInstagramPostInsightsBatch(
   const result = new Map<string, { reach: number; saves: number; videoViews: number }>();
   if (!mediaItems.length) return result;
 
-  const runBatch = async (items: Array<{ id: string; isVideo: boolean }>, metric: string, apply: (id: string, name: string, val: number) => void) => {
+  // ⚠️ A Graph aceita no máximo 50 chamadas por lote. Antes vinha um lote só, e com a
+  // paginação dos posts (relatório anual = centenas) o lote inteiro seria recusado.
+  const runBatch = async (todos: Array<{ id: string; isVideo: boolean }>, metric: string, apply: (id: string, name: string, val: number) => void) => {
+    const lotes: Array<Array<{ id: string; isVideo: boolean }>> = [];
+    for (let k = 0; k < todos.length; k += 50) lotes.push(todos.slice(k, k + 50));
+    // Lotes em paralelo: em série, 337 posts levavam ~90 s (7 lotes × 2 métricas).
+    await Promise.all(lotes.map(l => runLote(l, metric, apply)));
+  };
+  const runLote = async (items: Array<{ id: string; isVideo: boolean }>, metric: string, apply: (id: string, name: string, val: number) => void) => {
     const batch = items.map(m => ({ method: 'GET', relative_url: `${m.id}/insights?metric=${metric}&period=lifetime` }));
     try {
       const body = new URLSearchParams({ access_token: token, batch: JSON.stringify(batch) });
@@ -1942,7 +1958,15 @@ export async function fetchInstagramData(
     return chunks;
   }
 
-  async function fetchIgProfileMetricRange(metric: string, since: number, until: number, metricType?: 'total_value'): Promise<number> {
+  // A Meta só guarda insights de perfil dos ÚLTIMOS 2 ANOS ("since param is not valid.
+  // Metrics data is available for the last 2 years"). Pedaço antes disso nem é pedido:
+  // conta como falta, e a métrica sai marcada como parcial.
+  // A Meta valida o `since`: pedaço que COMEÇA antes do limite é recusado inteiro
+  // (mesmo terminando dentro), então nem vale a chamada. Dois dias de folga.
+  const LIMITE_META_S = Math.floor(Date.now() / 1000) - (2 * 365 - 2) * 86_400;
+  /** null = a Meta não devolveu este pedaço (fora da janela de 2 anos, erro ou timeout). */
+  async function fetchIgProfileMetricRange(metric: string, since: number, until: number, metricType?: 'total_value'): Promise<number | null> {
+    if (since < LIMITE_META_S) return null;
     const url = new URL(`https://graph.facebook.com/v21.0/${ig!.id}/insights`);
     url.searchParams.set('metric', metric);
     url.searchParams.set('period', 'day');
@@ -1954,7 +1978,7 @@ export async function fetchInstagramData(
     if (!res?.ok) {
       const body = await res?.text().catch(() => '');
       console.error(`[delivery][ig-insights] falha ao buscar "${metric}" (status ${res?.status ?? 'sem resposta'}):`, body);
-      return 0;
+      return null;
     }
     const data = await res.json() as {
       data?: Array<{ total_value?: { value: number }; values?: Array<{ value: number }> }>;
@@ -1965,21 +1989,24 @@ export async function fetchInstagramData(
     return (first?.values ?? []).reduce((sum, item) => sum + (typeof item.value === 'number' ? item.value : 0), 0);
   }
 
-  async function fetchIgProfileMetric(metric: string, chunks: Array<{ since: number; until: number }>, metricType?: 'total_value'): Promise<number> {
-    if (!chunks.length) return 0;
-    const totals = await Promise.all(
+  /** Soma dos pedaços do período + se TODOS vieram (sem isso o número é parcial). */
+  async function fetchIgProfileMetric(metric: string, chunks: Array<{ since: number; until: number }>, metricType?: 'total_value'): Promise<{ valor: number; completo: boolean }> {
+    if (!chunks.length) return { valor: 0, completo: true };
+    const somar = (lista: Array<number | null>) => ({
+      valor: lista.reduce<number>((sum, v) => sum + (v ?? 0), 0),
+      completo: lista.every(v => v !== null),
+    });
+    const totals = somar(await Promise.all(
       chunks.map((chunk) => fetchIgProfileMetricRange(metric, chunk.since, chunk.until, metricType)),
-    );
-    const total = totals.reduce((sum, value) => sum + value, 0);
-    if (total > 0 || !metricType) return total;
+    ));
+    if (totals.valor > 0 || !metricType) return totals;
 
     // Some IG accounts reject metric_type=total_value for longer windows even when the
     // per-day series exists. Fallback to summing daily values so the selected period is
     // still represented instead of showing only followers.
-    const fallbackTotals = await Promise.all(
+    return somar(await Promise.all(
       chunks.map((chunk) => fetchIgProfileMetricRange(metric, chunk.since, chunk.until)),
-    );
-    return fallbackTotals.reduce((sum, value) => sum + value, 0);
+    ));
   }
 
   // ⚠️ Ganho de seguidores NÃO sai mais de uma chamada por período: a Meta só
@@ -2010,6 +2037,7 @@ export async function fetchInstagramData(
     const chunks = makePeriodChunks(periodFrom, periodTo);
     const followers_cobertura = ganhoSeguidores(periodFrom, periodTo, doBanco);
     const followers_period = followers_cobertura.ganho;
+    const nomes = ['reach', 'impressions', 'profile_views', 'website_clicks', 'accounts_engaged'] as const;
     const [reach, views, profile_views, website_clicks, accounts_engaged] = await Promise.all([
       fetchIgProfileMetric('reach', chunks),
       fetchIgProfileMetric('views', chunks, 'total_value'),
@@ -2017,7 +2045,15 @@ export async function fetchInstagramData(
       fetchIgProfileMetric('website_clicks', chunks, 'total_value'),
       fetchIgProfileMetric('accounts_engaged', chunks, 'total_value'),
     ]);
-    return { followers_period, followers_cobertura, reach, impressions: views, profile_views, website_clicks, accounts_engaged };
+    const incompletas = [reach, views, profile_views, website_clicks, accounts_engaged]
+      .map((m, k) => (m.completo ? null : nomes[k]))
+      .filter((n): n is typeof nomes[number] => n !== null);
+    return {
+      followers_period, followers_cobertura,
+      reach: reach.valor, impressions: views.valor, profile_views: profile_views.valor,
+      website_clicks: website_clicks.valor, accounts_engaged: accounts_engaged.valor,
+      ...(incompletas.length ? { incompletas } : {}),
+    };
   }
 
   const [currentMetrics, previousMetrics] = await Promise.all([
@@ -2040,31 +2076,40 @@ export async function fetchInstagramData(
     profile_views,
     website_clicks,
     accounts_engaged,
+    ...(currentMetrics.incompletas ? { incompletas: currentMetrics.incompletas } : {}),
     previous: previousMetrics,
   };
 
-  // Last posts published within the report period (newest first, capped at 12)
+  // Posts publicados no período (a Graph devolve do mais novo para o mais antigo).
   let posts: InstagramPost[] = [];
   try {
     const since = Math.floor(new Date(from + 'T00:00:00Z').getTime() / 1000);
     const until = Math.floor(new Date(to + 'T23:59:59Z').getTime() / 1000);
-    // limit=50 covers virtually any monthly posting cadence — the old limit=12 silently
-    // undercounted "Total de publicações" and the calendar for clients posting more often.
+    // ⚠️ PAGINA até cobrir o período. Antes era uma página só de 50: num relatório de
+    // 13 meses da Romanza vieram os 50 posts de setembro e os outros 12 calendários
+    // saíram VAZIOS. O teto evita que um perfil que posta 10×/dia derrube a geração.
+    type MediaCru = {
+      id: string; caption?: string; media_type?: string; media_product_type?: string;
+      media_url?: string; thumbnail_url?: string; permalink?: string; timestamp?: string;
+      like_count?: number; comments_count?: number;
+    };
+    const media: MediaCru[] = [];
     const mediaUrl = new URL(`https://graph.facebook.com/v21.0/${ig.id}/media`);
     mediaUrl.searchParams.set('fields', 'id,caption,media_type,media_product_type,media_url,thumbnail_url,permalink,timestamp,like_count,comments_count');
     mediaUrl.searchParams.set('limit', '50');
     mediaUrl.searchParams.set('since', String(since));
     mediaUrl.searchParams.set('until', String(until));
     mediaUrl.searchParams.set('access_token', pageToken);
-    const mediaRes = await fetch(mediaUrl.toString(), { signal: AbortSignal.timeout(15000) }).catch(() => null);
+    let proxima: string | null = mediaUrl.toString();
+    while (proxima && media.length < IG_POSTS_MAX) {
+      const mediaRes: Response | null = await fetch(proxima, { signal: AbortSignal.timeout(15000) }).catch(() => null);
+      if (!mediaRes?.ok) break;
+      const mediaData = await mediaRes.json() as { data?: MediaCru[]; paging?: { next?: string } };
+      media.push(...(mediaData.data ?? []));
+      proxima = mediaData.paging?.next ?? null;
+    }
 
-    if (mediaRes?.ok) {
-      const mediaData = await mediaRes.json() as { data?: Record<string, unknown>[] };
-      const media = (mediaData.data ?? []) as Array<{
-        id: string; caption?: string; media_type?: string; media_product_type?: string;
-        media_url?: string; thumbnail_url?: string; permalink?: string; timestamp?: string;
-        like_count?: number; comments_count?: number;
-      }>;
+    if (media.length) {
 
       const mediaForInsights = media.map(m => ({
         id: m.id,
@@ -2094,6 +2139,9 @@ export async function fetchInstagramData(
 
   return { insights, posts };
 }
+
+/** Teto de posts lidos por relatório (12 páginas de 50 da Graph). */
+export const IG_POSTS_MAX = 600;
 
 // ── Slide audit (dev-only warnings) ───────────────────────────────────────────
 
@@ -3836,7 +3884,16 @@ export function sInstagram(ig: InstagramData, idx: number, total: number, period
       <rect x="2" y="2" width="20" height="20" rx="6"/><circle cx="12" cy="12" r="4.5"/><circle cx="17.2" cy="6.8" r="1.1" fill="${color}" stroke="none"/>
     </svg>`;
 
-  const compareLine = (current: number, previous: number | undefined, baseLabel = 'vs período anterior') => {
+  const compareLine = (current: number, previous: number | undefined, baseLabel = 'vs período anterior', chave?: string) => {
+    // Métrica parcial (a Meta só guarda 2 anos de insights) não vira comparativo nem
+    // percentual: a Romanza saiu com "+3022% de visualizações" porque o período anterior
+    // de um relatório anual caía fora da janela e somava só os pedaços que vieram.
+    if (chave && ig.incompletas?.includes(chave)) {
+      return { text: 'valor parcial — a Meta só guarda 2 anos de dados', color: MUTED, mark: BORDER };
+    }
+    if (chave && ig.previous?.incompletas?.includes(chave)) {
+      return { text: 'sem comparativo: período anterior fora dos 2 anos que a Meta guarda', color: MUTED, mark: BORDER };
+    }
     if (!previous) {
       return { text: 'sem comparativo anterior', color: MUTED, mark: PRIMARY };
     }
@@ -3865,7 +3922,7 @@ export function sInstagram(ig: InstagramData, idx: number, total: number, period
     compareLabel = 'vs período anterior',
     customCompare?: { text: string; color: string; mark: string },
   ) => {
-    const compare = customCompare ?? compareLine(currentCompare, previousCompare, compareLabel);
+    const compare = customCompare ?? compareLine(currentCompare, previousCompare, compareLabel, enLabel === 'views' ? 'impressions' : enLabel);
     return (
     `<div style="background:${CARD};border:1px solid #E7ECF3;border-radius:16px;box-shadow:0 10px 26px rgba(15,23,42,.06);padding:20px 22px;display:flex;flex-direction:column;gap:14px">
       <div style="display:flex;align-items:center;gap:14px">
@@ -4245,7 +4302,7 @@ export function monthsBetweenInclusive(fromDate: Date, toDate: Date): Date[] {
   return months.length ? months : [start];
 }
 
-export function sInstagramPosts(posts: InstagramPost[], idx: number, total: number): string {
+export function sInstagramPosts(posts: InstagramPost[], idx: number, total: number, periodoEhMes = true): string {
   const score = (p: InstagramPost) => (p.reach > 0 ? p.reach : 0) + (p.likes + p.comments + p.saves) * 12 + p.videoViews * 0.2;
   const featuredPosts = [...posts].sort((a, b) => score(b) - score(a)).slice(0, 4);
 
@@ -4306,8 +4363,8 @@ export function sInstagramPosts(posts: InstagramPost[], idx: number, total: numb
 
   <div style="position:relative;z-index:1;flex:1;padding:42px 44px 30px;box-sizing:border-box;display:flex;flex-direction:column">
     <div style="flex-shrink:0;margin:0 0 18px">
-      <h1 style="font-family:${INTER};font-size:52px;font-weight:950;color:#050816;line-height:.95;margin:0 0 13px;letter-spacing:-0.055em">${reportTitle('Top conteúdos do mês')}</h1>
-      <p style="font-size:18px;font-weight:500;color:#6B7280;font-family:${INTER};margin:0;letter-spacing:-0.015em">Entregas dos principais posts do último mês</p>
+      <h1 style="font-family:${INTER};font-size:52px;font-weight:950;color:#050816;line-height:.95;margin:0 0 13px;letter-spacing:-0.055em">${reportTitle(periodoEhMes ? 'Top conteúdos do mês' : 'Top conteúdos do período')}</h1>
+      <p style="font-size:18px;font-weight:500;color:#6B7280;font-family:${INTER};margin:0;letter-spacing:-0.015em">Entregas dos principais posts ${periodoEhMes ? 'do último mês' : 'do período'}</p>
       <div style="width:36px;height:3px;border-radius:999px;background:${PRIMARY};margin-top:13px"></div>
     </div>
 
@@ -4325,12 +4382,22 @@ export function sInstagramPosts(posts: InstagramPost[], idx: number, total: numb
 // Paginado pelo builder em fatias de TODOS_CONTEUDOS_POR_PAGINA.
 
 export const TODOS_CONTEUDOS_POR_PAGINA = 6;
+/**
+ * Teto de páginas de "Todos os conteúdos" — relatório anual com 300 posts viraria 50
+ * páginas iguais. Acima do teto entram só as publicações MAIS RECENTES, e a página diz.
+ */
+export const TODOS_CONTEUDOS_MAX_PAGINAS = 8;
+export function postsParaListar(ordenados: InstagramPost[]): { lista: InstagramPost[]; totalPosts: number; paginas: number } {
+  const max = TODOS_CONTEUDOS_POR_PAGINA * TODOS_CONTEUDOS_MAX_PAGINAS;
+  const lista = ordenados.length > max ? ordenados.slice(-max) : ordenados;
+  return { lista, totalPosts: ordenados.length, paginas: Math.ceil(lista.length / TODOS_CONTEUDOS_POR_PAGINA) };
+}
 
 export function ordenarPostsPorData(posts: InstagramPost[]): InstagramPost[] {
   return [...posts].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
 }
 
-export function sInstagramTodosConteudos(pagePosts: InstagramPost[], idx: number, total: number, pageNum: number, pageCount: number): string {
+export function sInstagramTodosConteudos(pagePosts: InstagramPost[], idx: number, total: number, pageNum: number, pageCount: number, totalPosts?: number): string {
   const truncateCaption = truncateCaptionText;
 
   // white-space:nowrap nos wrappers com overflow:hidden é PROPOSITAL: casa com o passe
@@ -4384,7 +4451,9 @@ export function sInstagramTodosConteudos(pagePosts: InstagramPost[], idx: number
     </div>`;
   };
 
-  const pageLabel = pageCount > 1 ? ` · página ${pageNum} de ${pageCount}` : '';
+  const listados = pageCount * TODOS_CONTEUDOS_POR_PAGINA;
+  const recorte = totalPosts && totalPosts > listados ? ` · as ${TODOS_CONTEUDOS_POR_PAGINA * TODOS_CONTEUDOS_MAX_PAGINAS} publicações mais recentes de ${totalPosts}` : '';
+  const pageLabel = (pageCount > 1 ? ` · página ${pageNum} de ${pageCount}` : '') + recorte;
 
   const body = `<div data-slide-index="${idx}" data-slide-total="${total}" style="width:1440px;min-height:810px;background:${BG};border:1px solid ${BORDER};margin:0 auto 20px;overflow:hidden;box-sizing:border-box;page-break-after:always;display:flex;flex-direction:column;position:relative">
   <div style="position:absolute;right:-90px;top:-180px;width:620px;height:560px;border-radius:50%;background:linear-gradient(135deg,rgba(241,245,249,.72),rgba(255,255,255,.1));opacity:.78;pointer-events:none"></div>
@@ -4406,7 +4475,7 @@ export function sInstagramTodosConteudos(pagePosts: InstagramPost[], idx: number
 
 // ── Instagram — spotlight on the best-performing post ─────────────────────────
 
-export function sInstagramSpotlight(posts: InstagramPost[], idx: number, total: number): string {
+export function sInstagramSpotlight(posts: InstagramPost[], idx: number, total: number, periodoEhMes = true): string {
   const best = bestInstagramPost(posts);
   if (!best) return '';
 
@@ -4454,7 +4523,7 @@ export function sInstagramSpotlight(posts: InstagramPost[], idx: number, total: 
 
   <div style="position:relative;z-index:1;flex:1;padding:44px 48px 0;display:flex;flex-direction:column">
     <div style="flex-shrink:0;margin-bottom:16px">
-      <h1 style="font-family:${INTER};font-size:44px;font-weight:900;color:${FG};line-height:1.05;margin:0 0 6px;letter-spacing:-0.03em">${reportTitle('Melhor conteúdo do mês')}</h1>
+      <h1 style="font-family:${INTER};font-size:44px;font-weight:900;color:${FG};line-height:1.05;margin:0 0 6px;letter-spacing:-0.03em">${reportTitle(periodoEhMes ? 'Melhor conteúdo do mês' : 'Melhor conteúdo do período')}</h1>
       <p style="font-size:16px;font-weight:500;color:#163461;font-family:${INTER};margin:0">O post com melhor desempenho entre os publicados no período</p>
     </div>
 
@@ -5389,7 +5458,8 @@ export async function buildDeliveryReport(opts: {
   const hasDestaques         = meta !== null && meta.campanhas.length > 0 && en('meta_campanhas');
   const hasCriativos         = creatives.length > 0 && en('criativos');
   const destaquePages        = hasDestaques ? Math.ceil(meta!.campanhas.length / 4) : 0;
-  const todosConteudosPages  = hasTodosConteudos ? Math.ceil(igPosts.length / TODOS_CONTEUDOS_POR_PAGINA) : 0;
+  const todosListar          = postsParaListar(ordenarPostsPorData(igPosts));
+  const todosConteudosPages  = hasTodosConteudos ? todosListar.paginas : 0;
 
   const total = 1
     + (hasVisao      ? 1 : 0)
@@ -5438,13 +5508,13 @@ export async function buildDeliveryReport(opts: {
     }
   }
   if (hasTodosConteudos) {
-    const ordered = ordenarPostsPorData(igPosts);
+    const ordered = todosListar.lista;
     for (let start = 0, page = 1; start < ordered.length; start += TODOS_CONTEUDOS_POR_PAGINA, page++) {
-      slides.push(sInstagramTodosConteudos(ordered.slice(start, start + TODOS_CONTEUDOS_POR_PAGINA), ++i, total, page, todosConteudosPages));
+      slides.push(sInstagramTodosConteudos(ordered.slice(start, start + TODOS_CONTEUDOS_POR_PAGINA), ++i, total, page, todosConteudosPages, todosListar.totalPosts));
     }
   }
-  if (hasTopConteudos)       slides.push(sInstagramPosts(igPosts, ++i, total));
-  if (hasInstagramSpotlight) slides.push(sInstagramSpotlight(igPosts, ++i, total));
+  if (hasTopConteudos)       slides.push(sInstagramPosts(igPosts, ++i, total, mesesCheios(from, to) === 1));
+  if (hasInstagramSpotlight) slides.push(sInstagramSpotlight(igPosts, ++i, total, mesesCheios(from, to) === 1));
 
   return {
     html: `${FONT_LINK}<div class="onmid-report" style="background:${CANVAS};padding:28px;font-family:${INTER}">${slides.join('')}</div>`,

@@ -3,7 +3,7 @@ import { makeServerPool } from '@/lib/server-db';
 import {
   fetchInstagramData,
   sCapa, sInstagram, sInstagramCalendar, sInstagramPosts, sInstagramSpotlight,
-  sInstagramTodosConteudos, ordenarPostsPorData, TODOS_CONTEUDOS_POR_PAGINA,
+  sInstagramTodosConteudos, ordenarPostsPorData, TODOS_CONTEUDOS_POR_PAGINA, postsParaListar, mesesCheios,
   monthsBetweenInclusive, FONT_LINK, CANVAS, INTER,
   resolveReportCover, fetchReportRotationSeed, sanitizeJsonValue, rotuloPeriodo, autoPreviousPeriod,
   type DiagJson, type ParsedData, type CompareOverride,
@@ -97,7 +97,8 @@ export async function buildSocialReport(input: {
   const hasCalendario         = hasInstagramPosts && en('calendario');
   const hasTopConteudos       = hasInstagramPosts && en('top_conteudos');
   const hasInstagramSpotlight = hasInstagramPosts && en('melhor_conteudo');
-  const todosConteudosPages   = hasTodosConteudos ? Math.ceil(igPosts.length / TODOS_CONTEUDOS_POR_PAGINA) : 0;
+  const todosListar           = postsParaListar(ordenarPostsPorData(igPosts));
+  const todosConteudosPages   = hasTodosConteudos ? todosListar.paginas : 0;
 
   const total = 1
     + (hasInstagram      ? 1 : 0)
@@ -122,13 +123,14 @@ export async function buildSocialReport(input: {
     }
   }
   if (hasTodosConteudos) {
-    const ordered = ordenarPostsPorData(igPosts);
+    const ordered = todosListar.lista;
     for (let start = 0, page = 1; start < ordered.length; start += TODOS_CONTEUDOS_POR_PAGINA, page++) {
-      slides.push(sInstagramTodosConteudos(ordered.slice(start, start + TODOS_CONTEUDOS_POR_PAGINA), ++i, total, page, todosConteudosPages));
+      slides.push(sInstagramTodosConteudos(ordered.slice(start, start + TODOS_CONTEUDOS_POR_PAGINA), ++i, total, page, todosConteudosPages, todosListar.totalPosts));
     }
   }
-  if (hasTopConteudos)       slides.push(sInstagramPosts(igPosts, ++i, total));
-  if (hasInstagramSpotlight) slides.push(sInstagramSpotlight(igPosts, ++i, total));
+  const periodoEhMes = mesesCheios(periodFrom, periodTo) === 1;
+  if (hasTopConteudos)       slides.push(sInstagramPosts(igPosts, ++i, total, periodoEhMes));
+  if (hasInstagramSpotlight) slides.push(sInstagramSpotlight(igPosts, ++i, total, periodoEhMes));
 
   return { html: `${FONT_LINK}<div class="onmid-report" style="background:${CANVAS};padding:28px;font-family:${INTER}">${slides.join('')}</div>` };
 }

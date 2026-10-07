@@ -39,6 +39,16 @@ resultados (1 Não atendeu · 2 Caixa postal · 3 Número errado · 4 Atendeu; L
   demais tabelas as rotas criam sozinhas (`GET /api/crm?clientId=…` cria o `crm_leads`
   completo). Turbopack recusa `node_modules` em symlink — `npm ci` no worktree.
 
+## Relatório de período longo — Instagram parava em 50 posts e comparava com antes dos 2 anos da Meta (2026-10-07)
+
+Matheus: "relatório da Romanza de 05/10 (13 meses) ficou faltando informação de rede social e os dados de Instagram vieram estranhos". Medido na produção com a função real:
+
+- **Posts: a Graph era lida numa página só (`limit=50`, sem paginação)** → vieram os 50 de setembro/2026 e os OUTROS 12 CALENDÁRIOS saíram vazios. Agora `fetchInstagramData` segue `paging.next` até cobrir o período (teto `IG_POSTS_MAX = 600`). Romanza: **337 posts em 13 meses**, todos com alcance. ⚠️ O lote de insights por post tem limite de 50 chamadas na Graph — `runBatch` fatia e roda os lotes em paralelo (em série: 92 s; paralelo: 36 s).
+- **"+3022% de visualizações" era comparativo PARCIAL**: a Meta só guarda insights de perfil dos **últimos 2 anos** (`since param is not valid. Metrics data is available for the last 2 years`); o período anterior de um relatório anual (ago/2024–ago/2025) caía fora e cada pedaço recusado virava 0 em silêncio. Agora cada pedaço devolve `null` ao falhar, pedaço que começa antes do limite nem é pedido, e a métrica sai em **`incompletas`** (`InstagramPeriodMetrics`/`InstagramData`). No slide, métrica parcial do período anterior vira "sem comparativo: período anterior fora dos 2 anos que a Meta guarda"; parcial do período atual vira "valor parcial". **Parcial nunca vira percentual.**
+- **"Todos os conteúdos" tem teto de 8 páginas** (`TODOS_CONTEUDOS_MAX_PAGINAS`, `postsParaListar`): 337 posts dariam 57 páginas iguais; entram as 48 MAIS RECENTES e a página diz "as 48 publicações mais recentes de 337". Calendário continua um por mês (13 páginas num ano — é a informação que faltava). Títulos "Top/Melhor conteúdo do mês" viram "do período" fora de mês cheio.
+- ✅ Verificado: 10 asserts novos (127 no arquivo); `buildOmniReport` REAL da Romanza 2025-09-01→2026-09-30 em produção → 37 páginas, 13 calendários preenchidos, Funil e Canais presentes, zero "+3022%", 29 s; tsc + `next build` + eslint sem erro novo.
+- ⚠️ Visão Geral NÃO aparece para a Romanza em nenhum período: a página exige faturamento ou venda e o CRM dela tem R$ 0 — é o portão, não defeito. ⚠️ Sobram no log um 400 de `accounts_engaged` num pedaço do período anterior (já marcado parcial) e `[reports/google] Google Ads query failed` (a conexão `b1ee3281…` do vínculo da Romanza não existe mais em `google_connections`; as páginas de Google ainda saem pela conexão de fallback).
+
 ## Relatório — período de vários meses era chamado pelo mês INICIAL (2026-10-07)
 
 Print do Matheus (Incorpast): "Julho não faturou 123.880,20, a dashboard atualiza certinho". **O número estava certo; o rótulo mentia.** O relatório tinha sido gerado para 01/07–30/09 (três meses) e a página dizia "Julho 2026" — R$ 123.880,20 / 35 vendas / 512 leads é o TRIMESTRE (conferido na produção pela mesma query da dashboard: julho sozinho = R$ 29.857,30, igual à tela). E o comparativo saía como "Março": a janela anterior automática era 92 dias corridos a partir de 31/03.

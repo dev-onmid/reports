@@ -6,7 +6,7 @@ import {
   sCapa, sVisaoGeral, sFunilComercial, sCanais, sSiteResumo, sSiteAudiencia, sRegioes, sPaidTrafficResumo, sMetaAdsResumo, sMetaAdsCampanhas, sCriativos,
   sGoogleAdsResumo, sGoogleAdsCampanhas, sGoogleAdsPalavrasChave,
   sInstagram, sInstagramCalendar, sInstagramPosts, sInstagramSpotlight,
-  sInstagramTodosConteudos, ordenarPostsPorData, TODOS_CONTEUDOS_POR_PAGINA,
+  sInstagramTodosConteudos, ordenarPostsPorData, TODOS_CONTEUDOS_POR_PAGINA, postsParaListar,
   monthsBetweenInclusive, FONT_LINK, CANVAS, INTER,
   resolveReportCover, fetchReportRotationSeed,
   type ParsedData, type DiagJson, type GoogleAdsFull, type CampanhaGoogleDetalhada, type PalavraChaveGoogle, type MetaBreakdownLevel, type CompareOverride,
@@ -720,7 +720,8 @@ export async function buildOmniReport(input: {
   const hasCriativos          = creatives.length > 0 && en('criativos');
   const destaquePages         = hasDestaques ? Math.ceil(meta!.campanhas.length / 4) : 0;
   const googleDestaquePages   = hasGoogleDestaques ? Math.ceil(googleDetailed!.campanhas.length / 4) : 0;
-  const todosConteudosPages   = hasTodosConteudos ? Math.ceil(igPosts.length / TODOS_CONTEUDOS_POR_PAGINA) : 0;
+  const todosListar           = postsParaListar(ordenarPostsPorData(igPosts));
+  const todosConteudosPages   = hasTodosConteudos ? todosListar.paginas : 0;
 
   const total = 1
     + (hasVisao      ? 1 : 0)
@@ -815,13 +816,13 @@ export async function buildOmniReport(input: {
     }
   }
   if (hasTodosConteudos) {
-    const ordered = ordenarPostsPorData(igPosts);
+    const ordered = todosListar.lista;
     for (let start = 0, page = 1; start < ordered.length; start += TODOS_CONTEUDOS_POR_PAGINA, page++) {
-      slides.push(sInstagramTodosConteudos(ordered.slice(start, start + TODOS_CONTEUDOS_POR_PAGINA), ++i, total, page, todosConteudosPages));
+      slides.push(sInstagramTodosConteudos(ordered.slice(start, start + TODOS_CONTEUDOS_POR_PAGINA), ++i, total, page, todosConteudosPages, todosListar.totalPosts));
     }
   }
-  if (hasTopConteudos)       slides.push(sInstagramPosts(igPosts, ++i, total));
-  if (hasInstagramSpotlight) slides.push(sInstagramSpotlight(igPosts, ++i, total));
+  if (hasTopConteudos)       slides.push(sInstagramPosts(igPosts, ++i, total, periodoEhMes));
+  if (hasInstagramSpotlight) slides.push(sInstagramSpotlight(igPosts, ++i, total, periodoEhMes));
 
   return { html: `${FONT_LINK}<div class="onmid-report" style="background:${CANVAS};padding:28px;font-family:${INTER}">${slides.join('')}</div>` };
 }

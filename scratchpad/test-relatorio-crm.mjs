@@ -4,7 +4,7 @@
 //     --packages=external --tsconfig=tsconfig.json --outfile=scratchpad/build/relatorio-crm.mjs
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { ehMesCheio, degrausDoFunil, sFunilComercial, sCanais, sVisaoGeral, sInstagram, sInstagramCalendar, sGoogleAdsResumo, sGoogleAdsCampanhas, sPaidTrafficResumo, sSiteResumo, sSiteAudiencia, agruparSerieDiaria, seletorContatos, categorizeGoogleCampaign, comprasReaisGoogle, rotuloPeriodo, mesesCheios, autoPreviousPeriod, ganhoNoPeriodo, serieDaResposta, CRM_PERIODO_SQL } from './build/relatorio-crm.mjs';
+import { ehMesCheio, degrausDoFunil, sFunilComercial, sCanais, sVisaoGeral, sInstagram, sInstagramCalendar, sGoogleAdsResumo, sGoogleAdsCampanhas, sPaidTrafficResumo, sSiteResumo, sSiteAudiencia, agruparSerieDiaria, seletorContatos, categorizeGoogleCampaign, comprasReaisGoogle, rotuloPeriodo, mesesCheios, autoPreviousPeriod, postsParaListar, sInstagramPosts, sInstagramSpotlight, sInstagramTodosConteudos, TODOS_CONTEUDOS_MAX_PAGINAS, ganhoNoPeriodo, serieDaResposta, CRM_PERIODO_SQL } from './build/relatorio-crm.mjs';
 
 let n = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); n++; };
@@ -210,5 +210,27 @@ ok(vgTri.includes('Visão Geral do Período') && vgTri.includes('Comparativo de 
 ok(!vgTri.includes('Visão Geral do Mês'), 'trimestre não se chama "mês"');
 const vgMes = sVisaoGeral({ ativos: 0, inativos: 0, potenciais: 0, faturamento: 1, pedidos_ativos: 1, ticket: 1, mensagens: 0, taxa_resposta: 0, entregas_por_dia: [], regioes: [], clientes_inativos: [] }, null, 2, 20, 'Julho/2026', 'Junho/2026', { rotuloVendas: 'Vendas' });
 ok(vgMes.includes('Visão Geral do Mês'), 'mês cheio continua "Visão geral do mês"');
+
+// ── Relatório de período longo (caso Romanza, 13 meses) ──
+const postFake = (i) => ({ id: 'p' + i, caption: 'post ' + i, mediaType: 'IMAGE', thumbnailUrl: null, permalink: 'https://instagram.com/p/' + i, timestamp: new Date(Date.UTC(2025, 8, 1) + i * 86400000).toISOString(), likes: i, comments: 0, reach: 10 + i, saves: 0, videoViews: 0 });
+const muitos = Array.from({ length: 337 }, (_, i) => postFake(i));
+const rec = postsParaListar(muitos);
+ok(rec.totalPosts === 337 && rec.paginas === TODOS_CONTEUDOS_MAX_PAGINAS && rec.lista.length === 48, '337 posts viram 8 páginas (48 posts)');
+ok(rec.lista[rec.lista.length - 1].id === 'p336' && rec.lista[0].id === 'p289', 'ficam as 48 MAIS RECENTES');
+const pouco = postsParaListar(muitos.slice(0, 7));
+ok(pouco.lista.length === 7 && pouco.paginas === 2, 'abaixo do teto lista tudo');
+ok(sInstagramTodosConteudos(rec.lista.slice(0, 6), 1, 2, 1, 8, 337).includes('as 48 publicações mais recentes de 337'), 'página diz que é recorte');
+ok(!sInstagramTodosConteudos(rec.lista.slice(0, 6), 1, 2, 1, 2, 7).includes('mais recentes'), 'sem recorte, sem aviso');
+ok(sInstagramPosts(muitos.slice(0, 5), 1, 2, false).includes('Top Conteúdos do Período') && sInstagramPosts(muitos.slice(0, 5), 1, 2).includes('Top Conteúdos do Mês'), 'título acompanha a unidade do período');
+ok(sInstagramSpotlight(muitos.slice(0, 5), 1, 2, false).includes('Melhor Conteúdo do Período'), 'melhor conteúdo idem');
+const igBaseR = { username: 'lojaromanza', followers: 11641, followers_period: 188, reach: 624089, impressions: 1356642, profile_views: 12035, website_clicks: 1082, accounts_engaged: 2200 };
+const igParcialAntR = { ...igBaseR, previous: { followers_period: 0, reach: 434657, impressions: 43445, profile_views: 13451, website_clicks: 1262, accounts_engaged: 0, incompletas: ['reach', 'impressions', 'profile_views', 'website_clicks', 'accounts_engaged'] } };
+const htmlAntR = sInstagram(igParcialAntR, 1, 2, 'Setembro de 2025 a Setembro/2026');
+ok(!/3022|\+1\.313\.197/.test(htmlAntR) && (htmlAntR.match(/fora dos 2 anos que a Meta guarda/g) || []).length === 5, 'período anterior parcial: nenhum "+3022%", 5 cards avisam');
+const igOkR = { ...igBaseR, previous: { followers_period: 0, reach: 434657, impressions: 43445, profile_views: 13451, website_clicks: 1262, accounts_engaged: 0 } };
+ok(/\+3022,7%/.test(sInstagram(igOkR, 1, 2, 'x')), 'período anterior completo continua comparando');
+const igParcialAtualR = { ...igBaseR, incompletas: ['reach'], previous: igOkR.previous };
+const htmlAtualR = sInstagram(igParcialAtualR, 1, 2, 'x');
+ok((htmlAtualR.match(/valor parcial — a Meta só guarda 2 anos/g) || []).length === 1 && /\+3022,7%/.test(htmlAtualR), 'só a métrica parcial perde o comparativo');
 
 console.log(`OK — ${n} asserts`);
