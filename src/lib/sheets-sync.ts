@@ -15,7 +15,7 @@
 import type { Pool } from 'pg';
 import { memoizarSchema } from '@/lib/schema-memo';
 import { internalHeaders } from '@/lib/session';
-import { escolherAbas, abasCompativeis, colunaEquivalente, urlExportXlsx, MAX_ABAS_POR_RODADA } from '@/lib/google-sheets';
+import { escolherAbas, abasCompativeis, colunaEquivalente, assinaturaDaAba, urlExportXlsx, MAX_ABAS_POR_RODADA } from '@/lib/google-sheets';
 
 export type SheetsConfig = {
   clientId: string;
@@ -37,6 +37,8 @@ export type SheetsConfig = {
   colunasVistas: string[] | null;
   /** Campos cujo de-para foi escolhido pelo gestor — a IA não os sobrescreve. */
   camposManuais: string[] | null;
+  /** `aba -> assinatura` do que já foi importado, para não repetir trabalho. */
+  abasImportadas: Record<string, string> | null;
   /** Somar a aba do mês atual às escolhidas. Padrão true — ver `escolherAbas`. */
   seguirMes: boolean;
   tipoPlanilha: 'lead' | 'venda' | 'hibrido';
@@ -80,7 +82,10 @@ export const ensureSheetsSchema = memoizarSchema(async (pool: Pool) => {
       ADD COLUMN IF NOT EXISTS colunas_vistas JSONB,
       -- Campos que o gestor apontou à mão. A reanálise preserva estes: sem isso,
       -- um clique em "Reanalisar colunas" desfaz o ajuste e ninguém percebe.
-      ADD COLUMN IF NOT EXISTS campos_manuais JSONB
+      ADD COLUMN IF NOT EXISTS campos_manuais JSONB,
+      -- Assinatura do conteúdo de cada aba já importada (2026-10-07). É o que
+      -- faz o histórico entrar aos poucos e depois parar de gastar vaga.
+      ADD COLUMN IF NOT EXISTS abas_importadas JSONB
   `);
 });
 
@@ -138,7 +143,22 @@ export async function sincronizarSheets(
   }
 
   const wb = XLSX.read(buf, { type: 'buffer' });
-  const escolha = escolherAbas(wb.SheetNames, { fixas: cfg.abas, seguirMes: cfg.seguirMes }, hoje);
+  // ⚠️ Assinatura de TODAS as abas antes de escolher: é ela que diz o que mudou
+  // desde a última rodada e, portanto, o que ainda precisa de vaga.
+  // ⚠️⚠️ O de-para entra na assinatura. Sem isso, ajustar as colunas na tela não
+  // teria efeito nenhum sobre o histórico: as abas antigas continuariam
+  // "idênticas", seriam puladas para sempre e os meses anteriores ficariam com o
+  // mapeamento velho. Com o selo, mudar uma coluna reimporta tudo.
+  const selo = JSON.stringify(cfg.mapeamento ?? null);
+  const assinaturas: Record<string, string> = {};
+  for (const nome of wb.SheetNames) {
+    try { assinaturas[nome] = assinaturaDaAba(XLSX.utils.sheet_to_csv(wb.Sheets[nome]) + '\u0000' + selo); } catch { /* aba ilegível entra como pendente */ }
+  }
+  const escolha = escolherAbas(
+    wb.SheetNames,
+    { fixas: cfg.abas, seguirMes: cfg.seguirMes, jaImportadas: cfg.abasImportadas, assinaturas },
+    hoje,
+  );
   if (!escolha.abas.length) {
     return {
       ok: false, motivoAba: escolha.motivoAbaDoMes,
@@ -199,12 +219,27 @@ export async function sincronizarSheets(
         ? `A aba "${abas[0]}" ficou de fora: não tem ${faltam}.`
         : `${abas.length} abas ficaram de fora por não terem ${faltam}: ${abas.join(', ')}.`),
     ...(escolha.sumidas.length ? [`Não existem mais na planilha: ${escolha.sumidas.join(', ')}.`] : []),
-    ...(escolha.cortadas.length ? [`Entram as ${MAX_ABAS_POR_RODADA} abas mais recentes por rodada — o mês atual sempre entra. Ficaram de fora: ${escolha.cortadas.join(', ')}.`] : []),
+    ...(escolha.cortadas.length ? [`Entram até ${MAX_ABAS_POR_RODADA} abas por rodada — o mês atual sempre entra. Faltam importar, e entram nas próximas rodadas: ${escolha.cortadas.join(', ')}.`] : []),
+    // ⚠️ Separado do corte de propósito: isto NÃO é pendência, e misturar fazia
+    // a tela parecer que algo está faltando quando o histórico já está no banco.
+    ...(escolha.jaEstavam.length ? [`${escolha.jaEstavam.length} abas já importadas e sem alteração não entraram de novo.`] : []),
   ];
   let linhas = 0;
   const corpos: unknown[] = [];
+  const importadas: string[] = [];
+  // ⚠️ A defesa contra planilha fora da curva é o RELÓGIO, não o teto de abas:
+  // o teto baixo impedia o histórico de entrar e não protegia de uma aba única
+  // gigante. 240 s deixam folga dentro do `maxDuration = 300` da rota para
+  // fechar a resposta e gravar o estado.
+  const prazo = Date.now() + 240_000;
+  let faltouTempo = false;
 
   for (const [, abasDoFormato] of porFormato) {
+    if (Date.now() > prazo) {
+      faltouTempo = true;
+      avisos.push(`Faltou tempo nesta rodada; ${abasDoFormato.join(', ')} entram na próxima.`);
+      continue;
+    }
     const fd = new FormData();
     const mappings: { file: string; clientId: string }[] = [];
     for (const aba of abasDoFormato) {
@@ -261,6 +296,7 @@ export async function sincronizarSheets(
       continue;
     }
     corpos.push(body);
+    importadas.push(...abasDoFormato);
     const av = (body as { avisos_coluna?: string[] }).avisos_coluna;
     if (av?.length) avisos.push(...av);
   }
@@ -278,13 +314,22 @@ export async function sincronizarSheets(
   // tem o arquivo em mãos, pedir uma análise só para descobrir isso seria
   // gastar IA para responder o que acabamos de ler.
   const cabAtual = cabecalhos[abasOk[abasOk.length - 1]] ?? [];
+  // ⚠️ Só as abas que REALMENTE entraram nesta rodada são marcadas — formato que
+  // falhou ou ficou sem tempo continua pendente e volta na próxima.
+  const memoria = { ...(cfg.abasImportadas ?? {}) };
+  for (const nome of importadas) if (assinaturas[nome]) memoria[nome] = assinaturas[nome];
+  // Aba que sumiu da planilha sai da memória, senão ela cresce para sempre.
+  for (const nome of Object.keys(memoria)) if (!(nome in assinaturas)) delete memoria[nome];
+
   await pool.query(
     `UPDATE public.client_sheets
         SET ultima_sync = NOW(), ultimo_resultado = $2::jsonb, ultimo_erro = NULL,
-            colunas_vistas = COALESCE($3::jsonb, colunas_vistas), atualizado_em = NOW()
+            colunas_vistas = COALESCE($3::jsonb, colunas_vistas),
+            abas_importadas = $4::jsonb, atualizado_em = NOW()
       WHERE client_id = $1`,
-    [cfg.clientId, JSON.stringify({ aba, abas: abasOk, motivo, linhas, avisos, ...(body as object) }),
-     cabAtual.length ? JSON.stringify(cabAtual.filter(c => c.trim().length > 0)) : null]
+    [cfg.clientId, JSON.stringify({ aba, abas: abasOk, motivo, linhas, avisos, faltouTempo, ...(body as object) }),
+     cabAtual.length ? JSON.stringify(cabAtual.filter(c => c.trim().length > 0)) : null,
+     JSON.stringify(memoria)]
   );
   return { ok: true, aba, abas: abasOk, motivoAba: motivo, linhas, avisos, resultado: body };
 }
@@ -308,6 +353,8 @@ export function lerConfig(row: Record<string, unknown>): SheetsConfig {
     abasVistas: Array.isArray(row.abas_vistas) ? (row.abas_vistas as string[]) : null,
     colunasVistas: Array.isArray(row.colunas_vistas) ? (row.colunas_vistas as string[]) : null,
     camposManuais: Array.isArray(row.campos_manuais) ? (row.campos_manuais as string[]) : null,
+    abasImportadas: row.abas_importadas && typeof row.abas_importadas === 'object' && !Array.isArray(row.abas_importadas)
+      ? (row.abas_importadas as Record<string, string>) : null,
     seguirMes: row.seguir_mes !== false,
     tipoPlanilha: (row.tipo_planilha as SheetsConfig['tipoPlanilha']) ?? 'lead',
     fonteFaturamento: row.fonte_faturamento === true,

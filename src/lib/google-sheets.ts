@@ -150,16 +150,45 @@ export function periodoDaAba(nome: string): { ano: number; mes: number } | null 
   return null;  // "JUL242" e afins: número que não é ano
 }
 
-/** Teto de abas por rodada — ver `escolherAbas`. */
-export const MAX_ABAS_POR_RODADA = 12;
+/**
+ * Assinatura do conteúdo de uma aba, para saber se ela mudou desde a última
+ * importação.
+ *
+ * ⚠️ Hash do CONTEÚDO, não do número de linhas: o gestor corrige um telefone
+ * numa linha existente e o total não muda — a aba pareceria idêntica e a
+ * correção nunca chegaria ao CRM.
+ */
+export function assinaturaDaAba(conteudo: string): string {
+  // FNV-1a: curto, sem dependência, e aqui só precisa detectar diferença.
+  let h = 0x811c9dc5;
+  for (let i = 0; i < conteudo.length; i++) {
+    h ^= conteudo.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return `${conteudo.length.toString(36)}-${h.toString(36)}`;
+}
+
+/**
+ * Teto de abas por rodada — ver `escolherAbas`.
+ *
+ * ⚠️ 12 era palpite, nunca medido, e cortava histórico que cabia folgado.
+ * Cronometrado na Romanza em 07/10/2026: **12 abas e 10.996 linhas em 9,5 s**,
+ * ~0,8 s por aba, contra um `maxDuration` de 300 s. 36 abas (três anos de
+ * histórico mensal) ficam em ~30 s, ou seja 10% do orçamento. A defesa contra
+ * planilha fora da curva não é este número e sim a parada por tempo dentro de
+ * `sincronizarSheets` — teto baixo só garantia que o histórico nunca entrasse.
+ */
+export const MAX_ABAS_POR_RODADA = 36;
 
 export type EscolhaAbas = {
   /** As abas que vão para a importação, na ordem em que a planilha as lista. */
   abas: string[];
   /** Abas pedidas que não existem mais na planilha (renomeadas/apagadas). */
   sumidas: string[];
-  /** Abas cortadas pelo teto. */
+  /** Abas cortadas pelo teto que AINDA faltam importar (ou mudaram). */
   cortadas: string[];
+  /** Cortadas que já estão no banco e não mudaram — não é pendência. */
+  jaEstavam: string[];
   /** A aba do mês, quando `seguirMes` — separada porque a tela a mostra. */
   abaDoMes: string | null;
   motivoAbaDoMes: AbaResolvida['motivo'];
@@ -190,7 +219,14 @@ export type EscolhaAbas = {
  */
 export function escolherAbas(
   todas: string[],
-  cfg: { fixas?: string[] | null; seguirMes?: boolean },
+  cfg: {
+    fixas?: string[] | null;
+    seguirMes?: boolean;
+    /** `aba -> assinatura do conteúdo` na última importação bem-sucedida. */
+    jaImportadas?: Record<string, string> | null;
+    /** Assinatura ATUAL de cada aba, para saber o que mudou. */
+    assinaturas?: Record<string, string> | null;
+  },
   hoje = new Date(),
 ): EscolhaAbas {
   const { aba: abaDoMes, motivo } = resolverAbaDoMes(todas, hoje);
@@ -234,22 +270,39 @@ export function escolherAbas(
   // tela do cliente parava no passado. A aba do mês é intocável, e aba que não
   // dá para datar só entra se sobrar vaga (ela não é base de mês).
   const posicao = new Map(naOrdem.map((a, i) => [a, i]));
+  // Já importada E idêntica: só entra se sobrar vaga depois de todo o resto.
+  const inalterada = (a: string): boolean => {
+    const antes = cfg.jaImportadas?.[a];
+    const agora = cfg.assinaturas?.[a];
+    return !!antes && !!agora && antes === agora;
+  };
   const recencia = (a: string): number => {
     if (seguirMes && abaDoMes && a === abaDoMes) return Number.MAX_SAFE_INTEGER;
     const p = periodoDaAba(a);
     // Entre abas que não dá para datar, vale a ordem da planilha: a primeira
     // tem o maior ranque, para o corte manter as de cima (o teste do teto com
-    // "ABA 0".."ABA 19" cobre exatamente isso).
+    // "ABA 0".."ABA N" cobre exatamente isso).
     if (!p || p.ano === 0) return -1_000_000 - (posicao.get(a) ?? 0);
     return p.ano * 12 + p.mes;
   };
+  // ⚠️ Aba já importada e idêntica é PULADA, não só despriorizada: reimportar
+  // todo dia o mesmo histórico é trabalho à toa — tempo de rodada e escrita no
+  // banco para reescrever o que já está lá. A do mês nunca é pulada (ela muda
+  // todo dia), e a assinatura carrega o de-para (ver `sheets-sync`), então
+  // ajustar as colunas faz tudo voltar a ser importado.
+  const pendentes = naOrdem.filter(a => !(inalterada(a) && a !== abaDoMes));
   const mantidas = new Set(
-    [...naOrdem].sort((x, y) => recencia(y) - recencia(x)).slice(0, MAX_ABAS_POR_RODADA),
+    [...pendentes].sort((x, y) => recencia(y) - recencia(x)).slice(0, MAX_ABAS_POR_RODADA),
   );
+  const fora = naOrdem.filter(a => !mantidas.has(a));
   return {
     // Importa na ordem cronológica crescente — ver o bloco acima sobre o upsert.
     abas: naOrdem.filter(a => mantidas.has(a)),
-    cortadas: naOrdem.filter(a => !mantidas.has(a)),
+    // Separados porque dizem coisas diferentes ao gestor: uma é pendência, a
+    // outra é trabalho concluído. Juntar faz a tela gritar todo dia sobre aba
+    // que já está no banco.
+    cortadas: fora.filter(a => !inalterada(a)),
+    jaEstavam: fora.filter(a => inalterada(a)),
     sumidas,
     abaDoMes,
     motivoAbaDoMes: motivo,

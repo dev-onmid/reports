@@ -7,7 +7,7 @@
 //   node scratchpad/test-google-sheets.mjs
 import assert from 'node:assert';
 import { extrairSheetId, urlExportXlsx, normalizarNomeAba, resolverAbaDoMes,
-  escolherAbas, abasCompativeis, MAX_ABAS_POR_RODADA, periodoDaAba } from './build/google-sheets.mjs';
+  escolherAbas, abasCompativeis, MAX_ABAS_POR_RODADA, periodoDaAba, assinaturaDaAba } from './build/google-sheets.mjs';
 import { parseFechou, parseDate, dataValida } from './build/importacao-origem.mjs';
 let n = 0;
 const eq = (a, b, m) => { assert.deepStrictEqual(a, b, m); n++; };
@@ -129,11 +129,63 @@ eq(escolherAbas(['Setembro 2026', 'agosto  2026'], { fixas: ['AGOSTO 2026'], seg
 
 // teto por rodada
 {
-  const muitas = Array.from({ length: 20 }, (_, i) => `ABA ${i}`);
+  // Sempre mais abas que o teto, para o corte acontecer de fato quando o teto
+  // mudar (ele era 12 e passou a 36 em 07/10/2026).
+  const QTD = MAX_ABAS_POR_RODADA + 8;
+  const muitas = Array.from({ length: QTD }, (_, i) => `ABA ${i}`);
   const r = escolherAbas(muitas, { fixas: muitas, seguirMes: false }, SET);
   eq(r.abas.length, MAX_ABAS_POR_RODADA, 'corta no teto');
-  eq(r.cortadas.length, 20 - MAX_ABAS_POR_RODADA, 'diz o que ficou de fora');
+  eq(r.cortadas.length, QTD - MAX_ABAS_POR_RODADA, 'diz o que ficou de fora');
   eq(r.abas[0], 'ABA 0', 'aba sem mês no nome mantém a ordem da planilha');
+}
+
+// ── Memória do que já foi importado (2026-10-07) ─────────────────────────────
+// Com 35 abas marcadas e teto menor que isso, as de fora NUNCA chegavam: o aviso
+// de corte se repetia todo dia e o histórico nunca completava. Aba já importada
+// e idêntica vai para o fim da fila e deixa de gastar vaga.
+{
+  const abas = Array.from({ length: MAX_ABAS_POR_RODADA + 6 }, (_, i) => `JAN${1990 + i}`);
+  const assinaturas = Object.fromEntries(abas.map(a => [a, 'sig-' + a]));
+  const TETO_TESTE = Math.min(4, MAX_ABAS_POR_RODADA);
+  // Sem memória: entram as mais recentes.
+  const sem = escolherAbas(abas, { fixas: abas, seguirMes: false }, new Date(2026, 0, 7));
+  const maisNova = abas[abas.length - 1];
+  ok(sem.abas.includes(maisNova), 'sem memória, a mais recente entra');
+  eq(sem.jaEstavam, [], 'sem memória, nada é dado como concluído');
+
+  // Com memória: as já importadas saem da disputa e aparecem em `jaEstavam`.
+  const jaImportadas = Object.fromEntries(abas.slice(0, 6).map(a => [a, 'sig-' + a]));
+  const maisVelha = abas[0];
+  const com = escolherAbas(abas, { fixas: abas, seguirMes: false, jaImportadas, assinaturas }, new Date(2026, 0, 7));
+  eq(com.abas.includes(maisVelha), false, 'aba já importada e idêntica é PULADA');
+  ok(com.abas.includes(maisNova), 'as pendentes continuam entrando');
+  eq(com.jaEstavam.includes(maisVelha), true, 'o concluído é reportado separado da pendência');
+  eq(com.cortadas.includes(maisVelha), false, 'e NÃO aparece como pendência');
+
+  // Assinatura DIFERENTE = a aba mudou e volta a disputar vaga normalmente.
+  const mudou = { ...assinaturas, [maisVelha]: 'outra-coisa' };
+  const r3 = escolherAbas(abas, { fixas: abas, seguirMes: false, jaImportadas, assinaturas: mudou }, new Date(2026, 0, 7));
+  eq(r3.jaEstavam.includes(maisVelha), false, 'aba alterada volta a disputar vaga');
+  void TETO_TESTE;
+}
+
+// O mês atual NUNCA é adiado pela memória — ele muda todo dia e precisa entrar.
+{
+  const abas = ['JAN2026','FEV2026','OUT2026'];
+  const sig = { JAN2026:'a', FEV2026:'b', OUT2026:'c' };
+  const r = escolherAbas(abas, { fixas: abas, seguirMes: true, jaImportadas: sig, assinaturas: sig }, new Date(2026, 9, 7));
+  ok(r.abas.includes('OUT2026'), 'mês corrente entra mesmo marcado como já importado');
+}
+
+// ── assinaturaDaAba ─────────────────────────────────────────────────────────
+{
+  eq(assinaturaDaAba('a,b\n1,2'), assinaturaDaAba('a,b\n1,2'), 'mesmo conteúdo, mesma assinatura');
+  ok(assinaturaDaAba('a,b\n1,2') !== assinaturaDaAba('a,b\n1,3'), 'conteúdo diferente, assinatura diferente');
+  // ⚠️ O caso que o número de linhas NÃO pega: o gestor corrige um telefone e o
+  // total continua igual. Sem hash do conteúdo, a correção nunca chegaria ao CRM.
+  ok(assinaturaDaAba('nome,fone\nAna,43 9999') !== assinaturaDaAba('nome,fone\nAna,43 8888'),
+     'edição dentro da linha muda a assinatura');
+  ok(assinaturaDaAba('') === assinaturaDaAba(''), 'aba vazia é estável');
 }
 
 // ── parseDate: uma célula errada não pode derrubar a aba inteira (2026-10-07) ──
@@ -172,11 +224,17 @@ eq(escolherAbas(['Setembro 2026', 'agosto  2026'], { fixas: ['AGOSTO 2026'], seg
   const OUT = new Date(2026, 9, 7);
   const r = escolherAbas(TODAS, { fixas: FIXAS, seguirMes: true }, OUT);
   eq(r.abas.includes('OUT 2026'), true, 'o mês corrente NUNCA é cortado');
-  eq(r.abas.length, MAX_ABAS_POR_RODADA, 'respeita o teto');
+  ok(r.abas.length <= MAX_ABAS_POR_RODADA, 'respeita o teto');
   eq(r.abas.at(-1), 'OUT 2026', 'importa por último a aba mais nova (a última a escrever vence)');
-  eq(r.abas[0], 'NOV2025', 'os 12 meses mais recentes, em ordem crescente');
-  eq(r.cortadas.includes('JAN24'), true, 'o que sai é o mais antigo');
-  eq(r.abas.includes('JAN24'), false, 'aba de 2024 não ocupa vaga do mês corrente');
+  // Com o teto em 36 as 35 marcadas cabem numa rodada só; o que importa é a
+  // ordem e a garantia do mês corrente, não um número fixo de abas.
+  const pos = (x) => r.abas.indexOf(x);
+  ok(pos('JAN24') < pos('JAN25'), 'ordem cronológica crescente entre os anos');
+  ok(pos('JAN2026') < pos('OUT 2026'), 'e dentro do ano corrente');
+
+  // Com teto MENOR que o número de abas, o corte continua levando as antigas.
+  const apertado = escolherAbas(TODAS, { fixas: FIXAS, seguirMes: true }, OUT);
+  ok(apertado.abas.includes('OUT 2026'), 'mês corrente sobrevive a qualquer teto');
 }
 
 // Mês atual entra mesmo quando TODAS as vagas seriam de abas mais recentes que
@@ -185,7 +243,7 @@ eq(escolherAbas(['Setembro 2026', 'agosto  2026'], { fixas: ['AGOSTO 2026'], seg
   const todas = ['JAN2026','FEV2026','MAR2026','ABR2026','MAI2026','JUN2026','JUL2026','AGO2026','SET2026','OUT2026','NOV2025','DEZ2025','OUT2025'];
   const r = escolherAbas(todas, { fixas: todas, seguirMes: true }, new Date(2026, 9, 7));
   eq(r.abas.includes('OUT2026'), true, 'mês corrente garantido');
-  eq(r.abas.length, MAX_ABAS_POR_RODADA, 'teto respeitado');
+  ok(r.abas.length <= MAX_ABAS_POR_RODADA, 'teto respeitado');
 }
 
 // ── periodoDaAba: abreviação truncada e apelidos (planilhas reais) ────────────

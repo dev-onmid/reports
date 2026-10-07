@@ -705,6 +705,18 @@ abrir o painel, o `lps/bin/gtag ads destinos <cliente>` consulta o reports.
 
 @AGENTS.md
 
+## Planilhas — a rotina passou a LEMBRAR o que já importou, e o teto de 12 era palpite (2026-10-07)
+
+Pergunta do Matheus depois de ver o aviso de corte se repetir: *"não tem jeito mais inteligente de nunca mais acontecer isso?"* e *"não dá para pôr mais abas de uma vez?"*. Duas respostas, as duas medidas:
+
+- **⚠️ O teto de 12 nunca tinha sido cronometrado.** Medido na Romanza em produção: **12 abas e 10.996 linhas em 9,5 s** — ~0,8 s por aba contra um `maxDuration` de 300 s. Teto subiu para **36** (três anos de histórico mensal, ~30 s, 10% do orçamento). Com 35 abas marcadas, a Romanza passa a importar tudo numa rodada.
+- **⚠️⚠️ A defesa de verdade virou o RELÓGIO, não a contagem**: `sincronizarSheets` para no prazo de 240 s e devolve as abas restantes para a próxima rodada. Teto baixo não protegia de uma aba única gigante e, em troca, garantia que o histórico NUNCA entrasse.
+- **`abas_importadas` (assinatura por aba) é o que faz o histórico entrar e parar de pesar**: aba já importada e idêntica é **PULADA** — reimportar o mesmo 2024 todo dia é tempo de rodada e escrita no banco para reescrever o que já está lá. A aba do mês nunca é pulada (ela muda todo dia).
+- **⚠️ A assinatura é hash do CONTEÚDO, não do número de linhas** — o gestor corrige um telefone numa linha existente e o total não muda; a aba pareceria idêntica e a correção nunca chegaria ao CRM.
+- **⚠️⚠️ O DE-PARA entra na assinatura.** Sem isso, ajustar as colunas na tela não teria efeito nenhum sobre o histórico: as abas antigas continuariam "idênticas", seriam puladas para sempre e os meses anteriores ficariam com o mapeamento velho. Com o selo, mudar uma coluna reimporta tudo.
+- **`jaEstavam` é separado de `cortadas`** na resposta: uma é trabalho concluído, a outra é pendência. Juntar fazia a tela gritar todo dia sobre aba que já está no banco.
+- ✅ Verificado: **117 asserts** em `test-google-sheets.mjs` (12 novos: aba inalterada pulada e reportada como concluída, aba alterada voltando à fila, mês corrente imune à memória, assinatura mudando com edição dentro da linha) + 165 de origem + 25 de mapeamento; tsc + `next build` + eslint limpos. ⚠️ O teste do teto passou a derivar a quantidade de `MAX_ABAS_POR_RODADA` — fixar 20 quebrava a cada mudança do número.
+
 ## Importação — uma célula errada derrubava o mês inteiro, e data ISO virava ano errado (2026-10-07)
 
 Apareceu na 1ª importação boa da Romanza (9 abas, 9.921 linhas): *"As abas JUN2026 falharam: date/time field value out of range: 2026-00-23"*.
