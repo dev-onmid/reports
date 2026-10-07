@@ -16,6 +16,7 @@ import { extrairSheetId } from '@/lib/google-sheets';
 import {
   baixarPlanilha, ensureSheetsSchema, lerConfig, registrarErroSheets, sincronizarSheets,
 } from '@/lib/sheets-sync';
+import { normalizarMapeamento } from '@/lib/sheets-mapeamento';
 
 export const maxDuration = 300;
 
@@ -43,9 +44,16 @@ export async function PUT(req: NextRequest, { params }: Ctx) {
   const { id } = await params;
   const body = await req.json().catch(() => ({})) as {
     sheetsUrl?: string; tipoPlanilha?: string; fonteFaturamento?: boolean;
-    ativo?: boolean; mapeamento?: Record<string, string | null>;
-    abas?: string[]; seguirMes?: boolean;
+    ativo?: boolean; mapeamento?: Record<string, string | string[] | null>;
+    abas?: string[]; seguirMes?: boolean; colunas?: string[];
   };
+  // ⚠️ Nunca grava o que a tela mandou cru: campo fora do catálogo viraria um
+  // override que a importação ignora, e coluna inexistente derruba a aba inteira
+  // na rodada do dia seguinte. `colunas` é o cabeçalho que a tela tem em mãos.
+  const mapa = body.mapeamento === undefined
+    ? null
+    : normalizarMapeamento(body.mapeamento, body.colunas);
+
   const sheetId = extrairSheetId(body.sheetsUrl);
   if (!sheetId) return Response.json({ error: 'Cole o link de uma planilha do Google Sheets.' }, { status: 400 });
 
@@ -85,7 +93,7 @@ export async function PUT(req: NextRequest, { params }: Ctx) {
          atualizado_em = NOW()`,
       [id, sheetId, String(body.sheetsUrl), tipo, fonte,
        body.ativo === undefined ? null : body.ativo,
-       body.mapeamento ? JSON.stringify(body.mapeamento) : null,
+       mapa ? JSON.stringify(mapa) : null,
        // ⚠️ Lista VAZIA é uma escolha ("nenhuma aba fixa, só o mês") e precisa
        // gravar `[]`; `undefined` é "não mexi nisso" e preserva o que está lá.
        body.abas === undefined ? null : JSON.stringify(body.abas.filter(a => typeof a === 'string').slice(0, 60)),
@@ -152,16 +160,20 @@ export async function POST(req: NextRequest, { params }: Ctx) {
     // ⚠️ Grava o de-para AQUI, não só na tela. Sem isto, a rotina diária rodava
     // com `mapeamento` nulo e a importação caía na detecção automática de coluna:
     // no teste com a planilha real entraram 108 leads sem nome e sem telefone.
-    const mapa = (analise as { mapping?: Record<string, string | null> }).mapping ?? null;
+    const mapaIa = (analise as { mapping?: Record<string, string | string[] | null> }).mapping ?? null;
+    // Cabeçalho da aba analisada: é o que a tela oferece no seletor de coluna.
+    const linha0 = XLSX.utils.sheet_to_json<unknown[]>(wb.Sheets[alvo], { header: 1, defval: '' })[0] ?? [];
+    const colunas = (linha0 as unknown[]).map((c) => String(c ?? '')).filter((c) => c.trim().length > 0);
+    const mapa = normalizarMapeamento(mapaIa, colunas);
     await pool.query(
       `UPDATE public.client_sheets
           SET aba_exemplo = $2, mapeamento = COALESCE($3::jsonb, mapeamento),
-              abas_vistas = $4::jsonb,
+              abas_vistas = $4::jsonb, colunas_vistas = $5::jsonb,
               ultimo_erro = NULL, atualizado_em = NOW()
         WHERE client_id = $1`,
-      [id, alvo, mapa ? JSON.stringify(mapa) : null, JSON.stringify(wb.SheetNames)]
+      [id, alvo, mapa ? JSON.stringify(mapa) : null, JSON.stringify(wb.SheetNames), JSON.stringify(colunas)]
     );
-    return Response.json({ ok: true, abas: wb.SheetNames, abaDoMes: aba, motivoAba: motivo, analisada: alvo, analise });
+    return Response.json({ ok: true, abas: wb.SheetNames, colunas, abaDoMes: aba, motivoAba: motivo, analisada: alvo, analise: { ...analise, mapping: mapa } });
   } catch (e) {
     console.error('[sheets POST]', e);
     return Response.json({ error: 'Erro ao analisar a planilha.' }, { status: 500 });

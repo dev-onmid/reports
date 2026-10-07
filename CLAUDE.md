@@ -703,6 +703,20 @@ abrir o painel, o `lps/bin/gtag ads destinos <cliente>` consulta o reports.
 
 @AGENTS.md
 
+## Planilhas do Google — o de-para de colunas da IA virou editável (2026-10-07)
+
+Pedido do Matheus, olhando o card "Colunas reconhecidas": *"além de ser automático pela IA, gostaria de poder alterar se for preciso"*. A IA continua resolvendo sozinha na análise; o que mudou é que agora dá para corrigir.
+
+- **`src/lib/sheets-mapeamento.ts`** é o catálogo dos 17 campos com **rótulo em português e a frase do que cada um faz** — antes a tela imprimia a chave crua (`updatedDate: DATA DE CONTATO`), que não diz a ninguém o que aquilo muda. Botão **Ajustar** no card abre um `<select>` por campo com as colunas REAIS da planilha; `contact` é lista e vira botões marcáveis.
+- **⚠️ As chaves são as MESMAS que `/api/integrations/spreadsheet` aceita** (`dateColumn`, `nameColumn`…) e as mesmas que a IA devolve. Renomear uma quebra a importação **em silêncio**: a coluna só deixa de ser usada e a linha entra sem o dado.
+- **⚠️ `clinic` fica fora do catálogo de propósito** — aqui a planilha é de UM cliente, e mandar a coluna de clínica faz a rota tentar um de-para clínica→cliente que não existe neste caminho.
+- **⚠️ `normalizarMapeamento` roda NO SERVIDOR, não só na tela**: campo fora do catálogo é descartado (viraria um `<chave>Column` que ninguém lê, e o gestor acharia que mapeou algo) e **coluna que não existe no cabeçalho vira null** — `abasCompativeis` recusa a aba inteira quando uma coluna mapeada some, então um nome errado derrubaria a importação do cliente na madrugada seguinte. A tela manda o cabeçalho junto no PUT para essa checagem ser possível.
+- **Coluna nova `client_sheets.colunas_vistas`**: o cabeçalho da aba analisada, para o seletor funcionar ao reabrir sem rebaixar a planilha. A sincronização **nunca** lê daí — ela sempre olha o cabeçalho real de cada aba.
+- **Grava a cada mudança, não num botão "salvar"**: o gestor fecha o modal achando que pegou, e a rotina roda de madrugada com o de-para velho.
+- **Avisos ao vivo** (não bloqueiam — já houve import útil só com nome e data): falta de data, falta de telefone, faturamento sem data, e **a mesma coluna em dois campos**, que é o erro clássico da IA em planilha com "VALOR" ambíguo e cujo efeito (receita = orçamento) é silencioso.
+- ✅ Verificado: **25 asserts** (`scratchpad/test-sheets-mapeamento.mjs`: campo inventado descartado, coluna inexistente virando null, espaço sobrando casando, dedupe do `contact`, CSV aceito, e o de-para REAL do print sobrevivendo inteiro); tsc + `next build` limpos; eslint idêntico ao HEAD (os 6 erros do arquivo são pré-existentes); browser com a planilha do print — troca de coluna disparando o PUT com o mapeamento inteiro + as 14 colunas, desmarcar tentativa de contato, e o aviso de coluna duplicada aparecendo ao vivo.
+- ⚠️ **Config antiga não tem `colunas_vistas`** (a coluna nasceu hoje): até reanalisar, o card mostra "Reanalise para poder ajustar" em vez de um seletor vazio.
+
 ## Painel de Rotinas — saber o que a VPS está rodando, sem adivinhar (2026-10-06)
 
 Pedido do Matheus: "um painel só para os ADM que mostra se estão ativas as rotinas que alimentam o CRM… análise de atendimento, pontuação, Agendor, Cardápio Web, baixar e indexar planilha da Sorrifácil… e a conexão da Meta Ads, Google Ads e Analytics. Queria ver por aqui e te aviso quando não funcionar."

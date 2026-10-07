@@ -17,6 +17,8 @@ import type { MetaAdAccount } from '@/app/api/meta/ad-accounts/route';
 import type { MetaPage } from '@/app/api/meta/pages/route';
 import type { Ga4Property } from '@/app/api/google/ga4-properties/route';
 import { MAX_ABAS_POR_RODADA } from '@/lib/google-sheets';
+import { cn } from '@/lib/utils';
+import { CAMPOS, camposPreenchidos, avisosDoMapeamento, type Mapeamento } from '@/lib/sheets-mapeamento';
 
 type AdsAccount = { id: string; name: string; status: string; isManager: boolean; mccId?: string; currency?: string };
 type GmbLocation = { locationId: string; accountId: string; name: string; address?: string; phone?: string };
@@ -813,8 +815,9 @@ function MetaPagesContent({
 type SheetsCfg = {
   sheetUrl: string; tipoPlanilha: string; fonteFaturamento: boolean; ativo: boolean;
   abaExemplo: string | null; ultimaSync: string | null; ultimoErro: string | null;
-  mapeamento: Record<string, string | null> | null;
+  mapeamento: Mapeamento | null;
   abas: string[] | null; abasVistas: string[] | null; seguirMes: boolean;
+  colunasVistas: string[] | null;
 };
 
 /**
@@ -833,7 +836,11 @@ function GoogleSheetsContent({ clientId, onDone, onCancel }: { clientId: string;
   const [aviso, setAviso] = useState('');
   const [abas, setAbas] = useState<string[]>([]);
   const [abaDoMes, setAbaDoMes] = useState<string | null>(null);
-  const [colunas, setColunas] = useState<Record<string, string | null> | null>(null);
+  const [colunas, setColunas] = useState<Mapeamento | null>(null);
+  // Cabeçalho real da planilha: é o que o seletor de coluna oferece. Sem ele o
+  // gestor só consegue ver o de-para, não corrigir.
+  const [cabecalho, setCabecalho] = useState<string[]>([]);
+  const [editandoColunas, setEditandoColunas] = useState(false);
   const [fatura, setFatura] = useState(false);
   const [ativo, setAtivo] = useState(false);
   const [resumo, setResumo] = useState('');
@@ -856,14 +863,17 @@ function GoogleSheetsContent({ clientId, onDone, onCancel }: { clientId: string;
           setAbasFixas(d.config.abas ?? []);
           setSeguirMes(d.config.seguirMes !== false);
           if (d.config.abasVistas?.length) setAbas(d.config.abasVistas);
+          if (d.config.colunasVistas?.length) setCabecalho(d.config.colunasVistas);
         }
       });
   }, [clientId]);
 
-  async function salvar(extra: Partial<{ ativo: boolean; mapeamento: Record<string, string | null> }> = {}) {
+  async function salvar(extra: Partial<{ ativo: boolean; mapeamento: Mapeamento }> = {}) {
     const res = await fetch(`/api/clients/${clientId}/sheets`, {
       method: 'PUT', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sheetsUrl: url.trim(), fonteFaturamento: fatura, ativo, abas: abasFixas, seguirMes, ...extra }),
+      // `colunas` vai junto para o servidor poder recusar coluna que não existe
+      // na planilha — ela derrubaria a aba inteira na rodada seguinte.
+      body: JSON.stringify({ sheetsUrl: url.trim(), fonteFaturamento: fatura, ativo, abas: abasFixas, seguirMes, colunas: cabecalho, ...extra }),
     });
     if (!res.ok) { const d = await res.json() as { error?: string }; throw new Error(d.error ?? 'Erro ao salvar.'); }
   }
@@ -879,12 +889,13 @@ function GoogleSheetsContent({ clientId, onDone, onCancel }: { clientId: string;
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ acao: 'analisar' }),
     });
     const d = await res.json() as {
-      error?: string; abas?: string[]; abaDoMes?: string | null; analisada?: string;
-      analise?: { mapping?: Record<string, string | null>; rowCount?: number };
+      error?: string; abas?: string[]; colunas?: string[]; abaDoMes?: string | null; analisada?: string;
+      analise?: { mapping?: Mapeamento; rowCount?: number };
     };
     setStatus('idle');
     if (!res.ok) { setError(d.error ?? 'Erro ao analisar a planilha.'); return; }
     setAbas(d.abas ?? []);
+    setCabecalho(d.colunas ?? []);
     setAbaDoMes(d.abaDoMes ?? null);
     const m = d.analise?.mapping ?? null;
     setColunas(m);
@@ -893,6 +904,19 @@ function GoogleSheetsContent({ clientId, onDone, onCancel }: { clientId: string;
     // em vez de deixar o gestor descobrir por um número errado na dashboard.
     if (!d.abaDoMes) setAviso(`A aba do mês atual ainda não existe na planilha. Analisei "${d.analisada}" só para descobrir as colunas — a rotina diária vai esperar a aba do mês nascer.`);
     setResumo(`${d.analise?.rowCount ?? 0} linhas lidas em "${d.analisada}".`);
+  }
+
+  /**
+   * Troca o de-para de um campo e grava na hora.
+   *
+   * ⚠️ Grava a cada mudança em vez de esperar um "salvar": o gestor pode fechar
+   * o modal achando que o ajuste pegou, e a rotina roda de madrugada com o
+   * de-para velho sem ninguém perceber.
+   */
+  function trocarColuna(campo: string, valor: string | string[] | null) {
+    const novo: Mapeamento = { ...(colunas ?? {}), [campo]: valor };
+    setColunas(novo);
+    void salvar({ mapeamento: novo }).catch(() => setError('Não consegui salvar o ajuste de colunas.'));
   }
 
   async function handleImportar() {
@@ -915,6 +939,7 @@ function GoogleSheetsContent({ clientId, onDone, onCancel }: { clientId: string;
 
   const busy = status !== 'idle';
   const temMapa = !!colunas && Object.values(colunas).some(Boolean);
+  const avisosColunas = temMapa ? avisosDoMapeamento(colunas) : [];
   // ⚠️ Desmarcar o mês E não escolher aba nenhuma deixaria a rotina sem nada
   // para importar. Bloqueia aqui, com a frase, em vez de deixar o gestor sair
   // achando que configurou e descobrir pelo dado que parou de chegar.
@@ -998,15 +1023,85 @@ function GoogleSheetsContent({ clientId, onDone, onCancel }: { clientId: string;
           </p>
         )}
         {temMapa && (
-          <div className="rounded-lg border border-border bg-muted/20 p-3">
-            <p className="text-xs font-semibold mb-1.5">Colunas reconhecidas</p>
-            <div className="flex flex-wrap gap-1.5">
-              {Object.entries(colunas!).filter(([, v]) => v).map(([k, v]) => (
-                <span key={k} className="rounded bg-background px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                  {k}: <b className="text-foreground">{v}</b>
-                </span>
-              ))}
+          <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs font-semibold">Colunas reconhecidas</p>
+              {cabecalho.length > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => setEditandoColunas(v => !v)}
+                  className="text-[11px] font-semibold text-primary hover:underline"
+                >
+                  {editandoColunas ? 'Concluir' : 'Ajustar'}
+                </button>
+              ) : (
+                <span className="text-[10px] text-muted-foreground/70">Reanalise para poder ajustar</span>
+              )}
             </div>
+
+            {!editandoColunas ? (
+              <div className="flex flex-wrap gap-1.5">
+                {camposPreenchidos(colunas).map((campo) => {
+                  const v = colunas![campo.chave];
+                  return (
+                    <span key={campo.chave} className="rounded bg-background px-1.5 py-0.5 text-[10px] text-muted-foreground" title={campo.ajuda}>
+                      {campo.rotulo}: <b className="text-foreground">{Array.isArray(v) ? v.join(' · ') : v}</b>
+                    </span>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
+                {CAMPOS.map((campo) => {
+                  const v = colunas?.[campo.chave] ?? null;
+                  const marcadas = Array.isArray(v) ? v : [];
+                  return (
+                    <div key={campo.chave} className="rounded border border-border/60 bg-background/40 p-2">
+                      <div className="flex items-baseline justify-between gap-2">
+                        <span className="text-[11px] font-semibold text-foreground">
+                          {campo.rotulo}
+                          {campo.essencial && <span className="ml-1 text-[9px] font-normal uppercase tracking-widest text-primary">essencial</span>}
+                        </span>
+                      </div>
+                      <p className="mt-0.5 text-[10px] leading-snug text-muted-foreground">{campo.ajuda}</p>
+                      {campo.lista ? (
+                        <div className="mt-1.5 flex flex-wrap gap-1">
+                          {cabecalho.map((col) => {
+                            const on = marcadas.some(m => m === col || m.trim() === col.trim());
+                            return (
+                              <button
+                                key={col}
+                                type="button"
+                                onClick={() => trocarColuna(campo.chave, on ? marcadas.filter(m => m !== col && m.trim() !== col.trim()) : [...marcadas, col])}
+                                className={cn(
+                                  'rounded border px-1.5 py-0.5 text-[10px] transition-colors',
+                                  on ? 'border-primary/50 bg-primary/15 text-foreground' : 'border-border text-muted-foreground hover:border-primary/40',
+                                )}
+                              >
+                                {col}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <select
+                          value={typeof v === 'string' ? v : ''}
+                          onChange={(e) => trocarColuna(campo.chave, e.target.value || null)}
+                          className="mt-1.5 h-8 w-full rounded border border-border bg-background px-2 text-xs text-foreground"
+                        >
+                          <option value="">— não usar —</option>
+                          {cabecalho.map((col) => <option key={col} value={col}>{col}</option>)}
+                        </select>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {avisosColunas.map((a) => (
+              <p key={a} className="text-[11px] leading-snug text-amber-400/90">{a}</p>
+            ))}
           </div>
         )}
         {resumo && <p className="text-xs text-emerald-400">{resumo}</p>}

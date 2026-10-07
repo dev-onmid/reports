@@ -29,6 +29,12 @@ export type SheetsConfig = {
   abas: string[] | null;
   /** Cache das abas que a planilha tinha na última análise (só para a tela). */
   abasVistas: string[] | null;
+  /**
+   * Cabeçalho da aba analisada, guardado para a tela poder oferecer o seletor de
+   * coluna ao reabrir sem baixar a planilha de novo. A sincronização nunca lê
+   * isto — ela sempre olha o cabeçalho real de cada aba.
+   */
+  colunasVistas: string[] | null;
   /** Somar a aba do mês atual às escolhidas. Padrão true — ver `escolherAbas`. */
   seguirMes: boolean;
   tipoPlanilha: 'lead' | 'venda' | 'hibrido';
@@ -67,7 +73,9 @@ export const ensureSheetsSchema = memoizarSchema(async (pool: Pool) => {
       -- Lista de abas vista na última análise. É CACHE para a tela poder
       -- oferecer as caixinhas ao reabrir sem rebaixar 2 MB de planilha; a
       -- rotina diária nunca lê isto, ela sempre olha a planilha de verdade.
-      ADD COLUMN IF NOT EXISTS abas_vistas JSONB
+      ADD COLUMN IF NOT EXISTS abas_vistas JSONB,
+      -- Cabeçalho visto na última análise, para o editor de colunas (2026-10-07).
+      ADD COLUMN IF NOT EXISTS colunas_vistas JSONB
   `);
 });
 
@@ -262,6 +270,7 @@ export function lerConfig(row: Record<string, unknown>): SheetsConfig {
     abaExemplo: (row.aba_exemplo as string | null) ?? null,
     abas: Array.isArray(row.abas) ? (row.abas as string[]) : null,
     abasVistas: Array.isArray(row.abas_vistas) ? (row.abas_vistas as string[]) : null,
+    colunasVistas: Array.isArray(row.colunas_vistas) ? (row.colunas_vistas as string[]) : null,
     seguirMes: row.seguir_mes !== false,
     tipoPlanilha: (row.tipo_planilha as SheetsConfig['tipoPlanilha']) ?? 'lead',
     fonteFaturamento: row.fonte_faturamento === true,
