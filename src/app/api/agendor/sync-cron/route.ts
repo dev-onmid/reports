@@ -8,6 +8,7 @@ import {
   bloqueioDefinitivo, buscarPessoaAgendor, conferirFiltros, ingerirNegocioAgendor,
   posProcessarIngestao, removerNegocioForaDoFiltro, revisarOrigensAgendor, type ResumoRevisao,
 } from '@/lib/agendor-ingest';
+import { passoReleituraAgendor, type ResumoReleitura } from '@/lib/agendor-releitura';
 
 /**
  * Sincronismo Agendor: backfill do histórico + reconciliação.
@@ -42,6 +43,7 @@ type Resultado = {
   backfill_concluido: boolean;
   reconciliados: number;
   revisao?: ResumoRevisao;
+  releitura?: ResumoReleitura | { erro: string };
   erro?: string;
 };
 
@@ -162,6 +164,15 @@ export async function GET(req: NextRequest) {
         } catch (err) {
           r.revisao = { revisados: 0, canalAtualizado: 0, removidos: 0, manuais: 0,
             pulou: `erro: ${err instanceof Error ? err.message.slice(0, 120) : String(err)}` };
+        }
+      }
+      // ---- fase 4: releitura diária (poucas páginas por rodada) + conferência
+      // de totais com aviso no sino — pega o que nenhuma regra acima prevê.
+      if (r.backfill_concluido && Date.now() - inicio < ORCAMENTO_MS) {
+        try {
+          r.releitura = await passoReleituraAgendor(pool, conn, inicio + ORCAMENTO_MS);
+        } catch (err) {
+          r.releitura = { erro: err instanceof Error ? err.message.slice(0, 160) : String(err) };
         }
       }
       resultados.push(r);

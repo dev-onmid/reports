@@ -411,8 +411,11 @@ export async function ingerirNegocioAgendor(
                            ELSE COALESCE($6, valor_rs) END,
            revenue = CASE WHEN $24 AND lower(COALESCE(origin, '')) = 'agendor' THEN 0
                           ELSE COALESCE($6, revenue) END,
+           -- A data do ganho ACOMPANHA o Agendor (reaberto e ganho de novo muda
+           -- o mês da venda lá). $25 só vem quando o Agendor informa wonAt — o
+           -- "hoje" de fallback do $13 nunca sobrescreve data já gravada.
            fechado_em = CASE WHEN $24 AND lower(COALESCE(origin, '')) = 'agendor' THEN NULL
-                             ELSE COALESCE(fechado_em, $13::date) END,
+                             ELSE COALESCE($25::date, fechado_em, $13::date) END,
            perdido_em = COALESCE(perdido_em, $15::date),
            -- Responsável, valor estimado e produtos: o Agendor é a fonte, então
            -- sobrescrevem (mudar de vendedor ou de itens é evento normal).
@@ -452,6 +455,7 @@ export async function ingerirNegocioAgendor(
           // quando o payload não traz status nenhum (statusDoNegocio) — usá-lo
           // apagaria receita real a cada webhook incompleto.
           negocio.status === 'perdido',
+          ganhou && negocio.ganhoEm ? negocio.ganhoEm.slice(0, 10) : null,
         ],
       );
       if (labelEtapa) await espelharEtapa(pool, clientId, leadFunnel, labelEtapa);
@@ -616,6 +620,23 @@ async function ensureRemovidos(pool: Pool) {
       removido_em TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )`);
   removidosPronto = true;
+}
+
+/**
+ * Guarda a linha inteira em `agendor_leads_removidos` antes de qualquer
+ * correção automática que tire valor dela (o nome da tabela é histórico: ela é
+ * o backup de toda mudança que a sincronização faz por conta própria).
+ */
+export async function copiarLinhaAgendor(
+  pool: Pool, clientId: string, externalId: string, motivo: string,
+): Promise<void> {
+  await ensureRemovidos(pool);
+  await pool.query(
+    `INSERT INTO public.agendor_leads_removidos (client_id, external_id, motivo, linha)
+     SELECT $1, $2, $3, to_jsonb(l) FROM public.crm_leads l
+      WHERE l.client_id = $1 AND l.external_id = $2`,
+    [clientId, externalId, motivo],
+  );
 }
 
 export type ResultadoRemocao = 'removido' | 'nao_existe' | 'manual';
