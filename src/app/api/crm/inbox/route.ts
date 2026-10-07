@@ -510,7 +510,7 @@ export async function POST(req: NextRequest) {
     // Relaxed phone filter: 8–15 digits (covers short local numbers & international).
     // Chats @lid sem telefone resolvido entram só com o lid — o upsert aceita
     // (phone OU lid) e o webhook preenche o número real depois.
-    const contacts = mapped.filter(contact => {
+    let contacts = mapped.filter(contact => {
       const jid = String(contact.remoteJid);
       if (jid.endsWith('@g.us') || jid.endsWith('@broadcast') || jid.includes('newsletter')) return false;
       if (!/^[0-9]{8,15}$/.test(contact.phone) && !contact.lid) return false;
@@ -519,7 +519,24 @@ export async function POST(req: NextRequest) {
         || contact.name.toLowerCase().includes(search);
     });
 
-    console.log(`[inbox] fetched=${chats.length} mapped=${mapped.length} contacts=${contacts.length}`);
+    // ⚠️ Contato SEM telefone (só LID) não cria lead novo — só atualiza quem já
+    // existe com aquele LID. A lista de chats da Evolution traz milhares de
+    // contatos @lid sem mensagem nenhuma (agenda, grupos antigos, o mesmo contato
+    // sob outro endereço): cada um virava um lead "fantasma" na primeira etapa.
+    // Medido em 07/10/2026: 15.442 no sistema, 2.154 só na Atmos, contando como
+    // lead na dashboard dos clientes cujo CRM é o WhatsApp. O lead de verdade
+    // nasce no webhook, quando chega mensagem — e ali o telefone vem junto.
+    const lidsSemTelefone = contacts.filter(c => !/^[0-9]{8,15}$/.test(c.phone) && c.lid).map(c => c.lid as string);
+    const lidsConhecidos = new Set<string>(lidsSemTelefone.length
+      ? (await pool.query<{ whatsapp_lid: string }>(
+          `SELECT whatsapp_lid FROM public.crm_leads WHERE client_id = $1 AND whatsapp_lid = ANY($2::text[])`,
+          [clientId, lidsSemTelefone],
+        )).rows.map(r => r.whatsapp_lid)
+      : []);
+    const ignoradosSemTelefone = contacts.length - contacts.filter(c => /^[0-9]{8,15}$/.test(c.phone) || (c.lid && lidsConhecidos.has(c.lid))).length;
+    contacts = contacts.filter(c => /^[0-9]{8,15}$/.test(c.phone) || (c.lid && lidsConhecidos.has(c.lid)));
+
+    console.log(`[inbox] fetched=${chats.length} mapped=${mapped.length} contacts=${contacts.length} sem_telefone_ignorados=${ignoradosSemTelefone}`);
 
     const profileLookups = new Map<string, string | null>();
     const lookupTargets = contacts

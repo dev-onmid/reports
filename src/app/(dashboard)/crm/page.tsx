@@ -38,6 +38,34 @@ import type { AttendanceAudit, ItemHistoricoAuditoria } from '@/lib/crm-attendan
 import type { MesAtendimento, TentativasContato } from '@/lib/crm-atendimento-evolucao';
 import { classificarEtapa, corDaEtapa, MODELO_PADRAO, OPCOES_EDITOR, opcaoDoValor, ROTULOS_ETAPA, valorOpcaoEditor, type EtapaFunil, type SituacaoStage } from '@/lib/funil-etapas';
 
+// ── Busca de lead ────────────────────────────────────────────────────────────
+// Sem acento e sem formatação: "joao" acha "João" e "(43) 99975-3604" acha
+// "554399753604". Número também casa com e sem o nono dígito, porque o WhatsApp
+// grava muitos números SEM ele e o gestor digita COM.
+const semAcento = (t: string) => t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+type Busca = { texto: string; numeros: string[] };
+function prepararBusca(q: string): Busca | null {
+  const texto = semAcento(q.trim());
+  if (!texto) return null;
+  const d = q.replace(/\D/g, '');
+  const numeros: string[] = [];
+  if (d.length >= 4) {
+    numeros.push(d);
+    const local = d.startsWith('55') && d.length >= 12 ? d.slice(2) : d;   // tira o 55
+    if (local !== d) numeros.push(local);
+    if (local.length === 11 && local[2] === '9') numeros.push(local.slice(0, 2) + local.slice(3)); // sem o nono dígito
+    if (local.length === 10) numeros.push(local.slice(0, 2) + '9' + local.slice(2));               // com o nono dígito
+  }
+  return { texto, numeros };
+}
+function leadCasaBusca(l: { nome: string | null; numero: string | null; canal: string | null; bairro: string | null; observacao: string | null; email?: string | null }, b: Busca) {
+  if (b.numeros.length) {
+    const n = (l.numero ?? '').replace(/\D/g, '');
+    if (n && b.numeros.some(x => n.includes(x))) return true;
+  }
+  return [l.nome, l.canal, l.bairro, l.observacao, l.email].some(v => v && semAcento(v).includes(b.texto));
+}
+
 /** Mensagens copiadas da conversa que provam a nota (o "print"). */
 type TrechoAtendimento = { d: 'in' | 'out'; em: string; t: string | null; autor?: string | null };
 
@@ -3431,22 +3459,19 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
     [visibleColumnKeys],
   );
 
+  // Busca procura em TODOS os períodos: com "Mês atual" escolhido, quem buscava
+  // um lead de setembro não achava e concluía que ele não existia.
+  const busca = useMemo(() => prepararBusca(search), [search]);
   const filtered = useMemo(() => leads.filter(l => {
-    if (monthFilter && monthFromDate(l.data) !== monthFilter) return false;
-    if ((dateFromFilter || dateToFilter) && !isDateInRange(l.data, dateFromFilter, dateToFilter)) return false;
+    if (!busca && monthFilter && monthFromDate(l.data) !== monthFilter) return false;
+    if (!busca && (dateFromFilter || dateToFilter) && !isDateInRange(l.data, dateFromFilter, dateToFilter)) return false;
     if (statusFilter && l.status !== statusFilter) return false;
     if (temperatureFilter) {
       if (temperatureFilter === 'sem' && l.temperatura) return false;
       if (temperatureFilter !== 'sem' && l.temperatura !== temperatureFilter) return false;
     }
     if (soAtendimentoRuim && !(temNota(l) && l.nota_atendimento <= 2)) return false;
-    if (search) {
-      const q = search.toLowerCase();
-      const found = l.nome?.toLowerCase().includes(q) || l.numero?.includes(q) ||
-             l.canal?.toLowerCase().includes(q) || l.bairro?.toLowerCase().includes(q) ||
-             l.observacao?.toLowerCase().includes(q) || false;
-      if (!found) return false;
-    }
+    if (busca && !leadCasaBusca(l, busca)) return false;
     for (const [key, value] of Object.entries(columnFilters) as [ColumnKey, string][]) {
       if (!passesColumnFilter(l, key, value)) return false;
     }
@@ -3455,7 +3480,7 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
     if (a.time_interno !== b.time_interno) return a.time_interno ? 1 : -1;
     const result = compareSortValues(sortValue(a, sortConfig.key), sortValue(b, sortConfig.key));
     return sortConfig.direction === 'asc' ? result : -result;
-  }), [leads, search, soAtendimentoRuim, statusFilter, temperatureFilter, monthFilter, dateFromFilter, dateToFilter, columnFilters, sortConfig]);
+  }), [leads, busca, soAtendimentoRuim, statusFilter, temperatureFilter, monthFilter, dateFromFilter, dateToFilter, columnFilters, sortConfig]);
 
   /**
    * Recorte da análise de IA: CLIENTE + PERÍODO, nada mais (instrução do
@@ -4229,8 +4254,11 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
                     barra de ferramentas não é respiro, é desperdício. */}
                 <div className="relative min-w-[160px] flex-1">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
-                  <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar leads..."
-                    className="w-full pl-8 pr-3 py-2 rounded-lg border border-border bg-card text-sm focus:outline-none focus:ring-1 focus:ring-primary" />
+                  <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar por nome ou número..."
+                    className={cn('w-full pl-8 py-2 rounded-lg border border-border bg-card text-sm focus:outline-none focus:ring-1 focus:ring-primary', search && (monthFilter || dateFromFilter || dateToFilter) ? 'pr-36' : 'pr-3')} />
+                  {search && (monthFilter || dateFromFilter || dateToFilter) && (
+                    <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-semibold text-muted-foreground">em todos os períodos</span>
+                  )}
                 </div>
 
                 {(() => {
