@@ -13,6 +13,7 @@
  */
 
 import type { Pool } from 'pg';
+import { gravarFunilPlanilha } from '@/lib/funil-planilha-server';
 import { memoizarSchema } from '@/lib/schema-memo';
 import { internalHeaders } from '@/lib/session';
 import { escolherAbas, assinaturaDaAba, urlExportXlsx, MAX_ABAS_POR_RODADA } from '@/lib/google-sheets';
@@ -150,6 +151,11 @@ export async function sincronizarSheets(
   }
 
   const wb = XLSX.read(buf, { type: 'buffer' });
+  // Funil contado com as regras da própria planilha (só clientes com regra em
+  // funil-planilha.ts). Antes de qualquer pulo de aba: o funil relê TODAS as
+  // abas de mês, porque ele é barato e a importação pula as que não mudaram.
+  await gravarFunilPlanilha(pool, cfg.clientId, wb, XLSX.utils as never)
+    .catch(err => console.error('[sheets] funil da planilha', err));
   // ⚠️ Assinatura de TODAS as abas antes de escolher: é ela que diz o que mudou
   // desde a última rodada e, portanto, o que ainda precisa de vaga.
   // ⚠️⚠️ O de-para entra na assinatura. Sem isso, ajustar as colunas na tela não
