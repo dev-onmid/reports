@@ -121,17 +121,29 @@ const MAX_PAGINAS_CATALOGO = 60;   // 6.000 fichas por tipo — teto de seguran�
 async function carregarCatalogo(apiToken: string): Promise<Catalogo> {
   const chave = apiToken.slice(0, 12);
   const atual = catalogos.get(chave);
-  if (atual && Date.now() - atual.em < TTL_CATALOGO_MS) return atual;
+  // Catálogo parcial vale só 2 min: guardá-lo 30 min travava a revisão de
+  // origem por meia hora depois de um único 429.
+  if (atual && Date.now() - atual.em < (atual.completo ? TTL_CATALOGO_MS : 2 * 60_000)) return atual;
 
   const cat: Catalogo = { em: Date.now(), pessoas: new Map(), orgs: new Map(), completo: true };
   for (const [recurso, destino] of [['people', cat.pessoas], ['organizations', cat.orgs]] as const) {
     for (let pagina = 1; pagina <= MAX_PAGINAS_CATALOGO; pagina++) {
-      let lote: Record<string, unknown>[] = [];
-      try {
-        const r = await agendorFetch<{ data?: Record<string, unknown>[] }>(
-          apiToken, `${AGENDOR_API}/${recurso}?page=${pagina}&per_page=100`);
-        lote = r?.data ?? [];
-      } catch {
+      let lote: Record<string, unknown>[] | null = null;
+      // ⚠️ Tenta a MESMA página de novo antes de desistir. Desistir na 1ª falha
+      // deixava o catálogo parcial quase sempre (o token da Londrigifts e da
+      // Incorpast é um só e vive no limite), e catálogo parcial desliga a
+      // revisão de origem inteira (revisarOrigensAgendor).
+      for (let tentativa = 0; tentativa < 3 && lote === null; tentativa++) {
+        try {
+          const r = await agendorFetch<{ data?: Record<string, unknown>[] }>(
+            apiToken, `${AGENDOR_API}/${recurso}?page=${pagina}&per_page=100`);
+          lote = r?.data ?? [];
+        } catch (err) {
+          const limite = (err as { status?: number })?.status === 429;
+          await new Promise(res => setTimeout(res, limite ? 15_000 : 3_000));
+        }
+      }
+      if (lote === null) {
         cat.completo = false;   // catálogo parcial: quem faltar cai na busca individual
         break;
       }

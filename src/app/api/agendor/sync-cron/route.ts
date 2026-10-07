@@ -145,9 +145,6 @@ export async function GET(req: NextRequest) {
             `UPDATE public.agendor_connections SET ultima_sync_em = NOW(), ultimo_erro = NULL WHERE client_id = $1`,
             [conn.client_id],
           );
-          // ---- fase 3: revisão de origem — pega a origem editada na ficha da
-          // empresa/pessoa, que não mexe no updatedAt do negócio.
-          if (Date.now() - inicio < ORCAMENTO_MS) r.revisao = await revisarOrigensAgendor(pool, conn);
         }
       } catch (err) {
         r.erro = err instanceof Error ? err.message.slice(0, 200) : String(err);
@@ -155,6 +152,17 @@ export async function GET(req: NextRequest) {
           `UPDATE public.agendor_connections SET ultimo_erro = $2 WHERE client_id = $1`,
           [conn.client_id, r.erro],
         ).catch(() => {});
+      }
+      // ---- fase 3: revisão de origem — pega a origem editada na ficha da
+      // empresa/pessoa, que não mexe no updatedAt do negócio. Fora do try da
+      // reconciliação: um timeout lá não pode desligar a revisão.
+      if (r.backfill_concluido && Date.now() - inicio < ORCAMENTO_MS) {
+        try {
+          r.revisao = await revisarOrigensAgendor(pool, conn);
+        } catch (err) {
+          r.revisao = { revisados: 0, canalAtualizado: 0, removidos: 0, manuais: 0,
+            pulou: `erro: ${err instanceof Error ? err.message.slice(0, 120) : String(err)}` };
+        }
       }
       resultados.push(r);
     }
