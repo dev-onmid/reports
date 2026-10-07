@@ -705,6 +705,19 @@ abrir o painel, o `lps/bin/gtag ads destinos <cliente>` consulta o reports.
 
 @AGENTS.md
 
+## Planilhas — o de-para passou a ser POR ABA e POR COLUNA (2026-10-07)
+
+Correção de rumo pedida pelo Matheus: *"cada coluna deve ser individual, não deve ser uma importação sequencial. Às vezes a coluna de data vai estar na A, às vezes na B, às vezes na C. O importante é que a coluna data vai ser puxada e usada no campo data do CRM"*.
+
+- **⚠️⚠️ O erro conceitual era ter UM de-para para a planilha inteira.** Toda aba que escrevesse a mesma coluna com outro nome era **descartada por completo** — a Romanza perdia 12 abas (quase um ano) só porque 2024/2025 usam `Data Entrada` em vez de `DATA`. Agora `casarColunasDaAba` resolve **campo a campo, por aba**: nome exato → mesmo nome ignorando caixa/acento → **sinônimo do campo** → o que o gestor escolheu à mão para aquela aba (vence tudo).
+- **`CAMPOS` ganhou `sinonimos`** (`date` ← Data Entrada/Data do Lead/Entrada; `phone` ← Fone/Celular/WhatsApp; `status` ← Situação…). ⚠️ Casados por **IGUALDADE** normalizada, nunca por "contém" — a lição do `resolverAbaDoMes`: com `contains`, "PRODUTOS" casaria com OUT(ubro). E **`VALOR` solto ficou fora de `revenue`**: numa planilha com orçamento e venda, cairia no campo errado e a receita viraria estimativa.
+- **⚠️ Uma coluna nunca serve a dois campos** — a primeira a reivindicar fica com ela. Sem isso, com "Valor" e "Valor do Orçamento", receita e orçamento disputariam a mesma coluna e um sairia errado, calado.
+- **`abaUtilizavel` substituiu `abasCompativeis` como porteiro, e só o ESSENCIAL reprova** (data + nome-ou-telefone; mais receita quando a planilha é fonte de faturamento, senão o mês entraria com R$ 0 e mentiria). Faltar `Observação` custava um mês inteiro de leads por um campo que não decide nada; agora a aba entra e o aviso lista o que ficou de fora.
+- **Coluna nova `mapeamento_por_aba`**: só os ajustes manuais do gestor por aba. O automático é recalculado a cada rodada, então planilha que muda de layout se conserta sozinha.
+- **Impacto medido antes de subir, contra as 3 planilhas reais**: Romanza **12 → 27 abas** (10.996 → 33.561 linhas); SorriLeve 4 → 6 (+R$ 4.675); Odonto First 5 → 6, trazendo **MAR26** (até R$ 128.165 — o banco tinha só 5 leads e R$ 4.160 nesse mês). ⚠️ Esse valor é TETO: só entra na receita a linha marcada como venda.
+- ⚠️ **O que ainda fica fora é cabeçalho fora da linha 1**: JAN24–JUL24 da Romanza têm um título ("QUALIFICAÇÃO LEADS - ROMANZA") ocupando a primeira linha, então o leitor pega o título como cabeçalho. SET2025/OUT2025 não têm coluna de data nenhuma.
+- ✅ Verificado: **36 asserts** em `test-sheets-mapeamento.mjs` (coluna em outra posição e outra caixa, `Data Entrada` por sinônimo, manual vencendo o sinônimo, mesma coluna não servindo a dois campos, essenciais, fileira de contato encolhendo) + 117 + 165 + 197; tsc + `next build` + eslint limpos.
+
 ## Planilhas — a rotina passou a LEMBRAR o que já importou, e o teto de 12 era palpite (2026-10-07)
 
 Pergunta do Matheus depois de ver o aviso de corte se repetir: *"não tem jeito mais inteligente de nunca mais acontecer isso?"* e *"não dá para pôr mais abas de uma vez?"*. Duas respostas, as duas medidas:

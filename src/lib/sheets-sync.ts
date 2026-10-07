@@ -15,7 +15,8 @@
 import type { Pool } from 'pg';
 import { memoizarSchema } from '@/lib/schema-memo';
 import { internalHeaders } from '@/lib/session';
-import { escolherAbas, abasCompativeis, colunaEquivalente, assinaturaDaAba, urlExportXlsx, MAX_ABAS_POR_RODADA } from '@/lib/google-sheets';
+import { escolherAbas, assinaturaDaAba, urlExportXlsx, MAX_ABAS_POR_RODADA } from '@/lib/google-sheets';
+import { casarColunasDaAba, abaUtilizavel, CAMPOS, type Mapeamento } from '@/lib/sheets-mapeamento';
 
 export type SheetsConfig = {
   clientId: string;
@@ -39,6 +40,8 @@ export type SheetsConfig = {
   camposManuais: string[] | null;
   /** `aba -> assinatura` do que já foi importado, para não repetir trabalho. */
   abasImportadas: Record<string, string> | null;
+  /** Ajustes de coluna que o gestor fez para UMA aba específica. */
+  mapeamentoPorAba: Record<string, Mapeamento> | null;
   /** Somar a aba do mês atual às escolhidas. Padrão true — ver `escolherAbas`. */
   seguirMes: boolean;
   tipoPlanilha: 'lead' | 'venda' | 'hibrido';
@@ -85,7 +88,11 @@ export const ensureSheetsSchema = memoizarSchema(async (pool: Pool) => {
       ADD COLUMN IF NOT EXISTS campos_manuais JSONB,
       -- Assinatura do conteúdo de cada aba já importada (2026-10-07). É o que
       -- faz o histórico entrar aos poucos e depois parar de gastar vaga.
-      ADD COLUMN IF NOT EXISTS abas_importadas JSONB
+      ADD COLUMN IF NOT EXISTS abas_importadas JSONB,
+      -- De-para por ABA (2026-10-07): a coluna de data pode se chamar "DATA"
+      -- num mês e "Data Entrada" no anterior. Só os ajustes manuais moram aqui;
+      -- o automático é recalculado a cada rodada.
+      ADD COLUMN IF NOT EXISTS mapeamento_por_aba JSONB
   `);
 });
 
@@ -168,21 +175,31 @@ export async function sincronizarSheets(
     };
   }
 
-  // ⚠️ Aba cujo cabeçalho não comporta o de-para fica FORA: a rota de importação
-  // recusa o lote inteiro quando uma coluna mapeada não existe, e um mês antigo
-  // com layout diferente derrubaria também o mês corrente.
+  // ⚠️⚠️ CADA ABA RESOLVE AS PRÓPRIAS COLUNAS. O de-para salvo é só o ponto de
+  // partida: a coluna de data pode estar em A num mês e em C no outro, chamar-se
+  // `DATA` agora e `Data Entrada` em 2024. `casarColunasDaAba` acha, por campo,
+  // a coluna daquela aba — e o que ela não entregar simplesmente não é mandado,
+  // em vez de reprovar a aba inteira (era assim que a Romanza perdia um ano).
   const cabecalhos: Record<string, string[]> = {};
+  const casamentos: Record<string, ReturnType<typeof casarColunasDaAba>> = {};
   for (const aba of escolha.abas) {
     const linha = XLSX.utils.sheet_to_json<unknown[]>(wb.Sheets[aba], { header: 1, defval: '' })[0] ?? [];
-    // Cru, sem trim: quem tolera espaço sobrando é `abasCompativeis`, e o de-para
-    // guarda o nome EXATO da coluna como a rota de importação vai procurá-la.
+    // Cru, sem trim: o nome EXATO é o que a rota de importação vai procurar.
     cabecalhos[aba] = (linha as unknown[]).map(c => String(c ?? ''));
+    casamentos[aba] = casarColunasDaAba(cabecalhos[aba], cfg.mapeamento, cfg.mapeamentoPorAba?.[aba] ?? null);
   }
-  const { ok: abasOk, incompativeis } = abasCompativeis(cabecalhos, escolha.abas, cfg.mapeamento);
+  const abasOk: string[] = [];
+  const incompativeis: { aba: string; faltam: string[] }[] = [];
+  const rotuloDe = (k: string) => CAMPOS.find(c => c.chave === k)?.rotulo ?? k;
+  for (const aba of escolha.abas) {
+    const { ok, faltamEssenciais } = abaUtilizavel(casamentos[aba], cfg.fonteFaturamento);
+    if (ok) abasOk.push(aba);
+    else incompativeis.push({ aba, faltam: faltamEssenciais.map(rotuloDe) });
+  }
   if (!abasOk.length) {
     return {
       ok: false, motivoAba: escolha.motivoAbaDoMes,
-      erro: `Nenhuma aba escolhida tem as colunas do mapeamento (falta ${incompativeis[0]?.faltam.join(', ')} em "${incompativeis[0]?.aba}"). Reanalise as colunas.`,
+      erro: `Nenhuma aba escolhida tem as colunas mínimas (falta ${incompativeis[0]?.faltam.join(', ')} em "${incompativeis[0]?.aba}"). Ajuste as colunas dessa aba na tela.`,
     };
   }
 
@@ -213,6 +230,11 @@ export async function sincronizarSheets(
     lista.push(i.aba);
     porFalta.set(chave, lista);
   }
+  // Aba que ENTROU mas sem algum campo do padrão: é informação, não bloqueio.
+  const parciais = abasOk
+    .map(aba => ({ aba, faltam: casamentos[aba].faltam.map(rotuloDe) }))
+    .filter(x => x.faltam.length > 0);
+
   const avisos = [
     ...[...porFalta].map(([faltam, abas]) =>
       abas.length === 1
@@ -223,6 +245,7 @@ export async function sincronizarSheets(
     // ⚠️ Separado do corte de propósito: isto NÃO é pendência, e misturar fazia
     // a tela parecer que algo está faltando quando o histórico já está no banco.
     ...(escolha.jaEstavam.length ? [`${escolha.jaEstavam.length} abas já importadas e sem alteração não entraram de novo.`] : []),
+    ...(parciais.length ? [`Entraram sem alguns campos (o resto do lead foi importado): ${parciais.map(p => `${p.aba} sem ${p.faltam.join('/')}`).join('; ')}.`] : []),
   ];
   let linhas = 0;
   const corpos: unknown[] = [];
@@ -261,27 +284,18 @@ export async function sincronizarSheets(
     // `revenueColumn`/`nameColumn`/…. `clinic` fica de fora: aqui a planilha é
     // de UM cliente só, e mandar a coluna de clínica faria a rota tentar o
     // de-para clínica→cliente que não existe neste caminho.
-    // ⚠️⚠️ Traduz cada coluna para o nome EXATO deste formato de cabeçalho. O
-    // de-para foi feito sobre UMA aba, e os outros meses escrevem a mesma coluna
-    // com outra caixa (`CANAL` × `Canal`) — mandar o nome do de-para faria a rota
-    // procurar um texto que não existe naquele arquivo e recusar o lote.
-    const cabFormato = cabecalhos[abasDoFormato[0]] ?? [];
-    for (const [campo, coluna] of Object.entries(cfg.mapeamento ?? {})) {
+    // ⚠️ O de-para desta aba, com o nome EXATO das colunas daqui — a rota de
+    // importação procura a coluna pelo texto, então mandar o nome de outra aba
+    // faria ela não achar nada.
+    const mapaDoFormato = casamentos[abasDoFormato[0]]?.mapa ?? {};
+    for (const [campo, coluna] of Object.entries(mapaDoFormato)) {
       // ⚠️ `contact` é LISTA (a fileira de tentativas) e vai como CSV num campo
       // próprio; os demais são 1:1.
       if (campo === 'contact') {
-        const cols = (Array.isArray(coluna) ? coluna : [])
-          // Só as que existem NESTE formato: a fileira encolhe de um mês para
-          // outro, e mandar coluna inexistente não ajuda ninguém.
-          .map(c => colunaEquivalente(cabFormato, c))
-          .filter((c): c is string => c !== null);
-        if (cols.length) fd.append('contactColumns', cols.join(','));
+        if (Array.isArray(coluna) && coluna.length) fd.append('contactColumns', coluna.join(','));
         continue;
       }
-      if (typeof coluna === 'string' && coluna && campo !== 'clinic') {
-        const real = colunaEquivalente(cabFormato, coluna);
-        if (real) fd.append(`${campo}Column`, real);
-      }
+      if (typeof coluna === 'string' && coluna && campo !== 'clinic') fd.append(`${campo}Column`, coluna);
     }
 
     const res = await fetch(`${base}/api/integrations/spreadsheet?step=import`, {
@@ -355,6 +369,8 @@ export function lerConfig(row: Record<string, unknown>): SheetsConfig {
     camposManuais: Array.isArray(row.campos_manuais) ? (row.campos_manuais as string[]) : null,
     abasImportadas: row.abas_importadas && typeof row.abas_importadas === 'object' && !Array.isArray(row.abas_importadas)
       ? (row.abas_importadas as Record<string, string>) : null,
+    mapeamentoPorAba: row.mapeamento_por_aba && typeof row.mapeamento_por_aba === 'object' && !Array.isArray(row.mapeamento_por_aba)
+      ? (row.mapeamento_por_aba as Record<string, Mapeamento>) : null,
     seguirMes: row.seguir_mes !== false,
     tipoPlanilha: (row.tipo_planilha as SheetsConfig['tipoPlanilha']) ?? 'lead',
     fonteFaturamento: row.fonte_faturamento === true,
