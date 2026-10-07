@@ -371,6 +371,17 @@ export async function ingerirNegocioAgendor(
       }>(`SELECT id, status, funnel_id, external_id FROM public.crm_leads WHERE id = $1`, [achado.id]);
       match = row ?? null;
     }
+    // ⚠️ Um NEGÓCIO do Agendor é uma linha. Achar pelo telefone/e-mail uma
+    // linha que já é OUTRO negócio do Agendor não é "o mesmo lead" — é a mesma
+    // pessoa com dois negócios. Fundir sobrescrevia o valor de um com o do
+    // outro (auditoria 07/10, Londrigifts: Sandro com 2 ganhos de R$ 475 e
+    // R$ 1.200 virou um de R$ 1.200; o negócio da Júlia Hirose nem entrou).
+    // Linha de CONVERSA (sem negócio do Agendor) continua recebendo o negócio.
+    let irmaoDeOutroNegocio = false;
+    if (match?.external_id?.startsWith('agendor:') && match.external_id !== externalId) {
+      match = null;
+      irmaoDeOutroNegocio = true;
+    }
 
     // sinais monotônicos: etapa dá agendou/compareceu; ganho dá fechou.
     const sinais = sinaisDoStatus(labelEtapa ?? '');
@@ -468,7 +479,10 @@ export async function ingerirNegocioAgendor(
         `${new Date(dataLead).toLocaleString('pt-BR', { month: 'short' })}/${dataLead.slice(0, 4)}`,
         dataLead,
         pessoa?.nome ?? negocio.pessoa.nome ?? negocio.titulo,
-        pessoa?.telefoneBruto,
+        // O telefone já mora na linha do outro negócio da mesma pessoa — repeti-lo
+        // estoura a unique (client_id, numero) de produção. A ligação entre as
+        // duas é feita por vincularAoLeadDeOrigem, no pós-processamento.
+        irmaoDeOutroNegocio ? null : pessoa?.telefoneBruto,
         observacao,
         status,
         funnelId,
