@@ -3,6 +3,7 @@ import { internalHeaders } from '@/lib/session';
 import { consultarCrmDoPeriodo, type CrmDoPeriodo } from '@/lib/crm-metricas';
 import { CORES_ETAPA, type ContagemFunil, type FunilPorStage } from '@/lib/funil-etapas';
 import type { Ga4Consolidado } from '@/lib/ga4-landing';
+import type { FunilPlanilha } from '@/lib/funil-planilha';
 
 /**
  * Dados de CRM do relatório de performance — lidos das MESMAS fontes da
@@ -24,6 +25,12 @@ export type FunilDoRelatorio = {
   funil: ContagemFunil;
   /** Etapas reais do Kanban do cliente, ou null → cai no funil semântico. */
   funilStages: FunilPorStage | null;
+  /**
+   * Funil contado DIRETO da planilha do cliente (Romanza, 2026-10-07) — na
+   * dashboard ele VENCE o Kanban e o semântico; aqui também, senão o relatório
+   * mostra 5 degraus genéricos e a tela mostra os da planilha, para o mesmo mês.
+   */
+  funilPlanilha: FunilPlanilha | null;
   /** Vendas fechadas na janela por quando o lead começou (Lei 5). */
   vendasCohort: { periodo: number; anteriores: number; semData: number } | null;
 };
@@ -69,6 +76,7 @@ type LinhaSummary = {
   clientId: string;
   funil: ContagemFunil;
   funilStages: FunilPorStage | null;
+  funilPlanilha?: FunilPlanilha | null;
   vendasCohort?: { periodo: number; anteriores: number; semData: number } | null;
 };
 
@@ -106,7 +114,7 @@ export async function fetchCrmDoRelatorio(
     return {
       atual,
       anterior: ant,
-      funil: linha ? { funil: linha.funil, funilStages: linha.funilStages ?? null, vendasCohort: linha.vendasCohort ?? null } : null,
+      funil: linha ? { funil: linha.funil, funilStages: linha.funilStages ?? null, funilPlanilha: linha.funilPlanilha ?? null, vendasCohort: linha.vendasCohort ?? null } : null,
       canais: canais && canais.ok
         ? { origens: canais.origens ?? [], total: Number(canais.total) || 0, semAtribuicao: Number(canais.semAtribuicao) || 0, leads: canais.leads ?? [], leadsTotal: Number(canais.leadsTotal) || 0 }
         : null,
@@ -144,6 +152,10 @@ export function ehMesCheio(from: string, to: string): boolean {
  * 2026-09-24), senão o funil semântico de 5 degraus.
  */
 export function degrausDoFunil(f: FunilDoRelatorio): Array<{ label: string; cor: string; valor: number }> {
+  // Mesma precedência da dashboard: planilha do cliente > Kanban > semântico.
+  if (f.funilPlanilha && f.funilPlanilha.degraus.length > 0) {
+    return f.funilPlanilha.degraus.map(d => ({ label: d.rotulo, cor: d.cor, valor: d.valor }));
+  }
   if (f.funilStages && f.funilStages.degraus.length > 0) {
     return f.funilStages.degraus.map(d => ({
       label: d.etapa === 'contato' ? 'Leads' : d.etapa === 'qualificado' ? 'Engajados' : d.label,

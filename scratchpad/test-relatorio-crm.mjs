@@ -233,4 +233,11 @@ const igParcialAtualR = { ...igBaseR, incompletas: ['reach'], previous: igOkR.pr
 const htmlAtualR = sInstagram(igParcialAtualR, 1, 2, 'x');
 ok((htmlAtualR.match(/valor parcial — a Meta só guarda 2 anos/g) || []).length === 1 && /\+3022,7%/.test(htmlAtualR), 'só a métrica parcial perde o comparativo');
 
+// ── Funil da planilha do cliente vence Kanban e semântico (Romanza, 07/10) ──
+const fp = { funil: { contatos: 556, qualificados: 51, agendamentos: 1, comparecimentos: 0, fechamentos: 0, perdidos: 0, receita: 0 }, funilStages: null,
+  funilPlanilha: { degraus: [{ rotulo: 'Leads', cor: '#7dd3fc', valor: 253 }, { rotulo: 'Contatos feitos', cor: '#0ea5e9', valor: 213 }, { rotulo: 'Cadastros', cor: '#10b981', valor: 12 }], desvios: [] }, vendasCohort: null };
+const dp = degrausDoFunil(fp);
+ok(dp.length === 3 && dp[0].valor === 253 && dp[1].label === 'Contatos feitos' && dp[2].valor === 12, 'com funil da planilha, o relatório mostra os degraus da planilha');
+ok(degrausDoFunil({ ...fp, funilPlanilha: null }).length === 5, 'sem planilha, cai no semântico como antes');
+
 console.log(`OK — ${n} asserts`);
