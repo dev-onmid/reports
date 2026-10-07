@@ -4,7 +4,10 @@ import { normalizarNegocio, type NegocioAgendor, type PessoaAgendor } from '@/li
 import {
   agendorFetch, AGENDOR_API, listarConexoesAgendorAtivas, type ConexaoAgendor,
 } from '@/lib/agendor-server';
-import { buscarPessoaAgendor, conferirFiltros, ingerirNegocioAgendor, posProcessarIngestao } from '@/lib/agendor-ingest';
+import {
+  bloqueioDefinitivo, buscarPessoaAgendor, conferirFiltros, ingerirNegocioAgendor,
+  posProcessarIngestao, removerNegocioForaDoFiltro, revisarOrigensAgendor, type ResumoRevisao,
+} from '@/lib/agendor-ingest';
 
 /**
  * Sincronismo Agendor: backfill do histórico + reconciliação.
@@ -38,6 +41,7 @@ type Resultado = {
   backfill_importados: number;
   backfill_concluido: boolean;
   reconciliados: number;
+  revisao?: ResumoRevisao;
   erro?: string;
 };
 
@@ -56,7 +60,15 @@ async function processarLote(
       pessoa = cachePessoas.get(n.pessoa.id) ?? null;
     }
     const { negocio: nf, bloqueado } = await conferirFiltros(conn, n, pessoa);
-    if (bloqueado) continue; // fora do filtro: nem log por item no backfill (viraria ruído aos milhares)
+    if (bloqueado) {
+      // fora do filtro: nem log por item no backfill (viraria ruído aos milhares).
+      // ⚠️ Mas se ele JÁ estava no CRM (entrou quando passava, e a origem ou o
+      // funil mudou depois), sai — senão segue somando no faturamento.
+      if (bloqueioDefinitivo(bloqueado)) {
+        await removerNegocioForaDoFiltro(pool, conn.client_id, `agendor:${n.idExterno}`, bloqueado);
+      }
+      continue;
+    }
     const r = await ingerirNegocioAgendor(pool, conn.client_id, nf, pessoa);
     await posProcessarIngestao(pool, conn, nf, pessoa, r, { sync: origem, dealId: nf.idExterno },
       origem === 'backfill' ? 'backfill' : (r.criado ? 'criado' : 'atualizado'));
@@ -133,6 +145,9 @@ export async function GET(req: NextRequest) {
             `UPDATE public.agendor_connections SET ultima_sync_em = NOW(), ultimo_erro = NULL WHERE client_id = $1`,
             [conn.client_id],
           );
+          // ---- fase 3: revisão de origem — pega a origem editada na ficha da
+          // empresa/pessoa, que não mexe no updatedAt do negócio.
+          if (Date.now() - inicio < ORCAMENTO_MS) r.revisao = await revisarOrigensAgendor(pool, conn);
         }
       } catch (err) {
         r.erro = err instanceof Error ? err.message.slice(0, 200) : String(err);

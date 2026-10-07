@@ -115,6 +115,19 @@ Print do Matheus, Cinfel, setembro: o relatório mostrava **R$ 37.511,76 / 24 "p
   - ⚠️ A DASHBOARD (`/api/meta/page-insights`) tem a mesma limitação no card de Seguidores em "Mês passado" e **não foi tocada** — o conserto natural é ela ler desta mesma lib.
 - ⚠️ Fica para a próxima rodada (dado existe para a Cinfel): leads por região (UF/cidade — a página "Regiões" só lê bairro de delivery), landing pages GA4 (3 propriedades), resultado por anúncio e vendedores.
 
+## Agendor — origem revisada no Agendor não chegava à dashboard (2026-10-07)
+
+Print do Matheus: Incorpast jul–out com **R$ 129.520,35** na dashboard × **R$ 123.525,35** no relatório do Agendor (Instagram + Google). "Acontece na Londrigifts e na Incorpast, e provavelmente na Cinfel."
+
+- **A diferença era UM negócio**: "8968 - Adriano - Faculdade GPI", R$ 5.995, ganho 10/08 e ainda ganho. A empresa entrou como Instagram; em **18/09 a equipe revisou a origem para "Carteira"** (fora do filtro; o negócio tem o campo "Revisão de origem: Sim"). Tirando ele, 37 negócios = R$ 123.525,35 exatos.
+- **⚠️ Dois buracos**: (1) a origem mora na ficha da EMPRESA/PESSOA, e editar a ficha **não mexe no `updatedAt` do negócio** — a reconciliação por `updatedAtGt` nunca revia; (2) negócio que deixa de passar no filtro só era IGNORADO (a linha importada seguia somando), e o `canal` gravado nunca acompanhava origem revisada.
+- **Correção**: `crm_leads` ganhou `agendor_pessoa_id`/`agendor_org_id`/`agendor_origem_pers_id`/`agendor_origem_pers` (gravados na ingestão). `revisarOrigensAgendor` (fase 3 do sync-cron) compara cada negócio importado com o CATÁLOGO já carregado em lote (custo extra zero; só decide com catálogo completo): origem atual fora do filtro → `removerNegocioForaDoFiltro`; dentro, com nome diferente → `canal` atualizado. O mesmo removedor roda quando a reconciliação/webhook vê negócio já importado sair do filtro (`bloqueioDefinitivo` exclui o "origem não verificada" do 429).
+- **⚠️ Remover só apaga a linha que É o negócio** (origin 'Agendor', sem mensagens); linha de conversa casada por telefone fica como 'manual'. Cópia integral vai para **`agendor_leads_removidos`** (nunca podada — o `agendor_log` é podado em 200). Canal só muda em linha do próprio negócio sem `origem_lead_id`: conversa ligada (ex.: ARTTONE como WhatsApp) é soberana.
+- **Venda desfeita**: negócio que virou PERDIDO depois de ganho mantinha `valor_rs` para sempre. Agora a ingestão zera receita/`fechado_em`/`fechou` quando o Agendor diz perdido (só origin 'Agendor'). ⚠️ 'andamento' NÃO desfaz: é também o valor de quando o payload não traz status (`statusDoNegocio`).
+- **Auditoria 07/10 (os 3 clientes, read-only, 12 mil negócios baixados)**: Londrigifts 5 ganhos R$ 20.840,50 revisados para "Carteira" (4 de 2024–fev/2026, 1 de set/26 R$ 399); Incorpast só a GPI; Cinfel 0 ganhos fora do filtro, mas **300 canais com rótulo velho** — as opções do campo personalizado foram RENOMEADAS no Agendor ("Instagram"→"Instagram/Facebook", "Facebook"→"FB (não usar)"). Vendas desfeitas: Londrigifts Tatiana R$ 1.155 (perdido) e Júlia Hirose R$ 1.095 (reaberto), Incorpast Eduardo Kuntz R$ 1.585,50 (perdido).
+- ⚠️ **Limite que fica**: renomear OPÇÃO de campo personalizado também não mexe no negócio — a revisão usa o nome gravado. Rodar de novo o script `scratchpad/_revis-entry.ts` (WRITE=1) atualiza; um varrimento periódico completo seria o remédio definitivo.
+- ⚠️ Lição de execução: script longo **dentro do container morre a cada deploy de outra sessão** (perdi 3 rodadas). Rodar local com túnel `ssh -L 15432:<ip do onmid-reports-db>:5432` + cache de páginas em disco.
+
 ## CRM — botão "Analisar com IA": o retroativo que a automação desligada perde (2026-10-02)
 
 Pedido do Matheus: "um botão para acionar a IA a analisar e categorizar e movimentar os leads no kanban. Pois quando eu deixo desativada a gente acaba perdendo o retroativo."

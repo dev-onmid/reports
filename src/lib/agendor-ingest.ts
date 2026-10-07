@@ -46,7 +46,13 @@ async function ensureColunasLead(pool: Pool) {
       ADD COLUMN IF NOT EXISTS valor_negocio NUMERIC,
       ADD COLUMN IF NOT EXISTS produtos JSONB,
       ADD COLUMN IF NOT EXISTS link_externo TEXT,
-      ADD COLUMN IF NOT EXISTS external_id TEXT
+      ADD COLUMN IF NOT EXISTS external_id TEXT,
+      -- De onde a origem do negócio é lida no Agendor (ver revisarOrigensAgendor):
+      -- a ficha da pessoa, a da empresa e o campo personalizado do próprio negócio.
+      ADD COLUMN IF NOT EXISTS agendor_pessoa_id TEXT,
+      ADD COLUMN IF NOT EXISTS agendor_org_id TEXT,
+      ADD COLUMN IF NOT EXISTS agendor_origem_pers_id TEXT,
+      ADD COLUMN IF NOT EXISTS agendor_origem_pers TEXT
   `).catch(() => {});
   await pool.query(
     `CREATE INDEX IF NOT EXISTS crm_leads_responsavel_idx
@@ -371,10 +377,19 @@ export async function ingerirNegocioAgendor(
            status = COALESCE($2, status),
            agendou = COALESCE(agendou, FALSE) OR $3,
            compareceu = COALESCE(compareceu, FALSE) OR $4,
-           fechou = COALESCE(fechou, FALSE) OR $5,
-           valor_rs = COALESCE($6, valor_rs),
-           revenue = COALESCE($6, revenue),
-           fechado_em = COALESCE(fechado_em, $13::date),
+           -- ⚠️ Negócio que virou PERDIDO depois de ganho sai da receita. Antes o valor ficava gravado para sempre e seguia
+           -- somando no Faturamento (auditoria 07/10: 3 vendas desfeitas no
+           -- Agendor ainda somavam R$ 3.835,50). Só na linha que é o próprio
+           -- negócio (origin 'Agendor') — linha de conversa pode ter receita
+           -- de outra fonte (planilha).
+           fechou = CASE WHEN $24 AND lower(COALESCE(origin, '')) = 'agendor' THEN FALSE
+                         ELSE COALESCE(fechou, FALSE) OR $5 END,
+           valor_rs = CASE WHEN $24 AND lower(COALESCE(origin, '')) = 'agendor' THEN NULL
+                           ELSE COALESCE($6, valor_rs) END,
+           revenue = CASE WHEN $24 AND lower(COALESCE(origin, '')) = 'agendor' THEN 0
+                          ELSE COALESCE($6, revenue) END,
+           fechado_em = CASE WHEN $24 AND lower(COALESCE(origin, '')) = 'agendor' THEN NULL
+                             ELSE COALESCE(fechado_em, $13::date) END,
            perdido_em = COALESCE(perdido_em, $15::date),
            -- Responsável, valor estimado e produtos: o Agendor é a fonte, então
            -- sobrescrevem (mudar de vendedor ou de itens é evento normal).
@@ -393,6 +408,13 @@ export async function ingerirNegocioAgendor(
                THEN $14 ELSE canal END,
            external_id = COALESCE(external_id, $11),
            funnel_id = COALESCE(funnel_id, $12),
+           agendor_pessoa_id = COALESCE($20, agendor_pessoa_id),
+           agendor_org_id = COALESCE($21, agendor_org_id),
+           -- COALESCE: payload sem campos personalizados (webhook) não apaga o
+           -- que a leitura completa já trouxe. Campo LIMPO no Agendor cai pelo
+           -- filtro na reconciliação (o negócio muda de updatedAt).
+           agendor_origem_pers_id = COALESCE($22, agendor_origem_pers_id),
+           agendor_origem_pers = COALESCE($23, agendor_origem_pers),
            updated_at = NOW()
          WHERE id = $1::uuid`,
         [
@@ -401,7 +423,12 @@ export async function ingerirNegocioAgendor(
           pessoa?.email ?? negocio.pessoa.email, pessoa?.telefoneBruto,
           observacao, externalId, funnelId, fechadoEm, canalDoLead,
           perdidoEm, negocio.responsavel, negocio.valorEstimado, produtosJson,
-          negocio.linkExterno,
+          negocio.linkExterno, negocio.pessoa.id, negocio.organizacaoId,
+          negocio.origemPersonalizadaId, negocio.origemPersonalizada,
+          // $24: só PERDIDO desfaz a venda. 'andamento' é também o valor de
+          // quando o payload não traz status nenhum (statusDoNegocio) — usá-lo
+          // apagaria receita real a cada webhook incompleto.
+          negocio.status === 'perdido',
         ],
       );
       if (labelEtapa) await espelharEtapa(pool, clientId, leadFunnel, labelEtapa);
@@ -419,9 +446,10 @@ export async function ingerirNegocioAgendor(
       `INSERT INTO public.crm_leads
          (client_id, mes, data, nome, numero, canal, origin, observacao, status,
           funnel_id, email, valor_rs, revenue, agendou, compareceu, fechou, fechado_em, external_id,
-          perdido_em, responsavel, valor_negocio, produtos, link_externo)
+          perdido_em, responsavel, valor_negocio, produtos, link_externo,
+          agendor_pessoa_id, agendor_org_id, agendor_origem_pers_id, agendor_origem_pers)
        VALUES ($1, $2, $3, $4, $5, $16, 'Agendor', $6, $7, $8, $9, $10, $10, $11, $12, $13, $14::date, $15,
-               $17::date, $18, $19, $20::jsonb, $21)
+               $17::date, $18, $19, $20::jsonb, $21, $22, $23, $24, $25)
        RETURNING id`,
       [
         clientId,
@@ -445,6 +473,10 @@ export async function ingerirNegocioAgendor(
         negocio.valorEstimado,
         produtosJson,
         negocio.linkExterno,
+        negocio.pessoa.id,
+        negocio.organizacaoId,
+        negocio.origemPersonalizadaId,
+        negocio.origemPersonalizada,
       ],
     );
     if (labelEtapa) await espelharEtapa(pool, clientId, funnelId, labelEtapa);
@@ -521,4 +553,153 @@ export async function posProcessarIngestao(
     ].filter(Boolean).join(' · '),
     leadId: r.leadId,
   });
+}
+
+// ─── Revisão de origem ─────────────────────────────────────────────────────
+//
+// ⚠️ Caso Incorpast (out/2026): a dashboard somava R$ 5.995 a mais que o
+// relatório do Agendor. O negócio "Faculdade GPI" entrou em agosto com a
+// empresa marcada como Instagram; em 18/09 a equipe REVISOU a origem para
+// "Carteira" (fora do filtro). Dois buracos deixavam a correção sem efeito:
+//  1. A origem mora na ficha da EMPRESA/PESSOA. Editar a ficha não mexe no
+//     `updatedAt` do NEGÓCIO, então a reconciliação por `updatedAtGt` nunca
+//     revia o negócio.
+//  2. Mesmo revisto, negócio que deixa de passar no filtro só era IGNORADO —
+//     a linha já importada continuava somando no faturamento — e o `canal`
+//     gravado nunca acompanhava uma origem revisada.
+// A revisão compara cada negócio importado com o catálogo (já carregado em
+// lote para o filtro — custo extra zero) e aplica a origem ATUAL.
+
+/** Motivo de bloqueio que é passageiro (limite de requisições), não decisão. */
+export function bloqueioDefinitivo(motivo: string | null): boolean {
+  return !!motivo && !motivo.startsWith('origem não verificada');
+}
+
+let removidosPronto = false;
+async function ensureRemovidos(pool: Pool) {
+  if (removidosPronto) return;
+  // Cópia integral da linha antes de apagar — o agendor_log é podado em 200
+  // por cliente e não serve de backup. Recuperar = reinserir a `linha`.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS public.agendor_leads_removidos (
+      id BIGSERIAL PRIMARY KEY,
+      client_id TEXT NOT NULL,
+      external_id TEXT,
+      motivo TEXT,
+      linha JSONB NOT NULL,
+      removido_em TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`);
+  removidosPronto = true;
+}
+
+export type ResultadoRemocao = 'removido' | 'nao_existe' | 'manual';
+
+/**
+ * Tira do CRM o negócio do Agendor que deixou de passar no filtro de
+ * importação — ele não teria entrado se a origem já fosse a atual.
+ * ⚠️ Só apaga a linha que É o negócio (origin 'Agendor', sem conversa). Linha
+ * de conversa do WhatsApp que casou com o negócio por telefone carrega a
+ * história do lead e NÃO é apagada: fica como 'manual' no relatório.
+ */
+export async function removerNegocioForaDoFiltro(
+  pool: Pool, clientId: string, externalId: string, motivo: string,
+): Promise<ResultadoRemocao> {
+  const { rows: [linha] } = await pool.query<{ id: string; origin: string | null; dados: unknown }>(
+    `SELECT id, origin, to_jsonb(l) AS dados FROM public.crm_leads l
+      WHERE client_id = $1 AND external_id = $2 LIMIT 1`,
+    [clientId, externalId],
+  );
+  if (!linha) return 'nao_existe';
+  if ((linha.origin ?? '').toLowerCase() !== 'agendor') return 'manual';
+  const { rows: [msgs] } = await pool.query<{ n: number }>(
+    `SELECT COUNT(*)::int AS n FROM public.crm_messages WHERE lead_id = $1`, [linha.id],
+  ).catch(() => ({ rows: [{ n: 0 }] }));
+  if ((msgs?.n ?? 0) > 0) return 'manual';
+
+  await ensureRemovidos(pool);
+  await pool.query('BEGIN');
+  try {
+    await pool.query(
+      `INSERT INTO public.agendor_leads_removidos (client_id, external_id, motivo, linha)
+       VALUES ($1, $2, $3, $4::jsonb)`,
+      [clientId, externalId, motivo, JSON.stringify(linha.dados)],
+    );
+    await pool.query(`UPDATE public.crm_leads SET origem_lead_id = NULL WHERE origem_lead_id = $1`, [linha.id])
+      .catch(() => {});
+    await pool.query(`DELETE FROM public.crm_leads WHERE id = $1`, [linha.id]);
+    await pool.query('COMMIT');
+  } catch (err) {
+    await pool.query('ROLLBACK').catch(() => {});
+    throw err;
+  }
+  await registrarLogAgendor(pool, {
+    clientId, raw: { externalId, motivo }, resultado: 'filtrado',
+    detalhe: `removido do CRM: ${motivo}`,
+  });
+  return 'removido';
+}
+
+export type ResumoRevisao = {
+  revisados: number; canalAtualizado: number; removidos: number; manuais: number;
+  pulou?: string;
+};
+
+const normCanal = (s: string | null | undefined) => (s ?? '').trim().toLowerCase();
+
+export async function revisarOrigensAgendor(pool: Pool, conn: ConexaoAgendor): Promise<ResumoRevisao> {
+  const r: ResumoRevisao = { revisados: 0, canalAtualizado: 0, removidos: 0, manuais: 0 };
+  if (!conn.api_token) return { ...r, pulou: 'sem_token' };
+  await ensureColunasLead(pool);
+  const cat = await carregarCatalogo(conn.api_token);
+  // Catálogo parcial: ausência de ficha não prova nada — não decide.
+  if (!cat.completo) return { ...r, pulou: 'catalogo_parcial' };
+  const filtros = filtrosDaConexao(conn);
+
+  const { rows } = await pool.query<{
+    external_id: string; canal: string | null; origin: string | null; origem_lead_id: string | null;
+    agendor_pessoa_id: string | null; agendor_org_id: string | null;
+    agendor_origem_pers_id: string | null; agendor_origem_pers: string | null;
+  }>(
+    `SELECT external_id, canal, origin, origem_lead_id, agendor_pessoa_id, agendor_org_id,
+            agendor_origem_pers_id, agendor_origem_pers
+       FROM public.crm_leads
+      WHERE client_id = $1 AND external_id LIKE 'agendor:%'
+        AND (agendor_pessoa_id IS NOT NULL OR agendor_org_id IS NOT NULL)`,
+    [conn.client_id],
+  );
+
+  for (const l of rows) {
+    const fp = l.agendor_pessoa_id ? cat.pessoas.get(l.agendor_pessoa_id) : undefined;
+    const fo = l.agendor_org_id ? cat.orgs.get(l.agendor_org_id) : undefined;
+    if (!fp && !fo) continue;   // ficha não está no catálogo: não decide
+    r.revisados++;
+    // Mesma ordem do conferirFiltros: a pessoa, se tiver origem; senão a empresa.
+    const ficha = fp?.origemLeadId ? fp : (fo ?? fp)!;
+
+    if (filtros.origens && filtros.origens.length > 0) {
+      const ids = [ficha.origemLeadId, l.agendor_origem_pers_id].filter(Boolean) as string[];
+      if (!ids.some(i => filtros.origens!.includes(i))) {
+        const res = await removerNegocioForaDoFiltro(pool, conn.client_id, l.external_id,
+          `origem "${ficha.origemLead ?? 'sem origem'}" fora do filtro (revisada no Agendor)`);
+        if (res === 'removido') r.removidos++;
+        else if (res === 'manual') r.manuais++;
+        continue;
+      }
+    }
+
+    // O canal acompanha a origem revisada — só na linha que é o próprio
+    // negócio. Linha ligada a uma conversa herdou o canal dela (WhatsApp,
+    // Instagram do anúncio) e esse é soberano.
+    const canalNovo = l.agendor_origem_pers?.trim() || ficha.origemLead?.trim();
+    if (canalNovo && (l.origin ?? '').toLowerCase() === 'agendor' && !l.origem_lead_id
+        && normCanal(l.canal) !== normCanal(canalNovo)) {
+      await pool.query(
+        `UPDATE public.crm_leads SET canal = $3, updated_at = NOW()
+          WHERE client_id = $1 AND external_id = $2`,
+        [conn.client_id, l.external_id, canalNovo],
+      );
+      r.canalAtualizado++;
+    }
+  }
+  return r;
 }

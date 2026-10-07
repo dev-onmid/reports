@@ -4,7 +4,7 @@ import { extrairEventoAgendor } from '@/lib/agendor';
 import {
   conexaoAgendorPorToken, ensureAgendorSchema, registrarLogAgendor,
 } from '@/lib/agendor-server';
-import { buscarPessoaAgendor, conferirFiltros, ingerirNegocioAgendor, posProcessarIngestao } from '@/lib/agendor-ingest';
+import { buscarPessoaAgendor, conferirFiltros, ingerirNegocioAgendor, posProcessarIngestao, bloqueioDefinitivo, removerNegocioForaDoFiltro } from '@/lib/agendor-ingest';
 
 /**
  * Receptor do webhook do Agendor — um token POR CLIENTE na URL.
@@ -67,6 +67,10 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ token: str
     const { negocio, bloqueado, pessoa: pessoaEfetiva } = await conferirFiltros(
       conn, evento.negocio, pessoa, tentouPessoa && pessoa === null);
     if (bloqueado) {
+      // Já importado antes de sair do filtro → sai do CRM (ver revisarOrigensAgendor).
+      if (bloqueioDefinitivo(bloqueado)) {
+        await removerNegocioForaDoFiltro(pool, conn.client_id, `agendor:${evento.negocio.idExterno}`, bloqueado);
+      }
       await registrarLogAgendor(pool, {
         clientId: conn.client_id, raw, resultado: 'filtrado', detalhe: bloqueado,
       });
