@@ -8,7 +8,7 @@
 import assert from 'node:assert';
 import { extrairSheetId, urlExportXlsx, normalizarNomeAba, resolverAbaDoMes,
   escolherAbas, abasCompativeis, MAX_ABAS_POR_RODADA, periodoDaAba } from './build/google-sheets.mjs';
-import { parseFechou } from './build/importacao-origem.mjs';
+import { parseFechou, parseDate, dataValida } from './build/importacao-origem.mjs';
 let n = 0;
 const eq = (a, b, m) => { assert.deepStrictEqual(a, b, m); n++; };
 const ok = (c, m) => { assert.ok(c, m); n++; };
@@ -134,6 +134,32 @@ eq(escolherAbas(['Setembro 2026', 'agosto  2026'], { fixas: ['AGOSTO 2026'], seg
   eq(r.abas.length, MAX_ABAS_POR_RODADA, 'corta no teto');
   eq(r.cortadas.length, 20 - MAX_ABAS_POR_RODADA, 'diz o que ficou de fora');
   eq(r.abas[0], 'ABA 0', 'aba sem mês no nome mantém a ordem da planilha');
+}
+
+// ── parseDate: uma célula errada não pode derrubar a aba inteira (2026-10-07) ──
+// Caso REAL (Romanza, JUN2026, linha 218): "23/0/2026" virava a string
+// "2026-00-23", o Postgres respondia "date/time field value out of range" e os
+// 1.000 leads do mês não entravam.
+{
+  eq(parseDate('23/0/2026'), null, 'mês ZERO é recusado, não vira 2026-00-23');
+  eq(parseDate('0/6/2026'), null, 'dia zero é recusado');
+  eq(parseDate('23/13/2026'), null, 'mês 13 é recusado');
+  eq(parseDate('32/01/2026'), null, 'dia 32 é recusado');
+  eq(parseDate('31/02/2026'), null, 'data que não existe no calendário é recusada');
+  eq(parseDate('2026-00-23'), null, 'ISO com mês zero também');
+  eq(parseDate('2026-02-30'), null, 'ISO com dia que não existe');
+  // E o que é válido continua passando — a correção não pode encolher o parse.
+  eq(parseDate('23/06/2026'), '2026-06-23', 'data normal passa');
+  eq(parseDate('1/6/26'), '2026-06-01', 'dia e mês de 1 dígito, ano de 2');
+  eq(parseDate('29/02/2024'), '2024-02-29', '29 de fevereiro em ano bissexto existe');
+  eq(parseDate('29/02/2025'), null, 'e não existe em ano comum');
+  eq(parseDate('2026-06-23'), '2026-06-23', 'ISO válido passa');
+  eq(parseDate(''), null, 'vazio é nulo');
+  eq(parseDate('sem data'), null, 'texto que não é data é nulo');
+  ok(typeof parseDate(45870) === 'string', 'número de série do Excel continua virando data');
+  eq(dataValida(2026, 6, 23), true, 'dataValida aceita o que existe');
+  eq(dataValida(2026, 0, 23), false, 'dataValida recusa mês zero');
+  eq(dataValida(1800, 6, 23), false, 'ano fora de alcance é recusado');
 }
 
 // ── Teto: fica com as MAIS RECENTES, nunca com as mais antigas (2026-10-07) ──

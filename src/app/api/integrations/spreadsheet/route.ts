@@ -2,7 +2,7 @@ import type { NextRequest } from 'next/server';
 import { createHash } from 'node:crypto';
 import { makeServerPool } from '@/lib/server-db';
 
-import { origemIntegravel, resumirOrigens, dedupLote, dedupPorTelefone, idExterno, decidirFechou, parseFechou, colunaEhBooleana, sinaisDoStatus, indexarOcorrencias } from '@/lib/importacao-origem';
+import { origemIntegravel, resumirOrigens, dedupLote, dedupPorTelefone, idExterno, decidirFechou, parseFechou, colunaEhBooleana, sinaisDoStatus, indexarOcorrencias, parseDate } from '@/lib/importacao-origem';
 import { chavesTelefone } from '@/lib/lead-identity';
 
 /** Tipo da planilha, escolhido na importação. Ver comentário em LeadParaFunil. */
@@ -174,24 +174,6 @@ export type SpreadsheetMapping = {
   clientName: string;
 };
 
-function parseDate(val: unknown): string | null {
-  if (!val) return null;
-  if (val instanceof Date && Number.isFinite(val.getTime())) return val.toISOString().split('T')[0];
-  if (typeof val === 'number') {
-    const d = new Date((val - 25569) * 86400 * 1000);
-    return d.toISOString().split('T')[0];
-  }
-  const s = String(val);
-  const parts = s.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
-  if (parts) {
-    const [, d, m, y] = parts;
-    const year = y.length === 2 ? `20${y}` : y;
-    return `${year}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
-  }
-  const iso = s.match(/(\d{4})-(\d{2})-(\d{2})/);
-  if (iso) return iso[0];
-  return null;
-}
 
 function parseRevenue(val: unknown): number {
   if (val === null || val === undefined || val === '') return 0;

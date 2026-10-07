@@ -350,3 +350,53 @@ export function sinaisDoStatus(status: unknown): SinaisDeEtapa {
 
   return { compareceu, fechou, agendou };
 }
+
+/**
+ * Uma data só é aceita se existir de verdade no calendário.
+ *
+ * ⚠️⚠️ Sem isto, uma ÚNICA célula digitada errada derruba a importação inteira
+ * daquela aba. Caso real (Romanza, JUN2026, linha 218): `23/0/2026` virava a
+ * string `2026-00-23`, o Postgres respondia *"date/time field value out of
+ * range"* e os **1.000 leads do mês** não entravam. Recusar a célula e deixar a
+ * linha entrar sem data é muito melhor do que perder o mês.
+ */
+export function dataValida(ano: number, mes: number, dia: number): boolean {
+  if (!Number.isInteger(ano) || ano < 1900 || ano > 2200) return false;
+  if (mes < 1 || mes > 12 || dia < 1 || dia > 31) return false;
+  // Pega 31/02 e afins: o Date "transborda" para março e os componentes mudam.
+  const d = new Date(Date.UTC(ano, mes - 1, dia));
+  return d.getUTCFullYear() === ano && d.getUTCMonth() === mes - 1 && d.getUTCDate() === dia;
+}
+
+export function parseDate(val: unknown): string | null {
+  if (!val) return null;
+  if (val instanceof Date && Number.isFinite(val.getTime())) return val.toISOString().split('T')[0];
+  if (typeof val === 'number') {
+    const d = new Date((val - 25569) * 86400 * 1000);
+    if (!Number.isFinite(d.getTime())) return null;
+    return d.toISOString().split('T')[0];
+  }
+  const s = String(val).trim();
+
+  // ⚠️⚠️ ISO PRIMEIRO. O padrão dd/mm/aaaa abaixo casa DENTRO de uma data ISO:
+  // em "2026-06-23" ele pega "26-06-23" e devolve 26/06/2023 — dia trocado com
+  // o ano e três anos de diferença, em silêncio. Enquanto o ISO era testado por
+  // último, esse ramo nunca era alcançado.
+  const iso = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?!\d)/);
+  if (iso) {
+    const [, y, m, d] = iso;
+    if (!dataValida(Number(y), Number(m), Number(d))) return null;
+    return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+  }
+
+  // `(?<!\d)` e `(?!\d)` impedem o mesmo erro ao contrário: casar um pedaço de
+  // número maior ("120/06/20261") e inventar uma data que a célula não tem.
+  const parts = s.match(/(?<!\d)(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})(?!\d)/);
+  if (parts) {
+    const [, d, m, y] = parts;
+    const year = y.length === 2 ? `20${y}` : y;
+    if (!dataValida(Number(year), Number(m), Number(d))) return null;
+    return `${year}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+  }
+  return null;
+}

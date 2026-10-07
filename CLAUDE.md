@@ -705,6 +705,16 @@ abrir o painel, o `lps/bin/gtag ads destinos <cliente>` consulta o reports.
 
 @AGENTS.md
 
+## Importação — uma célula errada derrubava o mês inteiro, e data ISO virava ano errado (2026-10-07)
+
+Apareceu na 1ª importação boa da Romanza (9 abas, 9.921 linhas): *"As abas JUN2026 falharam: date/time field value out of range: 2026-00-23"*.
+
+- **⚠️⚠️ UMA célula digitada errada matava 1.000 leads.** Linha 218 da JUN2026 tinha `23/0/2026` (mês zero); `parseDate` montava a string `2026-00-23`, o Postgres recusava e a **aba inteira** não entrava. Agora `dataValida` confere se a data existe no calendário (inclusive 31/02, que o `Date` transborda para março) e devolve `null` — a linha entra sem data, que é muito melhor do que perder o mês.
+- **⚠️⚠️ Bug PIOR, achado pelo teste que eu escrevi para o primeiro: `parseDate('2026-06-23')` devolvia `2023-06-26`.** O padrão `dd/mm/aaaa` casa DENTRO da data ISO (pega `26-06-23`), então o ramo ISO, testado por último, **nunca era alcançado** — dia trocado com o ano e três anos de diferença, em silêncio. Agora o ISO é testado primeiro, com `^`, e o padrão BR ganhou `(?<!\d)`/`(?!\d)` para não casar pedaço de número maior.
+- **`parseDate`/`dataValida` saíram da rota para `importacao-origem.ts`** — a rota do Next não pode exportar função solta, e sem exportar não havia como testar justamente a função que decide a data de todo lead importado.
+- **Impacto medido antes de subir**, comparando a função nova com a do HEAD sobre as 3 planilhas reais (20.367 células de data): **9 mudanças, todas na Romanza, todas lixo óbvio** (`08/08/0206` — ano 206 —, `23/0/2026`, `06/05/0206`) que viravam data absurda e agora são recusadas. SorriLeve e Odonto First: **zero**. Nenhuma data teve valor corrigido, ou seja, não há ISO em texto nessas planilhas hoje — a correção do ISO é defesa, não mudança.
+- ✅ 105 asserts em `test-google-sheets.mjs` (18 novos de data: mês zero, dia 32, 31/02, 29/02 em ano bissexto × comum, ISO válido e inválido, ano fora de alcance) + 165 de `test-origem.mjs` intocados.
+
 ## Planilhas do Google — o mês atual estava sendo JOGADO FORA pelo teto de abas (2026-10-07)
 
 Pergunta do Matheus sobre os avisos do card da Romanza ("porque isso acontece?"). Eram **três defeitos somados**, todos medidos contra as planilhas reais dos 3 clientes:
