@@ -136,6 +136,49 @@ eq(escolherAbas(['Setembro 2026', 'agosto  2026'], { fixas: ['AGOSTO 2026'], seg
   eq(r.abas[0], 'ABA 0', 'aba sem mês no nome mantém a ordem da planilha');
 }
 
+// ── Teto: fica com as MAIS RECENTES, nunca com as mais antigas (2026-10-07) ──
+// Planilha REAL da Romanza: 39 abas, 35 marcadas. Antes o corte levava as 12 mais
+// antigas e "OUT 2026" (o mês corrente) ficava de fora — a rotina importava 2024
+// todo dia e a tela do cliente parava no passado.
+{
+  const TODAS = ["LEADS 26 Á 25","CADASTROS","OUT 2026","SET 2026","AGOS2026","JUL2026","JUN2026","FORMS | GOOGLE","MAI2026","MAR2026","ABR2026","FEV2026","JAN2026","DEZ2025","FUNIL ATUAL","MAI25","FEV25","ABR25","MAR25","OUT2025","JAN25","NOV2025","AGOS25","SET2025","JUL25","JUN25","FEV24","DEZ24","NOV24","OUT24","SET24","AGT24","JUL242","JUL24","JUN24","MAI24","ABR24","MAR24","JAN24"];
+  const FIXAS = TODAS.filter(a => a !== 'OUT 2026' && a !== 'LEADS 26 Á 25' && a !== 'CADASTROS' && a !== 'FUNIL ATUAL');
+  const OUT = new Date(2026, 9, 7);
+  const r = escolherAbas(TODAS, { fixas: FIXAS, seguirMes: true }, OUT);
+  eq(r.abas.includes('OUT 2026'), true, 'o mês corrente NUNCA é cortado');
+  eq(r.abas.length, MAX_ABAS_POR_RODADA, 'respeita o teto');
+  eq(r.abas.at(-1), 'OUT 2026', 'importa por último a aba mais nova (a última a escrever vence)');
+  eq(r.abas[0], 'NOV2025', 'os 12 meses mais recentes, em ordem crescente');
+  eq(r.cortadas.includes('JAN24'), true, 'o que sai é o mais antigo');
+  eq(r.abas.includes('JAN24'), false, 'aba de 2024 não ocupa vaga do mês corrente');
+}
+
+// Mês atual entra mesmo quando TODAS as vagas seriam de abas mais recentes que
+// ele não existem — e mesmo sem estar nas fixas.
+{
+  const todas = ['JAN2026','FEV2026','MAR2026','ABR2026','MAI2026','JUN2026','JUL2026','AGO2026','SET2026','OUT2026','NOV2025','DEZ2025','OUT2025'];
+  const r = escolherAbas(todas, { fixas: todas, seguirMes: true }, new Date(2026, 9, 7));
+  eq(r.abas.includes('OUT2026'), true, 'mês corrente garantido');
+  eq(r.abas.length, MAX_ABAS_POR_RODADA, 'teto respeitado');
+}
+
+// ── periodoDaAba: abreviação truncada e apelidos (planilhas reais) ────────────
+{
+  // "AGOS" é prefixo de AGOSTO truncado em 4 letras — a versão antiga só aceitava
+  // 3 letras ou o nome inteiro, e devolvia null para metade da planilha da Romanza.
+  eq(periodoDaAba('AGOS2026'), { ano: 2026, mes: 7 }, 'AGOS2026 é agosto/2026');
+  eq(periodoDaAba('AGOS25'), { ano: 2025, mes: 7 }, 'AGOS25 é agosto/2025');
+  eq(periodoDaAba('SETE 26'), { ano: 2026, mes: 8 }, 'SETE 26 é setembro/2026');
+  eq(periodoDaAba('AGT24'), { ano: 2024, mes: 7 }, 'AGT é apelido visto em planilha real');
+  eq(periodoDaAba('SET 2026'), { ano: 2026, mes: 8 }, 'formato com espaço segue valendo');
+  eq(periodoDaAba('JUL242'), null, 'número que não é ano não vira data');
+  eq(periodoDaAba('CADASTROS'), null, 'aba que não é mês continua sem data');
+  eq(periodoDaAba('FUNIL ATUAL'), null, 'aba de resumo não vira mês');
+  eq(periodoDaAba('OUT'), { ano: 0, mes: 9 }, 'sem ano: mês conhecido, ano 0');
+  // ⚠️ Prefixo curto demais casaria mês errado: "MA" serve para março e maio.
+  eq(periodoDaAba('MA2026'), null, 'duas letras não bastam');
+}
+
 // aba de resumo marcada por engano continua sendo escolha do gestor — quem a
 // barra é a checagem de cabeçalho, não esta função
 eq(escolherAbas(ABAS, { fixas: ['RESUMO'], seguirMes: false }, SET).abas, ['RESUMO'],

@@ -705,6 +705,19 @@ abrir o painel, o `lps/bin/gtag ads destinos <cliente>` consulta o reports.
 
 @AGENTS.md
 
+## Planilhas do Google — o mês atual estava sendo JOGADO FORA pelo teto de abas (2026-10-07)
+
+Pergunta do Matheus sobre os avisos do card da Romanza ("porque isso acontece?"). Eram **três defeitos somados**, todos medidos contra as planilhas reais dos 3 clientes:
+
+- **⚠️⚠️ O corte do teto levava as abas MAIS ANTIGAS.** `escolherAbas` ordena cronológico CRESCENTE de propósito (a última a escrever vence o upsert), e o corte era `slice(0, 12)` — ou seja, as 12 mais velhas. Medido na Romanza (35 abas marcadas): entravam **JAN24…JUL24** e **`OUT 2026`, o mês corrente, ficava de fora todo dia**. A tela do cliente parava no passado em silêncio. Agora a seleção é por recência, com a **aba do mês intocável**, e a ordem de importação segue crescente.
+- **⚠️ `periodoDaAba` só aceitava 3 letras ou o nome inteiro**, então `AGOS2026`, `AGOS25` e `AGT24` voltavam nulas; aba não-datada vai para o começo da fila e ocupava vaga do teto. Agora casa a parte de LETRAS como prefixo do mês (mínimo 3, o que resolve `AGOS`/`SETE`) + `APELIDOS_MES` para o que não é prefixo (`AGT`). ⚠️ Só entra apelido **visto em planilha real** — inventar faz aba de outra coisa virar mês e ser importada como base.
+- **⚠️⚠️ Diferença de CAIXA reprovava quase um ano de histórico.** O de-para é feito sobre UMA aba (a do mês) e os meses anteriores escrevem a mesma coluna com outra grafia: `CANAL` × `Canal`, `DATA DE CONTATO` × `Data de Contato`, `OBSERVAÇÃO` × `Observação`. **`colunaEquivalente` casa ignorando caixa e acento mas devolve o nome como está NAQUELA aba** — devolver o nome do de-para faria a aba passar na checagem e falhar na importação, porque a rota procura o texto exato. O `sheets-sync` traduz coluna a coluna por formato de cabeçalho.
+- **Impacto medido antes de subir, comparando a função NOVA × a do HEAD sobre as 3 planilhas reais**: Romanza **1 → 9 abas** (1.469 → 9.912 linhas) e o mês corrente passa a entrar; SorriLeve **0 → 4 abas** (importava NADA; 8.105 linhas, R$ 2.370 de receita nova — ela é `fonte_faturamento`); Odonto First **sem mudança** (5 abas antes e depois).
+- ⚠️ **O que ainda fica de fora é coluna ausente de verdade**, não grafia: NOV2025/DEZ2025 da Romanza não têm `DATA`, MAR2026 não tem `OBSERVAÇÃO`, e `OUT2026` da SorriLeve é a aba do mês novo ainda **vazia** (sem cabeçalho) — esse último é o comportamento certo, as outras abas entram.
+- ⚠️ **Dívida conhecida**: `abasCompativeis` reprova a aba inteira por QUALQUER coluna mapeada ausente, inclusive opcional — MAR2026 perde um mês de leads por não ter `OBSERVAÇÃO`. A exigência fazia sentido quando o sync mandava a coluna crua; agora que ele filtra o que não existe, dá para exigir só o essencial (data/nome/telefone + receita quando a planilha é fonte de faturamento). Não feito: muda uma decisão já testada e vale 1 aba.
+- **Aviso da tela**: as abas incompatíveis passaram a ser AGRUPADAS pelo que falta (a Romanza gerava 11 frases quase idênticas e o aviso que importava sumia no meio), e o texto do corte deixou de dizer "as 12 primeiras".
+- ✅ Verificado: **87 asserts** em `scratchpad/test-google-sheets.mjs` (18 novos: mês corrente nunca cortado, 12 mais recentes em ordem crescente, `AGOS2026`/`AGT24`/`SETE 26` datadas, `JUL242` e `MA2026` recusadas, e o teste antigo do teto com abas sem mês continuando a manter as de cima); tsc + `next build` + eslint limpos.
+
 ## Planilhas do Google — o de-para de colunas da IA virou editável (2026-10-07)
 
 Pedido do Matheus, olhando o card "Colunas reconhecidas": *"além de ser automático pela IA, gostaria de poder alterar se for preciso"*. A IA continua resolvendo sozinha na análise; o que mudou é que agora dá para corrigir.

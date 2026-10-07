@@ -15,7 +15,7 @@
 import type { Pool } from 'pg';
 import { memoizarSchema } from '@/lib/schema-memo';
 import { internalHeaders } from '@/lib/session';
-import { escolherAbas, abasCompativeis, urlExportXlsx, MAX_ABAS_POR_RODADA } from '@/lib/google-sheets';
+import { escolherAbas, abasCompativeis, colunaEquivalente, urlExportXlsx, MAX_ABAS_POR_RODADA } from '@/lib/google-sheets';
 
 export type SheetsConfig = {
   clientId: string;
@@ -177,10 +177,24 @@ export async function sincronizarSheets(
   }
 
   const base = (process.env.APP_URL ?? process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000').replace(/\/$/, '');
+  // ⚠️ Abas incompatíveis são AGRUPADAS pelo que falta. Uma frase por aba vira
+  // um parágrafo ilegível quando a planilha tem anos de histórico com layout
+  // antigo — a da Romanza gerava 11 frases quase idênticas e o aviso que
+  // importava (o corte de abas) sumia no meio.
+  const porFalta = new Map<string, string[]>();
+  for (const i of incompativeis) {
+    const chave = i.faltam.join(', ');
+    const lista = porFalta.get(chave) ?? [];
+    lista.push(i.aba);
+    porFalta.set(chave, lista);
+  }
   const avisos = [
-    ...incompativeis.map(i => `A aba "${i.aba}" ficou de fora: não tem ${i.faltam.join(', ')}.`),
+    ...[...porFalta].map(([faltam, abas]) =>
+      abas.length === 1
+        ? `A aba "${abas[0]}" ficou de fora: não tem ${faltam}.`
+        : `${abas.length} abas ficaram de fora por não terem ${faltam}: ${abas.join(', ')}.`),
     ...(escolha.sumidas.length ? [`Não existem mais na planilha: ${escolha.sumidas.join(', ')}.`] : []),
-    ...(escolha.cortadas.length ? [`Só as ${MAX_ABAS_POR_RODADA} primeiras abas entram por rodada; ficaram de fora: ${escolha.cortadas.join(', ')}.`] : []),
+    ...(escolha.cortadas.length ? [`Entram as ${MAX_ABAS_POR_RODADA} abas mais recentes por rodada — o mês atual sempre entra. Ficaram de fora: ${escolha.cortadas.join(', ')}.`] : []),
   ];
   let linhas = 0;
   const corpos: unknown[] = [];
@@ -207,6 +221,11 @@ export async function sincronizarSheets(
     // `revenueColumn`/`nameColumn`/…. `clinic` fica de fora: aqui a planilha é
     // de UM cliente só, e mandar a coluna de clínica faria a rota tentar o
     // de-para clínica→cliente que não existe neste caminho.
+    // ⚠️⚠️ Traduz cada coluna para o nome EXATO deste formato de cabeçalho. O
+    // de-para foi feito sobre UMA aba, e os outros meses escrevem a mesma coluna
+    // com outra caixa (`CANAL` × `Canal`) — mandar o nome do de-para faria a rota
+    // procurar um texto que não existe naquele arquivo e recusar o lote.
+    const cabFormato = cabecalhos[abasDoFormato[0]] ?? [];
     for (const [campo, coluna] of Object.entries(cfg.mapeamento ?? {})) {
       // ⚠️ `contact` é LISTA (a fileira de tentativas) e vai como CSV num campo
       // próprio; os demais são 1:1.
@@ -214,11 +233,15 @@ export async function sincronizarSheets(
         const cols = (Array.isArray(coluna) ? coluna : [])
           // Só as que existem NESTE formato: a fileira encolhe de um mês para
           // outro, e mandar coluna inexistente não ajuda ninguém.
-          .filter(c => (cabecalhos[abasDoFormato[0]] ?? []).some(h => h === c || h.trim() === c.trim()));
+          .map(c => colunaEquivalente(cabFormato, c))
+          .filter((c): c is string => c !== null);
         if (cols.length) fd.append('contactColumns', cols.join(','));
         continue;
       }
-      if (typeof coluna === 'string' && coluna && campo !== 'clinic') fd.append(`${campo}Column`, coluna);
+      if (typeof coluna === 'string' && coluna && campo !== 'clinic') {
+        const real = colunaEquivalente(cabFormato, coluna);
+        if (real) fd.append(`${campo}Column`, real);
+      }
     }
 
     const res = await fetch(`${base}/api/integrations/spreadsheet?step=import`, {
