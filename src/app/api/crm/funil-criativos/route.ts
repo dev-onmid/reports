@@ -1,4 +1,5 @@
 import type { NextRequest } from 'next/server';
+import { statusFechouSql } from '@/lib/importacao-origem';
 import { leadContaSql, rastroPagoSql } from '@/lib/lead-contagem';
 import { makeServerPool } from '@/lib/server-db';
 import { parseIsoDateRange } from '@/lib/optimizer-period-range';
@@ -65,7 +66,7 @@ export async function GET(req: NextRequest) {
                 ${ANUNCIO_SQL} AS anuncio, NULLIF(btrim(l.campaign_name), '') AS campanha,
                 ${PLATAFORMA_SQL} AS plataforma,
                 l.status, l.funnel_id, l.agendou, l.data_agendada, l.compareceu, l.engajou,
-                (l.fechou OR ${VALOR} > 0) AS fechou, ${VALOR} AS valor,
+                (l.fechou OR ${VALOR} > 0 OR ${statusFechouSql('l')}) AS fechou, ${VALOR} AS valor,
                 ${rastroPagoSql('l')} AS rastreado,
                 COALESCE(l.lead_date, l.data, l.created_at::date) AS data_lead
            FROM public.crm_leads l
@@ -82,7 +83,7 @@ export async function GET(req: NextRequest) {
                 COALESCE(SUM(${VALOR}), 0)::float AS receita
            FROM public.crm_leads l
           WHERE l.client_id = ANY($1) AND ${leadContaSql('l')} AND ${TEM_ANUNCIO}
-            AND (${VALOR} > 0 OR l.fechou = TRUE)
+            AND (${VALOR} > 0 OR l.fechou = TRUE OR ${statusFechouSql('l')})
             AND (COALESCE(l.fechado_em, l.lead_date, l.data) IS NULL
                  OR COALESCE(l.fechado_em, l.lead_date, l.data) BETWEEN $2 AND $3)
           GROUP BY 1, 2, 3, 4, 5`,

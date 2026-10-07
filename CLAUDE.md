@@ -132,6 +132,15 @@ Print do Matheus: Incorpast jul–out com **R$ 129.520,35** na dashboard × **R$
 - ⚠️ ~~**Limite que fica**~~ (resolvido pela releitura): renomear OPÇÃO de campo personalizado também não mexe no negócio — a revisão usa o nome gravado. Rodar de novo o script `scratchpad/_revis-entry.ts` (WRITE=1) atualiza; um varrimento periódico completo seria o remédio definitivo.
 - ⚠️ Lição de execução: script longo **dentro do container morre a cada deploy de outra sessão** (perdi 3 rodadas). Rodar local com túnel `ssh -L 15432:<ip do onmid-reports-db>:5432` + cache de páginas em disco.
 
+## Romanza — "Cadastrou" passa a contar como venda nas telas de criativos (2026-10-07)
+
+Pergunta do Matheus: "por que não cruza os criativos com os cadastrados?".
+
+- **Causa**: as telas de criativos (Funil de criativos, Biblioteca, colunas Vendas/Faturamento da tabela de campanhas) contam venda como `fechou OR valor > 0`. Os 171 leads "Cadastrou" da Romanza tinham `fechou = false` — o status não era lido como conversão, e **mover o lead no Kanban NÃO marca `fechou`** (só a importação marca). Resultado: 0 vendas cruzadas, inclusive nos cadastros com anúncio rastreado (4 Meta com `source_id`, 4 Google com `gclid`).
+- **Correção**: `PADRAO_FECHOU` (importação, `sinaisDoStatus`) e `classificarEtapa` ganharam "cadastrou" — só a Romanza usa o termo (medido). As 3 consultas de criativos somam `statusFechouSql()` ao critério de venda.
+- **⚠️ `statusFechouSql` reconhece SÓ "cadastrou" de propósito**: com a régua inteira, 206 leads em "Fechado" no Kanban sem `fechou` virariam venda em outros clientes, quase todos de delivery (Dominos 19→110, PicoLocos 0→50, Tokiomaki 17→58, Meta Pizzaria 0→24). Pode ser o certo, mas é decisão do Matheus — perguntado.
+- **⚠️ Limite que NÃO é de código**: os 12 cadastros de ago–set que vieram só da planilha **não têm conversa no nosso CRM com o mesmo número** — falaram com um WhatsApp que não está conectado ao sistema. A coluna "Anuncio" da planilha está vazia e o "LINK CRIATIVO" traz só "OLÁ! POSSO TER MAIS INFORMAÇÕES?" (mensagem pronta do anúncio de WhatsApp do Meta: dá para saber que veio de anúncio, não de qual).
+
 ## Romanza — Funil de Performance contado DIRETO da planilha, com as fórmulas dela (2026-10-07)
 
 Print do Matheus: dashboard da Romanza em setembro com 259 leads / 140 engajados / 1 agendamento / 54 fechamentos, contra o resumo "FUNIL ATUAL" da planilha: 253 / 213 contatos feitos / 26 aprovações / 13 agendamentos / 13 comparecimentos / 12 cadastros. "Preciso que esses sejam os padrões de funil da Romanza."

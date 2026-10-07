@@ -338,11 +338,35 @@ export function indexarOcorrencias<T>(linhas: T[], chaveDe: (l: T) => string): {
   });
 }
 
+/**
+ * Status que significa conversão. "Cadastrou" é a conversão da Romanza (a
+ * revendedora se cadastrou) — único cliente que usa o termo (medido 07/10/2026:
+ * 171 leads, todos dela). Uma régua só, usada aqui e em `statusFechouSql`.
+ */
+const PADRAO_FECHOU = 'efetivad|fechad|vendid|comprou|contratad|paciente|cadastrou';
+
+/**
+ * Status de conversão que as telas de criativos contam como venda mesmo sem
+ * `fechou` — mover o lead no Kanban NÃO marca `fechou` (só a importação marca),
+ * e a venda feita pelo Kanban não aparecia cruzada com o criativo.
+ *
+ * ⚠️ Por ora SÓ "Cadastrou" (Romanza). A régua inteira (`PADRAO_FECHOU`) foi
+ * medida em 07/10/2026 e mudaria outros clientes sem pedido: 206 leads em
+ * "Fechado" sem `fechou`, quase todos de delivery (Dominos 19→110 vendas,
+ * PicoLocos 0→50, Tokiomaki 17→58). Ampliar é decisão do Matheus.
+ */
+const PADRAO_FECHOU_KANBAN = 'cadastrou';
+
+export function statusFechouSql(alias = ''): string {
+  const c = alias ? `${alias}.` : '';
+  return `(lower(COALESCE(${c}status, '')) ~ '${PADRAO_FECHOU_KANBAN}')`;
+}
+
 export function sinaisDoStatus(status: unknown): SinaisDeEtapa {
   const s = normalizarOrigem(status); // reaproveita: sem acento, sem caixa
 
   // "Efetivada" é a venda concluída; "Realizada" é só o comparecimento.
-  const fechou = /efetivad|fechad|vendid|comprou|contratad|paciente/.test(s);
+  const fechou = new RegExp(PADRAO_FECHOU).test(s);
   // Compareceu inclui quem fechou: não dá pra efetivar sem ter comparecido.
   const compareceu = fechou || /realizad|compareceu|atendid[oa] na avaliacao/.test(s);
   // Agendou inclui quem faltou — o agendamento aconteceu, a presença não.
