@@ -23,7 +23,10 @@ export type RegraPlanilha =
   /** A coluna de status é um destes valores (comparação sem caixa/acento). */
   | { tipo: 'status'; valores: string[] }
   /** Alguma destas colunas tem a marca (ex.: ✅). */
-  | { tipo: 'marcado'; colunas: string[]; marca: string };
+  | { tipo: 'marcado'; colunas: NomeColuna[]; marca: string };
+
+/** Nome de coluna, ou a lista de nomes que ela já teve (o cabeçalho muda entre anos). */
+export type NomeColuna = string | string[];
 
 export type EtapaPlanilha = { rotulo: string; cor: string; regra: RegraPlanilha };
 /** Contagem paralela exibida como chip sob um degrau (ex.: Restrições). */
@@ -32,7 +35,7 @@ export type DesvioPlanilha = { rotulo: string; apos: number; tom: 'ruim' | 'neut
 export type ConfigFunilPlanilha = {
   /** Candidatas à coluna de data, na ordem (o cabeçalho muda entre anos). */
   colunasData: string[];
-  colunaStatus: string;
+  colunaStatus: NomeColuna;
   /** Linha só conta se esta coluna estiver preenchida (a planilha conta COUNTA dela). */
   colunaObrigatoria: string;
   etapas: EtapaPlanilha[];
@@ -53,12 +56,13 @@ const ROMANZA = 'client-1778639756911';
  */
 export const FUNIS_PLANILHA: Record<string, ConfigFunilPlanilha> = {
   [ROMANZA]: {
-    colunasData: ['DATA', 'DATA ENTRADA'],
-    colunaStatus: 'STATUS',
+    // Nomes que as abas de 2024–2026 usam (medido na planilha real em 07/10/2026).
+    colunasData: ['DATA', 'DATA ENTRADA', 'DATA DE ENTRADA'],
+    colunaStatus: ['STATUS', 'STATUS DO LEAD'],
     colunaObrigatoria: 'CANAL',
     etapas: [
       { rotulo: 'Leads', cor: '#7dd3fc', regra: { tipo: 'todas' } },
-      { rotulo: 'Contatos Feitos', cor: '#0ea5e9', regra: { tipo: 'marcado', colunas: ['1º CONTATO', '2º CONTATO', '3º CONTATO'], marca: '✅' } },
+      { rotulo: 'Contatos Feitos', cor: '#0ea5e9', regra: { tipo: 'marcado', colunas: [['1º CONTATO', '1 CONTATO'], ['2º CONTATO', '2 CONTATO'], ['3º CONTATO', '3 CONTATO']], marca: '✅' } },
       { rotulo: 'Aprovações', cor: '#6366f1', regra: { tipo: 'status', valores: ['Agendado', 'Cadastrou', 'Aprovado'] } },
       { rotulo: 'Agendamentos', cor: '#8b5cf6', regra: { tipo: 'status', valores: ['Agendado', 'Cadastrou'] } },
       { rotulo: 'Comparecimentos', cor: '#f59e0b', regra: { tipo: 'status', valores: ['Agendado', 'Cadastrou'] } },
@@ -79,10 +83,15 @@ export function normalizarCelula(v: unknown): string {
   return String(v ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').trim().toUpperCase().replace(/\s+/g, ' ');
 }
 
-function indiceDaColuna(cabecalho: unknown[], nome: string): number {
-  const alvo = normalizarCelula(nome);
-  return cabecalho.findIndex(h => normalizarCelula(h) === alvo);
+function indiceDaColuna(cabecalho: unknown[], nome: NomeColuna): number {
+  for (const n of Array.isArray(nome) ? nome : [nome]) {
+    const alvo = normalizarCelula(n);
+    const i = cabecalho.findIndex(h => normalizarCelula(h) === alvo);
+    if (i >= 0) return i;
+  }
+  return -1;
 }
+const nomePrincipal = (n: NomeColuna) => (Array.isArray(n) ? n[0] : n);
 
 /** Data de uma célula: número de série do Excel, Date ou texto dd/mm/aaaa. */
 export function dataDaCelula(v: unknown): Date | null {
@@ -129,7 +138,7 @@ export function contarAbaPlanilha(
   const iStatus = indiceDaColuna(cab, cfg.colunaStatus);
   const iData = cfg.colunasData.map(c => indiceDaColuna(cab, c)).find(i => i >= 0) ?? -1;
   const ausentes = new Set<string>();
-  if (iStatus < 0) ausentes.add(cfg.colunaStatus);
+  if (iStatus < 0) ausentes.add(nomePrincipal(cfg.colunaStatus));
 
   const avaliador = (regra: RegraPlanilha): ((l: unknown[]) => boolean) => {
     if (regra.tipo === 'todas') return () => true;
@@ -138,7 +147,7 @@ export function contarAbaPlanilha(
       return l => iStatus >= 0 && ok.has(normalizarCelula(l[iStatus]));
     }
     const idx = regra.colunas.map(c => indiceDaColuna(cab, c));
-    regra.colunas.forEach((c, k) => { if (idx[k] < 0) ausentes.add(c); });
+    regra.colunas.forEach((c, k) => { if (idx[k] < 0) ausentes.add(nomePrincipal(c)); });
     const marca = normalizarCelula(regra.marca);
     return l => idx.some(i => i >= 0 && normalizarCelula(l[i]) === marca);
   };

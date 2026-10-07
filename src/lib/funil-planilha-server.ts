@@ -45,9 +45,16 @@ export async function gravarFunilPlanilha(
     if (!periodo || periodo.ano < 2000) continue;
     const c = contarAbaPlanilha(utils.sheet_to_json<unknown[]>(wb.Sheets[aba], { header: 1, defval: '' }), cfg, periodo);
     if (!c) continue;
+    // ⚠️ Aba sem as colunas de algum degrau NÃO entra: o degrau sairia zerado e
+    // o funil diria "nenhum contato feito" num mês em que só não havia a coluna
+    // (Romanza: jan–jul/2024 sem as colunas de contato, ago/2025 com o STATUS
+    // sem cabeçalho). Sem dado do mês, a dashboard volta ao funil do CRM.
+    if (c.colunasAusentes.length) {
+      avisos.push(`${aba} fora do funil: sem ${c.colunasAusentes.join('/')}`);
+      continue;
+    }
     vistas.push(aba);
     linhas += c.linhas;
-    if (c.colunasAusentes.length) avisos.push(`${aba} sem ${c.colunasAusentes.join('/')}`);
 
     await pool.query('BEGIN');
     try {
