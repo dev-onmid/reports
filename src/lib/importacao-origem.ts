@@ -360,6 +360,13 @@ export function sinaisDoStatus(status: unknown): SinaisDeEtapa {
  * range"* e os **1.000 leads do mês** não entravam. Recusar a célula e deixar a
  * linha entrar sem data é muito melhor do que perder o mês.
  */
+export /** Data que um CRM pode ter de verdade — fora disso é lixo de planilha. */
+function emFaixa(d: Date): boolean {
+  if (!Number.isFinite(d.getTime())) return false;
+  const ano = d.getUTCFullYear();
+  return ano >= 1900 && ano <= 2200;
+}
+
 export function dataValida(ano: number, mes: number, dia: number): boolean {
   if (!Number.isInteger(ano) || ano < 1900 || ano > 2200) return false;
   if (mes < 1 || mes > 12 || dia < 1 || dia > 31) return false;
@@ -370,11 +377,15 @@ export function dataValida(ano: number, mes: number, dia: number): boolean {
 
 export function parseDate(val: unknown): string | null {
   if (!val) return null;
-  if (val instanceof Date && Number.isFinite(val.getTime())) return val.toISOString().split('T')[0];
+  if (val instanceof Date) return emFaixa(val) ? val.toISOString().split('T')[0] : null;
   if (typeof val === 'number') {
+    // ⚠️⚠️ O número de série do Excel também precisa de faixa. Caso REAL
+    // (Romanza, abas MAI24/AGT24/SET24/OUT24): células com um número enorme
+    // viravam `+020204-05-13`, o Postgres respondia *"time zone displacement out
+    // of range"* e as abas falhavam inteiras. Validar só o texto não bastava:
+    // a planilha guarda data como número, e é por aqui que a maioria passa.
     const d = new Date((val - 25569) * 86400 * 1000);
-    if (!Number.isFinite(d.getTime())) return null;
-    return d.toISOString().split('T')[0];
+    return emFaixa(d) ? d.toISOString().split('T')[0] : null;
   }
   const s = String(val).trim();
 

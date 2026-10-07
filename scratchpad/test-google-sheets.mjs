@@ -209,6 +209,17 @@ eq(escolherAbas(['Setembro 2026', 'agosto  2026'], { fixas: ['AGOSTO 2026'], seg
   eq(parseDate(''), null, 'vazio é nulo');
   eq(parseDate('sem data'), null, 'texto que não é data é nulo');
   ok(typeof parseDate(45870) === 'string', 'número de série do Excel continua virando data');
+  eq(parseDate(45870), '2025-08-01', 'e com o valor certo');
+  // ⚠️ Caso REAL (Romanza, abas MAI24/AGT24/SET24/OUT24): número enorme virava
+  // "+020204-05-13" e o Postgres derrubava a aba inteira com "time zone
+  // displacement out of range". Validar só o TEXTO não bastava — a planilha
+  // guarda data como número e é por aqui que a maioria passa.
+  eq(parseDate(6700000), null, 'serial absurdo do Excel é recusado');
+  eq(parseDate(-900000), null, 'serial negativo também');
+  eq(parseDate(0), null, 'zero não é data');
+  ok(parseDate(1) === null || typeof parseDate(1) === 'string', 'serial 1 (1900) não quebra');
+  eq(parseDate(new Date('+020204-05-13')), null, 'Date fora de faixa é recusado');
+  eq(parseDate(new Date('2026-06-23')), '2026-06-23', 'Date normal passa');
   eq(dataValida(2026, 6, 23), true, 'dataValida aceita o que existe');
   eq(dataValida(2026, 0, 23), false, 'dataValida recusa mês zero');
   eq(dataValida(1800, 6, 23), false, 'ano fora de alcance é recusado');
