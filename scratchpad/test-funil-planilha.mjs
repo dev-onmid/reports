@@ -35,6 +35,7 @@ t('cabeçalho com coluna em branco antes', contarAbaPlanilha(comBranco, cfg, { a
 t('aba sem CANAL é ignorada', contarAbaPlanilha([['X', 'Y'], [1, 2]], cfg, { ano: 2026, mes: 8 }) === null);
 t('aba sem colunas de contato avisa', contarAbaPlanilha([['DATA', 'CANAL', 'STATUS'], [46276, 'Site', 'Aprovado']], cfg, { ano: 2026, mes: 8 }).colunasAusentes.includes('1º CONTATO'));
 const f = montarFunilPlanilha(cfg, [10, 8, 3, 2, 2, 1], [4]);
+t('só 1º e 2º contato ainda conta', contarAbaPlanilha([['DATA', 'CANAL', '1º CONTATO', '2º CONTATO', 'STATUS'], [46276, 'Site', '', '✅', 'Aprovado']], cfg, { ano: 2026, mes: 8 }).colunasAusentes.length === 0);
 t('montar funil', f.degraus.length === 6 && f.degraus[5].rotulo === 'Cadastros' && f.desvios[0].valor === 4);
 
 const ARQ = process.env.ARQ;

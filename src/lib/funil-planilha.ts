@@ -147,7 +147,9 @@ export function contarAbaPlanilha(
       return l => iStatus >= 0 && ok.has(normalizarCelula(l[iStatus]));
     }
     const idx = regra.colunas.map(c => indiceDaColuna(cab, c));
-    regra.colunas.forEach((c, k) => { if (idx[k] < 0) ausentes.add(nomePrincipal(c)); });
+    // Basta UMA das colunas existir: "contato feito" com só 1º e 2º contato
+    // (Romanza, jun/2025) continua sendo contato feito.
+    if (idx.every(i => i < 0)) regra.colunas.forEach(c => ausentes.add(nomePrincipal(c)));
     const marca = normalizarCelula(regra.marca);
     return l => idx.some(i => i >= 0 && normalizarCelula(l[i]) === marca);
   };
