@@ -450,10 +450,11 @@ export async function POST(req: NextRequest) {
 
     // Prefer the Evolution instance when both providers are active (Evolution is the
     // live/primary; Z-API rows are legacy). Must match getClientInstance + sync-history.
+    // A API oficial (provider 'meta') não tem findChats — fica fora do import.
     const { rows: [instance] } = await pool.query(
       `SELECT instance_id, token, provider
        FROM public.client_zapi_instances
-       WHERE client_id = $1 AND ativo = true
+       WHERE client_id = $1 AND ativo = true AND provider <> 'meta'
        ORDER BY CASE WHEN provider = 'evolution' THEN 0 ELSE 1 END, created_at ASC
        LIMIT 1`,
       [clientId],
