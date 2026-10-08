@@ -1,7 +1,7 @@
 import {
   LayoutDashboard, Users, FileText, WalletCards,
   BarChart3, MessageCircle, TableProperties, Zap, Bot, ShieldCheck, WandSparkles,
-  Download, History, Gift, CalendarClock, PhoneCall,
+  Download, History, Gift, CalendarClock, PhoneCall, Lightbulb,
 } from 'lucide-react';
 import type { Permission } from '@/lib/mock-data';
 
@@ -46,6 +46,7 @@ export const NAV_ITEMS: NavItem[] = [
   // tela foi pensada para rodar no próprio iPhone (o link tel: disca direto).
   { name: 'Discador',        href: '/discador',                  icon: PhoneCall,     key: 'crm',        desc: 'Ligações de prospecção',        group: 'ferramentas', mobile: true },
   { name: 'Biblioteca Meta', href: '/ferramentas/biblioteca-meta', icon: Download,    key: 'radar',      desc: 'Baixar criativos de anúncios',  group: 'ferramentas' },
+  { name: 'Formatos de Criativos', href: '/ferramentas/formatos-criativos', icon: Lightbulb, key: 'radar', desc: '50 formatos com exemplos', group: 'ferramentas' },
   { name: 'Sorteador',       href: '/ferramentas/sorteador',       icon: Gift,        key: 'radar',      desc: 'Sorteios de comentários IG/FB', group: 'ferramentas' },
   { name: 'Publicações',     href: '/ferramentas/publicacoes',     icon: CalendarClock, key: 'radar',    desc: 'Agendar posts e stories',       group: 'ferramentas' },
 ];
