@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { BellRing, X, Clock } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -44,7 +45,12 @@ export function LembreteAlarme({ itens, onVi, onAdiar }: {
 
   if (!atual) return null;
 
-  return (
+  // ⚠️ Portal para o <body> pela MESMA razão do modal de novo lembrete: este card é
+  // renderizado dentro do <header>, que tem `backdrop-blur-sm`, e `backdrop-filter`
+  // torna o header o bloco de contenção dos filhos `fixed`. Sem o portal, o
+  // `bottom-5 right-5` abaixo era o canto do HEADER (faixa de 56px), não o da tela —
+  // o alarme aparecia grudado no topo em vez do rodapé.
+  return createPortal(
     <div
       role="alertdialog"
       aria-live="assertive"
@@ -95,7 +101,8 @@ export function LembreteAlarme({ itens, onVi, onAdiar }: {
           <X className="h-4 w-4" />
         </button>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
