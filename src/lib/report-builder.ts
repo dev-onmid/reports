@@ -13,6 +13,7 @@ import {
 } from './delivery-report-builder';
 import { sectionEnabled } from './report-sections';
 import { fetchCrmDoRelatorio, fetchSiteDoRelatorio, degrausDoFunil, ehMesCheio } from './report-crm-dados';
+import { receitaPorPlataforma, comercialDaPlataforma } from './canal-plataforma';
 import type { CrmDoPeriodo } from './crm-metricas';
 
 // ── Persist ───────────────────────────────────────────────────────────────────
@@ -787,7 +788,9 @@ export async function buildOmniReport(input: {
 
   if (hasPaidTraffic) slides.push(sPaidTrafficResumo(meta, googleDetailed, ++i, total));
 
-  if (hasMeta)        slides.push(sMetaAdsResumo(meta!, ++i, total));
+  // Faturamento do CRM por plataforma (canais Meta × Google) para o ROAS dos resumos.
+  const receitaPlat = receitaPorPlataforma(crm.canais?.origens ?? []);
+  if (hasMeta)        slides.push(sMetaAdsResumo(meta!, ++i, total, comercialDaPlataforma(receitaPlat.meta, meta!.investimento)));
   if (hasDestaques) {
     for (let start = 0; start < meta!.campanhas.length; start += 4) {
       slides.push(sMetaAdsCampanhas(meta!, diag, ++i, total, periodo, meta!.campanhas.slice(start, start + 4)));
@@ -795,7 +798,7 @@ export async function buildOmniReport(input: {
   }
   if (hasCriativos)   slides.push(sCriativos(creatives, ++i, total));
 
-  if (hasGoogle)      slides.push(sGoogleAdsResumo(googleDetailed!, ++i, total));
+  if (hasGoogle)      slides.push(sGoogleAdsResumo(googleDetailed!, ++i, total, comercialDaPlataforma(receitaPlat.google, googleDetailed!.investimento)));
   if (hasGoogleDestaques) {
     for (let start = 0; start < googleDetailed!.campanhas.length; start += 4) {
       slides.push(sGoogleAdsCampanhas(googleDetailed!, ++i, total, periodo, googleDetailed!.campanhas.slice(start, start + 4)));

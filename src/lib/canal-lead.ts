@@ -80,7 +80,23 @@ function fusoesSql(c: string): string {
 export function canalSql(pre = ''): string {
   const c = pre ? `${pre}.` : '';
   return `CASE
-${fusoesSql(c)}  WHEN NULLIF(${c}ctwa_clid, '') IS NOT NULL OR NULLIF(${c}fbclid, '') IS NOT NULL THEN 'Meta Ads'
+${fusoesSql(c)}  -- Lead de anúncio da Meta (click id presente): a REDE vem do que o webhook
+  -- gravou em canal/origin ("Instagram", "Facebook", "Facebook - WhatsApp"…) e o
+  -- TIPO do que o trouxe — formulário nativo ou conversa no WhatsApp. Pedido do
+  -- Matheus (08/10/2026): "Meta Ads tem que ser dividido entre Facebook e
+  -- Instagram, e aí dividir o que for formulário e o que for whatsapp". Antes
+  -- tudo isso virava a fatia única "Meta Ads", jogando fora o que já estava gravado.
+  WHEN NULLIF(${c}ctwa_clid, '') IS NOT NULL OR NULLIF(${c}fbclid, '') IS NOT NULL THEN
+    (CASE
+       WHEN lower(${c}canal) LIKE '%instagram%' OR ${c}origin = 'instagram' THEN 'Instagram'
+       WHEN lower(${c}canal) LIKE '%facebook%' OR lower(${c}canal) LIKE 'fb%' OR ${c}origin = 'meta' THEN 'Facebook'
+       ELSE 'Meta Ads'
+     END)
+    || (CASE
+          WHEN lower(${c}canal) LIKE '%formul%' THEN ' · Formulário'
+          WHEN NULLIF(${c}ctwa_clid, '') IS NOT NULL THEN ' · WhatsApp'
+          ELSE ''
+        END)
   WHEN NULLIF(${c}gclid, '') IS NOT NULL OR NULLIF(${c}wbraid, '') IS NOT NULL
     OR NULLIF(${c}gbraid, '') IS NOT NULL THEN 'Google Ads'
   WHEN NULLIF(btrim(${c}canal), '') IS NOT NULL

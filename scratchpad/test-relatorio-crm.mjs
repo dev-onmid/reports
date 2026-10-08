@@ -4,7 +4,7 @@
 //     --packages=external --tsconfig=tsconfig.json --outfile=scratchpad/build/relatorio-crm.mjs
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { ehMesCheio, degrausDoFunil, sFunilComercial, sCanais, sVisaoGeral, sInstagram, sInstagramCalendar, sGoogleAdsResumo, sGoogleAdsCampanhas, sPaidTrafficResumo, sSiteResumo, sSiteAudiencia, agruparSerieDiaria, seletorContatos, categorizeGoogleCampaign, comprasReaisGoogle, rotuloPeriodo, mesesCheios, autoPreviousPeriod, postsParaListar, sInstagramPosts, sInstagramSpotlight, sInstagramTodosConteudos, TODOS_CONTEUDOS_MAX_PAGINAS, ganhoNoPeriodo, serieDaResposta, CRM_PERIODO_SQL } from './build/relatorio-crm.mjs';
+import { ehMesCheio, degrausDoFunil, sFunilComercial, sCanais, sVisaoGeral, sInstagram, sInstagramCalendar, sGoogleAdsResumo, sGoogleAdsCampanhas, sPaidTrafficResumo, sSiteResumo, sSiteAudiencia, agruparSerieDiaria, seletorContatos, categorizeGoogleCampaign, comprasReaisGoogle, rotuloPeriodo, mesesCheios, autoPreviousPeriod, postsParaListar, sInstagramPosts, sInstagramSpotlight, sInstagramTodosConteudos, TODOS_CONTEUDOS_MAX_PAGINAS, plataformaDoCanal, receitaPorPlataforma, comercialDaPlataforma, ganhoNoPeriodo, serieDaResposta, CRM_PERIODO_SQL } from './build/relatorio-crm.mjs';
 
 let n = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); n++; };
@@ -178,8 +178,7 @@ const site = sSiteResumo(ga4, { periodo: 'Setembro/2026', prevPeriodo: 'Agosto/2
 ok(site.includes('>1.910<') && site.includes('>141<'), 'visitas e contatos do GA4');
 ok(site.includes('7,4%') && site.includes('65,0%') && site.includes('1m 02s'), 'taxa de contato, engajamento e tempo médio');
 ok(site.includes('+14,3% ↑ vs Agosto'), 'variação contra o período anterior');
-ok(site.includes('Pesquisa paga') && site.includes('Busca orgânica') && !site.includes('Paid Search'), 'canais traduzidos');
-ok(site.includes('72 contatos'), 'contatos por canal = WhatsApp + formulário + telefone (a régua da dashboard)');
+ok(!site.includes('De onde vieram as visitas') && site.includes('Pesquisa paga foi a origem que mais gerou contato: 72'), 'lista de canais saiu da página (08/10); a leitura ainda cita a melhor origem traduzida');
 ok(!sSiteResumo(ga4, { periodo: 'Setembro/2026', prevPeriodo: '', comparar: false }, 11, 20).includes('↑ vs'), 'sem comparativo, sem variação');
 const audi = sSiteAudiencia(ga4, { periodo: 'Setembro/2026' }, 12, 20);
 ok(audi.includes('Celular') && audi.includes('Computador') && audi.includes('Novos visitantes'), 'dispositivos e novos × recorrentes');
@@ -190,7 +189,7 @@ ok(!/NaN|Infinity|undefined/.test(site + audi), 'páginas de site sem NaN/Infini
 const semTipo = [{ valor: 'a', sessoes: 10, engajadas: 5, tempo: 1, conversoes: 4, sessoesConv: 3, whatsapp: 0, formulario: 0, telefone: 0 }];
 ok(seletorContatos(semTipo)(semTipo[0]) === 4, 'sem tipo classificável, contatos = eventos-chave');
 const vazio = { ...ga4, diario: [], pago: { ...ga4.pago, canais: [] }, audiencia: { dispositivos: [], cidades: [], novosRecorrentes: [], idades: [], generos: [], semanaHora: [] }, comportamento: { ...ga4.comportamento, paginasEntrada: [] } };
-ok(sSiteResumo(vazio, { periodo: 'X', prevPeriodo: '', comparar: false }, 1, 2).includes('Sem origem registrada') && sSiteAudiencia(vazio, { periodo: 'X' }, 1, 2).length > 500, 'GA4 sem cortes não quebra as páginas');
+ok(sSiteResumo(vazio, { periodo: 'X', prevPeriodo: '', comparar: false }, 1, 2).length > 500 && sSiteAudiencia(vazio, { periodo: 'X' }, 1, 2).length > 500, 'GA4 sem cortes não quebra as páginas');
 
 // ── Rótulo do período e comparativo automático (caso Incorpast: trimestre chamado de "Julho") ──
 ok(mesesCheios('2026-07-01', '2026-07-31') === 1 && mesesCheios('2026-07-01', '2026-09-30') === 3, 'conta meses cheios');
@@ -239,5 +238,20 @@ const fp = { funil: { contatos: 556, qualificados: 51, agendamentos: 1, comparec
 const dp = degrausDoFunil(fp);
 ok(dp.length === 3 && dp[0].valor === 253 && dp[1].label === 'Contatos feitos' && dp[2].valor === 12, 'com funil da planilha, o relatório mostra os degraus da planilha');
 ok(degrausDoFunil({ ...fp, funilPlanilha: null }).length === 5, 'sem planilha, cai no semântico como antes');
+
+// ── Faturamento/ROAS por plataforma (regra do Matheus: Google Ads + WhatsApp = Google; Instagram + Meta Ads = Meta) ──
+const P = plataformaDoCanal;
+ok(['Meta Ads','Instagram','Facebook','Facebook - WhatsApp','Instagram - WhatsApp','Instagram/Facebook','faceads','FB (não usar)'].every(c => P(c) === 'meta'), 'vocabulário real da Meta');
+ok(['Google','Google Ads','Google/Site','Site/Google','google','Whatsapp','WhatsApp','Chatwoot - WhatsApp'].every(c => P(c) === 'google'), 'vocabulário real do Google (WhatsApp sem rede social = Google)');
+ok(['Indicação','Fachada','Site','TV','Placa','Google Meu Negócio','',null].every(c => P(c) === null), 'canal sem plataforma fica fora');
+const rp = receitaPorPlataforma([{ label: 'Google', receita: 1000, vendas: 2 }, { label: 'Whatsapp', receita: 500, vendas: 1 }, { label: 'Instagram', receita: 300, vendas: 1 }, { label: 'Indicação', receita: 9999, vendas: 9 }]);
+ok(rp.google.faturamento === 1500 && rp.google.vendas === 3 && rp.meta.faturamento === 300 && rp.google.canais.length === 2, 'soma por plataforma, Indicação fora');
+ok(comercialDaPlataforma(rp.google, 750).roas === 2 && comercialDaPlataforma(rp.meta, 0).roas === null && comercialDaPlataforma({ faturamento: 0, vendas: 0, canais: [] }, 100) === null, 'ROAS = faturamento ÷ investimento; sem venda não aparece');
+const gRoas = sGoogleAdsResumo(gLeads, 8, 18, { faturamento: 1500, vendas: 3, roas: 1500 / gLeads.investimento, canais: ['Google'] });
+ok(gRoas.includes('Faturamento (CRM)') && gRoas.includes('1,30x') && gRoas.includes('repeat(5,1fr)'), 'resumo do Google mostra faturamento e ROAS em 5 colunas');
+ok(!sGoogleAdsResumo(gLeads, 8, 18, null).includes('ROAS') || !sGoogleAdsResumo(gLeads, 8, 18, null).includes('Faturamento (CRM)'), 'sem venda atribuída o resumo fica como era');
+
+// ── Canal da Meta dividido por rede e tipo (08/10) — o ROAS continua agrupando tudo em Meta ──
+ok(['Instagram · WhatsApp','Facebook · WhatsApp','Facebook · Formulário','Meta Ads · WhatsApp'].every(c => plataformaDoCanal(c) === 'meta'), 'rótulos novos da Meta continuam contando no ROAS da Meta');
 
 console.log(`OK — ${n} asserts`);

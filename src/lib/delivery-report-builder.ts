@@ -6,6 +6,7 @@ import { randomUUID } from 'crypto';
 import { logAiUsage } from '@/lib/ai-usage-logger';
 import { sectionEnabled } from '@/lib/report-sections';
 import { ROTULOS_CANAL_GA4, ROTULOS_DISPOSITIVO_GA4, seletorContatos, type Ga4Consolidado, type Ga4Seg } from '@/lib/ga4-landing';
+import type { ComercialDaPlataforma } from '@/lib/canal-plataforma';
 import { buscarSerieSeguidores, registrarSerieSeguidores, lerSerieSeguidores, ganhoNoPeriodo, type GanhoSeguidores } from '@/lib/ig-seguidores';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -2852,21 +2853,14 @@ export function sSiteResumo(
   const grafico = serie.length >= 2
     ? cardSite(`Visitas e contatos ${escala}`, `<div style="display:flex;gap:22px;margin:-2px 0 4px">
         ${legendaGrafico(BLUE, 'Visitas', num(a.sessoes))}${legendaGrafico(PRIMARY_TEXT, 'Contatos', num(a.contatos), true)}
-      </div>${graficoBarrasLinha(serie, { w: 772, h: 212, corBarra: BLUE, corLinha: PRIMARY_TEXT, fmtBarra: (v) => num(Math.round(v)), fmtLinha: dec1 })}`)
+      </div>${graficoBarrasLinha(serie, { w: 1296, h: 254, corBarra: BLUE, corLinha: PRIMARY_TEXT, fmtBarra: (v) => num(Math.round(v)), fmtLinha: dec1 })}`)
     : '';
 
   const contar = seletorContatos(g.pago.canais);
   const canais = g.pago.canais.filter(c => c.sessoes > 0).slice(0, 5);
   const maior = Math.max(...canais.map(c => c.sessoes), 1);
-  const linhasCanais = canais.map(c => {
-    const cont = contar(c);
-    return linhaSite(
-      escapeHtmlAttr(cortaTexto(ROTULOS_CANAL_GA4[c.valor] ?? c.valor, 30)), num(c.sessoes),
-      a.sessoes > 0 ? (c.sessoes / a.sessoes) * 100 : 0, (c.sessoes / maior) * 100, BLUE,
-      cont > 0 ? `${num(cont)} ${cont === 1 ? 'contato' : 'contatos'} · ${pctBR((cont / c.sessoes) * 100)} das visitas` : 'sem contato no período',
-    );
-  }).join('');
-  const origens = cardSite('De onde vieram as visitas', linhasCanais || `<p style="font-family:${INTER};font-size:14px;color:${MUTED}">Sem origem registrada no período.</p>`);
+  // O card "De onde vieram as visitas" SAIU da página (pedido do Matheus, 08/10/2026):
+  // o gráfico ocupa a largura inteira. A leitura ainda aponta a melhor origem.
 
   const partes = [a.whatsapp > 0 ? `${num(a.whatsapp)} pelo WhatsApp` : '', a.leadForm > 0 ? `${num(a.leadForm)} por formulário` : '', a.telefone > 0 ? `${num(a.telefone)} por telefone` : ''].filter(Boolean);
   const dSess = o.comparar ? deltaInfo(a.sessoes, p.sessoes) : null;
@@ -2884,8 +2878,8 @@ export function sSiteResumo(
       ${kpi('Contatos', num(a.contatos), a.contatos, p.contatos)}
       ${kpi('Taxa de contato', pctBR(taxaContato), taxaContato, taxaContatoAnt)}
     </div>
-    <div style="display:grid;grid-template-columns:${grafico ? '816px 1fr' : '1fr'};gap:16px;align-items:stretch">
-      ${grafico}${origens}
+    <div style="display:grid;grid-template-columns:1fr;gap:16px;align-items:stretch">
+      ${grafico}
     </div>
     ${leituraCrm([p1, p2])}`;
   return molduraCrm('Site e landing pages', `O que aconteceu no site em ${o.periodo} — Google Analytics`, corpo, 'sSiteResumo');
@@ -3485,7 +3479,7 @@ function cleanCampaignHighlightTitle(raw: string): string {
   return tags.join(' ') || raw;
 }
 
-export function sMetaAdsResumo(meta: MetaAdsFull, idx: number, total: number): string {
+export function sMetaAdsResumo(meta: MetaAdsFull, idx: number, total: number, comercial?: ComercialDaPlataforma | null): string {
   void idx;
   void total;
   const ctr = meta.impressoes > 0 ? (meta.cliques / meta.impressoes) * 100 : 0;
@@ -3581,7 +3575,15 @@ export function sMetaAdsResumo(meta: MetaAdsFull, idx: number, total: number): s
     bigKpi('CPM', brlC(cpm), ICO_CHART),
     bigKpi('CPC', brlC(cpc), ICO_CURSOR),
     ...(totalResultados > 0 ? [bigKpi('CPL', brlC(cplGeral), ICO_TARGET)] : []),
+    // Faturamento do CRM nos canais da Meta (Instagram/Facebook/Meta Ads) e o ROAS
+    // sobre o investimento da conta — pedido do Matheus (08/10/2026). Só entram
+    // quando há venda atribuída; sem isso o layout fica como era.
+    ...(comercial ? [
+      bigKpi('Faturamento (CRM)', brlC(comercial.faturamento), ICO_MONEY),
+      bigKpi('ROAS', comercial.roas !== null ? `${comercial.roas.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}x` : '—', ICO_CHART),
+    ] : []),
   ];
+  const kpiCols = generalMetrics.length > 8 ? 5 : 4;
 
   const segmentLine = (label: string, value: string) =>
     `<div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px;border-top:1px solid rgba(148,163,184,.18);padding-top:8px">
@@ -3671,7 +3673,7 @@ export function sMetaAdsResumo(meta: MetaAdsFull, idx: number, total: number): s
       <p style="font-size:16px;font-weight:500;color:#163461;font-family:${INTER};margin:0">Métricas Meta Ads e resultados separados por objetivo de ${meta.nivel === 'adset' ? 'conjunto de anúncios' : 'campanha'}</p>
     </div>
 
-    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;flex-shrink:0">
+    <div style="display:grid;grid-template-columns:repeat(${kpiCols},1fr);gap:14px;flex-shrink:0">
       ${generalMetrics.join('')}
     </div>
 
@@ -4967,7 +4969,7 @@ export function sMetaAdsCampanhas(meta: MetaAdsFull, diag: DiagJson, idx: number
 
 // ── Google Ads — Resumo ───────────────────────────────────────────────────────
 
-export function sGoogleAdsResumo(google: GoogleAdsFull, idx: number, total: number): string {
+export function sGoogleAdsResumo(google: GoogleAdsFull, idx: number, total: number, comercial?: ComercialDaPlataforma | null): string {
   void idx;
   void total;
   const ctr = google.impressoes > 0 ? (google.cliques / google.impressoes) * 100 : 0;
@@ -5014,7 +5016,14 @@ export function sGoogleAdsResumo(google: GoogleAdsFull, idx: number, total: numb
     bigKpi('CPC', brlC(cpc), ICO_CURSOR),
     bigKpi('Conversões', numOrDash(google.conversoes), ICO_TARGET),
     bigKpi('Custo/conversão', brlC(custoConversao), ICO_MONEY),
+    // Faturamento do CRM nos canais do Google (Google Ads e WhatsApp sem marca de
+    // rede social — regra do Matheus, 08/10/2026) e o ROAS sobre o investimento.
+    ...(comercial ? [
+      bigKpi('Faturamento (CRM)', brlC(comercial.faturamento), ICO_MONEY),
+      bigKpi('ROAS', comercial.roas !== null ? `${comercial.roas.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}x` : '—', ICO_PERCENT),
+    ] : []),
   ];
+  const kpiCols = generalMetrics.length > 8 ? 5 : 4;
 
 
   // ⚠️ A divisão em cards por "objetivo" (Pesquisa/tráfego × Geração de leads × Vendas)
@@ -5060,7 +5069,7 @@ export function sGoogleAdsResumo(google: GoogleAdsFull, idx: number, total: numb
       <p style="font-size:16px;font-weight:500;color:#163461;font-family:${INTER};margin:0">Métricas gerais e evolução do período</p>
     </div>
 
-    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;flex-shrink:0">
+    <div style="display:grid;grid-template-columns:repeat(${kpiCols},1fr);gap:14px;flex-shrink:0">
       ${generalMetrics.join('')}
     </div>
 
