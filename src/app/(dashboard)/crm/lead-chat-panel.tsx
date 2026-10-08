@@ -255,7 +255,7 @@ export function LeadChatPanel({
         ) : messages.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
             <MessageCircle className="h-6 w-6 text-muted-foreground/50" />
-            <p className="text-xs text-muted-foreground">Nenhuma mensagem ainda. Mande a primeira abaixo.</p>
+            <p className="text-xs text-muted-foreground">Nenhuma mensagem ainda. Mande a primeira por aqui: a conversa fica vinculada a este lead, inclusive o que você responder depois pelo celular.</p>
           </div>
         ) : (
           messages.map((m, i) => {

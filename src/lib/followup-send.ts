@@ -178,8 +178,11 @@ function buildEvolutionTargets(phone: string, lid?: string): string[] {
   if (raw.includes('@')) targets.push(raw);
   if (lidDigits) targets.push(`${lidDigits}@lid`);
   if (digits.length > 13 && !digits.startsWith('55')) targets.push(`${digits}@lid`);
-  if (digits) targets.push(digits);
+  // Número brasileiro guardado sem o 55 (padrão do SULTS): o 55 vem PRIMEIRO.
+  // Tentar o número cru antes mandaria "41 99924-8433" para a Suíça (+41) se
+  // por azar existisse lá — só vale como último recurso.
   if ((digits.length === 10 || digits.length === 11) && !digits.startsWith('55')) targets.push(`55${digits}`);
+  if (digits) targets.push(digits);
 
   return Array.from(new Set(targets.filter(Boolean)));
 }

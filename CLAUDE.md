@@ -1,3 +1,14 @@
+## CRM — conversa em modo LID passa a vincular no ENVIO (caso CondoStore, 2026-10-08)
+
+Matheus: "os leads da CondoStore entram pela integração com o SULTS, mas os chats e atendimentos não estão sendo vinculados".
+
+- **Causa medida**: a conversa existe no número conectado (`comercial-condostore-dani`), mas o WhatsApp entrega **419 de 499 chats só com o LID**, sem telefone; o lead do SULTS só tem telefone. **Nenhuma leitura revela o par**: mapa em disco (`lid-mapping-*`), banco da Evolution (`IsOnWhatsapp.lid` guarda a palavra literal "lid"; só 52 de 471 chats LID têm `remoteJidAlt` em alguma mensagem), `/chat/whatsappNumbers` e `/chat/fetchProfile` (não devolvem LID nem criam o mapa). A API do SULTS não tem conversa (timeline = etapa e PERDA).
+- **O envio é o único momento em que o par aparece**: o Baileys grava `lid-mapping-<tel>.json` ao mandar. `src/lib/crm-lid-vinculo.ts` (`vincularLidAposEnvio`) roda no POST de `/api/crm/[id]/messages` quando o envio Evolution dá certo e o lead ainda não tem `whatsapp_lid`: grava o LID e **funde o lead-fantasma só-LID** que o eco do webhook possa ter criado antes (mensagem repetida por `external_id` fica uma só). Nunca lança.
+- ⚠️ **A 1ª mensagem precisa sair pelo CRM** (botão "Conversa" no modal do lead; o estado vazio agora explica). Começar pelo celular não gera o vínculo.
+- ⚠️ **`buildEvolutionTargets` tentava o número CRU antes do 55**: o SULTS guarda `41999248433`, que como número internacional é Suíça (+41). Agora o `55` vem primeiro.
+- **Retroativo**: 50 leads do SULTS ligados aos chats por **primeiro nome da saudação + movimento para Abordagem no SULTS (ou criação) a ±3 dias**, só com candidato único, chat citando um nome só, segundo nome batendo quando ela usa dois ("Ana Cláudia" ≠ "Ana Paula") e lead sem segundo chat. Histórico via `/api/crm/sync-history` (61 mensagens: a Evolution só guarda desde agosto). Leads do SULTS com conversa: **40 → 78**. Pares em `/root/backup-vinculo-lid-condostore-2026-10-08.json`. ~100 chats ficaram de fora por nome ambíguo.
+- ⚠️ A limpeza de fantasmas de 07/10 apagou **150 leads só-LID do CondoStore** que eram essas conversas sem telefone (sem mensagens gravadas, só a prévia); estão no backup daquele dia.
+
 ## Discador — ligações de prospecção um clique por vez, lead no CRM (2026-10-01)
 
 Pedido do Matheus: baixar uma lista grande de leads (ON Prospecção) e ligar um a um sem

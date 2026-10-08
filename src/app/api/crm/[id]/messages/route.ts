@@ -1,6 +1,7 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { getClientInstance, sendFollowupMessage } from '@/lib/followup-send';
+import { vincularLidAposEnvio } from '@/lib/crm-lid-vinculo';
 import { analisarConversa } from '@/lib/crm-ai-analysis';
 import { ensureCrmMessagesSchema, ensureDefaultFunnel } from '@/lib/crm-conversation-sync';
 import { readSession } from '@/lib/session';
@@ -191,6 +192,7 @@ export async function POST(
     let waSent = false;
     let waError: string | undefined;
     let waExternalId: string | undefined;
+    let waInstanceName: string | null = null;
     let whatsappStatus: string | null = direction === 'out' ? 'pending' : null;
 
     if (direction === 'out') {
@@ -218,6 +220,7 @@ export async function POST(
             waSent = result.ok;
             waError = result.error;
             waExternalId = result.externalId;
+            if (waSent && instance.provider === 'evolution') waInstanceName = instance.instanceId;
           }
         } else {
           waError = 'Nenhuma instância WhatsApp ativa para este cliente';
@@ -268,6 +271,14 @@ export async function POST(
           )`,
       [lead.client_id, id, lead.numero ?? null, dbText, direction],
     );
+    // Modo LID: o envio é o único momento em que o WhatsApp revela o código do
+    // contato. Guardado no lead, a resposta e o que o atendente mandar depois
+    // pelo celular deixam de cair num lead sem telefone (caso CondoStore).
+    if (waInstanceName && lead.numero && !String(lead.whatsapp_lid ?? '').trim()) {
+      await vincularLidAposEnvio(pool, {
+        clientId: lead.client_id, leadId: targetLeadId, phone: lead.numero, instanceName: waInstanceName,
+      });
+    }
     if (lead.time_interno !== true) {
       await analisarConversa(pool, targetLeadId).catch(err => console.error('[messages analisarConversa]', err));
     }
