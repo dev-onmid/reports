@@ -8,7 +8,9 @@
     "client-1778639715710",
     "client-1788987948836",
     "client-1789748020716",
-    "client-1778639860142"
+    "client-1778639860142",
+    "client-1788350966704",
+    "client-1790956537044"
   ],
   "_auditoria": "Clientes que recebem a nota diária de atendimento.",
   "auditoria": [
@@ -29,7 +31,11 @@
     "client-1778591834317",
     "client-1778591737887",
     "client-1778639900852",
-    "client-1778887096322"
+    "client-1778887096322",
+    "client-1788350966704",
+    "client-1790956537044",
+    "client-1778639563347",
+    "client-1783771601698"
   ],
   "max_leads_por_dia": 150,
   "modelo": "sonnet",
