@@ -35,11 +35,15 @@ export async function GET(req: NextRequest) {
   if (!st) return Response.redirect(ORIGEM + f, 302);
 
   const ext = f.split('.').pop()!;
-  const base = {
+  // ?baixar=<nome> força o download com um nome legível em vez de tocar.
+  const baixar = req.nextUrl.searchParams.get('baixar');
+  const nome = baixar ? `${baixar.replace(/[^a-zA-Z0-9_-]+/g, '-').slice(0, 80)}.${ext}` : null;
+  const base: Record<string, string> = {
     'Content-Type': MIME[ext],
     'Accept-Ranges': 'bytes',
     'Cache-Control': 'private, max-age=86400',
   };
+  if (nome) base['Content-Disposition'] = `attachment; filename="${nome}"`;
 
   // Safari só toca vídeo com resposta parcial (206); sem Range, também não dá
   // para avançar o vídeo em nenhum navegador.
