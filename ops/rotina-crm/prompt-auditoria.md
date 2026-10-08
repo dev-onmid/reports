@@ -7,6 +7,7 @@ CLIENTE DE HOJE: {{CLIENTE}}
 - `/opt/onmid-rotina/bin/rotina amostra {{CLIENTE}}` — até 28 conversas da última semana, escolhidas por: cliente esperando, conversa longa, ganho/perda, aleatória.
 - Leia os dois arquivos com Read. Escreva o resultado com Write em `/opt/onmid-rotina/work/{{DIA}}/{{CLIENTE}}-auditoria.json`.
 - `/opt/onmid-rotina/bin/rotina auditoria-gravar {{CLIENTE}}` — valida e grava. Se ele recusar, corrija o JSON e rode de novo.
+- Não tente outros comandos nem crie scripts (python, node, shell): eles são bloqueados e só fazem perder tempo. Escreva os arquivos DIRETAMENTE com a ferramenta Write.
 
 ## Régua (some exatamente 100)
 - velocidade_sla 0–25: 22–25 respostas rápidas e quase nada parado; 16–21 atrasos pontuais; 8–15 muitos atrasos ou leads importantes esperando; 0–7 abandono.

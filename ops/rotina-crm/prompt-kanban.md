@@ -8,6 +8,7 @@ CLIENTE DE HOJE: {{CLIENTE}}
 - Escreva as decisões de cada parte com a ferramenta Write em `/opt/onmid-rotina/work/{{DIA}}/{{CLIENTE}}-decisoes-N.jsonl` (N = número da parte).
 - `/opt/onmid-rotina/bin/rotina kanban-aplicar {{CLIENTE}}` — aplica tudo. Rode UMA vez, no fim.
 Não tente outros comandos: não há acesso direto ao banco.
+Não tente outros comandos nem crie scripts (python, node, shell): eles são bloqueados e só fazem perder tempo. Escreva os arquivos DIRETAMENTE com a ferramenta Write.
 
 ## Formato da decisão — uma linha JSON por lead, para TODO lead lido
 {"lead":"<uuid completo>","status":"<etapa EXATA ou null>","temperatura":"frio|morno|quente|null","valor_negocio":<número ou null>,"valor_rs":<número ou null>,"motivo_perda":"<id ou null>","motivo_perda_detalhe":"<texto ou null>","nota":"<1 frase do porquê>"}
