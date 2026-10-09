@@ -1,5 +1,6 @@
 import { makeServerPool } from '@/lib/server-db';
 import { readSession } from '@/lib/session';
+import { hostDaRequisicao, hostSoEquipe, MSG_USAR_CRM, URL_CRM } from '@/lib/host-acesso';
 
 /**
  * Fonte de verdade da sessão para o cliente.
@@ -23,6 +24,11 @@ export async function GET(req: Request) {
     const user = rows[0];
     if (!user || user.status !== 'Ativo') {
       return Response.json({ error: 'Não autenticado.' }, { status: 401 });
+    }
+    // Sessão de cliente aberta no reports (de antes da trava): a tela some e
+    // ele é mandado para o crm.onmid.app.
+    if (user.team === 'cliente' && hostSoEquipe(hostDaRequisicao(req))) {
+      return Response.json({ error: MSG_USAR_CRM, usarCrm: URL_CRM }, { status: 401 });
     }
     return Response.json({
       userId: String(user.id), name: user.name, email: user.email, role: user.role, team: user.team,

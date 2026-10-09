@@ -96,7 +96,11 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
         if (!active) return;
         if (res.status === 401) {
           clearAuthSession();
-          router.replace(`/?expirado=1&next=${encodeURIComponent(pathname)}`);
+          // Cliente logado no endereço da equipe: vai para o crm.onmid.app.
+          void res.clone().json().then((d: { usarCrm?: string }) => {
+            if (d?.usarCrm) window.location.href = `${d.usarCrm}/`;
+            else router.replace(`/?expirado=1&next=${encodeURIComponent(pathname)}`);
+          }).catch(() => router.replace(`/?expirado=1&next=${encodeURIComponent(pathname)}`));
           return;
         }
         if (!res.ok) setIndisponivel(true);

@@ -1,6 +1,7 @@
 import { makeServerPool } from '@/lib/server-db';
 import { verifyPassword, hashPassword } from '@/lib/password';
 import { createSessionToken, sessionCookieHeader, sessionSecretMissing } from '@/lib/session';
+import { hostDaRequisicao, hostSoEquipe, MSG_USAR_CRM, URL_CRM } from '@/lib/host-acesso';
 
 /**
  * Login server-side.
@@ -50,6 +51,11 @@ export async function POST(req: Request) {
     const { ok, needsRehash } = await verifyPassword(password, user.password);
     if (!ok) return deny();
     if (user.status !== 'Ativo') return deny();
+    // reports.onmid.app é da equipe: funcionário do cliente entra pelo crm.
+    // Depois da senha conferida, para não revelar quem tem conta.
+    if (user.team === 'cliente' && hostSoEquipe(hostDaRequisicao(req))) {
+      return Response.json({ error: MSG_USAR_CRM, usarCrm: URL_CRM }, { status: 403 });
+    }
 
     // Migração transparente: a conta guardava a senha em texto puro (ou com
     // parâmetros de hash antigos) e acabou de provar que sabe a senha — este é

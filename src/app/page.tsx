@@ -35,6 +35,7 @@ export default function LoginPage() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     setExpirado(params.get('expirado') === '1');
+    if (params.get('usar_crm') === '1') setError('Seu acesso é pelo crm.onmid.app — entre por lá.');
     const crm = window.location.hostname.startsWith('crm.');
     setEhCrm(crm);
     if (crm) document.title = 'Onmid CRM';
@@ -50,6 +51,12 @@ export default function LoginPage() {
     const resultado = await authenticateUser(email, password);
     setLoading(false);
 
+    if (!resultado.ok && resultado.motivo === 'usar_crm') {
+      setExpirado(false);
+      setError('Seu acesso é pelo crm.onmid.app — levando você para lá…');
+      window.setTimeout(() => { window.location.href = `${resultado.destino ?? 'https://crm.onmid.app'}/`; }, 1500);
+      return;
+    }
     if (!resultado.ok) {
       setExpirado(false);
       setError(

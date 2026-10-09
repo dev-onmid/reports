@@ -30,7 +30,7 @@ export type AuthSession = {
  */
 export type LoginResult =
   | { ok: true; session: AuthSession }
-  | { ok: false; motivo: 'credencial' | 'servidor' };
+  | { ok: false; motivo: 'credencial' | 'servidor' | 'usar_crm'; destino?: string };
 
 export async function authenticateUser(email: string, password: string): Promise<LoginResult> {
   if (typeof window === 'undefined') return { ok: false, motivo: 'servidor' };
@@ -42,6 +42,10 @@ export async function authenticateUser(email: string, password: string): Promise
       body: JSON.stringify({ email, password }),
     });
     // 401/403 = credencial; 5xx e afins = infraestrutura.
+    if (res.status === 403) {
+      const d = await res.json().catch(() => ({})) as { usarCrm?: string };
+      if (d.usarCrm) return { ok: false, motivo: 'usar_crm', destino: d.usarCrm };
+    }
     if (!res.ok) return { ok: false, motivo: res.status >= 500 ? 'servidor' : 'credencial' };
     const data = await res.json() as Partial<AuthSession>;
     if (!data?.userId) return { ok: false, motivo: 'credencial' };

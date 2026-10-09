@@ -5,6 +5,7 @@ import {
   carregarAcesso, clienteDoLead, clienteDoFunil, clientesCitados, leadsCitados, regraCliente, TEAM_CLIENTE,
   type AcessoUsuario,
 } from '@/lib/acesso';
+import { hostDaRequisicao, hostSoEquipe, MSG_USAR_CRM } from '@/lib/host-acesso';
 
 /**
  * Gate único de /api/*, negando por padrão.
@@ -226,6 +227,7 @@ export async function proxy(req: NextRequest) {
   const team = acesso?.team ?? session.team;
   if (team === TEAM_CLIENTE) {
     if (!acesso) return Response.json({ error: 'indisponivel' }, { status: 503 });
+    if (hostSoEquipe(hostDaRequisicao(req))) return proibido(MSG_USAR_CRM);
     const recusa = await barrarForaDoCliente(req, acesso).catch(() => proibido());
     if (recusa) return recusa;
   }
