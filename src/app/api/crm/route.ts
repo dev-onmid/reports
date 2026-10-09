@@ -204,6 +204,11 @@ export async function POST(req: NextRequest) {
   try {
     await ensureTable(pool);
     const fallbackFunnelId = await ensureDefaultFunnel(pool, clientId);
+    // Funil informado tem de ser DESTE cliente (auditoria 2026-10-10).
+    if (f.funnel_id) {
+      const { rowCount } = await pool.query(`SELECT 1 FROM public.crm_funnels WHERE id::text = $1 AND client_id = $2`, [String(f.funnel_id), clientId]);
+      if (!rowCount) return Response.json({ error: 'Funil não pertence a este cliente.' }, { status: 400 });
+    }
     const fallbackStatus = await getFirstFunnelStageLabel(pool, String(f.funnel_id ?? fallbackFunnelId));
     // Normaliza o número na ENTRADA (só dígitos; vazio → NULL) — o webhook e o GET
     // já trabalham com número normalizado; sem isso, número digitado formatado
@@ -249,7 +254,7 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error('[CRM POST error]', msg);
-    return Response.json({ error: msg }, { status: 500 });
+    return Response.json({ error: 'Não foi possível criar o lead.' }, { status: 500 });
   } finally {
     await pool.end();
   }

@@ -5,6 +5,14 @@ import { markLeadResponded } from '@/lib/followup-send';
 import { analisarConversa } from '@/lib/crm-ai-analysis';
 import { enviarEventoMeta, enviarEventoGoogle, hasSuccessfulConversion } from '@/lib/conversions';
 import { upsertLeadFromConversation, ensureCrmMessagesSchema } from '@/lib/crm-conversation-sync';
+import { timingSafeEqual } from 'node:crypto';
+
+function webhookAutenticado(body: unknown, tokenEsperado: unknown): boolean {
+  const recebido = body && typeof body === 'object' ? (body as { apikey?: unknown }).apikey : undefined;
+  if (typeof recebido !== 'string' || typeof tokenEsperado !== 'string' || !recebido || !tokenEsperado) return false;
+  const a = Buffer.from(recebido), b = Buffer.from(tokenEsperado);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
 import { resolverLeadExistente } from '@/lib/lead-identity';
 import { fetchEvolutionMediaBase64, uploadBase64ToStorage } from '@/lib/evolution-media';
 import { logMissingAdTracking } from '@/lib/crm-tracking-debug';
@@ -179,9 +187,14 @@ export async function POST(
 
   try {
     // 1. Resolve instance → client + provider (accepts UUID or instance_id name)
+    // ⚠️ Só pelo UUID da linha (é o que vai na URL do webhook). Aceitar o NOME
+    // da instância deixava a URL adivinhável ("crm-<cliente>").
+    if (!/^[0-9a-f-]{36}$/i.test(instanceId)) {
+      return Response.json({ ok: false, error: 'Instância não encontrada ou inativa' }, { status: 404 });
+    }
     const { rows: [inst] } = await pool.query(
-      `SELECT client_id, provider, instance_id FROM public.client_zapi_instances
-       WHERE (id::text = $1 OR instance_id = $1) AND ativo = true`,
+      `SELECT client_id, provider, instance_id, token FROM public.client_zapi_instances
+       WHERE id::text = $1 AND ativo = true`,
       [instanceId],
     );
     if (!inst) {
@@ -195,6 +208,17 @@ export async function POST(
     // 2. Parse and normalize payload based on provider
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const body: any = await req.json().catch(() => ({}));
+
+    // ⚠️ A Evolution manda `apikey` (o token da instância) em todo webhook —
+    // conferido no bundle dela (`...,sender:a,apikey:c`). Sem esta checagem
+    // qualquer um na internet postava uma "mensagem recebida" aqui: criava
+    // lead, disparava conversão no Meta, gastava IA e, via follow-up, mandava
+    // WhatsApp do número do CLIENTE para quem quisesse (auditoria 2026-10-10).
+    // Medido antes de ligar: 29 de 29 instâncias ativas com token igual ao da
+    // Evolution. Z-API não manda credencial no corpo e não tem instância ativa.
+    if (!webhookAutenticado(body, inst.token)) {
+      return Response.json({ ok: false, error: 'Credencial do webhook inválida' }, { status: 401 });
+    }
 
     if (provider === 'evolution') {
       const statusUpdates = extractEvolutionStatusUpdates(body);

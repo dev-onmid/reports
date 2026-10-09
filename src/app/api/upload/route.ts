@@ -68,7 +68,11 @@ export async function POST(req: NextRequest) {
   // Ensure bucket exists (idempotent)
   await supabase.storage.createBucket(BUCKET, { public: true }).catch(() => null);
 
-  const ext = file.name.split('.').pop() ?? 'bin';
+  // Só mídia de chat (auditoria 2026-10-10): HTML/SVG/script num bucket público
+  // seria hospedagem de phishing no nosso nome.
+  const tipoOk = /^(image\/(jpeg|png|webp|gif)|audio\/(mpeg|ogg|mp4|aac|wav|webm)|video\/(mp4|quicktime)|application\/pdf)$/i.test(file.type || '');
+  if (!tipoOk) return Response.json({ error: 'Tipo de arquivo não permitido. Envie imagem, áudio, vídeo ou PDF.' }, { status: 415 });
+  const ext = (file.name.split('.').pop() ?? 'bin').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 5) || 'bin';
   const path = `${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
 
   const { error } = await supabase.storage.from(BUCKET).upload(path, file, {

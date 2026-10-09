@@ -11,6 +11,8 @@ export type AuthSession = {
   email: string;
   role: string;
   team: Team;
+  /** Só para team='cliente': 'gestor' | 'atendente'. */
+  perfil?: string;
 };
 
 /**
@@ -56,6 +58,7 @@ export async function authenticateUser(email: string, password: string): Promise
       email: data.email ?? '',
       role: data.role ?? '',
       team: (data.team as Team) ?? 'onmid',
+      perfil: data.perfil,
     };
     window.localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
     return { ok: true, session };

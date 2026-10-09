@@ -1,5 +1,6 @@
 import type { NextRequest } from 'next/server';
 import { google } from 'googleapis';
+import { assinarStateOAuth } from '@/lib/oauth-state';
 
 const GMB_SCOPES = [
   'https://www.googleapis.com/auth/business.manage',
@@ -64,7 +65,7 @@ export async function GET(request: NextRequest) {
   const url = oauth2Client.generateAuthUrl({
     access_type: 'offline',
     scope: scopes,
-    state: type,
+    state: assinarStateOAuth(type),
     prompt: 'consent select_account',
   });
 

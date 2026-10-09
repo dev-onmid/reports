@@ -20,7 +20,10 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   try {
     const { rows } = await pool.query('SELECT * FROM public.crm_leads WHERE id = $1::uuid LIMIT 1', [id]);
     if (!rows[0]) return Response.json({ error: 'lead não encontrado' }, { status: 404 });
-    return Response.json({ lead: rows[0] });
+    // `raw` (linha original da planilha) fica fora, como na lista.
+    const { raw: _raw, ...lead } = rows[0];
+    void _raw;
+    return Response.json({ lead });
   } catch (err) {
     console.error('[crm lead GET]', err);
     return Response.json({ error: 'falha ao carregar o lead' }, { status: 500 });

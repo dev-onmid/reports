@@ -1,4 +1,4 @@
-import { scrypt, randomBytes, timingSafeEqual, createHash } from 'node:crypto';
+import { scrypt, randomBytes, timingSafeEqual } from 'node:crypto';
 import { promisify } from 'node:util';
 
 const scryptAsync = promisify(scrypt) as (
@@ -40,13 +40,6 @@ export type VerifyResult = {
 };
 
 /** Compara dois textos em tempo constante, sem vazar o tamanho pelo early-return. */
-function safeEqualStr(a: string, b: string): boolean {
-  // timingSafeEqual exige tamanhos iguais; comparar o comprimento antes vazaria
-  // essa informação. Hashear os dois lados normaliza pra 32 bytes fixos.
-  const ha = createHash('sha256').update(a, 'utf8').digest();
-  const hb = createHash('sha256').update(b, 'utf8').digest();
-  return timingSafeEqual(ha, hb);
-}
 
 /**
  * Verifica a senha contra o valor gravado, aceitando os DOIS formatos.
@@ -60,8 +53,11 @@ export async function verifyPassword(plain: string, stored: string | null | unde
   if (typeof stored !== 'string' || stored.length === 0) return { ok: false, needsRehash: false };
 
   if (!isHashed(stored)) {
-    // Legado: texto puro no banco.
-    return { ok: safeEqualStr(plain, stored), needsRehash: true };
+    // Senha em texto puro NÃO vale mais (auditoria 2026-10-10): em produção
+    // todas as contas já estão com hash, e aceitar texto puro mantinha vivo o
+    // caminho das senhas de exemplo que estão no repositório. Conta que ainda
+    // esteja assim precisa de redefinição pelo administrador.
+    return { ok: false, needsRehash: false };
   }
 
   const parts = stored.split('$');

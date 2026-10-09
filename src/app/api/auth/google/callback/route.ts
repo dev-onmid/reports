@@ -1,6 +1,7 @@
 import type { NextRequest } from 'next/server';
 import { google } from 'googleapis';
 import { makeServerPool } from '@/lib/server-db';
+import { jsonParaScript, verificarStateOAuth } from '@/lib/oauth-state';
 
 function popupHtml(script: string, message: string) {
   return new Response(
@@ -13,14 +14,17 @@ function popupHtml(script: string, message: string) {
 
 export async function GET(request: NextRequest) {
   const code = request.nextUrl.searchParams.get('code');
-  const state = request.nextUrl.searchParams.get('state') ?? 'gmb';
+  // O state é assinado no início do fluxo; qualquer outro valor é recusado —
+  // sem isso qualquer um pendurava a própria conta Google na agência.
+  const state = verificarStateOAuth(request.nextUrl.searchParams.get('state'));
+  if (!state) return new Response('Sessão de login inválida ou expirada. Comece de novo em Integrações.', { status: 400 });
   const oauthError = request.nextUrl.searchParams.get('error');
   const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000').replace(/\/$/, '');
 
   if (oauthError || !code) {
     const msg = oauthError ?? 'cancelled';
     return popupHtml(
-      `if(window.opener){window.opener.postMessage({type:'google_oauth_error',error:${JSON.stringify(msg)}},'*');window.close();}else{window.location.href=${JSON.stringify(appUrl + '/integracoes?google_error=' + encodeURIComponent(msg))}}`,
+      `if(window.opener){window.opener.postMessage({type:'google_oauth_error',error:${jsonParaScript(msg)}},'*');window.close();}else{window.location.href=${jsonParaScript(appUrl + '/integracoes?google_error=' + encodeURIComponent(msg))}}`,
       'Erro na conexão. Fechando...'
     );
   }
@@ -83,14 +87,14 @@ export async function GET(request: NextRequest) {
     }
 
     return popupHtml(
-      `if(window.opener){window.opener.postMessage({type:'google_oauth_success',accountType:${JSON.stringify(state)}},'*');window.close();}else{window.location.href=${JSON.stringify(appUrl + '/integracoes?google_connected=1&type=' + encodeURIComponent(state))}}`,
+      `if(window.opener){window.opener.postMessage({type:'google_oauth_success',accountType:${jsonParaScript(state)}},'*');window.close();}else{window.location.href=${jsonParaScript(appUrl + '/integracoes?google_connected=1&type=' + encodeURIComponent(state))}}`,
       'Conectado com sucesso! Fechando...'
     );
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Erro desconhecido';
     console.error('Erro no callback Google OAuth:', err);
     return popupHtml(
-      `if(window.opener){window.opener.postMessage({type:'google_oauth_error',error:${JSON.stringify(msg)}},'*');window.close();}else{window.location.href=${JSON.stringify(appUrl + '/integracoes?google_error=' + encodeURIComponent(msg))}}`,
+      `if(window.opener){window.opener.postMessage({type:'google_oauth_error',error:${jsonParaScript(msg)}},'*');window.close();}else{window.location.href=${jsonParaScript(appUrl + '/integracoes?google_error=' + encodeURIComponent(msg))}}`,
       'Erro inesperado. Fechando...'
     );
   }

@@ -21,17 +21,23 @@ const lerSessao = () => { try { return localStorage.getItem(CHAVE); } catch { re
  * Sessão crua do localStorage. `undefined` = ainda no servidor/hidratação (não
  * dá para saber quem é); a tela espera em vez de montar a casca errada.
  */
-export function useSessaoLocal(): { team?: string; name?: string } | null | undefined {
+export function useSessaoLocal(): { team?: string; name?: string; perfil?: string } | null | undefined {
   const cru = useSyncExternalStore(nada, lerSessao, () => '__ssr__');
   return useMemo(() => {
     if (cru === '__ssr__') return undefined;
     if (!cru) return null;
-    try { return JSON.parse(cru) as { team?: string; name?: string }; } catch { return null; }
+    try { return JSON.parse(cru) as { team?: string; name?: string; perfil?: string }; } catch { return null; }
   }, [cru]);
 }
 
 export function useEhUsuarioCliente(): boolean {
   return useSessaoLocal()?.team === 'cliente';
+}
+
+/** Gestor do cliente: além do CRM, vê os resultados e cadastra a equipe. */
+export function useEhGestorCliente(): boolean {
+  const s = useSessaoLocal();
+  return s?.team === 'cliente' && s?.perfil === 'gestor';
 }
 
 export const ModoClienteContext = createContext(false);

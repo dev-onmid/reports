@@ -126,6 +126,24 @@ export async function GET(
   }
 }
 
+/**
+ * A Evolution baixa a mídia da URL que mandamos — de dentro da rede do
+ * servidor. URL de host interno (evolution, banco, 169.254…) viraria leitura
+ * da rede privada entregue no WhatsApp do atacante. Só https com nome de
+ * domínio público, ou o próprio arquivo em base64 (`data:`).
+ */
+function urlDeMidiaPermitida(raw: unknown): boolean {
+  const v = String(raw ?? '').trim();
+  if (!v) return false;
+  if (/^data:(image|audio|video|application)\//i.test(v)) return true;
+  let u: URL;
+  try { u = new URL(v); } catch { return false; }
+  if (u.protocol !== 'https:') return false;
+  const h = u.hostname.toLowerCase();
+  if (!h.includes('.') || /^[0-9.]+$/.test(h) || h.includes(':') || /\.(local|internal|lan)$/.test(h)) return false;
+  return true;
+}
+
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -143,7 +161,12 @@ export async function POST(
   };
 
   const tipo = body.tipo ?? 'texto';
-  const direction = body.direction ?? 'out';
+  // Usuário de cliente só ENVIA: gravar uma "recebida" forjada falsearia a nota
+  // de atendimento e acionaria a IA (auditoria 2026-10-10).
+  const direction = req.headers.get('x-onmid-team') === 'cliente' ? 'out' : (body.direction ?? 'out');
+  if (tipo !== 'texto' && tipo !== 'localizacao' && !urlDeMidiaPermitida(body.url)) {
+    return Response.json({ error: 'Endereço de mídia não permitido.' }, { status: 400 });
+  }
 
   // Build display text for DB
   let dbText: string;

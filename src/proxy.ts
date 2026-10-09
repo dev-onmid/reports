@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { verifySessionToken, SESSION_COOKIE, isValidInternalToken, INTERNAL_HEADER } from '@/lib/session';
 import {
-  carregarAcesso, clienteDoLead, clienteDoFunil, clientesCitados, leadsCitados, regraCliente, TEAM_CLIENTE,
+  carregarAcesso, clienteDoLead, clienteDoFunil, clienteNoCaminho, clientesCitados, leadsCitados, regraCliente, TEAM_CLIENTE,
   type AcessoUsuario,
 } from '@/lib/acesso';
 import { hostDaRequisicao, hostSoEquipe, MSG_USAR_CRM } from '@/lib/host-acesso';
@@ -150,16 +150,33 @@ const proibido = (msg = 'Sem permissão.') => Response.json({ error: msg }, { st
  */
 async function barrarForaDoCliente(req: NextRequest, acesso: AcessoUsuario): Promise<Response | null> {
   const { pathname, searchParams } = req.nextUrl;
-  const regra = regraCliente(pathname, req.method);
+  const regra = regraCliente(pathname, req.method, acesso.perfilCliente === 'gestor');
   if (!regra) return proibido();
 
+  // ⚠️ Lê o corpo SEMPRE que houver um, seja qual for o Content-Type. A versão
+  // anterior só lia com `application/json`, e as rotas fazem `req.json()` de
+  // qualquer jeito: mandar `Content-Type: text/plain` com `{"clientId":OUTRO}`
+  // e `?clientId=MEU` na query passava pelo proxy e agia no OUTRO cliente
+  // (achado da auditoria de 10/10). Corpo que não é JSON válido é recusado:
+  // nenhuma rota do cliente aceita outro formato (upload é multipart e não
+  // cita cliente — tratado abaixo).
   let corpo: unknown = null;
-  if (!['GET', 'HEAD'].includes(req.method) && (req.headers.get('content-type') ?? '').includes('application/json')) {
-    corpo = await req.clone().json().catch(() => null);
+  if (!['GET', 'HEAD'].includes(req.method)) {
+    const ct = (req.headers.get('content-type') ?? '').toLowerCase();
+    const texto = await req.clone().text().catch(() => '');
+    if (texto.trim()) {
+      if (ct.includes('multipart/form-data')) {
+        if (!regra.multipart) return proibido('Formato não aceito.');
+      } else {
+        try { corpo = JSON.parse(texto); } catch { return proibido('Corpo inválido.'); }
+      }
+    }
   }
 
   const meus = new Set(acesso.clientIds);
   const citados = clientesCitados(searchParams, corpo);
+  const noCaminho = clienteNoCaminho(pathname);
+  if (noCaminho) citados.push(noCaminho);
   for (const leadId of leadsCitados(pathname, corpo)) {
     const dono = await clienteDoLead(leadId);
     if (!dono) return Response.json({ error: 'Lead não encontrado.' }, { status: 404 });
@@ -177,6 +194,39 @@ async function barrarForaDoCliente(req: NextRequest, acesso: AcessoUsuario): Pro
   return null;
 }
 
+/**
+ * Cabeçalhos de identidade que SÓ o proxy pode escrever. Em todo caminho que
+ * passa sem sessão (público, cron, integração, token interno) eles são
+ * apagados: uma rota que caísse no fallback "sem cookie, leio o header" podia
+ * ser enganada por um `x-onmid-user-id` forjado (auditoria 2026-10-10).
+ */
+const CABECALHOS_IDENTIDADE = ['x-onmid-user-id', 'x-onmid-role', 'x-onmid-team', 'x-onmid-user-name', 'x-onmid-clientes', 'x-onmid-perfil'];
+function semIdentidadeForjada(req: NextRequest) {
+  const headers = new Headers(req.headers);
+  for (const h of CABECALHOS_IDENTIDADE) headers.delete(h);
+  return NextResponse.next({ request: { headers } });
+}
+
+/**
+ * Requisição que ALTERA algo (POST/PUT/PATCH/DELETE) com sessão tem de vir do
+ * próprio site. O cookie é SameSite=Lax, mas um subdomínio irmão (*.onmid.app
+ * das landing pages) conta como "mesmo site" para o navegador — um XSS lá
+ * viraria CSRF aqui. Sem Origin (curl, app nativo) passa: o cookie HttpOnly
+ * já é a credencial nesses casos.
+ */
+function origemConfere(req: NextRequest): boolean {
+  if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return true;
+  const origin = req.headers.get('origin');
+  if (!origin) return true;
+  try {
+    const o = new URL(origin).host.toLowerCase();
+    const h = (req.headers.get('x-forwarded-host') ?? req.headers.get('host') ?? req.nextUrl.host).split(',')[0].trim().toLowerCase();
+    return !!h && o === h;
+  } catch {
+    return false;
+  }
+}
+
 export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
@@ -190,20 +240,20 @@ export async function proxy(req: NextRequest) {
     return Response.json({ error: 'O portal é somente leitura.' }, { status: 405 });
   }
 
-  if (matches(pathname, PUBLIC_PREFIXES)) return NextResponse.next();
+  if (matches(pathname, PUBLIC_PREFIXES)) return semIdentidadeForjada(req);
 
   // Chamada servidor→servidor (Luna, cron do CRM, disparo de relatório). Elas
   // saem do próprio app por HTTP e não carregam cookie de usuário.
-  if (isValidInternalToken(req.headers.get(INTERNAL_HEADER))) return NextResponse.next();
+  if (isValidInternalToken(req.headers.get(INTERNAL_HEADER))) return semIdentidadeForjada(req);
 
   if (matches(pathname, INTEGRATION_PREFIXES) && req.headers.get('x-onmid-secret')) {
-    return NextResponse.next();
+    return semIdentidadeForjada(req);
   }
 
   // Cron só passa se apresentar alguma credencial; o valor é conferido na rota.
   if (matches(pathname, CRON_PREFIXES)) {
     const hasSecret = req.nextUrl.searchParams.has('secret') || req.headers.get('authorization');
-    if (hasSecret) return NextResponse.next();
+    if (hasSecret) return semIdentidadeForjada(req);
     // Sem secret, cai na checagem de sessão abaixo (a UI também dispara essas
     // rotas — ex: "Analisar esta conta" no Otimizador).
   }
@@ -212,6 +262,7 @@ export async function proxy(req: NextRequest) {
   if (!session) {
     return Response.json({ error: 'Não autenticado.' }, { status: 401 });
   }
+  if (!origemConfere(req)) return proibido('Origem não permitida.');
 
   // Papel, time, status e clientes vêm do BANCO (cache de 30s), não do cookie:
   // o cookie vale 7 dias, e desativar alguém ou tirar um cliente dele tem de
@@ -242,8 +293,13 @@ export async function proxy(req: NextRequest) {
   // Autoria de quem mexeu no lead (histórico do CRM). Codificado: nome tem acento.
   if (acesso?.nome) headers.set('x-onmid-user-name', encodeURIComponent(acesso.nome));
   else headers.delete('x-onmid-user-name');
-  if (team === TEAM_CLIENTE && acesso) headers.set('x-onmid-clientes', acesso.clientIds.join(','));
-  else headers.delete('x-onmid-clientes');
+  if (team === TEAM_CLIENTE && acesso) {
+    headers.set('x-onmid-clientes', acesso.clientIds.join(','));
+    headers.set('x-onmid-perfil', acesso.perfilCliente);
+  } else {
+    headers.delete('x-onmid-clientes');
+    headers.delete('x-onmid-perfil');
+  }
 
   return NextResponse.next({ request: { headers } });
 }

@@ -22,6 +22,8 @@ export type AcessoUsuario = {
   team: string;
   status: string;
   clientIds: string[];
+  /** Só para team='cliente': 'gestor' (CRM + resultados + cadastra a equipe) ou 'atendente' (só CRM). */
+  perfilCliente: 'gestor' | 'atendente';
 };
 
 let pool: Pool | null = null;
@@ -46,7 +48,9 @@ let schemaPronto: Promise<void> | null = null;
 export function garantirSchemaAcesso(): Promise<void> {
   if (!schemaPronto) {
     schemaPronto = getPool()
-      .query(`ALTER TABLE public.users ADD COLUMN IF NOT EXISTS client_ids TEXT[] NOT NULL DEFAULT '{}'`)
+      .query(`ALTER TABLE public.users
+                ADD COLUMN IF NOT EXISTS client_ids TEXT[] NOT NULL DEFAULT '{}',
+                ADD COLUMN IF NOT EXISTS perfil_cliente TEXT NOT NULL DEFAULT 'atendente'`)
       .then(() => undefined)
       .catch((e) => { schemaPronto = null; throw e; });
   }
@@ -70,13 +74,17 @@ export async function carregarAcesso(uid: string): Promise<AcessoUsuario | null>
   if (hit && Date.now() - hit.em < TTL_MS) return hit.valor;
   await garantirSchemaAcesso();
   const { rows } = await getPool().query(
-    `SELECT id, name, role, status, COALESCE(team, 'onmid') AS team, COALESCE(client_ids, '{}') AS client_ids
+    `SELECT id, name, role, status, COALESCE(team, 'onmid') AS team, COALESCE(client_ids, '{}') AS client_ids,
+            COALESCE(perfil_cliente, 'atendente') AS perfil_cliente
        FROM public.users WHERE id = $1 LIMIT 1`,
     [uid],
   );
   const r = rows[0];
   const valor: AcessoUsuario | null = r
-    ? { uid: String(r.id), nome: r.name ?? '', role: r.role, team: r.team, status: r.status, clientIds: r.client_ids ?? [] }
+    ? {
+        uid: String(r.id), nome: r.name ?? '', role: r.role, team: r.team, status: r.status, clientIds: r.client_ids ?? [],
+        perfilCliente: r.perfil_cliente === 'gestor' ? 'gestor' : 'atendente',
+      }
     : null;
   cache.set(uid, { em: Date.now(), valor });
   return valor;
@@ -98,7 +106,7 @@ export const TEAM_CLIENTE = 'cliente';
 
 const UUID = '[0-9a-f-]{36}';
 
-type Regra = { padrao: RegExp; metodos: string[]; exigeCliente: boolean };
+type Regra = { padrao: RegExp; metodos: string[]; exigeCliente: boolean; /** aceita multipart (só o upload) */ multipart?: boolean };
 
 export const ROTAS_CLIENTE: Regra[] = [
   // sessão e menu
@@ -124,12 +132,33 @@ export const ROTAS_CLIENTE: Regra[] = [
   { padrao: /^\/api\/crm\/webhook-heal$/, metodos: ['POST'], exigeCliente: true },
   // reconectar o WhatsApp do próprio cliente (só as instâncias dele; ver a rota)
   { padrao: /^\/api\/crm\/whatsapp-conexao$/, metodos: ['GET', 'POST'], exigeCliente: true },
-  { padrao: /^\/api\/upload$/, metodos: ['POST'], exigeCliente: false },
+  { padrao: /^\/api\/upload$/, metodos: ['POST'], exigeCliente: false, multipart: true },
 ];
 
-export function regraCliente(pathname: string, metodo: string): Regra | null {
+/**
+ * O que o GESTOR do cliente pode a mais: resultados do próprio cliente e a
+ * equipe dele. Cada rota aqui foi lida: todas recebem o cliente por query
+ * (`clientIds`/`clientId`) ou pelo caminho (`/api/clients/<id>/…`) e filtram
+ * por ele — o proxy confere que é o dele antes de deixar passar.
+ */
+export const ROTAS_GESTOR: Regra[] = [
+  { padrao: /^\/api\/clients\/[^/]+\/metrics$/, metodos: ['GET'], exigeCliente: true },
+  { padrao: /^\/api\/crm\/por-canal$/, metodos: ['GET'], exigeCliente: true },
+  { padrao: /^\/api\/crm\/desempenho$/, metodos: ['GET'], exigeCliente: true },
+  { padrao: /^\/api\/crm\/funil$/, metodos: ['GET'], exigeCliente: true },
+  { padrao: /^\/api\/crm\/equipe-cliente$/, metodos: ['GET', 'POST', 'PATCH'], exigeCliente: true },
+];
+
+export function regraCliente(pathname: string, metodo: string, gestor = false): Regra | null {
   const m = metodo.toUpperCase() === 'HEAD' ? 'GET' : metodo.toUpperCase();
-  return ROTAS_CLIENTE.find(r => r.padrao.test(pathname) && r.metodos.includes(m)) ?? null;
+  const lista = gestor ? [...ROTAS_CLIENTE, ...ROTAS_GESTOR] : ROTAS_CLIENTE;
+  return lista.find(r => r.padrao.test(pathname) && r.metodos.includes(m)) ?? null;
+}
+
+/** Cliente citado no caminho (`/api/clients/<id>/…`). */
+export function clienteNoCaminho(pathname: string): string | null {
+  const m = pathname.match(/^\/api\/clients\/([^/]+)\//);
+  return m ? decodeURIComponent(m[1]) : null;
 }
 
 /** Dono do funil (para /api/crm/funnels/<id>/stages). */

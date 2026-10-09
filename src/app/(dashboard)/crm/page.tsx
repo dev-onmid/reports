@@ -20,7 +20,8 @@ import { ChatView } from './chat-view';
 import { ConectarWhatsappModal } from './conectar-whatsapp';
 import { LeadChatPanel } from './lead-chat-panel';
 import { CamposAtendimento, HistoricoLead, NovoLeadModal, opcoesDeOrigem } from './lead-operacao';
-import { ModoClienteContext, useEhUsuarioCliente, useMeuNome, useModoCliente } from '@/lib/modo-cliente';
+import { ModoClienteContext, useEhGestorCliente, useEhUsuarioCliente, useMeuNome, useModoCliente } from '@/lib/modo-cliente';
+import { EquipeCliente, ResultadosCliente } from './cliente-gestor';
 import { PortalLinkModal } from './portal-link-modal';
 import { SeletorModeloFunil } from '@/components/crm/seletor-modelo-funil';
 import { AplicarModeloFunil } from '@/components/crm/aplicar-modelo-funil';
@@ -137,11 +138,11 @@ type Draft = Partial<Omit<CrmLead, 'id' | 'client_id' | 'created_at'>>;
 type CrmFunnel = { id: string; name: string; created_at: string };
 type CrmStage  = { id: string; label: string; color: string; position: number; etapa_funil?: EtapaFunil | null; situacao?: SituacaoStage | null };
 type LocalStage = CrmStage & { _isNew?: boolean };
-type CrmTab = 'leads' | 'chat' | 'followup' | 'attendance' | 'disparos' | 'ads';
+type CrmTab = 'leads' | 'chat' | 'followup' | 'attendance' | 'disparos' | 'ads' | 'resultados' | 'equipe';
 // ⚠️ 'capture' saiu daqui: Fontes de Captura virou sub-aba de Integrações do
 // cliente (`?tab=rastreio&sub=captura`), junto das demais integrações. Quem
 // tiver 'capture' salvo no localStorage cai no fallback 'leads'.
-const ABAS_CRM = ['leads', 'chat', 'followup', 'attendance', 'disparos', 'ads'] as const;
+const ABAS_CRM = ['leads', 'chat', 'followup', 'attendance', 'disparos', 'ads', 'resultados', 'equipe'] as const;
 type DatePreset = 'all' | 'today' | 'yesterday' | 'last7' | 'last15' | 'last14' | 'last30' | 'last90' | 'thisMonth' | 'lastMonth' | 'thisYear' | 'custom';
 
 type AttendanceMetrics = {
@@ -3042,6 +3043,7 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
   // Funcionário do CLIENTE (ver src/lib/modo-cliente.ts): esconde o que é da
   // agência. O servidor já recusa as rotas fora da lista dele.
   const modoCliente = useEhUsuarioCliente();
+  const gestorCliente = useEhGestorCliente();
   const meuNome = useMeuNome();
   const [showNovoLead, setShowNovoLead] = useState(false);
   // Atalhos de operação: ignoram o período (a consulta de hoje pode ser de um lead de agosto).
@@ -3198,7 +3200,8 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
   }, [modoCliente, lockedClientId, activeClients, clientId]);
   useEffect(() => {
     if (!modoCliente) return;
-    if (crmView !== 'leads' && crmView !== 'chat') setCrmView('leads');
+    const permitidas: CrmTab[] = gestorCliente ? ['leads', 'chat', 'resultados', 'equipe'] : ['leads', 'chat'];
+    if (!permitidas.includes(crmView)) setCrmView('leads');
     if (!modoClienteAplicado.current) {
       modoClienteAplicado.current = true;
       applyDatePreset('all');
@@ -3865,6 +3868,18 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
               <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-emerald-500 border border-card" />
             )}
           </button>
+          {gestorCliente && (<>
+          <button type="button" onClick={() => setCrmView('resultados')}
+            className={cn('flex items-center gap-1.5 h-8 px-3 rounded-md text-xs font-semibold transition-colors',
+              crmView === 'resultados' ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground')}>
+            <BarChart3 className="h-3.5 w-3.5" /> Resultados
+          </button>
+          <button type="button" onClick={() => setCrmView('equipe')}
+            className={cn('flex items-center gap-1.5 h-8 px-3 rounded-md text-xs font-semibold transition-colors',
+              crmView === 'equipe' ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground')}>
+            <Users className="h-3.5 w-3.5" /> Equipe
+          </button>
+          </>)}
           {!modoCliente && (<>
           <button type="button" onClick={() => setCrmView('followup')}
             className={cn('flex items-center gap-1.5 h-8 px-3 rounded-md text-xs font-semibold transition-colors',
@@ -4122,6 +4137,13 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
       )}
 
       {/* ── FOLLOW UP ───────────────────────────────────────────────── */}
+      {clientId && gestorCliente && crmView === 'resultados' && (
+        <div className="flex-1 min-h-0 overflow-y-auto"><ResultadosCliente clientId={clientId} /></div>
+      )}
+      {clientId && gestorCliente && crmView === 'equipe' && (
+        <div className="flex-1 min-h-0 overflow-y-auto"><EquipeCliente clientId={clientId} /></div>
+      )}
+
       {clientId && crmView === 'followup' && (
         <div className="flex-1 min-h-0 overflow-y-auto">
           <FollowupTab clientId={clientId} statusOptions={statusOptions} />

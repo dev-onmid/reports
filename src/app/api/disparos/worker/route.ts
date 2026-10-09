@@ -11,6 +11,7 @@
  */
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
+import { cronAutorizado } from '@/lib/cron-auth';
 import { sendText, sendImage } from '@/lib/zapi';
 import { sendFollowupMessage, type WaInstance } from '@/lib/followup-send';
 import { isWithinWindow, isActiveDayNow } from '@/lib/disparos-schedule';
@@ -42,16 +43,8 @@ function sleep(ms: number) {
 async function runWorker(req: NextRequest) {
   // Mesma família de secrets dos outros crons (CRON_SECRET da Vercel é
   // write-only — os workflows do GitHub usam REPORTS_CRON_SECRET).
-  const validSecrets = [process.env.CRON_SECRET, process.env.REPORTS_CRON_SECRET, process.env.CRM_CRON_SECRET]
-    .filter(Boolean);
-  if (validSecrets.length > 0) {
-    const authHeader = req.headers.get('authorization');
-    const urlSecret = new URL(req.url).searchParams.get('secret');
-    const ok = validSecrets.some(s => authHeader === `Bearer ${s}` || urlSecret === s);
-    if (!ok) {
-      return Response.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-  }
+  // Falha FECHADA e em tempo constante (auditoria 2026-10-10).
+  if (!cronAutorizado(req)) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
   const pool = makeServerPool();
   const startTime = Date.now();

@@ -15,6 +15,8 @@ async function ensureSchema(pool: Pool) {
   await pool.query('ALTER TABLE public.users ADD COLUMN IF NOT EXISTS clickup_id TEXT').catch(() => {});
   // Usuário de CLIENTE (team='cliente'): quais clientes ele enxerga no CRM.
   await pool.query(`ALTER TABLE public.users ADD COLUMN IF NOT EXISTS client_ids TEXT[] NOT NULL DEFAULT '{}'`).catch(() => {});
+  // 'gestor' vê resultados e cadastra a própria equipe; 'atendente' só o CRM.
+  await pool.query(`ALTER TABLE public.users ADD COLUMN IF NOT EXISTS perfil_cliente TEXT NOT NULL DEFAULT 'atendente'`).catch(() => {});
 }
 
 /** Só estes valores são gravados; qualquer outra coisa vira NULL. */
@@ -36,10 +38,11 @@ function rowToJson(r: any) {
     id: r.id, name: r.name, email: r.email, role: r.role, status: r.status, team: r.team ?? 'onmid',
     setor: r.setor ?? null, clickup_id: r.clickup_id ?? null,
     client_ids: Array.isArray(r.client_ids) ? r.client_ids : [],
+    perfil_cliente: r.perfil_cliente === 'gestor' ? 'gestor' : 'atendente',
   };
 }
 
-const SAFE_COLUMNS = 'id, name, email, role, status, COALESCE(team, \'onmid\') AS team, setor, clickup_id, client_ids';
+const SAFE_COLUMNS = 'id, name, email, role, status, COALESCE(team, \'onmid\') AS team, setor, clickup_id, client_ids, perfil_cliente';
 
 export async function GET(req: NextRequest) {
   // Listar usuários expõe e-mails e papéis: exige sessão, mas não ser admin
@@ -66,8 +69,13 @@ export async function POST(req: NextRequest) {
 
   const body = await req.json() as {
     id: string; name: string; email: string; password?: string; role: string; status: string;
-    team?: string; setor?: string | null; clickup_id?: string | null; client_ids?: unknown;
+    team?: string; setor?: string | null; clickup_id?: string | null; client_ids?: unknown; perfil_cliente?: unknown;
   };
+  const perfil = body.perfil_cliente === 'gestor' ? 'gestor' : 'atendente';
+  // Senha curta não entra (auditoria 2026-10-10): não havia regra nenhuma.
+  if (typeof body.password === 'string' && body.password.trim() && body.password.length < 8) {
+    return Response.json({ error: 'A senha precisa ter pelo menos 8 caracteres.' }, { status: 400 });
+  }
   const team = body.team === 'parceiro' ? 'parceiro' : body.team === 'cliente' ? 'cliente' : 'onmid';
   const clientIds = Array.isArray(body.client_ids)
     ? [...new Set(body.client_ids.filter((x): x is string => typeof x === 'string' && x.trim() !== ''))]
@@ -95,12 +103,13 @@ export async function POST(req: NextRequest) {
     // Senha entra hasheada; texto puro nunca é gravado.
     const hashed = hasPassword ? await hashPassword(body.password as string) : '';
 
-    // As duas variantes compartilham as MESMAS 13 posições — a única diferença é
+    // As duas variantes compartilham as MESMAS 15 posições — a única diferença é
     // se o UPDATE toca em `password`. Numeração divergente entre elas já foi
     // fonte de bug (o $8 caindo no valor errado).
     const params = [
       body.id, body.name, body.email, hashed, body.role, body.status, team,
       touchSetor, setor, touchClickup, clickupId, team === 'cliente' ? clientIds : [], 'client_ids' in body || team !== 'cliente',
+      perfil, 'perfil_cliente' in body || team !== 'cliente',
     ];
     const onConflict = [
       'name=$2', 'email=$3', ...(hasPassword ? ['password=$4'] : []), 'role=$5', 'status=$6', 'team=$7',
@@ -109,11 +118,12 @@ export async function POST(req: NextRequest) {
       // Chave ausente mantém os clientes (tela antiga que não conhece o campo);
       // quem deixa de ser 'cliente' sempre perde a lista.
       'client_ids = CASE WHEN $13::boolean THEN $12::text[] ELSE users.client_ids END',
+      'perfil_cliente = CASE WHEN $15::boolean THEN $14 ELSE users.perfil_cliente END',
     ].join(', ');
 
     const { rows } = await pool.query(
-      `INSERT INTO public.users (id, name, email, password, role, status, team, setor, clickup_id, client_ids)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $9, $11, $12::text[])
+      `INSERT INTO public.users (id, name, email, password, role, status, team, setor, clickup_id, client_ids, perfil_cliente)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $9, $11, $12::text[], $14)
        ON CONFLICT (id) DO UPDATE SET ${onConflict}
        RETURNING ${SAFE_COLUMNS}`,
       params,

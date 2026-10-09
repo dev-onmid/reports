@@ -8,6 +8,7 @@
  */
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
+import { cronAutorizado } from '@/lib/cron-auth';
 import { ensureCrmDisparoSchema, getConnectedClientInstance } from '@/lib/crm-disparo';
 import { sendFollowupMessage, interpolate, type FollowupVars } from '@/lib/followup-send';
 
@@ -30,14 +31,9 @@ function sleep(ms: number) {
 }
 
 async function runWorker(req: NextRequest) {
-  const secret = process.env.CRON_SECRET;
-  if (secret) {
-    const authHeader = req.headers.get('authorization');
-    const urlSecret = new URL(req.url).searchParams.get('secret');
-    if (authHeader !== `Bearer ${secret}` && urlSecret !== secret) {
-      return Response.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-  }
+  // Falha FECHADA e em tempo constante (auditoria 2026-10-10): sem segredo
+  // configurado, a versão antiga deixava QUALQUER um rodar o worker.
+  if (!cronAutorizado(req)) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
   const pool = makeServerPool();
   const startTime = Date.now();

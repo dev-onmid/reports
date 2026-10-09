@@ -79,7 +79,7 @@ function setorLabel(setor: string | null | undefined): string | null {
 
 const emptyForm = {
   name: '', email: '', password: '', role: 'Usuário', status: 'Ativo', team: 'onmid' as Team,
-  setor: '', clientIds: [] as string[],
+  setor: '', clientIds: [] as string[], perfilCliente: 'atendente' as 'gestor' | 'atendente',
 };
 
 /**
@@ -87,7 +87,7 @@ const emptyForm = {
  * do mock-data, que é compartilhado com o auth-store e a semente de UI. Estender
  * aqui evita mexer num tipo usado por meio sistema por causa de uma tela só.
  */
-type UserRow = UserType & { setor?: string | null; clickup_id?: string | null; client_ids?: string[] };
+type UserRow = UserType & { setor?: string | null; clickup_id?: string | null; client_ids?: string[]; perfil_cliente?: string };
 
 // ── Vínculo ONMID ↔ ClickUp (GET/POST /api/clickup/members) ──────────────────
 
@@ -811,6 +811,7 @@ export default function ConfiguracoesPage() {
       team: user.team ?? 'onmid',
       setor: user.setor ?? '',
       clientIds: user.client_ids ?? [],
+      perfilCliente: user.perfil_cliente === 'gestor' ? 'gestor' : 'atendente',
     });
     setDialogOpen(true);
   }
@@ -840,6 +841,7 @@ export default function ConfiguracoesPage() {
         team: form.team,
         setor: form.setor || null,
         client_ids: form.team === 'cliente' ? form.clientIds : [],
+        perfil_cliente: form.perfilCliente,
       };
       const snapshot = users;
       setUsers((prev) => prev.map((u) => u.id === editingUserId ? updated : u));
@@ -868,6 +870,7 @@ export default function ConfiguracoesPage() {
       team: form.team,
       setor: form.setor || null,
       client_ids: form.team === 'cliente' ? form.clientIds : [],
+      perfil_cliente: form.perfilCliente,
     };
     const snapshot = users;
     setUsers((prev) => [...prev, user]);
@@ -1109,7 +1112,7 @@ export default function ConfiguracoesPage() {
                               : 'bg-zinc-700/50 text-zinc-400 border border-zinc-600/50',
                         )} title={user.team === 'cliente' ? (user.client_ids ?? []).map(id => clientesPorId.get(id) ?? id).join(', ') : undefined}>
                           {user.team === 'parceiro' ? 'Parceiro'
-                            : user.team === 'cliente' ? `Cliente · ${(user.client_ids ?? []).map(id => clientesPorId.get(id) ?? '?').join(', ')}`
+                            : user.team === 'cliente' ? `Cliente · ${(user.client_ids ?? []).map(id => clientesPorId.get(id) ?? '?').join(', ')} · ${user.perfil_cliente === 'gestor' ? 'Gestor' : 'Atendente'}`
                             : 'Time Onmid'}
                         </span>
                       </td>
@@ -2034,10 +2037,24 @@ export default function ConfiguracoesPage() {
               </p>
             </div>
             {form.team === 'cliente' && (
-              <EscolherClientes
-                selecionados={form.clientIds}
-                onChange={(clientIds) => setForm({ ...form, clientIds })}
-              />
+              <>
+                <div className="space-y-1.5">
+                  <Label>Perfil no cliente</Label>
+                  <select
+                    value={form.perfilCliente}
+                    onChange={(e) => setForm({ ...form, perfilCliente: e.target.value === 'gestor' ? 'gestor' : 'atendente' })}
+                    className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                  >
+                    <option value="atendente">Atendente — só o CRM (leads e conversas)</option>
+                    <option value="gestor">Gestor — CRM + resultados + cadastra a própria equipe</option>
+                  </select>
+                  <p className="text-xs text-muted-foreground">O gestor (dono ou gerente) cria e desativa os atendentes dele dentro do CRM. Você só precisa criar o gestor.</p>
+                </div>
+                <EscolherClientes
+                  selecionados={form.clientIds}
+                  onChange={(clientIds) => setForm({ ...form, clientIds })}
+                />
+              </>
             )}
             <div className="space-y-1.5">
               <Label>Setor</Label>

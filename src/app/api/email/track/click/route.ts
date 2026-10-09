@@ -1,5 +1,7 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
+import { assinarDestino } from '@/lib/email-tracking';
+import { timingSafeEqual } from 'node:crypto';
 
 export async function GET(request: NextRequest) {
   const rid = request.nextUrl.searchParams.get('rid');
@@ -30,6 +32,11 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  const destination = url.startsWith('http://') || url.startsWith('https://') ? url : '/';
+  // Redirecionamento aberto fechado (auditoria 2026-10-10): só destino que o
+  // nosso e-mail assinou. Link sem assinatura (e-mail antigo) cai na home.
+  const s = request.nextUrl.searchParams.get('s') ?? '';
+  const esperado = url ? assinarDestino(url) : '';
+  const assinado = !!s && s.length === esperado.length && timingSafeEqual(Buffer.from(s), Buffer.from(esperado));
+  const destination = assinado && /^https?:\/\//.test(url) ? url : '/';
   return Response.redirect(destination, 302);
 }

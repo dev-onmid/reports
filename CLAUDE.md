@@ -1,3 +1,30 @@
+## Auditoria de segurança + perfis de cliente (gestor/atendente) (2026-10-10)
+
+Pedido do Matheus: "uma geralzão" de segurança (o sistema segura o WhatsApp e as conversas de 25 clientes) e, junto, separar dono de atendente no cliente, com o dono cadastrando a própria equipe.
+
+### O que a auditoria achou e foi fechado nesta rodada
+- **Webhook do WhatsApp aceitava qualquer um** (`/api/webhook/whatsapp/[instanceId]`): sem credencial, e aceitava o NOME da instância na URL (`crm-<cliente>`, adivinhável). Qualquer pessoa postava "mensagem recebida": criava lead, disparava conversão no Meta, gastava IA e, pelo follow-up, mandava WhatsApp **do número do cliente**. Agora exige `body.apikey` (token da instância, que a Evolution manda em todo webhook — conferido no bundle dela) em tempo constante, e só UUID na URL. Medido antes: 29/29 instâncias ativas com token igual ao da Evolution. Z-API não manda credencial e não tem instância ativa → fica fora.
+- **Proxy driblado por Content-Type** (minha trava de 09/10): só lia o corpo com `application/json`; `text/plain` + `{"clientId":OUTRO}` e `?clientId=MEU` passava e a rota agia no OUTRO (criar lead, QR do WhatsApp de outro cliente!). Agora lê o corpo sempre; corpo que não é JSON é recusado; multipart só no upload.
+- **XSS sem login** no callback do Google (`JSON.stringify` não escapa `</script>`) + fluxo sem `state`: `src/lib/oauth-state.ts` (state assinado 15 min + `jsonParaScript`).
+- **Webhook da Meta sem assinatura**: agora confere `X-Hub-Signature-256` com `META_APP_SECRET` (falha fechada) e `verify_token` em tempo constante.
+- **image-proxy = SSRF/proxy aberto**: só CDNs de criativo (fbcdn, cdninstagram, facebook, googleusercontent, unavatar, instagram), sem seguir redirect, só `image/*`, `nosniff`. **Apagados** `meta/ad-proxy`, `disparos/test-zapi` e o webhook antigo `/api/webhook/whatsapp` (sem instância) — sem nenhum chamador.
+- **Cabeçalhos de identidade forjáveis** nos caminhos sem sessão (público/cron/integração/token interno): o proxy agora APAGA `x-onmid-*` nesses caminhos. **Origin** conferido em POST/PUT/PATCH/DELETE com sessão (subdomínio irmão não vale — XSS numa LP não vira CSRF aqui). Cookie vira **`__Host-onmid_session`** em produção (nenhum *.onmid.app planta cookie no nosso nome) — ⚠️ **todo mundo relogou uma vez no deploy**.
+- **Força bruta**: login (30/IP e 8/e-mail por 15 min, `src/lib/rate-limit.ts`, em memória), `/api/auth/verify` idem, e-mail desconhecido paga o mesmo scrypt. **Senha em texto puro deixou de valer** (todas as 7 contas já eram hash; as contas de exemplo `admin123`/`1234` do repositório NÃO existem na produção). Senha nova: mínimo 8.
+- **Crons** `crm/disparos/worker` e `disparos/worker` deixavam passar sem segredo configurado → `src/lib/cron-auth.ts` (tempo constante, falha fechada).
+- **Mensagens**: usuário de cliente nunca grava "recebida" forjada; URL de mídia só https público ou `data:` (a Evolution baixa de dentro da rede). **Lead**: `funnel_id` tem de ser do cliente; detalhe sem `raw`; erro genérico. **Upload**: só imagem/áudio/vídeo/PDF. **Clique de e-mail**: destino assinado (`assinarDestino`), link antigo cai na home.
+- Cabeçalhos HSTS/nosniff/X-Frame/Referrer/Permissions no `next.config.ts`.
+- **Servidor** (conferido): só 22/80/443 abertos de fora (8080 da Evolution, 5432, Coolify bloqueados no DOCKER-USER), SSH só chave, fail2ban ativo, 0 falhas de login em 24h.
+
+### Perfis de cliente
+- `users.perfil_cliente` ('gestor' | 'atendente', default atendente), escolhido em Configurações → Usuários quando a equipe é Cliente. Sessão/`/api/auth/me` devolvem `perfil`; o proxy escreve `x-onmid-perfil` do banco.
+- **Gestor**: CRM + aba **Resultados** (`crm/cliente-gestor.tsx`: 4 rotas presas ao cliente — `/api/clients/<id>/metrics`, `/api/crm/funil` (nova, funil de UM cliente com a mesma régua do summary), `/api/crm/por-canal`, `/api/crm/desempenho`) + aba **Equipe** (`/api/crm/equipe-cliente`: lista, cria ATENDENTE, desativa, troca senha — só atendente cujo único cliente é o dele, nunca a si mesmo, nunca gestor). `ROTAS_GESTOR` em `acesso.ts`; `clienteNoCaminho` cobre `/api/clients/<id>/…`.
+- ⚠️ A dashboard da agência NÃO foi aberta ao cliente de propósito (~25 rotas, saldo de conta, modelo editável; `/api/crm/summary` devolve a carteira inteira).
+
+### Achados ABERTOS (decisão do Matheus)
+- **Supabase morreu** (`iremmorsgwiqrorzoihx.supabase.co` nem resolve DNS): **mídia do chat (foto/áudio/documento recebidos) não é gravada há semanas** — 0 mensagens de mídia em 14 dias — e o `/api/upload` (anexo do chat/follow-up) está quebrado. Os stores do navegador que liam `meta_integration`/`google_ads_*` pelo anon key também estão mortos. Remédio: mídia no volume da VPS (`MIDIA_DIR`) atrás de rota autenticada por cliente, e base64 para enviar.
+- Portal por link sem validade (telefones + conversas inteiras enquanto o link viver); logout não invalida o cookie (vale 7 dias — `session_version`); `/api/intake` cria cliente sem limite; `/api/webhooks/[token]` global alcança qualquer cliente; `/relatorio/[token]` renderiza HTML da IA sem sanitizar; sem política de retenção/exclusão em cascata (apagar lead deixa as mensagens); sem CSP.
+- ✅ 52 asserts do proxy + 19 das libs novas; tsc + eslint (sem erro novo) + build.
+
 ## crm.onmid.app — porta de entrada dos clientes, mesmo sistema (2026-10-09)
 
 Decisão do Matheus: o funcionário do cliente acessa por **crm.onmid.app**, não por reports.onmid.app. É o MESMO container e o MESMO código — só outra porta.
