@@ -15,6 +15,7 @@ import {
   Wifi, WifiOff, AlertTriangle, Check, CheckCheck, Clock3,
   Play, Pause, Download, Zap,
   ImageOff,
+  Loader2,
 } from 'lucide-react';
 
 function ChevronLeftIcon() {
@@ -367,17 +368,50 @@ function fmtAudioTime(s: number) {
   return `${m}:${sec.toString().padStart(2, '0')}`;
 }
 
+// Velocidade da escuta, no padrão do WhatsApp. A escolha é LEMBRADA para os
+// próximos áudios: quem ouve em 2× normalmente quer ouvir tudo em 2×, e trocar
+// bolha a bolha seria pior que não ter o botão.
+const VELOCIDADES = [1, 1.5, 2] as const;
+const CHAVE_VELOCIDADE = 'crm:audio-velocidade';
+
+function velocidadeSalva(): number {
+  if (typeof window === 'undefined') return 1;
+  const v = Number(window.localStorage.getItem(CHAVE_VELOCIDADE));
+  return (VELOCIDADES as readonly number[]).includes(v) ? v : 1;
+}
+
 function VoiceMessagePlayer({ src, isOut }: { src: string; isOut: boolean }) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [playing, setPlaying] = useState(false);
   const [duration, setDuration] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
+  // Preferência lida na criação do estado, não num efeito: o player só existe
+  // no cliente (as mensagens chegam por fetch), então não há risco de o
+  // servidor renderizar um valor e o navegador outro.
+  const [velocidade, setVelocidade] = useState<number>(velocidadeSalva);
+  const velocidadeRef = useRef(1);
+
+  // `playbackRate` é do elemento: mudar só o estado do React não acelera nada.
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    audio.playbackRate = velocidade;
+    // Sem isto a voz fica de desenho animado em 2× em alguns navegadores.
+    audio.preservesPitch = true;
+    velocidadeRef.current = velocidade;
+  }, [velocidade]);
 
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
     const onTime = () => setCurrentTime(audio.currentTime);
-    const onLoaded = () => setDuration(audio.duration || 0);
+    const onLoaded = () => {
+      setDuration(audio.duration || 0);
+      // Alguns navegadores devolvem playbackRate a 1 quando a mídia carrega —
+      // sem isto o primeiro play sai em velocidade normal mesmo com 2× escolhido.
+      audio.playbackRate = velocidadeRef.current;
+      audio.preservesPitch = true;
+    };
     const onEnd = () => { setPlaying(false); setCurrentTime(0); };
     audio.addEventListener('timeupdate', onTime);
     audio.addEventListener('loadedmetadata', onLoaded);
@@ -394,6 +428,12 @@ function VoiceMessagePlayer({ src, isOut }: { src: string; isOut: boolean }) {
     if (!audio) return;
     if (playing) audio.pause(); else void audio.play();
     setPlaying(!playing);
+  }
+
+  function trocarVelocidade() {
+    const prox = VELOCIDADES[(VELOCIDADES.indexOf(velocidade as 1 | 1.5 | 2) + 1) % VELOCIDADES.length];
+    setVelocidade(prox);
+    try { window.localStorage.setItem(CHAVE_VELOCIDADE, String(prox)); } catch { /* aba anônima */ }
   }
 
   function seekTo(ratio: number) {
@@ -447,6 +487,19 @@ function VoiceMessagePlayer({ src, isOut }: { src: string; isOut: boolean }) {
       <span className="text-[11px] text-muted-foreground tabular-nums shrink-0 w-9 text-right">
         {fmtAudioTime(currentTime > 0 ? currentTime : duration)}
       </span>
+      <button
+        onClick={trocarVelocidade}
+        className={cn(
+          'shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold tabular-nums transition-colors',
+          velocidade === 1
+            ? 'text-muted-foreground hover:bg-muted/50'
+            : cn('text-white', isOut ? 'bg-emerald-600' : 'bg-primary'),
+        )}
+        title="Velocidade da reprodução"
+        aria-label={`Velocidade ${String(velocidade).replace('.', ',')}x — clique para trocar`}
+      >
+        {String(velocidade).replace('.', ',')}×
+      </button>
     </div>
   );
 }
@@ -472,12 +525,28 @@ function MessageDeliveryIcon({ status, error }: { status: string | null; error?:
 
 // ── Media attachment modal ────────────────────────────────────────────────────
 
+// O que o seletor de arquivo oferece por tipo. A validação de verdade é do
+// servidor (`mimePermitido`) — isto é só para não listar o que será recusado.
+const ACEITA_POR_TIPO: Record<MediaType, string> = {
+  imagem: 'image/jpeg,image/png,image/webp,image/gif',
+  audio: 'audio/*',
+  video: 'video/mp4,video/quicktime,video/webm',
+  documento: '.pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.zip',
+  localizacao: '',
+};
+
 function MediaModal({
   tipo,
+  clientId,
+  leadId,
+  arquivoInicial,
   onSend,
   onClose,
 }: {
   tipo: MediaType;
+  clientId: string;
+  leadId: string | null;
+  arquivoInicial?: File | null;
   onSend: (payload: Record<string, unknown>) => Promise<void>;
   onClose: () => void;
 }) {
@@ -487,6 +556,13 @@ function MediaModal({
   const [lng,    setLng]    = useState('');
   const [name,   setName]   = useState('');
   const [sending, setSending] = useState(false);
+  const [arquivo, setArquivo] = useState<File | null>(null);
+  const [previa, setPrevia] = useState<string | null>(null);
+  const [subindo, setSubindo] = useState(false);
+  const [erro, setErro] = useState<string | null>(null);
+  const [arrastando, setArrastando] = useState(false);
+  const inputArquivo = useRef<HTMLInputElement>(null);
+  const isLocation = tipo === 'localizacao';
 
   const labels: Record<MediaType, string> = {
     imagem: 'Imagem', audio: 'Áudio (voz)', video: 'Vídeo', documento: 'Documento', localizacao: 'Localização',
@@ -499,6 +575,55 @@ function MediaModal({
     localizacao: <MapPin className="h-4 w-4" />,
   };
 
+  // Sobe assim que o arquivo é escolhido: o gestor vê a prévia e já sabe que
+  // deu certo antes de clicar em Enviar. A URL devolvida é a nossa, autenticada.
+  const subirArquivo = useCallback(async (f: File) => {
+    setErro(null);
+    setArquivo(f);
+    setPrevia(f.type.startsWith('image/') ? URL.createObjectURL(f) : null);
+    setSubindo(true);
+    try {
+      const form = new FormData();
+      form.append('file', f);
+      const res = await fetch(
+        `/api/upload?clientId=${encodeURIComponent(clientId)}${leadId ? `&leadId=${encodeURIComponent(leadId)}` : ''}`,
+        { method: 'POST', body: form },
+      );
+      const data = await res.json().catch(() => ({})) as { url?: string; error?: string };
+      if (!res.ok || !data.url) {
+        setErro(data.error ?? 'Não foi possível enviar o arquivo');
+        setArquivo(null); setPrevia(null);
+        return;
+      }
+      setUrl(data.url);
+    } catch {
+      setErro('Falha de conexão ao enviar o arquivo');
+      setArquivo(null); setPrevia(null);
+    } finally {
+      setSubindo(false);
+    }
+  }, [clientId, leadId]);
+
+  // Arrastado de fora do modal (direto no chat) já entra pronto.
+  useEffect(() => {
+    if (!arquivoInicial) return;
+    // Fora do tick do efeito (mesmo padrão do load de mensagens): o upload
+    // mexe em quatro estados de uma vez e não deve disparar durante o render.
+    const t = window.setTimeout(() => void subirArquivo(arquivoInicial), 0);
+    return () => window.clearTimeout(t);
+  }, [arquivoInicial, subirArquivo]);
+
+  // Colar print (Ctrl+V) é como a maior parte das fotos de atendimento chega.
+  useEffect(() => {
+    if (isLocation) return;
+    const onPaste = (e: ClipboardEvent) => {
+      const f = Array.from(e.clipboardData?.files ?? [])[0];
+      if (f) { e.preventDefault(); void subirArquivo(f); }
+    };
+    window.addEventListener('paste', onPaste);
+    return () => window.removeEventListener('paste', onPaste);
+  }, [isLocation, subirArquivo]);
+
   async function handleSend() {
     setSending(true);
     if (tipo === 'localizacao') {
@@ -509,8 +634,7 @@ function MediaModal({
     setSending(false);
   }
 
-  const isLocation = tipo === 'localizacao';
-  const canSend = isLocation ? (lat && lng) : url.trim().length > 0;
+  const canSend = isLocation ? Boolean(lat && lng) : url.trim().length > 0;
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={onClose}>
@@ -544,11 +668,64 @@ function MediaModal({
             </>
           ) : (
             <>
-              <label className="block space-y-1">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">URL do arquivo</span>
-                <input value={url} onChange={e => setUrl(e.target.value)} placeholder="https://..."
-                  className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary" />
-              </label>
+              {/* ⚠️ Antes aqui só havia um campo de URL — ninguém no atendimento
+                  tem a foto numa URL: ela está no computador, ou foi copiada.
+                  Escolher, arrastar ou colar cobre os três jeitos reais. */}
+              <input
+                ref={inputArquivo}
+                type="file"
+                accept={ACEITA_POR_TIPO[tipo]}
+                className="hidden"
+                onChange={e => { const f = e.target.files?.[0]; if (f) void subirArquivo(f); e.target.value = ''; }}
+              />
+              <div
+                onDragOver={e => { e.preventDefault(); setArrastando(true); }}
+                onDragLeave={() => setArrastando(false)}
+                onDrop={e => {
+                  e.preventDefault(); setArrastando(false);
+                  const f = e.dataTransfer.files?.[0];
+                  if (f) void subirArquivo(f);
+                }}
+                onClick={() => inputArquivo.current?.click()}
+                className={cn(
+                  'flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed px-4 py-6 text-center transition-colors',
+                  arrastando ? 'border-primary bg-primary/10' : 'border-border hover:border-primary/50 hover:bg-muted/30',
+                )}
+              >
+                {subindo ? (
+                  <>
+                    <Loader2 className="h-6 w-6 animate-spin text-primary" />
+                    <span className="text-xs text-muted-foreground">Enviando {arquivo?.name}…</span>
+                  </>
+                ) : arquivo ? (
+                  <>
+                    {previa
+                      ? <img src={previa} alt="Prévia" className="max-h-32 rounded-md object-contain" />
+                      : <FileText className="h-7 w-7 text-primary" />}
+                    <span className="max-w-full truncate text-xs font-semibold">{arquivo.name}</span>
+                    <span className="text-[11px] text-muted-foreground">Clique para trocar</span>
+                  </>
+                ) : (
+                  <>
+                    <Paperclip className="h-6 w-6 text-muted-foreground" />
+                    <span className="text-xs font-semibold">Clique para escolher o arquivo</span>
+                    <span className="text-[11px] text-muted-foreground">ou arraste aqui · ou cole com Ctrl+V</span>
+                  </>
+                )}
+              </div>
+
+              {erro && <p className="text-xs text-red-400">{erro}</p>}
+
+              {/* Link continua servindo para quem já tem a mídia hospedada. */}
+              {!arquivo && (
+                <details className="group">
+                  <summary className="cursor-pointer list-none text-[11px] text-muted-foreground hover:text-foreground">
+                    ou usar um link da internet
+                  </summary>
+                  <input value={url} onChange={e => setUrl(e.target.value)} placeholder="https://..."
+                    className="mt-2 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary" />
+                </details>
+              )}
               {(tipo === 'imagem' || tipo === 'video') && (
                 <label className="block space-y-1">
                   <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Legenda (opcional)</span>
@@ -635,6 +812,18 @@ export function ChatView({
   const [sendStatus, setSendStatus] = useState<'ok' | 'err' | null>(null);
   const [attachMenu, setAttachMenu] = useState(false);
   const [mediaModal, setMediaModal] = useState<MediaType | null>(null);
+  // Arrastar o arquivo para DENTRO da conversa (pedido do Matheus): abre o
+  // mesmo modal já com o arquivo subindo, em vez de obrigar a passar pelo
+  // menu de anexo.
+  const [arquivoArrastado, setArquivoArrastado] = useState<File | null>(null);
+  const [arrastandoNoChat, setArrastandoNoChat] = useState(false);
+
+  function tipoDoArquivo(f: File): MediaType {
+    if (f.type.startsWith('image/')) return 'imagem';
+    if (f.type.startsWith('video/')) return 'video';
+    if (f.type.startsWith('audio/')) return 'audio';
+    return 'documento';
+  }
   const [syncing,    setSyncing]    = useState(false);
   const [syncResult, setSyncResult] = useState<string | null>(null);
   const [sendError,  setSendError]  = useState<string | null>(null);
@@ -1918,8 +2107,37 @@ export function ChatView({
               {/* Messages */}
               <div
                 ref={messagesAreaRef}
-                className="min-h-0 flex-1 overflow-y-auto px-4 py-4 space-y-2 [background-image:linear-gradient(rgba(14,15,20,0.84),rgba(14,15,20,0.84)),radial-gradient(circle_at_1px_1px,rgba(255,255,255,0.08)_1px,transparent_0)] [background-size:auto,18px_18px]"
+                onDragOver={e => {
+                  // Só reage a ARQUIVO: arrastar texto ou um lead do Kanban não
+                  // pode acender a área de soltar.
+                  if (!e.dataTransfer.types.includes('Files')) return;
+                  e.preventDefault();
+                  setArrastandoNoChat(true);
+                }}
+                onDragLeave={e => {
+                  // sair para um filho não conta como sair da área
+                  if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+                  setArrastandoNoChat(false);
+                }}
+                onDrop={e => {
+                  if (!e.dataTransfer.types.includes('Files')) return;
+                  e.preventDefault();
+                  setArrastandoNoChat(false);
+                  const f = e.dataTransfer.files?.[0];
+                  if (!f) return;
+                  setArquivoArrastado(f);
+                  setMediaModal(tipoDoArquivo(f));
+                }}
+                className={cn(
+                  'relative min-h-0 flex-1 overflow-y-auto px-4 py-4 space-y-2 [background-image:linear-gradient(rgba(14,15,20,0.84),rgba(14,15,20,0.84)),radial-gradient(circle_at_1px_1px,rgba(255,255,255,0.08)_1px,transparent_0)] [background-size:auto,18px_18px]',
+                  arrastandoNoChat && 'ring-2 ring-inset ring-primary',
+                )}
               >
+                {arrastandoNoChat && (
+                  <div className="pointer-events-none sticky top-1/2 z-10 mx-auto w-fit rounded-xl bg-primary/90 px-5 py-3 text-sm font-bold text-primary-foreground shadow-xl">
+                    Solte para enviar o arquivo
+                  </div>
+                )}
                 {msgLoading && messages.length === 0 ? (
                   <div className="text-center text-xs text-muted-foreground py-8">Carregando mensagens…</div>
                 ) : messages.length === 0 ? (
@@ -2081,7 +2299,7 @@ export function ChatView({
 
       {/* Media modal */}
       {mediaModal && (
-        <MediaModal tipo={mediaModal} onSend={sendMedia} onClose={() => setMediaModal(null)} />
+        <MediaModal tipo={mediaModal} clientId={clientId} leadId={selectedId} arquivoInicial={arquivoArrastado} onSend={sendMedia} onClose={() => { setMediaModal(null); setArquivoArrastado(null); }} />
       )}
 
       {/* Confirm dialog */}
