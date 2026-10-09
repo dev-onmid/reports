@@ -1,3 +1,17 @@
+## CRM — anexo por arquivo/arrastar/colar e velocidade no áudio (2026-10-09)
+
+Dois pedidos do Matheus olhando a tela recém-consertada: "consigo acelerar o áudio?" e, ao clicar para mandar foto, "o cliente tem que poder só selecionar a imagem no computador ou arrastar para dentro do chat".
+
+- **⚠️ O modal de mídia pedia URL DO ARQUIVO** — e ninguém no atendimento tem a foto numa URL: ela está no computador, foi arrastada, ou é um print copiado. Agora são os três caminhos reais: clicar e escolher, **arrastar para a área da conversa** e **Ctrl+V**. O arquivo sobe na hora e aparece em prévia, então o gestor vê que deu certo antes de clicar em Enviar. O campo de link continua, recolhido num `<details>`, para quem já tem a mídia hospedada.
+- **⚠️ O drop no chat só reage a ARQUIVO** (`e.dataTransfer.types.includes('Files')`): sem isso, arrastar um texto — ou **um lead no Kanban** — acenderia a faixa "solte para enviar". E `onDragLeave` ignora saída para elemento filho (`currentTarget.contains(relatedTarget)`), senão a faixa pisca ao atravessar cada bolha de mensagem.
+- **Velocidade do áudio** (1× → 1,5× → 2×, padrão WhatsApp), com a escolha **lembrada** em `localStorage` para os próximos áudios — quem ouve em 2× quer ouvir tudo em 2×, e trocar bolha a bolha seria pior que não ter o botão.
+  - ⚠️ **`preservesPitch = true`** é obrigatório: sem ele a voz vira desenho animado em 2× em alguns navegadores.
+  - ⚠️ **A velocidade é reaplicada no `loadedmetadata`**: alguns navegadores devolvem `playbackRate` a 1 quando a mídia termina de carregar, e o primeiro play sairia em velocidade normal mesmo com 2× na tela. Um `ref` carrega o valor atual para dentro do listener, que não tem `velocidade` nas dependências.
+  - ⚠️ A preferência é lida no **inicializador do `useState`**, não num efeito (`react-hooks/static-components`/setState-em-efeito acusa): o player só existe no cliente — as mensagens chegam por fetch —, então não há risco de divergência com o servidor.
+- ✅ Verificado: tsc + `next build` + eslint (0 erros) limpos; **upload exercitado na rota REAL em produção** com sessão forjada — PNG sobe (200, URL nossa), volta a ser lido (200, `image/png`, bytes conferidos) e **SVG é recusado com 415** (seria hospedagem de phishing); registro de teste removido depois.
+- ⚠️ Áudio gravado pela tela sai em **`audio/webm`** (o que o `MediaRecorder` do Chrome produz). Chrome/Edge tocam; **Safari não toca webm** — o player fica mudo mesmo com tudo certo. Corrigir exigiria converter no navegador antes de subir; não feito.
+
+
 ## CRM — o áudio virava URL crua na bolha: o plano B da consulta MENTIA o tipo (2026-10-09)
 
 Print do Matheus: gravou o áudio, o WhatsApp entregou, e na bolha apareceu `/api/crm/midia/9694ee…` como texto.
