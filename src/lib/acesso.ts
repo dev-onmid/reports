@@ -122,6 +122,8 @@ export const ROTAS_CLIENTE: Regra[] = [
   { padrao: /^\/api\/crm\/instance-status$/, metodos: ['GET'], exigeCliente: true },
   { padrao: /^\/api\/crm\/avatars$/, metodos: ['POST'], exigeCliente: true },
   { padrao: /^\/api\/crm\/webhook-heal$/, metodos: ['POST'], exigeCliente: true },
+  // reconectar o WhatsApp do próprio cliente (só as instâncias dele; ver a rota)
+  { padrao: /^\/api\/crm\/whatsapp-conexao$/, metodos: ['GET', 'POST'], exigeCliente: true },
   { padrao: /^\/api\/upload$/, metodos: ['POST'], exigeCliente: false },
 ];
 

@@ -1,3 +1,14 @@
+## CRM — o próprio cliente conecta/reconecta o WhatsApp, UM por cliente (2026-10-09)
+
+Pedido do Matheus: "o próprio cliente poder vincular o WhatsApp quando cair" + "limite a 1 WhatsApp, e esse WhatsApp precisa vincular diretamente ao cliente em questão".
+
+- **`/api/crm/whatsapp-conexao`** (GET estado / POST QR), liberada ao usuário de cliente em `ROTAS_CLIENTE`, toda consulta com `client_id` no WHERE. **Sem WhatsApp**: cria a instância Evolution `crm-<nome-do-cliente>` já vinculada ao cliente (linha em `client_zapi_instances` + webhook canônico), com o limite de UM conferido sob `pg_advisory_xact_lock` (dois cliques não criam dois; QUALQUER instância ativa, inclusive Z-API, conta). **Com WhatsApp**: só reconecta — nunca adiciona, apaga ou troca. Ao voltar a `open`, reaponta o webhook.
+- ⚠️ **4 clientes já tinham DOIS números ativos de propósito** (Cinfel off-road/corte e dobra, Atibaia locação/venda, Empas 9391/5588, PicoLocos Guanabara/Prochet) — montados pela agência, NÃO foram mexidos. O limite vale para o que o cliente faz sozinho; a tela da agência (Rastreamento) continua podendo vincular mais de um.
+- ⚠️⚠️ **O risco é escanear com OUTRO celular** (a instância vira o número novo e atendimento/disparos/rastreio saem por ele). `client_zapi_instances.numero_conectado` guarda o último número visto conectado (backfill feito nas 29 instâncias ativas, a partir do `ownerJid`); conectou com número diferente → aviso vermelho no modal + **alarme crítico para a agência** (`tipo 'instancia'`, `importante`). O número diferente NÃO sobrescreve o registrado, para o alarme não se apagar sozinho.
+- **Tela** (`crm/conectar-whatsapp.tsx`, mesmo padrão do QR da agência: consulta a cada 3 s, QR renovado em 40 s, fecha sozinho): faixa vermelha na tela de LEADS quando o WhatsApp cai ("Reconectar agora"/"Conectar WhatsApp" — quem atende pode nem abrir o Chat), e botões no aviso do chat e por instância. O texto antigo mandava ir em "Clientes → Rastreamento", que o cliente não acessa.
+- ✅ Verificado: 29 asserts da trava (5 novos: consulta/reconecta o dele, recusa o de outro cliente, recusa sem cliente, não alcança a rota da agência); tsc + `next build` limpos; navegador com servidor simulado: faixa na tela de Leads, QR com instruções, "Conectado!" e a faixa sumindo, e o aviso de número trocado.
+- ⚠️ Não exercitado com QR real em produção (exige um WhatsApp desconectado de verdade).
+
 ## CRM pronto para o FUNCIONÁRIO DO CLIENTE usar (2026-10-09)
 
 Pedido do Matheus: o CRM vai ser usado pela equipe dos clientes (recepção de clínica, vendedor de franquia), e a auditoria mostrou que não estava apto. Fases 1–4 entregues numa rodada.

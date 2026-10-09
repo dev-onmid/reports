@@ -5,6 +5,7 @@ import type { ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 import { notificar } from '@/components/ui/toast';
 import { useModoCliente } from '@/lib/modo-cliente';
+import { ConectarWhatsappModal } from './conectar-whatsapp';
 import { GerenciarRespostas, SugestoesResposta, aplicarVariaveis, respostasDoAtalho, useRespostasRapidas, type RespostaRapida } from './respostas-rapidas';
 import {
   Search, MessageCircle, RefreshCw, Send, Paperclip,
@@ -637,6 +638,8 @@ export function ChatView({
   // Instance status
   const [instanceStatus,  setInstanceStatus]  = useState<InstanceStatus>('checking');
   const [instanceInfos,   setInstanceInfos]   = useState<InstanceInfo[]>([]);
+  // undefined = fechado; null = conectar o WhatsApp único (cria se não houver); id = reconectar aquele
+  const [conectarId, setConectarId] = useState<string | null | undefined>(undefined);
   const [instanceAlertOpen, setInstanceAlertOpen] = useState(false);
 
   // Confirm dialog
@@ -1879,8 +1882,8 @@ export function ChatView({
                 >
                   <WifiOff className="h-3.5 w-3.5 shrink-0 animate-pulse" />
                   {instanceStatus === 'no_instance'
-                    ? 'Nenhuma instância WhatsApp configurada. Clique para saber mais.'
-                    : 'WhatsApp desconectado — mensagens podem não ser enviadas. Clique para detalhes.'}
+                    ? 'Nenhum WhatsApp conectado. Clique para conectar.'
+                    : 'WhatsApp desconectado — clique para reconectar.'}
                 </button>
               )}
 
@@ -2106,6 +2109,12 @@ export function ChatView({
         />
       )}
 
+      {conectarId !== undefined && (
+        <ConectarWhatsappModal clientId={clientId} instanciaId={conectarId}
+          onFechar={() => { setConectarId(undefined); loadInstanceStatus(); }}
+          onConectou={loadInstanceStatus} />
+      )}
+
       {gerenciarRespostas && (
         <GerenciarRespostas clientId={clientId} lista={respostas.lista}
           onMudou={respostas.recarregar} onFechar={() => setGerenciarRespostas(false)} />
@@ -2161,11 +2170,15 @@ export function ChatView({
                 <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4">
                   <div className="flex items-start gap-3">
                     <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
-                    <p className="text-xs text-muted-foreground leading-relaxed">
-                      Nenhuma instância WhatsApp está configurada para este cliente. Configure em{' '}
-                      <span className="font-semibold text-foreground">Clientes → Rastreamento</span>{' '}
-                      para enviar e receber mensagens.
-                    </p>
+                    <div className="space-y-2">
+                      <p className="text-xs text-muted-foreground leading-relaxed">
+                        Nenhum WhatsApp está conectado a este CRM. Conecte o número que atende os clientes para enviar e receber mensagens por aqui.
+                      </p>
+                      <button type="button" onClick={() => { setInstanceAlertOpen(false); setConectarId(null); }}
+                        className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90">
+                        Conectar WhatsApp
+                      </button>
+                    </div>
                   </div>
                 </div>
               ) : instanceStatus !== 'connected' ? (
@@ -2173,9 +2186,17 @@ export function ChatView({
                   <div className="flex items-start gap-3">
                     <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-red-400" />
                     <p className="text-xs text-muted-foreground leading-relaxed">
-                      A instância está desconectada. Mensagens <span className="font-semibold text-foreground">não serão enviadas</span> até que o WhatsApp seja reconectado.
-                      Acesse <span className="font-semibold text-foreground">Clientes → Rastreamento</span> para escanear o QR Code e reconectar.
+                      O WhatsApp está desconectado. Mensagens <span className="font-semibold text-foreground">não serão enviadas nem recebidas</span> até reconectar.
                     </p>
+                    <button type="button"
+                      onClick={() => {
+                        const caida = instanceInfos.find(i => i.provider === 'evolution' && i.status !== 'connected');
+                        setInstanceAlertOpen(false);
+                        setConectarId(caida?.id ?? null);
+                      }}
+                      className="mt-2 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90">
+                      Reconectar agora
+                    </button>
                   </div>
                 </div>
               ) : (
@@ -2196,7 +2217,7 @@ export function ChatView({
                     <div key={inst.id} className="flex items-center justify-between gap-3 rounded-lg border border-border bg-background/60 px-3 py-2.5">
                       <div className="min-w-0">
                         <p className="text-xs font-semibold truncate">{inst.nome}</p>
-                        <p className="text-[10px] text-muted-foreground">{inst.provider === 'evolution' ? 'Evolution API' : 'Z-API'}</p>
+                        {!modoCliente && <p className="text-[10px] text-muted-foreground">{inst.provider === 'evolution' ? 'Evolution API' : 'Z-API'}</p>}
                       </div>
                       <span className={cn(
                         'flex items-center gap-1 rounded-full px-2 py-1 text-[10px] font-bold shrink-0',
@@ -2212,6 +2233,12 @@ export function ChatView({
                             ? <><Wifi className="h-2.5 w-2.5" /> Desconhecido</>
                             : <><WifiOff className="h-2.5 w-2.5" /> Desconectado</>}
                       </span>
+                      {inst.provider === 'evolution' && inst.status !== 'connected' && (
+                        <button type="button" onClick={() => { setInstanceAlertOpen(false); setConectarId(inst.id); }}
+                          className="shrink-0 rounded-md border border-primary/40 px-2 py-1 text-[10px] font-bold text-primary hover:bg-primary/10">
+                          Reconectar
+                        </button>
+                      )}
                     </div>
                   ))}
                 </div>

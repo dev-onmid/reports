@@ -17,6 +17,7 @@ import {
   BarChart3, UserRound, MessageCircle, X, Send, GripVertical, Layers, WifiOff, Link2,
   Globe2, Clapperboard, Info, MapPin, ClipboardList, BadgeCheck, BookmarkPlus, Check, Star } from 'lucide-react';
 import { ChatView } from './chat-view';
+import { ConectarWhatsappModal } from './conectar-whatsapp';
 import { LeadChatPanel } from './lead-chat-panel';
 import { CamposAtendimento, HistoricoLead, NovoLeadModal, opcoesDeOrigem } from './lead-operacao';
 import { ModoClienteContext, useEhUsuarioCliente, useMeuNome, useModoCliente } from '@/lib/modo-cliente';
@@ -3192,6 +3193,8 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
   const [clientView, setClientView] = useState<'grid' | 'list'>('grid');
   const [recentClientIds, setRecentClientIds] = useState<string[]>([]);
   const [chatInstanceStatus, setChatInstanceStatus] = useState<'connected' | 'disconnected' | 'unknown' | 'no_instance' | null>(null);
+  const [conectandoWhatsapp, setConectandoWhatsapp] = useState(false);
+  const [statusTick, setStatusTick] = useState(0);
 
   // ── Funnels & Stages ──────────────────────────────────────────────────
   const [funnels, setFunnels] = useState<CrmFunnel[]>([]);
@@ -3337,7 +3340,7 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
     check();
     const id = setInterval(check, 30_000);
     return () => clearInterval(id);
-  }, [clientId]);
+  }, [clientId, statusTick]);
 
   useEffect(() => {
     try {
@@ -4473,6 +4476,29 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
         )}
       </div>
       </>
+      )}
+
+      {/* WhatsApp caído: o aviso fica na tela de Leads também — quem atende pode
+          nem abrir o Chat e passar o dia sem receber mensagem. O próprio
+          cliente reconecta pelo QR (um WhatsApp por cliente; ver whatsapp-conexao). */}
+      {clientId && crmView === 'leads' && (chatInstanceStatus === 'disconnected' || chatInstanceStatus === 'no_instance') && (
+        <div className="flex shrink-0 flex-wrap items-center gap-3 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-2.5 text-sm text-red-200">
+          <WifiOff className="h-4 w-4 shrink-0 animate-pulse" />
+          <span className="flex-1">
+            {chatInstanceStatus === 'no_instance'
+              ? 'Nenhum WhatsApp conectado a este CRM — as conversas não chegam aqui.'
+              : 'WhatsApp desconectado — as mensagens não estão chegando nem saindo.'}
+          </span>
+          <button type="button" onClick={() => setConectandoWhatsapp(true)}
+            className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90">
+            {chatInstanceStatus === 'no_instance' ? 'Conectar WhatsApp' : 'Reconectar agora'}
+          </button>
+        </div>
+      )}
+      {conectandoWhatsapp && clientId && (
+        <ConectarWhatsappModal clientId={clientId}
+          onFechar={() => { setConectandoWhatsapp(false); setStatusTick(t => t + 1); }}
+          onConectou={() => setStatusTick(t => t + 1)} />
       )}
 
       {/* ── STATS (faixa única compacta — o espaço vertical é do funil) ── */}
