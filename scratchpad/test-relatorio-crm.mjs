@@ -4,7 +4,7 @@
 //     --packages=external --tsconfig=tsconfig.json --outfile=scratchpad/build/relatorio-crm.mjs
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { ehMesCheio, degrausDoFunil, sFunilComercial, sCanais, sVisaoGeral, sInstagram, sInstagramCalendar, sGoogleAdsResumo, sGoogleAdsCampanhas, sPaidTrafficResumo, sSiteResumo, sSiteAudiencia, agruparSerieDiaria, seletorContatos, categorizeGoogleCampaign, comprasReaisGoogle, rotuloPeriodo, mesesCheios, autoPreviousPeriod, postsParaListar, sInstagramPosts, sInstagramSpotlight, sInstagramTodosConteudos, TODOS_CONTEUDOS_MAX_PAGINAS, plataformaDoCanal, receitaPorPlataforma, comercialDaPlataforma, ganhoNoPeriodo, serieDaResposta, CRM_PERIODO_SQL } from './build/relatorio-crm.mjs';
+import { ehMesCheio, degrausDoFunil, sFunilComercial, sCanais, sVisaoGeral, sInstagram, sInstagramCalendar, sGoogleAdsResumo, sGoogleAdsCampanhas, sMetaAdsResumo, sMetaAdsCampanhas, rotuloVs, chaveCampanha, sPaidTrafficResumo, sSiteResumo, sSiteAudiencia, agruparSerieDiaria, seletorContatos, categorizeGoogleCampaign, comprasReaisGoogle, rotuloPeriodo, mesesCheios, autoPreviousPeriod, postsParaListar, sInstagramPosts, sInstagramSpotlight, sInstagramTodosConteudos, TODOS_CONTEUDOS_MAX_PAGINAS, plataformaDoCanal, receitaPorPlataforma, comercialDaPlataforma, ganhoNoPeriodo, serieDaResposta, CRM_PERIODO_SQL } from './build/relatorio-crm.mjs';
 
 let n = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); n++; };
@@ -253,5 +253,53 @@ ok(!sGoogleAdsResumo(gLeads, 8, 18, null).includes('ROAS') || !sGoogleAdsResumo(
 
 // ── Canal da Meta dividido por rede e tipo (08/10) — o ROAS continua agrupando tudo em Meta ──
 ok(['Instagram · WhatsApp','Facebook · WhatsApp','Facebook · Formulário','Meta Ads · WhatsApp'].every(c => plataformaDoCanal(c) === 'meta'), 'rótulos novos da Meta continuam contando no ROAS da Meta');
+
+// ── Comparativo com o mês anterior nos resumos e nas campanhas (09/10) ──────────
+ok(rotuloVs('Agosto/2026') === 'Agosto' && rotuloVs('Abril a Junho/2026') === 'anterior' && rotuloVs('') === 'anterior', 'rótulo "vs Agosto" só para mês cheio');
+ok(chaveCampanha('  Campanha  ÁGOSTO ') === chaveCampanha('campanha agosto'), 'campanha casa entre períodos sem acento/caixa/espaço');
+const mc = (nome, tipo, inv, opts = {}) => ({ nome, tipo, metricas: { investimento: inv, impressoes: 10000, alcance: 5000, cliques: 500, frequencia: 1.5, leads: 0, conversas: 0, compras: 0, valor_compras: 0, purchase_roas: 0, visitas_pagina: 0, iniciaram_checkout: 0, ...opts } });
+const metaAtual = { investimento: 2292.77, impressoes: 314914, alcance: 84177, cliques: 3123, nivel: 'campaign', campanhas: [
+  mc('Mensagens WA', 'OUTCOME_ENGAGEMENT', 911.97, { conversas: 300 }),
+  mc('Vendas Loja', 'OUTCOME_SALES', 1202.68, { compras: 121, valor_compras: 10742.23, purchase_roas: 8.93 }),
+  mc('Nova de Setembro', 'OUTCOME_TRAFFIC', 178.12),
+] };
+const metaAnt = { investimento: 2000, impressoes: 300000, alcance: 90000, cliques: 3000, nivel: 'campaign', campanhas: [
+  mc('mensagens wa', 'OUTCOME_ENGAGEMENT', 800, { conversas: 200 }),
+  mc('Vendas Loja', 'OUTCOME_SALES', 1200, { compras: 100, valor_compras: 9000, purchase_roas: 7.5 }),
+] };
+const comp = { anterior: metaAnt, vs: 'Agosto' };
+const rSem = sMetaAdsResumo(metaAtual, 5, 20, null);
+ok(!rSem.includes('vs Agosto') && !rSem.includes('data-delta'), 'sem comparativo o resumo da Meta fica como era');
+const rCom = sMetaAdsResumo(metaAtual, 5, 20, null, comp);
+ok(rCom.includes('+14,6% ↑ vs Agosto'), 'Investimento +14,6% vs Agosto');
+ok(rCom.includes('-6,5% ↓ vs Agosto'), 'Alcance caiu 6,5% (84.177 vs 90.000)');
+const cpcAtual = 2292.77 / 3123, cpcAnt = 2000 / 3000;
+const cpcPct = ((cpcAtual - cpcAnt) / cpcAnt * 100).toFixed(1).replace('.', ',');
+const iCpc = rCom.indexOf('>CPC<'); const trechoCpc = rCom.slice(iCpc, iCpc + 700);
+ok(trechoCpc.includes(`+${cpcPct}% ↑ vs Agosto`) && trechoCpc.includes('color:#e52020'), 'CPC subiu → vermelho (custo maior é pior)');
+const iInv = rCom.indexOf('>Investimento<'); const trechoInv = rCom.slice(iInv, iInv + 700);
+ok(trechoInv.includes('color:#334155'), 'investimento é neutro (cinza), nem bom nem ruim');
+ok(rCom.includes('+50,0% ↑ vs Agosto'), 'card Leads e conversas: conversas 300 vs 200 = +50%');
+ok(rCom.includes('+21,0% ↑ vs Agosto'), 'card Vendas: compras 121 vs 100 = +21%');
+ok(rCom.includes('repeat(4,1fr)'), 'sem faturamento do CRM continua em 4 colunas');
+const rZero = sMetaAdsResumo(metaAtual, 5, 20, null, { anterior: { ...metaAnt, alcance: 0 }, vs: 'Agosto' });
+ok(!/Alcance<\/p>[\s\S]{0,400}?vs Agosto/.test(rZero.slice(rZero.indexOf('>Alcance<'), rZero.indexOf('>Alcance<') + 600)), 'anterior zero → sem percentual (não inventa divisão por zero)');
+// campanhas
+const cSem = sMetaAdsCampanhas(metaAtual, { insight_campanha_conversa: '', insight_campanha_conversao: '' }, 6, 20, 'Setembro/2026');
+ok(!cSem.includes('vs Agosto') && !cSem.includes('Nova em'), 'página de campanhas sem comparativo fica como era');
+const cCom = sMetaAdsCampanhas(metaAtual, { insight_campanha_conversa: '', insight_campanha_conversao: '' }, 6, 20, 'Setembro/2026', metaAtual.campanhas, comp);
+ok(cCom.includes('+50,0% ↑ vs Agosto'), 'campanha casada pelo nome (caixa diferente): conversas +50%');
+const iVendas = cCom.indexOf('Vendas Loja'); const trechoV = cCom.slice(iVendas, iVendas + 6000);
+ok(trechoV.includes('+21,0% ↑ vs Agosto') && trechoV.includes('+19,4% ↑ vs Agosto'), 'Vendas Loja: compras +21% e valor de venda +19,4%');
+ok((cCom.match(/Nova em Setembro/g) || []).length === 1 && cCom.slice(cCom.indexOf('Nova De Setembro'), cCom.indexOf('Nova De Setembro') + 400).includes('Nova em Setembro'), 'campanha sem par no mês anterior ganha o selo "Nova em Setembro", só ela');
+// Google
+const gAnt = { ...gLeads, investimento: 1000, cliques: 500, conversoes: 40, campanhas: [gc('SEARCH', 10, 10, 0, 0, 500)] };
+const gCom = sGoogleAdsResumo(gLeads, 8, 18, null, { anterior: gAnt, vs: 'Agosto' });
+ok(gCom.includes('+25,0% ↑ vs Agosto') && gCom.includes('+15,1% ↑ vs Agosto'), 'Google: conversões +25% e investimento +15,1%');
+const ccAnt = 1000 / 40, ccAtual = 1150.77 / 50;
+ok(gCom.includes(`${((ccAtual - ccAnt) / ccAnt * 100).toFixed(1).replace('.', ',')}% ↓ vs Agosto`), 'custo/conversão caiu → aparece com ↓');
+ok(!sGoogleAdsResumo(gLeads, 8, 18, null).includes('data-delta'), 'Google sem comparativo fica como era');
+const gCamp = sGoogleAdsCampanhas(gLeads, 9, 18, 'Setembro/2026', gLeads.campanhas, { anterior: gAnt, vs: 'Agosto' });
+ok(gCamp.includes('vs Agosto') && gCamp.includes('Nova em Setembro') === false, 'campanhas Google com o mesmo nome "c" casam e comparam');
 
 console.log(`OK — ${n} asserts`);

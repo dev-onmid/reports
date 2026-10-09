@@ -2,7 +2,7 @@ import { makeServerPool } from '@/lib/server-db';
 import { getFreshMetaToken } from '@/lib/meta-token';
 import { RESULT_ACTIONS, NEW_CONTACT_ACTIONS, PURCHASE_ACTIONS, sumActions } from './report-runner';
 import {
-  fetchBairros, fetchMetaData, fetchInstagramData, autoPreviousPeriod, rotuloPeriodo, mesesCheios, sanitizeJsonValue, comprasReaisGoogle,
+  fetchBairros, fetchMetaData, fetchInstagramData, autoPreviousPeriod, rotuloPeriodo, rotuloVs, mesesCheios, sanitizeJsonValue, comprasReaisGoogle,
   sCapa, sVisaoGeral, sFunilComercial, sCanais, sSiteResumo, sSiteAudiencia, sRegioes, sPaidTrafficResumo, sMetaAdsResumo, sMetaAdsCampanhas, sCriativos,
   sGoogleAdsResumo, sGoogleAdsCampanhas, sGoogleAdsPalavrasChave,
   sInstagram, sInstagramCalendar, sInstagramPosts, sInstagramSpotlight,
@@ -661,7 +661,7 @@ export async function buildOmniReport(input: {
   // Um mês cheio é a unidade natural do relatório; fora disso as páginas dizem "período".
   const periodoEhMes = mesesCheios(periodFrom, periodTo) === 1;
 
-  const [crm, site, metaDetailed, googleDetailed, instagramFull, bairros, rotationSeed] = await Promise.all([
+  const [crm, site, metaDetailed, googleDetailed, instagramFull, bairros, rotationSeed, metaAnterior, googleAnterior] = await Promise.all([
     fetchCrmDoRelatorio(clientId, periodFrom, periodTo, prev),
     fetchSiteDoRelatorio(clientId, periodFrom, periodTo),
     connectionId && accountIds?.length
@@ -674,8 +674,20 @@ export async function buildOmniReport(input: {
     fetchInstagramData(clientId, connectionId ?? null, accountIds ?? [], periodFrom, periodTo, compare),
     fetchBairros(clientId, periodFrom, periodTo),
     fetchReportRotationSeed(),
+    // Período anterior do Meta/Google para os comparativos "vs Agosto" nos resumos e
+    // nas páginas de campanha (pedido do Matheus, 09/10/2026). Sem criativos: só o
+    // que o comparativo usa. `prev` null (geração com "não comparar") pula tudo.
+    prev && connectionId && accountIds?.length
+      ? fetchMetaData(connectionId, accountIds, prev.from, prev.to, metaLevel, { semCriativos: true }).then(r => r.meta).catch(() => null)
+      : Promise.resolve(null),
+    prev
+      ? fetchGoogleAdsDetailed(googleConnectionId, googleAccountIds ?? [], prev.from, prev.to).catch(() => null)
+      : Promise.resolve(null),
   ]);
   const cover = resolveReportCover(coverId, rotationSeed);
+  const vsAnterior = rotuloVs(prevPeriodo);
+  const compMeta   = { anterior: metaAnterior, vs: vsAnterior };
+  const compGoogle = { anterior: googleAnterior, vs: vsAnterior };
 
   const data    = toParsedData(crm.atual);
   const hasPrevData = !!crm.anterior && (crm.anterior.revenue > 0 || crm.anterior.sales > 0);
@@ -790,18 +802,18 @@ export async function buildOmniReport(input: {
 
   // Faturamento do CRM por plataforma (canais Meta × Google) para o ROAS dos resumos.
   const receitaPlat = receitaPorPlataforma(crm.canais?.origens ?? []);
-  if (hasMeta)        slides.push(sMetaAdsResumo(meta!, ++i, total, comercialDaPlataforma(receitaPlat.meta, meta!.investimento)));
+  if (hasMeta)        slides.push(sMetaAdsResumo(meta!, ++i, total, comercialDaPlataforma(receitaPlat.meta, meta!.investimento), compMeta));
   if (hasDestaques) {
     for (let start = 0; start < meta!.campanhas.length; start += 4) {
-      slides.push(sMetaAdsCampanhas(meta!, diag, ++i, total, periodo, meta!.campanhas.slice(start, start + 4)));
+      slides.push(sMetaAdsCampanhas(meta!, diag, ++i, total, periodo, meta!.campanhas.slice(start, start + 4), compMeta));
     }
   }
   if (hasCriativos)   slides.push(sCriativos(creatives, ++i, total));
 
-  if (hasGoogle)      slides.push(sGoogleAdsResumo(googleDetailed!, ++i, total, comercialDaPlataforma(receitaPlat.google, googleDetailed!.investimento)));
+  if (hasGoogle)      slides.push(sGoogleAdsResumo(googleDetailed!, ++i, total, comercialDaPlataforma(receitaPlat.google, googleDetailed!.investimento), compGoogle));
   if (hasGoogleDestaques) {
     for (let start = 0; start < googleDetailed!.campanhas.length; start += 4) {
-      slides.push(sGoogleAdsCampanhas(googleDetailed!, ++i, total, periodo, googleDetailed!.campanhas.slice(start, start + 4)));
+      slides.push(sGoogleAdsCampanhas(googleDetailed!, ++i, total, periodo, googleDetailed!.campanhas.slice(start, start + 4), compGoogle));
     }
   }
   if (hasGooglePalavras) slides.push(sGoogleAdsPalavrasChave(googleDetailed!, ++i, total, periodo));
