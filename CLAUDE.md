@@ -1,3 +1,18 @@
+## CRM — o áudio virava URL crua na bolha: o plano B da consulta MENTIA o tipo (2026-10-09)
+
+Print do Matheus: gravou o áudio, o WhatsApp entregou, e na bolha apareceu `/api/crm/midia/9694ee…` como texto.
+
+- **O dado estava CERTO no banco** — `tipo="audio"`, arquivo de 97 KB (`audio/webm`), `status=sent`. Quem errava era a LEITURA. Conferir o banco antes de culpar a gravação economizou a sessão inteira.
+- **⚠️⚠️ A causa: `crm_contacts` NÃO EXISTE neste banco.** É código morto (já anotado como tal em 2026-07-16) que não veio na migração para o Postgres da VPS em 17/09. A consulta do chat tinha um ramo `contact_matches` por essa tabela, estourava com `relation "public.crm_contacts" does not exist`, e caía num plano B que respondia **`'texto' AS tipo` para TODAS as linhas**. Desde setembro, portanto, o chat recebia **toda** mídia marcada como texto.
+- **⚠️ O plano B é o vilão, não a tabela faltante.** Ele transformava um erro de SQL em DADO FALSO na tela — o pior desfecho possível, porque não há log, não há erro, e a tela parece só estar "esquisita". Agora é uma consulta só, sem plano B: se um dia falhar, aparece no log e a conversa vem vazia com erro, em vez de vir errada em silêncio.
+- **Medido antes de remover o ramo**: **0 de 83.512** mensagens usam `contact_id`. Ele só servia para quebrar. 133 mídias (100 áudios, 22 fotos, 11 documentos) voltaram a renderizar.
+- **⚠️ Por que parecia problema do áudio**: o INBOX não tem esse plano B (usa `COALESCE(tipo,'texto')` direto), então a lista mostrava "🎤 Mensagem de voz" corretamente enquanto só a bolha falhava. Divergência entre lista e conversa sobre a MESMA mensagem = suspeitar da consulta, não do arquivo.
+- **⚠️ `isAudioUrl`/`isImageUrl` não salvam a URL nova**: elas exigem extensão (`.ogg`, `.jpg`) e `/api/crm/midia/<token>` não tem nenhuma — de propósito, o tipo vem do banco. Então o `tipo` correto é a ÚNICA coisa que faz a mídia renderizar; não há rede de segurança por trás dele.
+- ✅ Verificado: tsc + `next build` + eslint limpos; a consulta corrigida rodada contra o Postgres de produção (devolve `tipo=audio` para a mensagem do print); e a **ROTA REAL exercitada em produção** com sessão forjada — `GET /api/crm/<lead>/messages` devolve 200 com `tipo=audio`, e `GET /api/crm/midia/<token>` serve `audio/webm` 97.862 bytes, 206 com Range e **401 sem sessão**.
+- ⚠️ O cookie de sessão agora é **`__Host-onmid_session`** em produção (prefixo exigido desde a auditoria de segurança): forjador que use o nome antigo toma 401.
+- ⚠️ Áudio gravado pela tela sai em **`audio/webm`** (o que o `MediaRecorder` do Chrome produz). Chrome toca; **Safari não toca webm** — se alguém da equipe usar Safari, o player fica mudo mesmo com tudo certo. Não corrigido: exigiria converter no navegador antes de subir.
+
+
 ## Mídia do chat — faxina de 90 dias que POUPA o áudio, com teto de disco (2026-10-09)
 
 Pergunta do Matheus logo depois do conserto do Supabase: "tem um limite por cliente ou tempo? 30 dias é mais que suficiente, né?". A resposta mudou **depois de medir**, e os números é que valem.
