@@ -9,7 +9,10 @@
 # Evolution (WhatsApp), que é o risco real de colocar o sistema na mesma
 # máquina.
 
-FROM node:22-alpine AS base
+# Espelho público da Amazon da MESMA imagem oficial: o Docker Hub limita pulls
+# anônimos por IP e os runners do GitHub compartilham IP — em 09/10/2026 dois
+# builds seguidos morreram com "429 Too Many Requests" antes de começar.
+FROM public.ecr.aws/docker/library/node:22-alpine AS base
 # libc6-compat: o sharp (otimização de imagem do next/image) é compilado para
 # glibc; sem isto ele falha em Alpine na hora de servir imagem.
 RUN apk add --no-cache libc6-compat
