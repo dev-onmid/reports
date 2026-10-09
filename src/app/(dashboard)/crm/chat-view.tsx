@@ -20,6 +20,11 @@ function ChevronLeftIcon() {
   return <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2"><path d="M15 18l-6-6 6-6" /></svg>;
 }
 
+/** URL externa OU a nossa mídia autenticada (relativa, /api/crm/midia/<token>). */
+function ehUrlDeMidia(text: string): boolean {
+  return text.startsWith('http') || text.startsWith('/api/crm/midia/');
+}
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type InboxLead = {
@@ -128,12 +133,12 @@ function leadName(lead: InboxLead | null) {
 function inboxPreview(lead: InboxLead): string {
   const text = (lead.last_message ?? '').trim();
   const tipo = lead.last_tipo ?? 'texto';
-  if (tipo === 'imagem' || (text.startsWith('http') && isImageUrl(text)) || text === '[Imagem]') return '📷 Foto';
-  if (tipo === 'video' || (text.startsWith('http') && isVideoUrl(text)) || text === '[Vídeo]') return '🎥 Vídeo';
-  if (tipo === 'audio' || (text.startsWith('http') && isAudioUrl(text)) || text === '[Áudio]') return '🎤 Mensagem de voz';
+  if (tipo === 'imagem' || (ehUrlDeMidia(text) && isImageUrl(text)) || text === '[Imagem]') return '📷 Foto';
+  if (tipo === 'video' || (ehUrlDeMidia(text) && isVideoUrl(text)) || text === '[Vídeo]') return '🎥 Vídeo';
+  if (tipo === 'audio' || (ehUrlDeMidia(text) && isAudioUrl(text)) || text === '[Áudio]') return '🎤 Mensagem de voz';
   if (tipo === 'localizacao') return '📍 Localização';
   if (text === '[Sticker]' || text === '[Figurinha]') return '🩵 Figurinha';
-  if (tipo === 'documento' || /^\[doc\]/i.test(text) || (text.startsWith('http') && /\.(pdf|docx?|xlsx?|pptx?|zip)(\?.*)?$/i.test(text))) {
+  if (tipo === 'documento' || /^\[doc\]/i.test(text) || (ehUrlDeMidia(text) && /\.(pdf|docx?|xlsx?|pptx?|zip)(\?.*)?$/i.test(text))) {
     const nomeArq = text.replace(/^\[doc\]\s*/i, '').split('/').pop()?.split('?')[0];
     return `📄 ${nomeArq || 'Documento'}`;
   }
@@ -275,14 +280,14 @@ export function MessageBubble({ msg, onImageClick }: { msg: CrmMessage; onImageC
     }
     // Documento vira cartão estilo WhatsApp — tanto com arquivo baixável (URL)
     // quanto o placeholder "[Doc] nome.pdf" de mensagens cujo arquivo não foi salvo.
-    const isDocUrl = text.startsWith('http') && /\.(pdf|docx?|xlsx?|pptx?|zip|csv|txt)(\?.*)?$/i.test(text);
+    const isDocUrl = ehUrlDeMidia(text) && /\.(pdf|docx?|xlsx?|pptx?|zip|csv|txt)(\?.*)?$/i.test(text);
     const isDocPlaceholder = /^\[doc\]/i.test(text.trim());
     if (t === 'documento' || isDocUrl || isDocPlaceholder) {
       const fileName = (isDocPlaceholder
         ? text.trim().replace(/^\[doc\]\s*/i, '')
         : decodeURIComponent(text.split('/').pop()?.split('?')[0] ?? '')) || 'Documento';
       const ext = (fileName.split('.').pop() ?? '').toUpperCase();
-      const hasFile = text.startsWith('http');
+      const hasFile = ehUrlDeMidia(text);
       const card = (
         <div className={cn(
           'flex min-w-[220px] max-w-full items-center gap-3 rounded-lg px-3 py-2.5',
@@ -1284,7 +1289,7 @@ export function ChatView({
       formData.append('file', new File([blob], `audio-${Date.now()}.${ext}`, {
         type: blob.type || 'audio/webm',
       }));
-      const res = await fetch('/api/upload', { method: 'POST', body: formData });
+      const res = await fetch(`/api/upload?clientId=${encodeURIComponent(clientId)}${selectedId ? `&leadId=${encodeURIComponent(selectedId)}` : ''}`, { method: 'POST', body: formData });
       const data = await res.json().catch(() => ({})) as { url?: string; error?: string };
       if (!res.ok || !data.url) {
         setSendStatus('err');

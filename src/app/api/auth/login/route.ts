@@ -4,6 +4,18 @@ import { createSessionToken, sessionCookieHeader, sessionSecretMissing } from '@
 import { hostDaRequisicao, hostSoEquipe, MSG_USAR_CRM, URL_CRM } from '@/lib/host-acesso';
 import { ipDaRequisicao, resposta429, tentativaPermitida } from '@/lib/rate-limit';
 
+let colunasLogin: Promise<void> | null = null;
+function garantirColunasLogin(pool: ReturnType<typeof makeServerPool>): Promise<void> {
+  if (!colunasLogin) {
+    colunasLogin = pool.query(`ALTER TABLE public.users
+      ADD COLUMN IF NOT EXISTS team TEXT NOT NULL DEFAULT 'onmid',
+      ADD COLUMN IF NOT EXISTS client_ids TEXT[] NOT NULL DEFAULT '{}',
+      ADD COLUMN IF NOT EXISTS perfil_cliente TEXT NOT NULL DEFAULT 'atendente'`)
+      .then(() => undefined).catch((e) => { colunasLogin = null; throw e; });
+  }
+  return colunasLogin;
+}
+
 // Hash de ninguém: e-mail desconhecido também paga o scrypt, para o tempo de
 // resposta não dizer quem tem conta.
 const HASH_FICTICIO = 'scrypt$16384$8$1$AAAAAAAAAAAAAAAAAAAAAA==$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=';
@@ -48,6 +60,10 @@ export async function POST(req: Request) {
 
   const pool = makeServerPool();
   try {
+    // ⚠️ O login roda ANTES de qualquer sessão — ninguém mais garante as
+    // colunas novas aqui. Em 10/10 o deploy saiu sem `perfil_cliente` no banco
+    // e TODO login respondeu 500 até a coluna existir. Memoizado por processo.
+    await garantirColunasLogin(pool);
     const { rows } = await pool.query(
       `SELECT id, name, email, password, role, status, COALESCE(team, 'onmid') AS team,
               COALESCE(perfil_cliente, 'atendente') AS perfil

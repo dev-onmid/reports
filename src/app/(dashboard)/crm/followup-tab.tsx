@@ -110,17 +110,18 @@ const STATUS_LABEL: Record<string, string> = {
 
 // ── File upload helper ────────────────────────────────────────────────────────
 
-async function uploadFile(file: File): Promise<{ url?: string; error?: string }> {
+async function uploadFile(file: File, clientId: string): Promise<{ url?: string; error?: string }> {
   const fd = new FormData();
   fd.append('file', file);
-  const res = await fetch('/api/upload', { method: 'POST', body: fd });
+  // clientId na query: a mídia fica guardada no cliente certo (crm-midia.ts).
+  const res = await fetch(`/api/upload?clientId=${encodeURIComponent(clientId)}`, { method: 'POST', body: fd });
   const data = await res.json() as { url?: string; error?: string };
   return data;
 }
 
 // ── Audio recorder hook ───────────────────────────────────────────────────────
 
-function useAudioRecorder(onDone: (url: string) => void) {
+function useAudioRecorder(onDone: (url: string) => void, clientId: string) {
   const [recording, setRecording] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [seconds,   setSeconds]   = useState(0);
@@ -147,7 +148,7 @@ function useAudioRecorder(onDone: (url: string) => void) {
         const blob = new Blob(chunksRef.current, { type: mimeType });
         const ext = mimeType.includes('ogg') ? 'ogg' : 'webm';
         const file = new File([blob], `audio-${Date.now()}.${ext}`, { type: mimeType });
-        const result = await uploadFile(file);
+        const result = await uploadFile(file, clientId);
         setUploading(false);
         if (result.url) onDone(result.url);
         else setError(result.error ?? 'Falha ao fazer upload do áudio');
@@ -179,11 +180,13 @@ function ParteRow({
   onChange,
   onDelete,
   showDelete,
+  clientId,
 }: {
   parte: Parte;
   onChange: (p: Parte) => void;
   onDelete: () => void;
   showDelete: boolean;
+  clientId: string;
 }) {
   const [showGuia,   setShowGuia]   = useState(false);
   const [uploading,  setUploading]  = useState(false);
@@ -207,7 +210,7 @@ function ParteRow({
     if (!file) return;
     setUploadErr(null);
     setUploading(true);
-    const result = await uploadFile(file);
+    const result = await uploadFile(file, clientId);
     setUploading(false);
     if (result.url) onChange({ ...parte, conteudo: result.url });
     else setUploadErr(result.error ?? 'Erro no upload');
@@ -215,7 +218,7 @@ function ParteRow({
     e.target.value = '';
   }
 
-  const recorder = useAudioRecorder(url => onChange({ ...parte, conteudo: url }));
+  const recorder = useAudioRecorder(url => onChange({ ...parte, conteudo: url }), clientId);
 
   return (
     <div className="rounded-xl border border-border bg-background/50 p-3 space-y-2">
@@ -366,11 +369,13 @@ function MensagemModal({
   statusOptions,
   onSave,
   onClose,
+  clientId,
 }: {
   initial: Partial<Mensagem> | null;
   statusOptions: string[];
   onSave: (data: Omit<Mensagem, 'id' | 'ordem'>) => Promise<void>;
   onClose: () => void;
+  clientId: string;
 }) {
   const initialPartes: Parte[] = (() => {
     if (initial?.partes?.length) return initial.partes;
@@ -430,7 +435,7 @@ function MensagemModal({
 
           {/* Partes */}
           {partes.map((p, i) => (
-            <ParteRow key={i} parte={p}
+            <ParteRow key={i} parte={p} clientId={clientId}
               onChange={updated => updateParte(i, updated)}
               onDelete={() => deleteParte(i)}
               showDelete={partes.length > 1}
@@ -629,6 +634,7 @@ function RegraDetail({
 
       {editing !== null && (
         <MensagemModal
+          clientId={clientId}
           initial={editing === 'new' ? null : editing}
           statusOptions={statusOptions}
           onSave={handleSave}

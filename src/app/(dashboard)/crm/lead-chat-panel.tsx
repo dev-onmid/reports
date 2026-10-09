@@ -201,7 +201,7 @@ export function LeadChatPanel({
     try {
       const form = new FormData();
       form.append('file', file);
-      const res = await fetch('/api/upload', { method: 'POST', body: form });
+      const res = await fetch(`/api/upload?clientId=${encodeURIComponent(clientId ?? '')}&leadId=${encodeURIComponent(leadId)}`, { method: 'POST', body: form });
       const data = await res.json().catch(() => ({})) as { url?: string; error?: string };
       if (!res.ok || !data.url) {
         setSendStatus('err');

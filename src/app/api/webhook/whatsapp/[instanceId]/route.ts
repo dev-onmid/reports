@@ -14,7 +14,8 @@ function webhookAutenticado(body: unknown, tokenEsperado: unknown): boolean {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 import { resolverLeadExistente } from '@/lib/lead-identity';
-import { fetchEvolutionMediaBase64, uploadBase64ToStorage } from '@/lib/evolution-media';
+import { fetchEvolutionMediaBase64 } from '@/lib/evolution-media';
+import { salvarMidia, vincularMidiaAoLead } from '@/lib/crm-midia';
 import { logMissingAdTracking } from '@/lib/crm-tracking-debug';
 import { resolveMetaAdHierarchy } from '@/lib/meta-ad-resolver';
 import {
@@ -312,6 +313,7 @@ export async function POST(
     let messageTipo: string = 'texto';
     let resolvedMessageText: string = rawMessageText;
     let mediaCaption: string | null = null;
+    let midiaToken: string | null = null;
     const evoMsg = provider === 'evolution' ? body?.data?.message : null;
     const mediaKind: string | null = evoMsg?.audioMessage ? 'audio'
       : evoMsg?.imageMessage ? 'imagem'
@@ -322,7 +324,13 @@ export async function POST(
     if (mediaKind && body?.data?.key) {
       const media = await fetchEvolutionMediaBase64(evolutionInstanceName, body.data.key);
       if (media) {
-        const mediaUrl = await uploadBase64ToStorage(media.base64, media.mimetype);
+        // Disco da VPS, atrás de rota autenticada (crm-midia.ts). O lead ainda
+        // não existe neste ponto — o vínculo entra depois do upsert.
+        const salva = await salvarMidia(pool, {
+          clientId, bytes: Buffer.from(media.base64, 'base64'), mime: media.mimetype, origem: 'recebida',
+        }).catch(err => { console.error('[webhook midia]', err instanceof Error ? err.message : err); return null; });
+        const mediaUrl = salva?.url ?? null;
+        if (salva) midiaToken = salva.token;
         if (mediaUrl) {
           resolvedMessageText = mediaUrl;
           messageTipo = mediaKind;
@@ -454,6 +462,7 @@ export async function POST(
       creativeName: creativeName ?? null,
       instanceId: evolutionInstanceName ?? instanceId,
     });
+    await vincularMidiaAoLead(pool, midiaToken, leadId);
 
     // ── Atribuição estendida + região (first-touch: nunca sobrescreve) ────────
     // Região: prioriza a geolocalização do clique (localização real via headers

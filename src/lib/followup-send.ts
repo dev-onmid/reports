@@ -1,3 +1,4 @@
+import { resolverMidiaParaEnvio } from '@/lib/crm-midia';
 import type { Pool } from 'pg';
 import { sendText as zapiSendText, sendImage as zapiSendImage } from '@/lib/zapi';
 
@@ -131,6 +132,8 @@ async function sendViaEvolution(
 
   const targets = buildEvolutionTargets(phone, vars.whatsapp_lid);
   const errors: string[] = [];
+  // Mídia guardada por nós (/api/crm/midia/<token>) exige sessão: vai em base64.
+  conteudo = await resolverMidiaParaEnvio(conteudo);
 
   // Evolution API expects either a plain http URL or raw base64 (no data: prefix).
   // Canvas uploads arrive as data URLs — strip the prefix before sending.
@@ -153,7 +156,8 @@ async function sendViaEvolution(
       ? await postEvolutionMessage(`${base}/message/sendWhatsAppAudio/${instanceName}`, headers, {
           number: target,
           options: { delay: 1200, encoding: true },
-          audio: conteudo,
+          // Áudio aceita URL ou base64 cru; o data: URL vira só o base64.
+          audio: conteudo.replace(/^data:[^;]+;base64,/, ''),
         })
       : await postEvolutionMessage(`${base}/message/sendMedia/${instanceName}`, headers, {
           number: target,

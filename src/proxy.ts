@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { verifySessionToken, SESSION_COOKIE, isValidInternalToken, INTERNAL_HEADER } from '@/lib/session';
 import {
-  carregarAcesso, clienteDoLead, clienteDoFunil, clienteNoCaminho, clientesCitados, leadsCitados, regraCliente, TEAM_CLIENTE,
+  carregarAcesso, clienteDaMidia, clienteDoLead, clienteDoFunil, clienteNoCaminho, clientesCitados, leadsCitados, regraCliente, TEAM_CLIENTE,
   type AcessoUsuario,
 } from '@/lib/acesso';
 import { hostDaRequisicao, hostSoEquipe, MSG_USAR_CRM } from '@/lib/host-acesso';
@@ -180,6 +180,12 @@ async function barrarForaDoCliente(req: NextRequest, acesso: AcessoUsuario): Pro
   for (const leadId of leadsCitados(pathname, corpo)) {
     const dono = await clienteDoLead(leadId);
     if (!dono) return Response.json({ error: 'Lead não encontrado.' }, { status: 404 });
+    citados.push(dono);
+  }
+  const midia = pathname.match(/^\/api\/crm\/midia\/([0-9a-f]{32})$/);
+  if (midia) {
+    const dono = await clienteDaMidia(midia[1]);
+    if (!dono) return Response.json({ error: 'Mídia não encontrada.' }, { status: 404 });
     citados.push(dono);
   }
   const funil = pathname.match(/^\/api\/crm\/funnels\/([0-9a-f-]{36})\//);

@@ -136,6 +136,7 @@ function urlDeMidiaPermitida(raw: unknown): boolean {
   const v = String(raw ?? '').trim();
   if (!v) return false;
   if (/^data:(image|audio|video|application)\//i.test(v)) return true;
+  if (/^\/api\/crm\/midia\/[0-9a-f]{32}$/.test(v)) return true;
   let u: URL;
   try { u = new URL(v); } catch { return false; }
   if (u.protocol !== 'https:') return false;

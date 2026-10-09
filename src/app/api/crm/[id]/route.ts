@@ -6,6 +6,7 @@ import { dispararEventosPorStatus, dispararEventoFechamento, enviarEventoMeta } 
 import { classificarEtapa } from '@/lib/funil-etapas';
 import { motivoValido, motivoCompleto } from '@/lib/motivo-perda';
 import { autorDaRequisicao, diffLead, ensureColunasOperacao, horaValida, registrarEventos } from '@/lib/crm-eventos';
+import { apagarMidiasDoLead } from '@/lib/crm-midia';
 
 /**
  * Um lead inteiro, por id.
@@ -177,6 +178,12 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     const { rows: [apagado] } = await pool.query(
       `DELETE FROM public.crm_leads WHERE id = $1 RETURNING client_id, nome, numero, status`, [id],
     );
+    // Exclusão em CASCATA (LGPD, auditoria 10/10): antes as conversas e as
+    // mídias do lead ficavam órfãs no banco e no disco.
+    if (apagado) {
+      await pool.query(`DELETE FROM public.crm_messages WHERE lead_id = $1`, [id]).catch(() => null);
+      await apagarMidiasDoLead(pool, id).catch(() => null);
+    }
     // O histórico não tem chave estrangeira: o registro da exclusão sobrevive a ela.
     if (apagado) {
       await registrarEventos(pool, {

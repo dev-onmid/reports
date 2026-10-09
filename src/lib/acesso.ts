@@ -132,7 +132,8 @@ export const ROTAS_CLIENTE: Regra[] = [
   { padrao: /^\/api\/crm\/webhook-heal$/, metodos: ['POST'], exigeCliente: true },
   // reconectar o WhatsApp do próprio cliente (só as instâncias dele; ver a rota)
   { padrao: /^\/api\/crm\/whatsapp-conexao$/, metodos: ['GET', 'POST'], exigeCliente: true },
-  { padrao: /^\/api\/upload$/, metodos: ['POST'], exigeCliente: false, multipart: true },
+  { padrao: /^\/api\/upload$/, metodos: ['POST'], exigeCliente: true, multipart: true }, // clientId na query
+  { padrao: /^\/api\/crm\/midia\/[0-9a-f]{32}$/, metodos: ['GET'], exigeCliente: true }, // dono resolvido pelo token
 ];
 
 /**
@@ -159,6 +160,12 @@ export function regraCliente(pathname: string, metodo: string, gestor = false): 
 export function clienteNoCaminho(pathname: string): string | null {
   const m = pathname.match(/^\/api\/clients\/([^/]+)\//);
   return m ? decodeURIComponent(m[1]) : null;
+}
+
+/** Dono da mídia do chat (para /api/crm/midia/<token>). */
+export async function clienteDaMidia(token: string): Promise<string | null> {
+  const { rows } = await getPool().query(`SELECT client_id FROM public.crm_midia WHERE token = $1 LIMIT 1`, [token]).catch(() => ({ rows: [] as { client_id: string }[] }));
+  return rows[0]?.client_id ?? null;
 }
 
 /** Dono do funil (para /api/crm/funnels/<id>/stages). */
