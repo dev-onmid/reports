@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Image from 'next/image';
 import { LogOut, Menu } from 'lucide-react';
 import { clearAuthSession } from '@/lib/auth-store';
@@ -27,6 +27,7 @@ import {
  */
 function ClienteShell({ children }: { children: React.ReactNode }) {
   const nome = useSessaoLocal()?.name ?? '';
+  useEffect(() => { document.title = 'Onmid CRM'; }, []);
   return (
     <AuthGuard>
       <div className="flex h-screen w-full flex-col overflow-hidden bg-background">
