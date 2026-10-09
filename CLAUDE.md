@@ -850,6 +850,24 @@ abrir o painel, o `lps/bin/gtag ads destinos <cliente>` consulta o reports.
 
 @AGENTS.md
 
+## Reuniões — o checklist voltou para o grupo do tráfego, agora pelo nosso código (2026-10-09)
+
+Pergunta do Matheus: "o que houve com o resumo de reuniões que ia direto para o grupo do tráfego pago?".
+
+- **Parou em 25/09/2026 17:33**, depois de **379 envios**, e ficou 14 dias sem ninguém notar. O envio **nunca foi nosso** — vivia no cenário **v4 do Make**; no nosso código não existe (nem existia) nenhuma linha que mande reunião para WhatsApp.
+- **Tudo o mais da corrente estava vivo** (medido antes de mexer): polling do TLDV de 30 em 30 min, doc, transcrição, e o resumo **continuava chegando e sendo gravado** (3 no próprio dia da pergunta). A instância que disparava, **"Onmid Assistente"**, mandou 12 mensagens naquele dia — inclusive **dentro do mesmo grupo**. Então canal, instância, grupo e conteúdo estavam de pé: faltava só o módulo do Make.
+- ⚠️ **Segundo sinal apontando para o Make**: a outra saída dele (links de doc no grupo `Onmid Reports`) parou **no mesmo dia**, 25/09 12:02. Duas saídas independentes morrendo juntas é nível de conta/cenário, não de módulo.
+- ⚠️ **ERRO MEU de diagnóstico, registrado**: comecei dizendo que o cron do polling estava rodando de 4 a 7 h em 4 a 7 h (o GitHub Actions throttla este repo). Era só a metade da história — os carimbos do banco eram de 30 em 30 min, porque **um acionador EXTERNO** (nem GitHub, nem crontab da VPS) mantém o `tldv-sync`. **Conferir a cadência pelo dado (heartbeat/carimbos), não pelo agendador que eu suponho ser o dono.**
+- **`src/lib/reuniao-whatsapp.ts`** + gancho no fim de `/api/integrations/reuniao/resumo`: dispara **assim que o resumo chega**, como era. O **formato é cópia** do que o Make mandava, lido das mensagens REAIS do grupo — o time lê isso todo dia, e redesenhar junto com o conserto misturaria duas coisas.
+- **O `checklist` que já gravamos traz os cabeçalhos como ITENS** (`📋 CHECKLIST OPERACIONAL — AÇÕES ACORDADAS`, `🏢 AGÊNCIA ONMID`, `👥 CLIENTE`), então a mensagem é remontada quase literal. `ehCabecalho` separa título de ação por **CAIXA ALTA + tamanho** — ação longa gritando continua ação (coberto por assert).
+- **⚠️ `whatsapp_em` é tomado ANTES do envio, em escrita condicional** (`WHERE whatsapp_em IS NULL`): o Make reexecuta cenário com frequência e duas rodadas da mesma reunião mandariam o checklist **duas vezes no grupo, onde não há desfazer**. Falha no envio devolve a marca para NULL. Checklist só com cabeçalho **não vira mensagem** — lista vazia treina o time a ignorar o aviso.
+- **⚠️ Os 116 resumos anteriores foram marcados como já tratados EM PRODUÇÃO ANTES do deploy.** A coluna nasce pelo `ensure` na primeira chamada, então sem essa preparação um webhook logo após o deploy despejaria o retroativo de 14 dias no grupo.
+- **Canal**: chaves próprias `reuniao_resumo_ativo` / `reuniao_resumo_group_id` / `reuniao_resumo_zapi_client_id`, caindo em `gads_rotina_group_id` (→ `Onmid • Tráfego`) + `social_alert_zapi_client_id` — o canal que já é validado todo dia. Envio **best-effort e nunca lança**: o resumo já está gravado e a aba Reuniões não pode depender do WhatsApp.
+- ✅ Verificado: **28 asserts** sobre os checklists REAIS de produção (cabeçalho × ação do Cost Odonto e da Sorrifácil Londrina, data em BRT na virada do dia, `[x]` em item marcado, checklist vazio → sem mensagem); saída conferida contra a mensagem histórica de 25/09; tsc + eslint + `next build` limpos; **ponta a ponta na rota REAL em produção** com o canal desviado para o número do Matheus — `whatsapp:{enviado:true}`, mensagem confirmada no banco da Evolution, reenvio idêntico respondendo `ja_enviado`, linha de teste apagada e config restaurada.
+- ⚠️⚠️ **O módulo de WhatsApp do cenário v4 do Make tem que ficar DESLIGADO.** Se alguém reativar, o grupo passa a receber o checklist **duas vezes** — a nossa trava é por `whatsapp_em` e não enxerga o que o Make manda.
+- ⚠️ **Ponto único que sobra**: nós só disparamos quando o Make nos POSTa o resumo. Se o cenário v4 morrer inteiro, volta o silêncio — agora sem um módulo para culpar. Um vigia (resumo nenhum em N dias úteis → aviso) **não foi feito**.
+- ⚠️ A dívida do `titulo`/`gravacao_url` que o Make nunca manda **não entrou aqui**: a aba já tem fallback (`Reunião de {data}` e link do TLDV derivado do `meeting_id`), então é cosmética, não defeito.
+
 ## Planilhas — tela de "Colunas aba a aba" para apontar o que o automático não achou (2026-10-07)
 
 Segunda metade do pedido do Matheus: *"quando a IA não conseguir identificar qual é qual, a gente escolher manualmente"*.
