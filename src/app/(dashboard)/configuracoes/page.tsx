@@ -37,6 +37,7 @@ import { cn } from '@/lib/utils';
 import { useAbaPersistida } from '@/lib/aba-persistida';
 import { callerHeaders } from '@/lib/auth-store';
 import { notificar } from '@/components/ui/toast';
+import { useClients } from '@/lib/client-store';
 import { USD_TO_BRL } from '@/lib/ai-usage-config';
 
 // Mirrors the sidebar nav order (src/components/layout/sidebar.tsx) so admins
@@ -62,6 +63,7 @@ const ROLES = ['Administrador', 'Usuário', 'Visualizador'];
 const TEAMS: { value: Team; label: string }[] = [
   { value: 'onmid', label: 'Time Onmid' },
   { value: 'parceiro', label: 'Parceiro' },
+  { value: 'cliente', label: 'Cliente (só o CRM dele)' },
 ];
 
 // O setor decide o destino da tarefa gerada a partir de uma reunião: tráfego vai
@@ -77,7 +79,7 @@ function setorLabel(setor: string | null | undefined): string | null {
 
 const emptyForm = {
   name: '', email: '', password: '', role: 'Usuário', status: 'Ativo', team: 'onmid' as Team,
-  setor: '',
+  setor: '', clientIds: [] as string[],
 };
 
 /**
@@ -85,7 +87,7 @@ const emptyForm = {
  * do mock-data, que é compartilhado com o auth-store e a semente de UI. Estender
  * aqui evita mexer num tipo usado por meio sistema por causa de uma tela só.
  */
-type UserRow = UserType & { setor?: string | null; clickup_id?: string | null };
+type UserRow = UserType & { setor?: string | null; clickup_id?: string | null; client_ids?: string[] };
 
 // ── Vínculo ONMID ↔ ClickUp (GET/POST /api/clickup/members) ──────────────────
 
@@ -546,7 +548,40 @@ function InstancesTab() {
 
 const ABAS_CONFIG = ['usuarios', 'permissoes', 'ia', 'rotinas', 'instancias', 'otimizador', 'email', 'integracoes', 'logs', 'legal'] as const;
 
+/**
+ * Clientes que um usuário de CLIENTE enxerga no CRM. Normalmente é um só (a
+ * recepção da clínica); rede com várias unidades marca mais de um.
+ */
+function EscolherClientes({ selecionados, onChange }: { selecionados: string[]; onChange: (ids: string[]) => void }) {
+  const { clients: visibleClients } = useClients();
+  const [busca, setBusca] = useState('');
+  const sem = (t: string) => t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const lista = visibleClients.filter(c => !busca || sem(c.name).includes(sem(busca)));
+  const marcado = new Set(selecionados);
+  return (
+    <div className="space-y-1.5">
+      <Label>Clientes que este usuário vê ({selecionados.length})</Label>
+      <Input value={busca} onChange={e => setBusca(e.target.value)} placeholder="Buscar cliente..." className="h-8" />
+      <div className="max-h-44 overflow-y-auto rounded-lg border border-border">
+        {lista.map(c => (
+          <label key={c.id} className="flex cursor-pointer items-center gap-2 px-3 py-1.5 text-sm hover:bg-muted/40">
+            <input
+              type="checkbox"
+              checked={marcado.has(c.id)}
+              onChange={() => onChange(marcado.has(c.id) ? selecionados.filter(id => id !== c.id) : [...selecionados, c.id])}
+            />
+            {c.name}
+          </label>
+        ))}
+        {lista.length === 0 && <p className="px-3 py-2 text-xs text-muted-foreground">Nenhum cliente encontrado.</p>}
+      </div>
+    </div>
+  );
+}
+
 export default function ConfiguracoesPage() {
+  const { allClients: todosClientes } = useClients();
+  const clientesPorId = new Map(todosClientes.map(c => [c.id, c.name]));
   const [users, setUsers] = useState<UserRow[]>([]);
   const [permissions, setPermissions] = useState<Record<string, Permission>>(initialPermissions);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -775,12 +810,17 @@ export default function ConfiguracoesPage() {
       status: user.status,
       team: user.team ?? 'onmid',
       setor: user.setor ?? '',
+      clientIds: user.client_ids ?? [],
     });
     setDialogOpen(true);
   }
 
   async function handleSaveUser() {
     if (!form.name.trim() || !form.email.trim()) return;
+    if (form.team === 'cliente' && form.clientIds.length === 0) {
+      notificar('Escolha ao menos um cliente para este usuário.', 'erro');
+      return;
+    }
     // Password required only when creating; blank = keep current when editing
     if (!editingUserId && !form.password.trim()) return;
 
@@ -799,6 +839,7 @@ export default function ConfiguracoesPage() {
         status: form.status,
         team: form.team,
         setor: form.setor || null,
+        client_ids: form.team === 'cliente' ? form.clientIds : [],
       };
       const snapshot = users;
       setUsers((prev) => prev.map((u) => u.id === editingUserId ? updated : u));
@@ -826,6 +867,7 @@ export default function ConfiguracoesPage() {
       status: form.status,
       team: form.team,
       setor: form.setor || null,
+      client_ids: form.team === 'cliente' ? form.clientIds : [],
     };
     const snapshot = users;
     setUsers((prev) => [...prev, user]);
@@ -1062,9 +1104,13 @@ export default function ConfiguracoesPage() {
                           'inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium',
                           user.team === 'parceiro'
                             ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
-                            : 'bg-zinc-700/50 text-zinc-400 border border-zinc-600/50',
-                        )}>
-                          {user.team === 'parceiro' ? 'Parceiro' : 'Time Onmid'}
+                            : user.team === 'cliente'
+                              ? 'bg-sky-500/10 text-sky-300 border border-sky-500/20'
+                              : 'bg-zinc-700/50 text-zinc-400 border border-zinc-600/50',
+                        )} title={user.team === 'cliente' ? (user.client_ids ?? []).map(id => clientesPorId.get(id) ?? id).join(', ') : undefined}>
+                          {user.team === 'parceiro' ? 'Parceiro'
+                            : user.team === 'cliente' ? `Cliente · ${(user.client_ids ?? []).map(id => clientesPorId.get(id) ?? '?').join(', ')}`
+                            : 'Time Onmid'}
                         </span>
                       </td>
                       {/* Setor + vínculo ClickUp — sem o vínculo a pessoa não
@@ -1965,7 +2011,11 @@ export default function ConfiguracoesPage() {
             </div>
             <div className="space-y-1.5">
               <Label>Equipe</Label>
-              <Select value={form.team} onValueChange={(team) => team && setForm({ ...form, team: team as Team })}>
+              <Select value={form.team} onValueChange={(team) => team && setForm({
+                ...form, team: team as Team,
+                // usuário de cliente nunca é administrador (o servidor recusa)
+                role: team === 'cliente' && form.role === 'Administrador' ? 'Usuário' : form.role,
+              })}>
                 <SelectTrigger className="w-full">
                   <SelectValue>{(v: Team) => TEAMS.find((t) => t.value === v)?.label ?? v}</SelectValue>
                 </SelectTrigger>
@@ -1978,9 +2028,17 @@ export default function ConfiguracoesPage() {
                 </SelectContent>
               </Select>
               <p className="text-xs text-muted-foreground">
-                Parceiro só vê as próprias instâncias e campanhas em Disparos — nunca as de outras pessoas.
+                {form.team === 'cliente'
+                  ? 'Funcionário do cliente: entra direto no CRM e só enxerga os clientes marcados abaixo. Não vê configurações, anúncios nem a carteira da Onmid.'
+                  : 'Parceiro só vê as próprias instâncias e campanhas em Disparos — nunca as de outras pessoas.'}
               </p>
             </div>
+            {form.team === 'cliente' && (
+              <EscolherClientes
+                selecionados={form.clientIds}
+                onChange={(clientIds) => setForm({ ...form, clientIds })}
+              />
+            )}
             <div className="space-y-1.5">
               <Label>Setor</Label>
               <select

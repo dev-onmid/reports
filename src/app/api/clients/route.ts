@@ -54,7 +54,15 @@ function rowToJson(r: any) {
   };
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  // Usuário de CLIENTE vê só os clientes dele. O proxy grava a lista em
+  // x-onmid-clientes a partir do banco (e apaga qualquer valor forjado); para a
+  // equipe da Onmid o header não existe e a lista volta inteira, como sempre.
+  const team = req.headers.get('x-onmid-team');
+  const meus = team === 'cliente'
+    ? (req.headers.get('x-onmid-clientes') ?? '').split(',').filter(Boolean)
+    : null;
+  if (meus && meus.length === 0) return Response.json([]);
   const pool = makeServerPool();
   try {
     await ensureColumns(pool);
@@ -66,8 +74,9 @@ export async function GET() {
       FROM public.clients c
       LEFT JOIN public.users u ON c.gestor_id = u.id
       LEFT JOIN public.client_categories cat ON cat.id = c.category_id
+      ${meus ? 'WHERE c.id = ANY($1)' : ''}
       ORDER BY c.name ASC
-    `);
+    `, meus ? [meus] : []);
     return Response.json(rows.map(rowToJson));
   } finally {
     await pool.end();

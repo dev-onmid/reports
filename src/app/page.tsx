@@ -54,8 +54,9 @@ export default function LoginPage() {
       return;
     }
 
-    // Volta pra tela em que a sessão expirou, não pro início fixo.
-    router.push(destino);
+    // Funcionário do cliente só tem o CRM; o resto, volta pra tela em que a
+    // sessão expirou, não pro início fixo.
+    router.push(resultado.session.team === 'cliente' ? '/crm' : destino);
   }
 
   return (

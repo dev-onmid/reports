@@ -1,6 +1,10 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { verifySessionToken, SESSION_COOKIE, isValidInternalToken, INTERNAL_HEADER } from '@/lib/session';
+import {
+  carregarAcesso, clienteDoLead, clienteDoFunil, clientesCitados, leadsCitados, regraCliente, TEAM_CLIENTE,
+  type AcessoUsuario,
+} from '@/lib/acesso';
 
 /**
  * Gate único de /api/*, negando por padrão.
@@ -132,7 +136,42 @@ function matches(pathname: string, prefixes: string[]): boolean {
   return prefixes.some(p => (p.endsWith('/') ? pathname.startsWith(p) : pathname === p || pathname.startsWith(`${p}/`)));
 }
 
-export function proxy(req: NextRequest) {
+const proibido = (msg = 'Sem permissão.') => Response.json({ error: msg }, { status: 403 });
+
+/**
+ * Usuário de CLIENTE: só a lista fechada de `ROTAS_CLIENTE`, e só com ids de
+ * cliente/lead/funil que pertençam a ele. Devolve a resposta de recusa ou null.
+ */
+async function barrarForaDoCliente(req: NextRequest, acesso: AcessoUsuario): Promise<Response | null> {
+  const { pathname, searchParams } = req.nextUrl;
+  const regra = regraCliente(pathname, req.method);
+  if (!regra) return proibido();
+
+  let corpo: unknown = null;
+  if (!['GET', 'HEAD'].includes(req.method) && (req.headers.get('content-type') ?? '').includes('application/json')) {
+    corpo = await req.clone().json().catch(() => null);
+  }
+
+  const meus = new Set(acesso.clientIds);
+  const citados = clientesCitados(searchParams, corpo);
+  for (const leadId of leadsCitados(pathname, corpo)) {
+    const dono = await clienteDoLead(leadId);
+    if (!dono) return Response.json({ error: 'Lead não encontrado.' }, { status: 404 });
+    citados.push(dono);
+  }
+  const funil = pathname.match(/^\/api\/crm\/funnels\/([0-9a-f-]{36})\//);
+  if (funil) {
+    const dono = await clienteDoFunil(funil[1]);
+    if (!dono) return Response.json({ error: 'Funil não encontrado.' }, { status: 404 });
+    citados.push(dono);
+  }
+
+  if (regra.exigeCliente && citados.length === 0) return proibido('Informe o cliente.');
+  if (citados.some(id => !meus.has(id))) return proibido();
+  return null;
+}
+
+export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
   // ⚠️ O portal do cliente é SOMENTE LEITURA, e isso é garantido AQUI — na
@@ -168,13 +207,36 @@ export function proxy(req: NextRequest) {
     return Response.json({ error: 'Não autenticado.' }, { status: 401 });
   }
 
+  // Papel, time, status e clientes vêm do BANCO (cache de 30s), não do cookie:
+  // o cookie vale 7 dias, e desativar alguém ou tirar um cliente dele tem de
+  // valer já. Erro de banco mantém o comportamento antigo (cookie) para a
+  // equipe da Onmid — senão uma piscada do Postgres derrubaria o sistema
+  // inteiro —, mas FECHA para usuário de cliente, que nunca passa sem a lista.
+  let acesso: AcessoUsuario | null | undefined;
+  try { acesso = await carregarAcesso(session.uid); } catch { acesso = undefined; }
+  if (acesso === null || (acesso && acesso.status !== 'Ativo')) {
+    return Response.json({ error: 'Não autenticado.' }, { status: 401 });
+  }
+  const role = acesso?.role ?? session.role;
+  const team = acesso?.team ?? session.team;
+  if (team === TEAM_CLIENTE) {
+    if (!acesso) return Response.json({ error: 'indisponivel' }, { status: 503 });
+    const recusa = await barrarForaDoCliente(req, acesso).catch(() => proibido());
+    if (recusa) return recusa;
+  }
+
   // Identidade passa a vir do cookie ASSINADO, não do que o cliente declarou.
   // Sobrescrever (em vez de só ler) neutraliza o x-onmid-user-id forjado, que
   // era o que tornava getCallerScope decorativo.
   const headers = new Headers(req.headers);
   headers.set('x-onmid-user-id', session.uid);
-  headers.set('x-onmid-role', session.role);
-  headers.set('x-onmid-team', session.team);
+  headers.set('x-onmid-role', role);
+  headers.set('x-onmid-team', team);
+  // Autoria de quem mexeu no lead (histórico do CRM). Codificado: nome tem acento.
+  if (acesso?.nome) headers.set('x-onmid-user-name', encodeURIComponent(acesso.nome));
+  else headers.delete('x-onmid-user-name');
+  if (team === TEAM_CLIENTE && acesso) headers.set('x-onmid-clientes', acesso.clientIds.join(','));
+  else headers.delete('x-onmid-clientes');
 
   return NextResponse.next({ request: { headers } });
 }

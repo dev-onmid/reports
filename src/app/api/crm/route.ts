@@ -1,6 +1,8 @@
 import type { NextRequest } from 'next/server';
 import { memoizarSchema } from '@/lib/schema-memo';
 import { makeServerPool } from '@/lib/server-db';
+import { requireAdmin } from '@/lib/api-auth';
+import { autorDaRequisicao, ensureColunasOperacao, registrarEventos } from '@/lib/crm-eventos';
 import { ensureCrmMessagesSchema, ensureDefaultFunnel, getFirstFunnelStageLabel } from '@/lib/crm-conversation-sync';
 import { leadVisivelCrmSql } from '@/lib/lead-contagem';
 
@@ -93,6 +95,18 @@ async function ensureTableInterno(pool: ReturnType<typeof makeServerPool>) {
 // CRM em 16/09/2026. Ver src/lib/schema-memo.ts.
 const ensureTable = memoizarSchema(ensureTableInterno);
 
+/**
+ * `raw` é a linha ORIGINAL da planilha importada — a tela nunca lê, e era o que
+ * mais pesava: o CRM da Romanza baixava 24 MB por abertura (medido 09/10), num
+ * CRM que agora roda no celular da recepção do cliente.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function semCru(row: any) {
+  const { raw: _raw, ...resto } = row;
+  void _raw;
+  return resto;
+}
+
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const clientId = searchParams.get('clientId');
@@ -132,7 +146,7 @@ export async function GET(req: NextRequest) {
           ORDER BY l.updated_at DESC`,
         [clientId, since, funnelId ?? null],
       );
-      return Response.json(rows);
+      return Response.json(rows.map(semCru));
     }
     const { rows } = await pool.query(
       `WITH ranked AS (
@@ -176,7 +190,7 @@ export async function GET(req: NextRequest) {
       ORDER BY COALESCE(normalized_date, data) DESC NULLS LAST, created_at DESC`,
       [clientId, funnelId ?? null]
     );
-    return Response.json(rows);
+    return Response.json(rows.map(semCru));
   } finally {
     await pool.end();
   }
@@ -216,6 +230,21 @@ export async function POST(req: NextRequest) {
         f.funnel_id??fallbackFunnelId, f.temperatura??null, f.time_interno === true,
       ]
     );
+    // Responsável escolhido na criação conta como definido à mão (a integração
+    // não reescreve). Fora do INSERT posicional de propósito: aquela lista de
+    // 29 parâmetros já foi fonte de bug de posição.
+    if (typeof f.responsavel === 'string' && f.responsavel.trim()) {
+      await ensureColunasOperacao(pool);
+      await pool.query(
+        `UPDATE public.crm_leads SET responsavel = $2, responsavel_manual = TRUE WHERE id = $1`,
+        [lead.id, f.responsavel.trim().slice(0, 120)],
+      );
+      lead.responsavel = f.responsavel.trim().slice(0, 120);
+    }
+    await registrarEventos(pool, {
+      leadId: lead.id, clientId, autor: autorDaRequisicao(req),
+      eventos: [{ tipo: 'criado', campo: null, de: null, para: [lead.nome, lead.status].filter(Boolean).join(' · ') }],
+    });
     return Response.json(lead, { status: 201 });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -227,6 +256,9 @@ export async function POST(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
+  // Apaga TODOS os leads de um cliente — só administrador, conferido no banco.
+  const admin = await requireAdmin(req);
+  if (!admin.ok) return admin.response;
   const clientId = new URL(req.url).searchParams.get('clientId');
   if (!clientId) return Response.json({ error: 'clientId required' }, { status: 400 });
 

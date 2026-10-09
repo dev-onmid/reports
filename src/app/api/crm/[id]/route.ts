@@ -5,6 +5,7 @@ import { ensureCrmAiSchema } from '@/lib/crm-ai-analysis';
 import { dispararEventosPorStatus, dispararEventoFechamento, enviarEventoMeta } from '@/lib/conversions';
 import { classificarEtapa } from '@/lib/funil-etapas';
 import { motivoValido, motivoCompleto } from '@/lib/motivo-perda';
+import { autorDaRequisicao, diffLead, ensureColunasOperacao, horaValida, registrarEventos } from '@/lib/crm-eventos';
 
 /**
  * Um lead inteiro, por id.
@@ -34,6 +35,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   const pool = makeServerPool();
   try {
     await ensureCrmAiSchema(pool);
+    await ensureColunasOperacao(pool);
     // Read current status to detect changes
     const { rows: [current] } = await pool.query(
       `SELECT * FROM public.crm_leads WHERE id = $1`,
@@ -86,6 +88,10 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         -- Carimbo da perda: só é escrito na VIRADA, para o histórico não mentir
         -- sobre quando o lead foi dado como perdido.
         perdido_em = CASE WHEN $34 THEN CURRENT_DATE WHEN $35 THEN NULL ELSE perdido_em END,
+        responsavel=$36,
+        -- Marca de "definido à mão": a integração (SULTS/Agendor) deixa de reescrever.
+        responsavel_manual = CASE WHEN $37 THEN TRUE ELSE responsavel_manual END,
+        hora_agendada=$38, proxima_acao=$39, proxima_acao_em=$40,
         qualificado=$28,
         qualificado_em = CASE WHEN $28 IS DISTINCT FROM qualificado
                               THEN (CASE WHEN $28 THEN NOW() ELSE NULL END)
@@ -110,9 +116,20 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         req.headers.get('x-onmid-user-id') ?? null,
         current.client_id, id,
         motivoPerda, motivoDetalhe, virouPerdido, deixouDeSerPerdido,
+        typeof next.responsavel === 'string' && next.responsavel.trim() ? next.responsavel.trim().slice(0, 120) : null,
+        // Só a TROCA marca como manual: o modal manda o lead inteiro, e salvar a
+        // observação de um lead do SULTS não pode congelar o responsável dele.
+        'responsavel' in f && String(f.responsavel ?? '').trim() !== String(current.responsavel ?? '').trim(),
+        horaValida(next.hora_agendada),
+        typeof next.proxima_acao === 'string' && next.proxima_acao.trim() ? next.proxima_acao.trim().slice(0, 300) : null,
+        next.proxima_acao_em ? new Date(String(next.proxima_acao_em)) : null,
       ]
     );
     if (!lead) return Response.json({ error: 'Not found' }, { status: 404 });
+
+    await registrarEventos(pool, {
+      leadId: id, clientId: lead.client_id, autor: autorDaRequisicao(req), eventos: diffLead(current, lead),
+    });
 
     // Queue follow-up and fire conversion events if status changed
     const newStatus = (next.status ?? 'Em Atendimento') as string;
@@ -150,11 +167,20 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   }
 }
 
-export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const pool = makeServerPool();
   try {
-    await pool.query(`DELETE FROM public.crm_leads WHERE id = $1`, [id]);
+    const { rows: [apagado] } = await pool.query(
+      `DELETE FROM public.crm_leads WHERE id = $1 RETURNING client_id, nome, numero, status`, [id],
+    );
+    // O histórico não tem chave estrangeira: o registro da exclusão sobrevive a ela.
+    if (apagado) {
+      await registrarEventos(pool, {
+        leadId: id, clientId: apagado.client_id, autor: autorDaRequisicao(req),
+        eventos: [{ tipo: 'excluido', campo: null, de: [apagado.nome, apagado.numero, apagado.status].filter(Boolean).join(' · '), para: null }],
+      });
+    }
     return new Response(null, { status: 204 });
   } finally {
     await pool.end();

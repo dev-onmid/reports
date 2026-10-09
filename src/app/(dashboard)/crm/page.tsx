@@ -18,6 +18,8 @@ import {
   Globe2, Clapperboard, Info, MapPin, ClipboardList, BadgeCheck, BookmarkPlus, Check, Star } from 'lucide-react';
 import { ChatView } from './chat-view';
 import { LeadChatPanel } from './lead-chat-panel';
+import { CamposAtendimento, HistoricoLead, NovoLeadModal, opcoesDeOrigem } from './lead-operacao';
+import { ModoClienteContext, useEhUsuarioCliente, useMeuNome, useModoCliente } from '@/lib/modo-cliente';
 import { PortalLinkModal } from './portal-link-modal';
 import { SeletorModeloFunil } from '@/components/crm/seletor-modelo-funil';
 import { AplicarModeloFunil } from '@/components/crm/aplicar-modelo-funil';
@@ -119,6 +121,13 @@ type CrmLead = {
   whatsapp_last_message_text?: string | null;
   whatsapp_last_direction?: 'in' | 'out' | null;
   updated_at?: string | null;
+  /** Quem cuida do lead. Definido à mão (`responsavel_manual`) vence a integração. */
+  responsavel?: string | null;
+  responsavel_manual?: boolean;
+  /** 'HH:MM' — separado de `data_agendada` (DATE) de propósito; ver crm-eventos.ts. */
+  hora_agendada?: string | null;
+  proxima_acao?: string | null;
+  proxima_acao_em?: string | null;
   created_at: string | null;
 };
 
@@ -769,9 +778,9 @@ const COLS = [
   { key: 'nome', label: 'Nome', width: 170, min: 120, filter: 'text' },
   { key: 'numero', label: 'Número', width: 120, min: 96, filter: 'text' },
   { key: 'last_contact_at', label: 'Últ. contato', width: 125, min: 110, filter: 'text' },
-  { key: 'canal', label: 'Canal', width: 120, min: 90, filter: 'text' },
+  { key: 'canal', label: 'Origem', width: 120, min: 90, filter: 'text' },
   { key: 'status', label: 'Status', width: 150, min: 120, filter: 'select' },
-  { key: 'qualificado', label: 'MQL', width: 60, min: 52, filter: 'boolean' },
+  { key: 'qualificado', label: 'Qualif.', width: 64, min: 56, filter: 'boolean' },
   { key: 'temperatura', label: 'Temp.', width: 115, min: 94, filter: 'select' },
   { key: 'dia1', label: '1D', width: 46, min: 40, filter: 'boolean' },
   { key: 'dia2', label: '2D', width: 46, min: 40, filter: 'boolean' },
@@ -910,11 +919,13 @@ function QuickEditModal({
   const [, setNowTick] = useState(0);
   const [dealCheck, setDealCheck] = useState<'idle' | 'checking' | 'found' | 'empty'>('idle');
   const [dealSuggestion, setDealSuggestion] = useState<{ valor: number; trecho: string | null } | null>(null);
+  const modoCliente = useModoCliente();
   function set<K extends keyof Draft>(k: K, v: Draft[K]) { setDraft(prev => ({ ...prev, [k]: v })); }
 
   function toggleFechou(checked: boolean) {
     set('fechou', checked);
-    if (checked && !lead.fechou) {
+    // A sugestão de valor lê a conversa com IA (custo) — fica com a agência.
+    if (checked && !lead.fechou && !modoCliente) {
       setDealCheck('checking');
       setDealSuggestion(null);
       fetch(`/api/crm/${lead.id}/extract-value`, { method: 'POST' })
@@ -931,6 +942,7 @@ function QuickEditModal({
   }
 
   useEffect(() => {
+    if (modoCliente) return;
     fetch(`/api/crm/ai/lead/${lead.id}`)
       .then(r => r.ok ? r.json() : null)
       .then((data: { last?: { motivo_ia?: string; created_at?: string; confianca?: number } } | null) => {
@@ -941,7 +953,7 @@ function QuickEditModal({
         });
       })
       .catch(() => {});
-  }, [lead.id]);
+  }, [lead.id, modoCliente]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNowTick(v => v + 1), 60_000);
@@ -996,11 +1008,12 @@ function QuickEditModal({
           </div>
           <div className="grid grid-cols-2 gap-3">
             <label className="space-y-1">
-              <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Canal</span>
+              <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Origem</span>
+              {/* Valor fora da lista (vindo de integração) aparece como opção em vez de "—". */}
               <select value={draft.canal ?? ''} onChange={e => set('canal', e.target.value || null)}
                 className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary">
                 <option value="">—</option>
-                {CANAL_OPTIONS.map(o => <option key={o}>{o}</option>)}
+                {opcoesDeOrigem(draft.canal).map(o => <option key={o}>{o}</option>)}
               </select>
             </label>
             <label className="space-y-1">
@@ -1011,8 +1024,13 @@ function QuickEditModal({
               </select>
             </label>
           </div>
-          <NotaAtendimentoPanel lead={lead} />
-          <TrackingSourcePanel lead={lead} />
+          <CamposAtendimento
+            draft={draft}
+            set={(k, v) => set(k as keyof Draft, v as never)}
+            clientId={clientId}
+          />
+          {!modoCliente && <NotaAtendimentoPanel lead={lead} />}
+          {!modoCliente && <TrackingSourcePanel lead={lead} />}
           <RespostasFormulario leadId={lead.id} />
           <div className={cn(showChat && 'lg:hidden')}>
             <ChatPreviewPanel leadId={lead.id} onOpenChat={() => { onOpenChat(lead.id); onClose(); }} />
@@ -1024,11 +1042,20 @@ function QuickEditModal({
                 onChange={e => set('valor_rs', e.target.value ? parseFloat(e.target.value) : null)}
                 className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary" />
             </label>
+            {/* Data de ENTRADA do lead: mexer nela desloca o lead entre meses nos
+                relatórios. Para quem atende, só leitura. */}
+            {modoCliente ? (
+              <div className="space-y-1">
+                <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Entrou em</span>
+                <p className="px-1 py-2 text-sm text-muted-foreground">{fmtD(draft.data ?? lead.created_at)}</p>
+              </div>
+            ) : (
             <label className="space-y-1">
               <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Data</span>
               <input type="date" value={toD(draft.data)} onChange={e => set('data', e.target.value || null)}
                 className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary" />
             </label>
+            )}
           </div>
           <label className="flex items-center gap-3 cursor-pointer py-1">
             <input type="checkbox" checked={!!draft.fechou} onChange={e => toggleFechou(e.target.checked)} className="h-4 w-4 accent-primary" />
@@ -1068,6 +1095,7 @@ function QuickEditModal({
               IA não conseguiu identificar um valor na conversa — preencha manualmente.
             </div>
           )}
+          {!modoCliente && (
           <div className="rounded-lg border border-border bg-background/50 p-3 space-y-3">
             <div className="flex items-center justify-between gap-3">
               <div>
@@ -1110,6 +1138,7 @@ function QuickEditModal({
               </span>
             </label>
           </div>
+          )}
           <label className="space-y-1">
             <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Observação</span>
             <div className="relative">
@@ -1118,6 +1147,7 @@ function QuickEditModal({
               <DictateButton className="absolute bottom-2 right-2" onTranscript={(text) => set('observacao', draft.observacao ? `${draft.observacao} ${text}` : text)} />
             </div>
           </label>
+          <HistoricoLead leadId={lead.id} />
         </div>
         {showChat && (
           <div className="hidden lg:flex flex-1 min-w-0">
@@ -1168,6 +1198,9 @@ function KanbanCard({
   const aiTag = inferLeadAiTag(lead);
   const trackingStatus = leadTrackingStatus(lead);
   const { valor: value, emAberto: valorEmAberto } = valorDoLead(lead);
+  const modoCliente = useModoCliente();
+  const agenda = rotuloAgenda(lead);
+  const acao = rotuloProximaAcao(lead);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -1202,10 +1235,11 @@ function KanbanCard({
       )}
     >
       {/* Ações (aparecem no hover, sobrepostas — não gastam altura) */}
-      <div className="absolute right-1 top-1 z-10 flex items-center gap-0.5 rounded-md bg-card/95 opacity-0 group-hover:opacity-100 transition-opacity">
+      {/* max-md: no celular não existe hover — as ações ficam sempre visíveis. */}
+      <div className="absolute right-1 top-1 z-10 flex items-center gap-0.5 rounded-md bg-card/95 opacity-0 group-hover:opacity-100 max-md:opacity-100 transition-opacity">
         <button
           type="button"
-          title={lead.qualificado ? 'Desmarcar como qualificado' : 'Marcar como QUALIFICADO (vai para o Meta otimizar)'}
+          title={lead.qualificado ? 'Desmarcar como qualificado' : modoCliente ? 'Marcar como qualificado' : 'Marcar como QUALIFICADO (vai para o Meta otimizar)'}
           onPointerDown={e => e.stopPropagation()}
           onClick={e => { e.stopPropagation(); onToggleQualificado(lead); }}
           className={cn(
@@ -1217,6 +1251,7 @@ function KanbanCard({
         >
           <BadgeCheck className="h-3 w-3" />
         </button>
+        {!modoCliente && (
         <button
           type="button"
           title={lead.time_interno ? 'Remover de time interno' : 'Marcar como time interno'}
@@ -1229,6 +1264,7 @@ function KanbanCard({
         >
           <UserRound className="h-3 w-3" />
         </button>
+        )}
         <div className="relative" ref={menuRef}>
           <button
             onPointerDown={e => e.stopPropagation()}
@@ -1255,7 +1291,7 @@ function KanbanCard({
       {/* Linha 1: nome + valor */}
       <div className="flex items-center gap-1.5">
         <p className="min-w-0 flex-1 truncate text-[13px] font-semibold text-foreground">{lead.nome ?? lead.numero ?? '—'}</p>
-        <NotaAtendimentoBadge lead={lead} />
+        {!modoCliente && <NotaAtendimentoBadge lead={lead} />}
         {value > 0 && (
           <span
             title={valorEmAberto ? 'Em negociação (ainda não fechado)' : 'Venda fechada'}
@@ -1279,16 +1315,25 @@ function KanbanCard({
             {ch.icon}
           </span>
         ))}
+        {/* Rastreio de anúncio e o rótulo "IA" são leitura da agência; para quem
+            atende, o card mostra agenda, próxima ação e responsável. */}
+        {!modoCliente && (
         <span
           className={cn('inline-flex shrink-0 rounded px-1 py-px text-[9px] font-bold leading-tight opacity-80', trackingStatus.className)}
           title={`${trackingStatus.label}: ${trackingStatus.detail}`}
         >
           {trackingShort}
         </span>
+        )}
+        {!modoCliente && (
         <span className="inline-flex min-w-0 items-center gap-0.5 truncate rounded bg-primary/5 px-1 py-px text-[9px] font-semibold leading-tight text-primary/75" title={aiTag}>
           <Sparkles className="h-2 w-2 shrink-0" />
           <span className="truncate">{aiTag}</span>
         </span>
+        )}
+        {modoCliente && lead.canal && (
+          <span className="min-w-0 truncate text-[9px] text-muted-foreground">{lead.canal}</span>
+        )}
         <div className="ml-auto flex shrink-0 items-center gap-1">
           {lead.time_interno && (
             <span className="rounded bg-zinc-500/15 px-1 py-px text-[9px] font-bold leading-tight text-zinc-300/80">Interno</span>
@@ -1299,8 +1344,78 @@ function KanbanCard({
           )}
         </div>
       </div>
+
+      {/* Linha 4 (só quando há): agenda, próxima ação e responsável */}
+      {(agenda || acao || lead.responsavel) && (
+        <div className="mt-1 flex items-center gap-1 overflow-hidden">
+          {agenda && (
+            <span className={cn('inline-flex shrink-0 items-center gap-0.5 rounded px-1 py-px text-[9px] font-bold leading-tight', agenda.classe)} title={agenda.titulo}>
+              <CalendarDays className="h-2.5 w-2.5" />{agenda.texto}
+            </span>
+          )}
+          {acao && (
+            <span className={cn('inline-flex min-w-0 items-center gap-0.5 truncate rounded px-1 py-px text-[9px] font-semibold leading-tight', acao.classe)} title={acao.titulo}>
+              <Clock3 className="h-2.5 w-2.5 shrink-0" /><span className="truncate">{acao.texto}</span>
+            </span>
+          )}
+          {lead.responsavel && (
+            <span className="ml-auto flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-sky-500/20 px-1 text-[8px] font-bold text-sky-200" title={`Responsável: ${lead.responsavel}`}>
+              {iniciais(lead.responsavel)}
+            </span>
+          )}
+        </div>
+      )}
     </div>
   );
+}
+
+const semAcentoMin = (t: string) => t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+
+/** Atalhos da barra: "Meus leads", "Agenda de hoje" e "Ações atrasadas". */
+function passaAtalho(l: CrmLead, atalho: 'meus' | 'hoje' | 'atrasados', meuNome: string): boolean {
+  if (atalho === 'meus') return !!meuNome && !!l.responsavel && semAcentoMin(l.responsavel) === semAcentoMin(meuNome);
+  if (atalho === 'hoje') return !!l.data_agendada && String(l.data_agendada).slice(0, 10) === diaLocal(new Date());
+  return !!l.proxima_acao_em && new Date(l.proxima_acao_em).getTime() < Date.now();
+}
+
+function iniciais(nome: string): string {
+  const partes = nome.trim().split(/\s+/).filter(Boolean);
+  return ((partes[0]?.[0] ?? '') + (partes.length > 1 ? partes[partes.length - 1][0] : '')).toUpperCase() || '?';
+}
+
+function diaLocal(d: Date): string {
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+/** Agendamento no card: hoje/amanhã por extenso, passado sem "compareceu" em âmbar. */
+function rotuloAgenda(lead: CrmLead): { texto: string; titulo: string; classe: string } | null {
+  if (!lead.data_agendada) return null;
+  const dia = String(lead.data_agendada).slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dia)) return null;
+  const hoje = diaLocal(new Date());
+  const amanha = diaLocal(new Date(Date.now() + 86_400_000));
+  const hora = lead.hora_agendada ? ` ${lead.hora_agendada}` : '';
+  const texto = dia === hoje ? `Hoje${hora}` : dia === amanha ? `Amanhã${hora}` : `${dia.slice(8, 10)}/${dia.slice(5, 7)}${hora}`;
+  const passou = dia < hoje;
+  const classe = lead.compareceu ? 'bg-emerald-500/15 text-emerald-300'
+    : passou ? 'bg-amber-500/15 text-amber-300'
+    : dia === hoje ? 'bg-sky-500/25 text-sky-200'
+    : 'bg-sky-500/10 text-sky-300';
+  const titulo = lead.compareceu ? 'Compareceu' : passou ? 'Agendamento passou sem registro de comparecimento' : 'Agendado';
+  return { texto, titulo, classe };
+}
+
+function rotuloProximaAcao(lead: CrmLead): { texto: string; titulo: string; classe: string } | null {
+  if (!lead.proxima_acao && !lead.proxima_acao_em) return null;
+  const quando = lead.proxima_acao_em ? new Date(lead.proxima_acao_em) : null;
+  const atrasada = !!quando && quando.getTime() < Date.now();
+  const data = quando ? quando.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
+  return {
+    texto: atrasada ? `Atrasada · ${lead.proxima_acao ?? data}` : (lead.proxima_acao ?? data),
+    titulo: [lead.proxima_acao, data].filter(Boolean).join(' — '),
+    classe: atrasada ? 'bg-red-500/15 text-red-300' : 'bg-muted text-muted-foreground',
+  };
 }
 
 // ── Kanban Column (droppable) ────────────────────────────────────────────────
@@ -3054,6 +3169,13 @@ type CrmPageProps = {
 export default function CrmPage({ lockedClientId, embedded = false, acaoConfig = null, onAcaoConsumida }: CrmPageProps = {}) {
   const { clients } = useClients();
   const activeClients = useMemo(() => clients.filter(c => c.status === 'Ativo'), [clients]);
+  // Funcionário do CLIENTE (ver src/lib/modo-cliente.ts): esconde o que é da
+  // agência. O servidor já recusa as rotas fora da lista dele.
+  const modoCliente = useEhUsuarioCliente();
+  const meuNome = useMeuNome();
+  const [showNovoLead, setShowNovoLead] = useState(false);
+  // Atalhos de operação: ignoram o período (a consulta de hoje pode ser de um lead de agosto).
+  const [atalho, setAtalho] = useState<'' | 'meus' | 'hoje' | 'atrasados'>('');
 
   // Deep-link `?clientId=&lead=` — é como o modal do Funil de Performance (e
   // qualquer outra tela) manda abrir a conversa de um lead específico. A URL
@@ -3270,6 +3392,26 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
     try { if (clientId) localStorage.setItem('crm:last-client', clientId); } catch { /* ignore */ }
   }, [clientId]);
 
+  // Modo cliente: abre direto no cliente dele (e corrige um cliente antigo
+  // lembrado no navegador que não é mais dele), só Leads e Chat, e o quadro
+  // mostra todo o trabalho em andamento — não só quem entrou no mês.
+  const modoClienteAplicado = useRef(false);
+  useEffect(() => {
+    if (!modoCliente || lockedClientId) return;
+    if (activeClients.length > 0 && !activeClients.some(c => c.id === clientId)) {
+      setClientId(activeClients[0].id);
+    }
+  }, [modoCliente, lockedClientId, activeClients, clientId]);
+  useEffect(() => {
+    if (!modoCliente) return;
+    if (crmView !== 'leads' && crmView !== 'chat') setCrmView('leads');
+    if (!modoClienteAplicado.current) {
+      modoClienteAplicado.current = true;
+      applyDatePreset('all');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modoCliente, crmView]);
+
   function openClientCrm(id: string) {
     if (lockedClientId) return;
     setClientId(id);
@@ -3454,17 +3596,21 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
     setCrmView('chat');
   }
 
+  // 1D–4D são marcações de cadência da agência; para quem atende não dizem nada.
   const visibleCols = useMemo(
-    () => COLS.filter(col => visibleColumnKeys.includes(col.key)),
-    [visibleColumnKeys],
+    () => COLS.filter(col => visibleColumnKeys.includes(col.key)
+      && !(modoCliente && ['dia1', 'dia2', 'dia3', 'dia4'].includes(col.key))),
+    [visibleColumnKeys, modoCliente],
   );
 
   // Busca procura em TODOS os períodos: com "Mês atual" escolhido, quem buscava
   // um lead de setembro não achava e concluía que ele não existia.
   const busca = useMemo(() => prepararBusca(search), [search]);
   const filtered = useMemo(() => leads.filter(l => {
-    if (!busca && monthFilter && monthFromDate(l.data) !== monthFilter) return false;
-    if (!busca && (dateFromFilter || dateToFilter) && !isDateInRange(l.data, dateFromFilter, dateToFilter)) return false;
+    const semPeriodo = !!busca || !!atalho;
+    if (!semPeriodo && monthFilter && monthFromDate(l.data) !== monthFilter) return false;
+    if (!semPeriodo && (dateFromFilter || dateToFilter) && !isDateInRange(l.data, dateFromFilter, dateToFilter)) return false;
+    if (atalho && !passaAtalho(l, atalho, meuNome)) return false;
     if (statusFilter && l.status !== statusFilter) return false;
     if (temperatureFilter) {
       if (temperatureFilter === 'sem' && l.temperatura) return false;
@@ -3480,7 +3626,13 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
     if (a.time_interno !== b.time_interno) return a.time_interno ? 1 : -1;
     const result = compareSortValues(sortValue(a, sortConfig.key), sortValue(b, sortConfig.key));
     return sortConfig.direction === 'asc' ? result : -result;
-  }), [leads, busca, soAtendimentoRuim, statusFilter, temperatureFilter, monthFilter, dateFromFilter, dateToFilter, columnFilters, sortConfig]);
+  }), [leads, busca, atalho, meuNome, soAtendimentoRuim, statusFilter, temperatureFilter, monthFilter, dateFromFilter, dateToFilter, columnFilters, sortConfig]);
+
+  const contagemAtalho = useMemo(() => ({
+    meus: meuNome ? leads.filter(l => passaAtalho(l, 'meus', meuNome)).length : 0,
+    hoje: leads.filter(l => passaAtalho(l, 'hoje', meuNome)).length,
+    atrasados: leads.filter(l => passaAtalho(l, 'atrasados', meuNome)).length,
+  }), [leads, meuNome]);
 
   /**
    * Recorte da análise de IA: CLIENTE + PERÍODO, nada mais (instrução do
@@ -3641,6 +3793,9 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
 
   async function deleteRow(id: string) {
     setMenuId(null);
+    const alvo = leadsRef.current.find(l => l.id === id);
+    // Exclusão é definitiva (fica registrada no histórico, mas o lead some).
+    if (!window.confirm(`Excluir o lead "${alvo?.nome || alvo?.numero || 'sem nome'}"? Esta ação não pode ser desfeita.`)) return false;
     const res = await fetch(`/api/crm/${id}`, { method: 'DELETE' }).catch(() => null);
     if (res?.ok) {
       setLeads(prev => prev.filter(l => l.id !== id));
@@ -3650,9 +3805,10 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
         return next;
       });
       if (editId === id) setEditId(null);
-    } else {
-      notificar('Não foi possível excluir o lead — tente de novo.', 'erro');
+      return true;
     }
+    notificar('Não foi possível excluir o lead — tente de novo.', 'erro');
+    return false;
   }
 
   // ⚠️ Mover para uma etapa de PERDA abre o modal ANTES de gravar. O servidor
@@ -3872,6 +4028,7 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
   const lockedClient = lockedClientId ? activeClients.find(c => c.id === lockedClientId) : null;
 
   return (
+    <ModoClienteContext.Provider value={modoCliente}>
     <div className={cn(
       'flex flex-col gap-5 overflow-hidden',
       // 200px: sobrou header do cliente (~90) + a linha de abas/Configurações
@@ -4037,6 +4194,11 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
               <span>{lockedClient?.name ?? 'Cliente selecionado'}</span>
             </div>
           )
+        ) : modoCliente && activeClients.length <= 1 ? (
+          <div className="flex h-10 items-center gap-2 rounded-lg border border-border bg-card px-3 text-sm font-semibold">
+            <Users className="h-3.5 w-3.5 text-primary" />
+            <span>{activeClients[0]?.name ?? 'Carregando…'}</span>
+          </div>
         ) : (
           <IconSelect icon={Users} value={clientId} onChange={openClientCrm}
             placeholder="Selecionar cliente..." className="min-w-[180px]">
@@ -4063,7 +4225,7 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
                 sempre. Dentro do CLIENTE nem o menu fica — os 4 itens moram
                 no modal Configurações (13/09); aqui só no /crm avulso, que
                 não tem esse modal. */}
-            {!embedded && (
+            {!embedded && !modoCliente && (
             <div className="relative">
               <button
                 type="button"
@@ -4130,6 +4292,7 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
               <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-emerald-500 border border-card" />
             )}
           </button>
+          {!modoCliente && (<>
           <button type="button" onClick={() => setCrmView('followup')}
             className={cn('flex items-center gap-1.5 h-8 px-3 rounded-md text-xs font-semibold transition-colors',
               crmView === 'followup' ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground')}>
@@ -4151,6 +4314,7 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
               crmView === 'ads' ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground')}>
             <Clapperboard className="h-3.5 w-3.5" /> Anúncios
           </button>
+          </>)}
         </div>
 
         {clientId && (crmView === 'leads' || crmView === 'attendance') && (
@@ -4261,7 +4425,25 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
                   )}
                 </div>
 
-                {(() => {
+                <div className="flex shrink-0 overflow-hidden rounded-lg border border-border bg-card p-0.5">
+                  {([
+                    ['meus', 'Meus leads', contagemAtalho.meus, 'Leads em que você é o responsável'],
+                    ['hoje', 'Agenda de hoje', contagemAtalho.hoje, 'Agendados para hoje, de qualquer período'],
+                    ['atrasados', 'Atrasados', contagemAtalho.atrasados, 'Próxima ação com prazo vencido'],
+                  ] as const).map(([id, rotulo, n, dica]) => (
+                    <button key={id} type="button" title={dica}
+                      onClick={() => setAtalho(a => a === id ? '' : id)}
+                      className={cn('flex h-8 items-center gap-1 rounded-md px-2.5 text-xs font-semibold transition-colors',
+                        atalho === id
+                          ? id === 'atrasados' ? 'bg-red-500/15 text-red-300' : 'bg-primary/15 text-primary'
+                          : 'text-muted-foreground hover:text-foreground')}>
+                      {rotulo}
+                      {n > 0 && <span className={cn('rounded px-1 text-[10px]', id === 'atrasados' ? 'bg-red-500/20 text-red-300' : 'bg-muted')}>{n}</span>}
+                    </button>
+                  ))}
+                </div>
+
+                {!modoCliente && (() => {
                   const ruins = leads.filter(l => temNota(l) && l.nota_atendimento <= 2).length;
                   if (!ruins && !soAtendimentoRuim) return null;
                   return (
@@ -4277,7 +4459,10 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
                   );
                 })()}
 
-                <button onClick={() => void saveNew()}
+                {/* Abre o modal em qualquer visão. Antes chamava saveNew(), que só
+                    gravava a linha em branco da visão LISTA — no Kanban (a visão
+                    padrão) o botão não fazia nada. */}
+                <button onClick={() => setShowNovoLead(true)}
                   className="flex shrink-0 items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors"
                 >
                   <Plus className="h-4 w-4" /> Novo Lead
@@ -4402,8 +4587,9 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
               {/* Análise de IA sob demanda — recupera o retroativo que a
                   automação desligada não fez (pedido do Matheus, 2026-10-02).
                   Age sobre `leadsDoPeriodo`: só o cliente aberto e o período
-                  escolhido, sem herdar busca nem filtros de coluna. */}
-              {clientId && (
+                  escolhido, sem herdar busca nem filtros de coluna.
+                  Fica com a agência: custa IA e a rota é recusada ao cliente. */}
+              {clientId && !modoCliente && (
                 <button
                   type="button"
                   onClick={() => setAnaliseIaAberta(true)}
@@ -4967,10 +5153,30 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
           lead={kanbanEditLead}
           onSave={saveKanbanEdit}
           onClose={() => setKanbanEditLead(null)}
-          onDelete={() => { void deleteRow(kanbanEditLead.id); setKanbanEditLead(null); }}
+          onDelete={() => { void deleteRow(kanbanEditLead.id).then(ok => { if (ok) setKanbanEditLead(null); }); }}
           statusOptions={statusOptions}
           onOpenChat={openLeadChat}
           clientId={clientId}
+        />
+      )}
+
+      {showNovoLead && clientId && (
+        <NovoLeadModal
+          clientId={clientId}
+          funnelId={selectedFunnelId || undefined}
+          statusOptions={statusOptions}
+          leads={leads}
+          onClose={() => setShowNovoLead(false)}
+          onCreated={lead => {
+            setShowNovoLead(false);
+            setLeads(prev => [lead as unknown as CrmLead, ...prev]);
+            notificar('Lead criado.', 'ok');
+          }}
+          onAbrirExistente={id => {
+            const existente = leads.find(l => l.id === id);
+            setShowNovoLead(false);
+            if (existente) setKanbanEditLead(existente);
+          }}
         />
       )}
 
@@ -5010,6 +5216,7 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
         />
       )}
     </div>
+    </ModoClienteContext.Provider>
   );
 }
 

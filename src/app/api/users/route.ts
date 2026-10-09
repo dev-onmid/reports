@@ -2,6 +2,7 @@ import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { hashPassword } from '@/lib/password';
 import { requireAdmin, getSession, unauthorized } from '@/lib/api-auth';
+import { esquecerAcesso } from '@/lib/acesso';
 
 type Pool = ReturnType<typeof makeServerPool>;
 
@@ -12,6 +13,8 @@ async function ensureSchema(pool: Pool) {
   await pool.query('ALTER TABLE public.users ADD COLUMN IF NOT EXISTS setor TEXT').catch(() => {});
   // ID numérico do membro no ClickUp — único identificador aceito em `assignees`.
   await pool.query('ALTER TABLE public.users ADD COLUMN IF NOT EXISTS clickup_id TEXT').catch(() => {});
+  // Usuário de CLIENTE (team='cliente'): quais clientes ele enxerga no CRM.
+  await pool.query(`ALTER TABLE public.users ADD COLUMN IF NOT EXISTS client_ids TEXT[] NOT NULL DEFAULT '{}'`).catch(() => {});
 }
 
 /** Só estes valores são gravados; qualquer outra coisa vira NULL. */
@@ -32,10 +35,11 @@ function rowToJson(r: any) {
   return {
     id: r.id, name: r.name, email: r.email, role: r.role, status: r.status, team: r.team ?? 'onmid',
     setor: r.setor ?? null, clickup_id: r.clickup_id ?? null,
+    client_ids: Array.isArray(r.client_ids) ? r.client_ids : [],
   };
 }
 
-const SAFE_COLUMNS = 'id, name, email, role, status, COALESCE(team, \'onmid\') AS team, setor, clickup_id';
+const SAFE_COLUMNS = 'id, name, email, role, status, COALESCE(team, \'onmid\') AS team, setor, clickup_id, client_ids';
 
 export async function GET(req: NextRequest) {
   // Listar usuários expõe e-mails e papéis: exige sessão, mas não ser admin
@@ -62,9 +66,20 @@ export async function POST(req: NextRequest) {
 
   const body = await req.json() as {
     id: string; name: string; email: string; password?: string; role: string; status: string;
-    team?: string; setor?: string | null; clickup_id?: string | null;
+    team?: string; setor?: string | null; clickup_id?: string | null; client_ids?: unknown;
   };
-  const team = body.team === 'parceiro' ? 'parceiro' : 'onmid';
+  const team = body.team === 'parceiro' ? 'parceiro' : body.team === 'cliente' ? 'cliente' : 'onmid';
+  const clientIds = Array.isArray(body.client_ids)
+    ? [...new Set(body.client_ids.filter((x): x is string => typeof x === 'string' && x.trim() !== ''))]
+    : [];
+  // Usuário de cliente sem cliente não enxergaria nada — e administrador
+  // "de cliente" seria contradição: o papel de admin abre a configuração toda.
+  if (team === 'cliente' && clientIds.length === 0) {
+    return Response.json({ error: 'Escolha ao menos um cliente para este usuário.' }, { status: 400 });
+  }
+  if (team === 'cliente' && body.role === 'Administrador') {
+    return Response.json({ error: 'Usuário de cliente não pode ser Administrador.' }, { status: 400 });
+  }
   // Chave ausente = não mexer no valor atual; chave presente com null = limpar.
   // Sem essa distinção, todo caller antigo (que não conhece os campos novos)
   // apagaria o setor e o ClickUp ID do usuário ao salvar.
@@ -80,26 +95,30 @@ export async function POST(req: NextRequest) {
     // Senha entra hasheada; texto puro nunca é gravado.
     const hashed = hasPassword ? await hashPassword(body.password as string) : '';
 
-    // As duas variantes compartilham as MESMAS 11 posições — a única diferença é
+    // As duas variantes compartilham as MESMAS 13 posições — a única diferença é
     // se o UPDATE toca em `password`. Numeração divergente entre elas já foi
     // fonte de bug (o $8 caindo no valor errado).
     const params = [
       body.id, body.name, body.email, hashed, body.role, body.status, team,
-      touchSetor, setor, touchClickup, clickupId,
+      touchSetor, setor, touchClickup, clickupId, team === 'cliente' ? clientIds : [], 'client_ids' in body || team !== 'cliente',
     ];
     const onConflict = [
       'name=$2', 'email=$3', ...(hasPassword ? ['password=$4'] : []), 'role=$5', 'status=$6', 'team=$7',
       'setor = CASE WHEN $8::boolean THEN $9 ELSE users.setor END',
       'clickup_id = CASE WHEN $10::boolean THEN $11 ELSE users.clickup_id END',
+      // Chave ausente mantém os clientes (tela antiga que não conhece o campo);
+      // quem deixa de ser 'cliente' sempre perde a lista.
+      'client_ids = CASE WHEN $13::boolean THEN $12::text[] ELSE users.client_ids END',
     ].join(', ');
 
     const { rows } = await pool.query(
-      `INSERT INTO public.users (id, name, email, password, role, status, team, setor, clickup_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $9, $11)
+      `INSERT INTO public.users (id, name, email, password, role, status, team, setor, clickup_id, client_ids)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $9, $11, $12::text[])
        ON CONFLICT (id) DO UPDATE SET ${onConflict}
        RETURNING ${SAFE_COLUMNS}`,
       params,
     );
+    esquecerAcesso(body.id);
     return Response.json(rowToJson(rows[0]), { status: 201 });
   } finally {
     await pool.end();
@@ -118,6 +137,7 @@ export async function DELETE(req: NextRequest) {
   const pool = makeServerPool();
   try {
     await pool.query('DELETE FROM public.users WHERE id = $1', [id]);
+    esquecerAcesso(id);
     return new Response(null, { status: 204 });
   } finally {
     await pool.end();

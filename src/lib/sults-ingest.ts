@@ -163,7 +163,8 @@ export async function ingerirNegocioSults(
            revenue = COALESCE($6, revenue),
            fechado_em = COALESCE(fechado_em, $7::date),
            perdido_em = COALESCE(perdido_em, $8::date),
-           responsavel = COALESCE($9, responsavel),
+           -- definido à mão no CRM vence a integração (crm-eventos.ts)
+           responsavel = CASE WHEN COALESCE(responsavel_manual, FALSE) THEN responsavel ELSE COALESCE($9, responsavel) END,
            temperatura = COALESCE(NULLIF(temperatura, ''), $10),
            nome = COALESCE(NULLIF(nome, ''), $11),
            email = COALESCE(NULLIF(email, ''), $12),

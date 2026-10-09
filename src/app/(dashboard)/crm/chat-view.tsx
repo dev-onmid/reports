@@ -4,14 +4,20 @@ import { Fragment, useEffect, useState, useRef, useCallback, useMemo } from 'rea
 import type { ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 import { notificar } from '@/components/ui/toast';
+import { useModoCliente } from '@/lib/modo-cliente';
+import { GerenciarRespostas, SugestoesResposta, aplicarVariaveis, respostasDoAtalho, useRespostasRapidas, type RespostaRapida } from './respostas-rapidas';
 import {
   Search, MessageCircle, RefreshCw, Send, Paperclip,
   Image, Mic, Video, FileText, MapPin, X, CheckCircle2,
   AlertCircle, History, Filter, MoreHorizontal, Smile,
   CheckSquare2, Square, Trash2, Ban, UserX,
   Wifi, WifiOff, AlertTriangle, Check, CheckCheck, Clock3,
-  Play, Pause, Download,
+  Play, Pause, Download, Zap,
 } from 'lucide-react';
+
+function ChevronLeftIcon() {
+  return <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2"><path d="M15 18l-6-6 6-6" /></svg>;
+}
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -592,6 +598,10 @@ export function ChatView({
   const [leads,      setLeads]      = useState<InboxLead[]>([]);
   const [loading,    setLoading]    = useState(true);
   const [search,     setSearch]     = useState('');
+  const modoCliente = useModoCliente();
+  const [filtroInbox, setFiltroInbox] = useState<'todas' | 'nao_lidas' | 'aguardando'>('todas');
+  const respostas = useRespostasRapidas(clientId);
+  const [gerenciarRespostas, setGerenciarRespostas] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [messages,   setMessages]   = useState<CrmMessage[]>([]);
   const [msgLoading, setMsgLoading] = useState(false);
@@ -1374,7 +1384,19 @@ export function ChatView({
     }
   }
 
+  function escolherResposta(r: RespostaRapida) {
+    setReplyText(aplicarVariaveis(r.texto, selectedLead?.nome));
+    requestAnimationFrame(() => textareaRef.current?.focus());
+  }
+
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    // "/atalho" + Enter troca pelo texto da resposta em vez de enviar o atalho.
+    const sugestoes = respostasDoAtalho(replyText, respostas.lista);
+    if (e.key === 'Enter' && !e.shiftKey && sugestoes.length > 0) {
+      e.preventDefault();
+      escolherResposta(sugestoes[0]);
+      return;
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       void sendText();
@@ -1388,7 +1410,14 @@ export function ChatView({
     el.style.height = `${Math.min(el.scrollHeight, 140)}px`;
   }
 
+  const contagemInbox = {
+    nao_lidas: leads.filter(l => (l.unread_count ?? 0) > 0).length,
+    aguardando: leads.filter(l => l.last_direction === 'in').length,
+  };
   const filtered = leads.filter(l => {
+    // "Aguardando resposta" = a última mensagem foi do lead: é a fila de quem atende.
+    if (filtroInbox === 'nao_lidas' && !((l.unread_count ?? 0) > 0)) return false;
+    if (filtroInbox === 'aguardando' && l.last_direction !== 'in') return false;
     if (!search) return true;
     const q = search.toLowerCase();
     return (l.nome ?? '').toLowerCase().includes(q) || (l.numero ?? '').includes(q);
@@ -1408,8 +1437,10 @@ export function ChatView({
       {/* ── Main layout ── */}
       <div className="flex h-full min-h-0 overflow-hidden rounded-[var(--radius)] border border-border bg-card">
 
-        {/* ── Left: Inbox list ── */}
-        <div className="flex w-[340px] shrink-0 flex-col border-r border-border bg-card min-h-0">
+        {/* ── Left: Inbox list ──
+            Celular: uma coisa por vez — a lista some quando há conversa aberta
+            (e a conversa tem botão de voltar). Do md para cima, lado a lado. */}
+        <div className={cn('flex w-full md:w-[340px] shrink-0 flex-col border-r border-border bg-card min-h-0', selectedLead && 'max-md:hidden')}>
           {/* Header */}
           <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
             {selectMode ? (
@@ -1478,6 +1509,7 @@ export function ChatView({
                   >
                     <CheckSquare2 className="h-3.5 w-3.5" />
                   </button>
+                  {!modoCliente && (
                   <button
                     onClick={() => {
                       const wrongName = window.prompt(
@@ -1502,6 +1534,7 @@ export function ChatView({
                   >
                     <Filter className="h-3.5 w-3.5" />
                   </button>
+                  )}
                 </div>
               </>
             )}
@@ -1530,6 +1563,19 @@ export function ChatView({
             {importResult && (
               <p className="mt-2 text-[11px] text-muted-foreground">{importResult}</p>
             )}
+            <div className="mt-2 flex gap-1">
+              {([
+                ['todas', 'Todas', 0],
+                ['nao_lidas', 'Não lidas', contagemInbox.nao_lidas],
+                ['aguardando', 'Aguardando resposta', contagemInbox.aguardando],
+              ] as const).map(([id, rotulo, n]) => (
+                <button key={id} type="button" onClick={() => setFiltroInbox(id)}
+                  className={cn('flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-semibold transition-colors',
+                    filtroInbox === id ? 'border-primary/40 bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:text-foreground')}>
+                  {rotulo}{n > 0 && <span className="rounded bg-muted px-1 text-[10px]">{n}</span>}
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* Lead list */}
@@ -1662,7 +1708,7 @@ export function ChatView({
         </div>
 
         {/* ── Right: Conversation ── */}
-        <div className="relative flex min-w-0 min-h-0 flex-1 flex-col bg-background/50">
+        <div className={cn('relative flex min-w-0 min-h-0 flex-1 flex-col bg-background/50', !selectedLead && 'max-md:hidden')}>
           {recordingAudio && (
             <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center">
               <div
@@ -1687,7 +1733,11 @@ export function ChatView({
           ) : (
             <>
               {/* Conversation header */}
-              <div className="flex items-center gap-3 border-b border-border bg-card px-4 py-3 shrink-0">
+              <div className="flex flex-wrap items-center gap-3 border-b border-border bg-card px-4 py-3 shrink-0">
+                <button type="button" onClick={() => setSelectedId(null)} aria-label="Voltar para as conversas"
+                  className="md:hidden -ml-1 flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted">
+                  <ChevronLeftIcon />
+                </button>
                 <ContactAvatar lead={selectedLead} size="md" avatarOverride={selectedAvatar} />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
@@ -1735,6 +1785,7 @@ export function ChatView({
                     <History className="h-3 w-3" />
                     {syncing ? 'Buscando…' : 'Histórico'}
                   </button>
+                  {!modoCliente && (
                   <button
                     onClick={async () => {
                       if (!selectedId) return;
@@ -1757,6 +1808,7 @@ export function ChatView({
                     <AlertCircle className="h-3 w-3" />
                     Debug
                   </button>
+                  )}
 
                   {/* More options dropdown */}
                   <div className="relative">
@@ -1875,6 +1927,7 @@ export function ChatView({
                       : <><AlertCircle  className="h-3.5 w-3.5" /> {sendError ?? 'Salvo — falha ao enviar pelo WhatsApp'}</>}
                   </div>
                 )}
+                <SugestoesResposta itens={respostasDoAtalho(replyText, respostas.lista)} onEscolher={escolherResposta} />
                 {recordingAudio && (
                   <div className="flex items-center gap-2 border-b border-red-500/20 bg-red-500/10 px-4 py-1.5 text-xs font-semibold text-red-300">
                     <span className="h-2 w-2 animate-pulse rounded-full bg-red-400" />
@@ -1906,13 +1959,19 @@ export function ChatView({
                     )}
                   </div>
 
+                  <button type="button" onClick={() => setGerenciarRespostas(true)}
+                    title="Respostas rápidas (ou digite / na mensagem)"
+                    className="mb-1.5 flex h-8 w-8 shrink-0 items-center justify-center self-end rounded-[var(--radius)] text-muted-foreground transition-colors hover:bg-muted/50 hover:text-primary">
+                    <Zap className="h-4 w-4" />
+                  </button>
+
                   {/* Textarea */}
                   <textarea
                     ref={textareaRef}
                     value={replyText}
                     onChange={handleTextareaChange}
                     onKeyDown={handleKeyDown}
-                    placeholder="Mensagem… (Enter enviar, Shift+Enter quebra linha)"
+                    placeholder="Mensagem… (Enter envia, / respostas rápidas)"
                     rows={1}
                     className="flex-1 resize-none rounded-[var(--radius)] border border-border bg-background px-3 py-3 pr-11 text-sm focus:outline-none focus:ring-1 focus:ring-primary overflow-hidden"
                     style={{ minHeight: 44, maxHeight: 140 }}
@@ -2045,6 +2104,11 @@ export function ChatView({
           onConfirm={confirmDialog.onConfirm}
           onClose={() => setConfirmDialog(null)}
         />
+      )}
+
+      {gerenciarRespostas && (
+        <GerenciarRespostas clientId={clientId} lista={respostas.lista}
+          onMudou={respostas.recarregar} onFechar={() => setGerenciarRespostas(false)} />
       )}
 
       {/* Debug modal */}

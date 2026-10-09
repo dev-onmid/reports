@@ -103,6 +103,19 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
       })
       .catch(() => { if (active) setIndisponivel(true); });
 
+    // Funcionário do CLIENTE: só o CRM. Não passa pelo mapa de permissões da
+    // agência (ele não tem linha lá, e o padrão negaria o CRM). Quem garante o
+    // que ele vê é o servidor — o proxy recusa qualquer rota fora da lista dele.
+    if (session.team === 'cliente') {
+      if (pathname === '/crm' || pathname.startsWith('/crm/')) {
+        setAllowed(true);
+      } else {
+        setAllowed(false);
+        router.replace('/crm');
+      }
+      return cleanup;
+    }
+
     const role = session.role as Role;
     const allowedRoles = getAllowedRoles(pathname);
     if (!allowedRoles.includes(role)) {

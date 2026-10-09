@@ -419,7 +419,8 @@ export async function ingerirNegocioAgendor(
            perdido_em = COALESCE(perdido_em, $15::date),
            -- Responsável, valor estimado e produtos: o Agendor é a fonte, então
            -- sobrescrevem (mudar de vendedor ou de itens é evento normal).
-           responsavel = COALESCE($16, responsavel),
+           -- definido à mão no CRM vence a integração (crm-eventos.ts)
+           responsavel = CASE WHEN COALESCE(responsavel_manual, FALSE) THEN responsavel ELSE COALESCE($16, responsavel) END,
            valor_negocio = COALESCE($17, valor_negocio),
            produtos = COALESCE($18::jsonb, produtos),
            link_externo = COALESCE($19, link_externo),
