@@ -18,6 +18,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
   try {
     const m = await lerMidia(pool, token);
     if (!m) return new Response('não encontrado', { status: 404 });
+    // Expirada pela faxina: 410 (e não 404) para o chat poder dizer "não
+    // disponível" em vez de deixar uma bolha vazia sem explicação.
+    if (m.expurgada_em) {
+      return new Response('mídia expirada', { status: 410, headers: { 'X-Midia-Expirada': '1' } });
+    }
     const st = await fs.stat(m.arquivo).catch(() => null);
     if (!st) return new Response('arquivo não encontrado', { status: 404 });
     const base: Record<string, string> = {

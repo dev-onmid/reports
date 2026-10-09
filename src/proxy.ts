@@ -111,6 +111,7 @@ const CRON_PREFIXES = [
   '/api/publicacoes/worker',
   '/api/lead-aviso/worker',
   '/api/crm/sync-cron',
+  '/api/crm/midia-expurgo',
   '/api/google/search-terms-cron',
   '/api/disparos/worker',
   '/api/leadlovers/worker',

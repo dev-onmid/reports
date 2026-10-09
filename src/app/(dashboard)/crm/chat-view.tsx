@@ -14,6 +14,7 @@ import {
   CheckSquare2, Square, Trash2, Ban, UserX,
   Wifi, WifiOff, AlertTriangle, Check, CheckCheck, Clock3,
   Play, Pause, Download, Zap,
+  ImageOff,
 } from 'lucide-react';
 
 function ChevronLeftIcon() {
@@ -246,12 +247,25 @@ export function DateSeparator({ label }: { label: string }) {
   );
 }
 
+// ⚠️ Mídia que não carrega NÃO pode sumir calada: a bolha vazia foi o que
+// escondeu a quebra do Supabase por semanas. Depois de 90 dias a faxina apaga
+// foto/vídeo/documento (ver expurgarMidia), e o chat precisa DIZER isso.
+function MidiaIndisponivel({ oQue }: { oQue: string }) {
+  return (
+    <div className="flex items-center gap-2 rounded-lg bg-muted/40 px-3 py-2 text-[12px] text-muted-foreground">
+      <ImageOff className="h-4 w-4 shrink-0" />
+      <span>{oQue} não disponível — arquivos saem do servidor depois de 90 dias.</span>
+    </div>
+  );
+}
+
 export function MessageBubble({ msg, onImageClick }: { msg: CrmMessage; onImageClick?: (src: string) => void }) {
   const isOut = msg.direction === 'out';
   const t = msg.tipo ?? 'texto';
   const text = msg.text;
   const time = msgTimeFmt(msg.created_at);
   const waStatus = msg.whatsapp_status ?? (isOut ? 'sent' : null);
+  const [falhou, setFalhou] = useState(false);
 
   const content = (() => {
     if (t === 'localizacao') {
@@ -263,12 +277,13 @@ export function MessageBubble({ msg, onImageClick }: { msg: CrmMessage; onImageC
       );
     }
     if (t === 'imagem' || (t === 'texto' && isImageUrl(text))) {
+      if (falhou) return <MidiaIndisponivel oQue="Foto" />;
       return (
         <div className="space-y-1">
           <img src={text} alt="Imagem"
             className="max-w-full rounded-lg object-cover max-h-60 cursor-zoom-in hover:opacity-90 transition-opacity"
             onClick={() => onImageClick?.(text)}
-            onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+            onError={() => setFalhou(true)} />
         </div>
       );
     }
@@ -276,7 +291,8 @@ export function MessageBubble({ msg, onImageClick }: { msg: CrmMessage; onImageC
       return <VoiceMessagePlayer src={text} isOut={isOut} />;
     }
     if (t === 'video' || (t === 'texto' && isVideoUrl(text))) {
-      return <video controls src={text} className="max-w-full max-h-52 rounded-lg" />;
+      if (falhou) return <MidiaIndisponivel oQue="Vídeo" />;
+      return <video controls src={text} className="max-w-full max-h-52 rounded-lg" onError={() => setFalhou(true)} />;
     }
     // Documento vira cartão estilo WhatsApp — tanto com arquivo baixável (URL)
     // quanto o placeholder "[Doc] nome.pdf" de mensagens cujo arquivo não foi salvo.
