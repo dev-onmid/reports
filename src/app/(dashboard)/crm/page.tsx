@@ -15,14 +15,14 @@ import {
   ChevronLeft, ChevronRight, ChevronDown, SlidersHorizontal,
   Trash2, Pencil, Sparkles, Clock3, LayoutGrid, List, ArrowUpDown,
   BarChart3, UserRound, MessageCircle, X, Send, GripVertical, Layers, WifiOff, Link2,
-  Globe2, Clapperboard, Info, MapPin, ClipboardList, BadgeCheck, BookmarkPlus, Check, Star } from 'lucide-react';
+  Clapperboard, Info, MapPin, ClipboardList, BadgeCheck, BookmarkPlus, Check, Star } from 'lucide-react';
 import { ChatView } from './chat-view';
 import { ConectarWhatsappModal } from './conectar-whatsapp';
 import { LeadChatPanel } from './lead-chat-panel';
 import { CamposAtendimento, HistoricoLead, NovoLeadModal, opcoesDeOrigem } from './lead-operacao';
 import { ModoClienteContext, useEhGestorCliente, useEhUsuarioCliente, useMeuNome, useModoCliente } from '@/lib/modo-cliente';
 import { EquipeCliente, ResultadosCliente } from './cliente-gestor';
-import { PortalLinkModal } from './portal-link-modal';
+import { AcessosClienteModal } from './acessos-cliente-modal';
 import { SeletorModeloFunil } from '@/components/crm/seletor-modelo-funil';
 import { AplicarModeloFunil } from '@/components/crm/aplicar-modelo-funil';
 import { FollowupTab, useActiveFollowups, FollowupBadge } from './followup-tab';
@@ -3023,7 +3023,7 @@ function ClientChoiceCard({
 }
 
 /** Ações de configuração do CRM que a página do cliente dispara pelo modal Configurações. */
-export type AcaoConfigCrm = 'funil' | 'portal' | 'criterios';
+export type AcaoConfigCrm = 'funil' | 'acessos' | 'criterios';
 
 type CrmPageProps = {
   lockedClientId?: string;
@@ -3073,7 +3073,7 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
   const [stages, setStages] = useState<CrmStage[]>([]);
   const [showFunnelEditor, setShowFunnelEditor] = useState(false);
   const [showNovoFunil, setShowNovoFunil] = useState(false);
-  const [showPortalModal, setShowPortalModal] = useState(false);
+  const [showAcessosModal, setShowAcessosModal] = useState(false);
   const [showAiCriteria, setShowAiCriteria] = useState(false);
 
   const [leads, setLeads]           = useState<CrmLead[]>([]);
@@ -3126,7 +3126,7 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
   useEffect(() => {
     if (!acaoConfig) return;
     if (acaoConfig === 'funil') setShowFunnelEditor(true);
-    else if (acaoConfig === 'portal') setShowPortalModal(true);
+    else if (acaoConfig === 'acessos') setShowAcessosModal(true);
     else if (acaoConfig === 'criterios') setShowAiCriteria(true);
     onAcaoConsumida?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -3822,10 +3822,10 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
                       <Pencil className="h-3.5 w-3.5" /> Editar funil
                     </button>
                     <button type="button"
-                      onClick={() => { setFunnelMenuOpen(false); setShowPortalModal(true); }}
-                      title="Link somente-leitura pro cliente ver os resultados e o funil"
+                      onClick={() => { setFunnelMenuOpen(false); setShowAcessosModal(true); }}
+                      title="Logins do cliente no crm.onmid.app (gestor e atendentes)"
                       className="flex w-full items-center gap-2 px-3 py-2 text-xs text-muted-foreground hover:bg-muted hover:text-foreground">
-                      <Globe2 className="h-3.5 w-3.5" /> Portal do cliente
+                      <Users className="h-3.5 w-3.5" /> Acessos ao CRM
                     </button>
                     <button type="button"
                       onClick={() => { setFunnelMenuOpen(false); setShowAiCriteria(true); }}
@@ -4318,11 +4318,11 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
         />
       )}
 
-      {showPortalModal && clientId && (
-        <PortalLinkModal
+      {showAcessosModal && clientId && (
+        <AcessosClienteModal
           clientId={clientId}
           clientName={activeClients.find(c => c.id === clientId)?.name ?? 'Cliente'}
-          onClose={() => setShowPortalModal(false)}
+          onClose={() => setShowAcessosModal(false)}
         />
       )}
 

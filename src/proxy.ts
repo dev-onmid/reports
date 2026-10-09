@@ -35,8 +35,6 @@ const PUBLIC_PREFIXES = [
   // redireciona sem cookie; a credencial é o `state` assinado com HMAC.
   '/api/auth/instagram/callback',
 
-  // Portal do cliente — o token na URL é a credencial.
-  '/api/portal/',
 
   // Link público da biblioteca "Formatos de Criativos" (/formatos/[token]).
   // O token de 32 hex é a credencial; as rotas só entregam o que está no escopo
@@ -235,16 +233,6 @@ function origemConfere(req: NextRequest): boolean {
 
 export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
-
-  // ⚠️ O portal do cliente é SOMENTE LEITURA, e isso é garantido AQUI — na
-  // borda —, não só pelo fato de as rotas terem apenas GET hoje. Sem esta
-  // trava, bastaria alguém acrescentar um POST em /api/portal/* um dia para
-  // abrir um caminho de escrita sem sessão, sem que nada no código gritasse.
-  // Quem precisar de escrita para o cliente tem de tirar o prefixo do público
-  // e pensar na autenticação — que é exatamente a conversa que deve acontecer.
-  if (pathname.startsWith('/api/portal/') && req.method !== 'GET' && req.method !== 'HEAD') {
-    return Response.json({ error: 'O portal é somente leitura.' }, { status: 405 });
-  }
 
   if (matches(pathname, PUBLIC_PREFIXES)) return semIdentidadeForjada(req);
 

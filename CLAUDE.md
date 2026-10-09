@@ -1,3 +1,12 @@
+## Portal por link MORREU; "Acessos ao CRM" dentro do cliente (2026-10-10)
+
+Decisão do Matheus: "o portal passa a ser o crm.onmid.app… excluir ele… criar os acessos do cliente por ali, dentro do cliente".
+
+- **Apagado**: `src/app/portal/*`, `src/app/api/portal/*`, `src/lib/crm-portal.ts`, `src/lib/portal-dados.ts`, `/api/clients/[id]/portal`, `crm/portal-link-modal.tsx`, o prefixo público `/api/portal/` e a trava "somente leitura" do proxy. Tabela `crm_portal_tokens` dropada em produção (3 links, nenhum ativo, último acesso em setembro).
+- **No lugar**: `AcaoConfigCrm 'acessos'` → modal **Acessos ao CRM** (`crm/acessos-cliente-modal.tsx`), no ⋮ do `/crm` e no modal Configurar cliente → CRM. Mostra o endereço `crm.onmid.app`, lista quem tem acesso, cria gestor/atendente, troca perfil, desativa, redefine senha. Rota `/api/clients/[id]/acessos` (GET/POST/PATCH) — **qualquer pessoa do time Onmid** (`getCallerScope().unrestricted`), não só admin; usuário de cliente não alcança (fora de `ROTAS_CLIENTE`).
+- **Regra única em `src/lib/acessos-cliente.ts`** (`listarAcessos`/`criarAcesso`/`atualizarAcesso`), usada pela porta da agência E pela do gestor (`/api/crm/equipe-cliente`, que só cria/mexe em atendente). O alvo tem de ter o cliente como ÚNICO cliente — usuário ligado a duas unidades é da agência.
+- Configurações → Usuários continua funcionando para o mesmo fim (cadastro geral); o modal é o atalho dentro do cliente.
+
 ## Auditoria de segurança + perfis de cliente (gestor/atendente) (2026-10-10)
 
 Pedido do Matheus: "uma geralzão" de segurança (o sistema segura o WhatsApp e as conversas de 25 clientes) e, junto, separar dono de atendente no cliente, com o dono cadastrando a própria equipe.

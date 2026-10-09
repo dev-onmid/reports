@@ -5,7 +5,7 @@
 // isolado (usa next/link) — aqui o modal dá para renderizar num harness e olhar.
 import { useEffect, useState } from 'react';
 import {
-  AlertTriangle, BookMarked, ChevronRight, ExternalLink, Globe2, Kanban, Layers,
+  AlertTriangle, BookMarked, ChevronRight, ExternalLink, Kanban, Users, Layers,
   Link2, Pencil, Power, PowerOff, Settings, Sparkles, Store, Wallet, WalletCards,
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -260,12 +260,12 @@ export function ClientConfigModal({ open, onClose, clientId, clientName, statusC
 
                 {ativa === 'crm' && onAcaoCrm && (
                   <section>
-                    <SecaoTitulo Icone={Kanban} titulo="CRM" sub="Funil, portal do cliente e critérios da IA." />
+                    <SecaoTitulo Icone={Kanban} titulo="CRM" sub="Funil, acessos do cliente ao CRM e critérios da IA." />
                     {/* Eram o ⋮ da barra do CRM. Cada um fecha este modal e abre na aba CRM. */}
                     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                       {([
                         ['funil', Pencil, 'Editar funil', 'Visualize e edite as etapas do funil de vendas.'],
-                        ['portal', Globe2, 'Portal do cliente', 'Link somente-leitura para o cliente acompanhar.'],
+                        ['acessos', Users, 'Acessos ao CRM', 'Logins do cliente no crm.onmid.app: gestor e atendentes.'],
                         ['criterios', Sparkles, 'Critérios IA', 'Regras que a IA usa para qualificar e mover leads.'],
                       ] as Array<[AcaoConfigCrm, typeof Pencil, string, string]>).map(([acao, Icone, rotulo, desc]) => (
                         <button key={acao} type="button" onClick={() => { fechar(); onAcaoCrm(acao); }}
