@@ -7,7 +7,7 @@ Decisão do Matheus: o funcionário do cliente acessa por **crm.onmid.app**, nã
 - **Tela**: em `crm.*` o login vira "CRM / Atendimento e funil de vendas", e-mail sem "@onmid", e quem entra cai no `/crm`; a casca do usuário de cliente põe o título "Onmid CRM". O reports.onmid.app não muda.
 - `APP_URL` continua `https://reports.onmid.app` — webhooks e links de envio não mudam.
 - ⚠️ Cookie de sessão é por endereço: logar num não loga no outro (de propósito — não espalhar o cookie para os `*.onmid.app` das landing pages).
-- Pendente se o Matheus quiser: travar o reports.onmid.app para equipe e o crm.onmid.app para cliente (hoje os dois aceitam qualquer usuário; quem garante o acesso é a trava do servidor por cliente).
+- **reports.onmid.app é só da EQUIPE** (pedido do Matheus, mesmo dia; `src/lib/host-acesso.ts`): usuário de cliente é recusado no login (depois de conferir a senha, para não revelar quem tem conta), no `/api/auth/me` (sessão antiga → a tela manda para o crm) e no proxy (403 em qualquer rota). O crm.onmid.app aceita a equipe também. Localhost não trava nada. ⚠️ Para testar em produção de dentro do container, o `fetch` do Node troca o cabeçalho Host — usar `http.get` com `headers.Host` (com fetch o teste "passa" sem testar nada).
 
 ## CRM — o próprio cliente conecta/reconecta o WhatsApp, UM por cliente (2026-10-09)
 
