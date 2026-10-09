@@ -1,4 +1,5 @@
 import type { NextRequest } from 'next/server';
+import { escopoDoCliente } from '@/lib/acesso';
 import { makeServerPool } from '@/lib/server-db';
 
 async function ensureColumns(pool: ReturnType<typeof makeServerPool>) {
@@ -58,10 +59,7 @@ export async function GET(req: NextRequest) {
   // Usuário de CLIENTE vê só os clientes dele. O proxy grava a lista em
   // x-onmid-clientes a partir do banco (e apaga qualquer valor forjado); para a
   // equipe da Onmid o header não existe e a lista volta inteira, como sempre.
-  const team = req.headers.get('x-onmid-team');
-  const meus = team === 'cliente'
-    ? (req.headers.get('x-onmid-clientes') ?? '').split(',').filter(Boolean)
-    : null;
+  const meus = escopoDoCliente(req.headers);
   if (meus && meus.length === 0) return Response.json([]);
   const pool = makeServerPool();
   try {

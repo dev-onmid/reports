@@ -21,7 +21,7 @@ import { ConectarWhatsappModal } from './conectar-whatsapp';
 import { LeadChatPanel } from './lead-chat-panel';
 import { CamposAtendimento, HistoricoLead, NovoLeadModal, opcoesDeOrigem } from './lead-operacao';
 import { ModoClienteContext, useEhGestorCliente, useEhUsuarioCliente, useMeuNome, useModoCliente } from '@/lib/modo-cliente';
-import { EquipeCliente, ResultadosCliente } from './cliente-gestor';
+import { EquipeCliente } from './cliente-gestor';
 import { AcessosClienteModal } from './acessos-cliente-modal';
 import { SeletorModeloFunil } from '@/components/crm/seletor-modelo-funil';
 import { AplicarModeloFunil } from '@/components/crm/aplicar-modelo-funil';
@@ -1527,6 +1527,9 @@ function AttendanceView({
   const [auditError, setAuditError] = useState<string | null>(null);
   const [historico, setHistorico] = useState<ItemHistoricoAuditoria[]>([]);
   const [leadNomes, setLeadNomes] = useState<Record<string, string>>({});
+  // Gestor do CLIENTE vê a nota, a auditoria e exporta o PDF; gerar auditoria
+  // nova gasta IA e fica com a rotina da agência (a rota POST nem é liberada).
+  const somenteLeitura = useEhUsuarioCliente();
 
   useEffect(() => {
     const params = new URLSearchParams({ clientId });
@@ -1697,13 +1700,13 @@ function AttendanceView({
                   : 'Nenhuma auditoria gerada ainda para este cliente.'}
               </p>
               <div className="relative z-10 mt-3 flex flex-wrap gap-2">
-                <button
+                {!somenteLeitura && <button
                   onClick={generateAudit}
                   disabled={auditGenerating}
                   className="rounded-lg border border-purple-400/40 bg-purple-500/20 px-2.5 py-1.5 text-[11px] font-semibold text-purple-100 transition-colors hover:bg-purple-500/30 disabled:opacity-60"
                 >
                   {auditGenerating ? 'Gerando…' : audit ? 'Gerar nova auditoria' : 'Gerar auditoria'}
-                </button>
+                </button>}
                 <a
                   href={`/relatorio-atendimento?${new URLSearchParams({ clientId, ...(month ? { month } : {}), ...(!month && from ? { from } : {}), ...(!month && to ? { to } : {}) })}`}
                   target="_blank"
@@ -3200,7 +3203,7 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
   }, [modoCliente, lockedClientId, activeClients, clientId]);
   useEffect(() => {
     if (!modoCliente) return;
-    const permitidas: CrmTab[] = gestorCliente ? ['leads', 'chat', 'resultados', 'equipe'] : ['leads', 'chat'];
+    const permitidas: CrmTab[] = gestorCliente ? ['leads', 'chat', 'attendance', 'equipe'] : ['leads', 'chat'];
     if (!permitidas.includes(crmView)) setCrmView('leads');
     if (!modoClienteAplicado.current) {
       modoClienteAplicado.current = true;
@@ -3869,10 +3872,10 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
             )}
           </button>
           {gestorCliente && (<>
-          <button type="button" onClick={() => setCrmView('resultados')}
+          <button type="button" onClick={() => setCrmView('attendance')}
             className={cn('flex items-center gap-1.5 h-8 px-3 rounded-md text-xs font-semibold transition-colors',
-              crmView === 'resultados' ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground')}>
-            <BarChart3 className="h-3.5 w-3.5" /> Resultados
+              crmView === 'attendance' ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground')}>
+            <BarChart3 className="h-3.5 w-3.5" /> Atendimento
           </button>
           <button type="button" onClick={() => setCrmView('equipe')}
             className={cn('flex items-center gap-1.5 h-8 px-3 rounded-md text-xs font-semibold transition-colors',
@@ -4137,9 +4140,6 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
       )}
 
       {/* ── FOLLOW UP ───────────────────────────────────────────────── */}
-      {clientId && gestorCliente && crmView === 'resultados' && (
-        <div className="flex-1 min-h-0 overflow-y-auto"><ResultadosCliente clientId={clientId} /></div>
-      )}
       {clientId && gestorCliente && crmView === 'equipe' && (
         <div className="flex-1 min-h-0 overflow-y-auto"><EquipeCliente clientId={clientId} /></div>
       )}

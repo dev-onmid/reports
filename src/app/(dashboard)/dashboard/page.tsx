@@ -58,6 +58,7 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { useClients } from '@/lib/client-store';
+import { useEhUsuarioCliente } from '@/lib/modo-cliente';
 import { cn, formatCurrencyBRL } from '@/lib/utils';
 import { T } from '@/lib/dashboard-tipografia';
 import { ClientAvatar } from '@/components/client-avatar';
@@ -1788,6 +1789,7 @@ function CampaignPerformanceTable({
       ad: new Map((vendas?.criativos ?? []).filter(c => c.adId).map(c => [c.adId as string, c])),
     };
   }, [vendas]);
+  const modoClienteTabela = useEhUsuarioCliente();
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [childrenMap, setChildrenMap] = useState<Record<string, ChildState>>({});
   const [adPreview, setAdPreview] = useState<{ ad: MetaAdWithMetrics; x: number; y: number } | null>(null);
@@ -1955,7 +1957,9 @@ function CampaignPerformanceTable({
     }
 
     const isExpanded = 'fetchUrl' in row && expanded.has(row.key);
-    const expandable = canExpand(row);
+    // Gestor do cliente: sem detalhe de conjuntos/anúncios (as rotas são por
+    // id de campanha, sem cliente para o servidor conferir — ver acesso.ts).
+    const expandable = canExpand(row) && !modoClienteTabela;
 
     let displayStatus: string;
     let displayName: string;
@@ -5266,8 +5270,12 @@ export default function GeneralDashboard() {
   const { clients } = useClients();
   const session = getAuthSession();
   const isAdmin = session?.role === 'Administrador';
+  // Gestor do CLIENTE (team='cliente'): a mesma dashboard, presa ao cliente
+  // dele — sem seletor de carteira, sem editor de modelo. O servidor só
+  // devolve dados desse cliente (ROTAS_GESTOR em src/lib/acesso.ts).
+  const modoCliente = useEhUsuarioCliente();
 
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => {
+  const [selectedIdsSalvos, setSelectedIds] = useState<Set<string>>(() => {
     if (typeof window === 'undefined') return new Set();
     try {
       const stored = localStorage.getItem('dashboard-selected-clients');
@@ -5275,6 +5283,14 @@ export default function GeneralDashboard() {
     } catch { /* ignore */ }
     return new Set();
   });
+  // No modo cliente a seleção é DERIVADA (o id do único cliente que /api/clients
+  // devolve), não estado: nada do que a tela faça troca de cliente. Dep pelo id
+  // (string), não pelo array — identidade nova de `clients` refaria todo fetch.
+  const meuClienteId = modoCliente ? (clients[0]?.id ?? null) : null;
+  const selectedIds = useMemo(
+    () => (meuClienteId ? new Set([meuClienteId]) : selectedIdsSalvos),
+    [meuClienteId, selectedIdsSalvos],
+  );
   const [prevMetricsByClient, setPrevMetricsByClient] = useState<Record<string, ApiMetrics>>({});
   const [period, setPeriod] = useState<Period>('this_month');
   const [customDateFrom, setCustomDateFrom] = useState('');
@@ -5766,6 +5782,9 @@ export default function GeneralDashboard() {
 
   // Fetch balances and account links used by the general balance cards
   useEffect(() => {
+    // Saldo das contas é dinheiro da agência: o gestor do cliente não vê (e as
+    // rotas nem estão liberadas para ele).
+    if (modoCliente) return; // estado inicial já é vazio
     setBalancesLoading(true);
     Promise.all([
       fetch('/api/meta/account-balances'),
@@ -5789,7 +5808,7 @@ export default function GeneralDashboard() {
         setClientLinks([]);
       })
       .finally(() => setBalancesLoading(false));
-  }, []);
+  }, [modoCliente]);
 
   useEffect(() => {
     const params = new URLSearchParams({ from: faixaSel.from, to: faixaSel.to });
@@ -6799,7 +6818,7 @@ export default function GeneralDashboard() {
                 <div className="rounded-[12px] border border-white/[0.08] bg-[#071014] p-3">
                   <div className="mb-3 flex items-center gap-2 text-sm font-black uppercase tracking-[0.06em] text-[#f4f7f8]"><MetaAdsMark className="h-5 w-5 text-[#168BFF]" /> Meta Ads</div>
                   <div className="grid gap-2 sm:grid-cols-3">
-                    <MiniPlatformMetric label="Saldo Meta Ads" value={metaBalance > 0 ? premiumValue(metaBalance, 'currency') : '—'} logo={<MetaAdsMark className="h-4 w-4 text-[#168BFF]" />} sub="Saldo disponível" />
+                    {!modoCliente && <MiniPlatformMetric label="Saldo Meta Ads" value={metaBalance > 0 ? premiumValue(metaBalance, 'currency') : '—'} logo={<MetaAdsMark className="h-4 w-4 text-[#168BFF]" />} sub="Saldo disponível" />}
                     <MiniPlatformMetric label="Alcance" value={metaReach > 0 ? premiumValue(metaReach) : '—'} icon={Users} change={pct(metaReach, prevMetaReach)} comparacao={rotuloComp} />
                     {/* CPM: preço para aparecer. Queda é boa (inverseChange). */}
                     <MiniPlatformMetric label="CPM" value={metaCpm > 0 ? premiumValue(metaCpm, 'currency') : '—'} icon={Eye} change={metaCpm > 0 && prevMetaCpm > 0 ? pct(metaCpm, prevMetaCpm) : null} inverseChange comparacao={rotuloComp} />
@@ -6815,7 +6834,7 @@ export default function GeneralDashboard() {
                 <div className="rounded-[12px] border border-white/[0.08] bg-[#071014] p-3">
                   <div className="mb-3 flex items-center gap-2 text-sm font-black uppercase tracking-[0.06em] text-[#f4f7f8]"><GoogleAdsMark className="h-5 w-5" /> Google Ads</div>
                   <div className="grid gap-2 sm:grid-cols-3">
-                    <MiniPlatformMetric label="Saldo Google Ads" value={googleBalance > 0 ? premiumValue(googleBalance, 'currency') : '—'} logo={<GoogleAdsMark className="h-4 w-4" />} sub="Saldo disponível" />
+                    {!modoCliente && <MiniPlatformMetric label="Saldo Google Ads" value={googleBalance > 0 ? premiumValue(googleBalance, 'currency') : '—'} logo={<GoogleAdsMark className="h-4 w-4" />} sub="Saldo disponível" />}
                     <MiniPlatformMetric label="Impressões" value={hasGoogleData ? premiumValue(googleImpressions) : '—'} icon={BarChart3} change={hasGoogleData ? pct(googleImpressions, prevGoogleImpressions) : null} comparacao={rotuloComp} />
                     {/* CPM: preço para aparecer. Queda é boa (inverseChange). */}
                     <MiniPlatformMetric label="CPM" value={googleCpm > 0 ? premiumValue(googleCpm, 'currency') : '—'} icon={Eye} change={googleCpm > 0 && prevGoogleCpm > 0 ? pct(googleCpm, prevGoogleCpm) : null} inverseChange comparacao={rotuloComp} />
@@ -7238,7 +7257,13 @@ export default function GeneralDashboard() {
 
       <div className="sticky top-0 z-20 border-b border-white/[0.08] bg-[#060a0d]/92 px-4 py-3 backdrop-blur-xl xl:px-6">
         <div className="flex items-center gap-3 overflow-x-auto">
-          <ClientSelector clients={clients} selected={selectedIds} onChange={setSelectedIds} />
+          {modoCliente ? (
+            <div className="flex h-10 shrink-0 items-center gap-2 rounded-[10px] border border-white/[0.08] bg-[#0b1216] px-3 text-sm font-bold text-[#f4f7f8]">
+              {clients[0]?.name ?? 'Carregando…'}
+            </div>
+          ) : (
+            <ClientSelector clients={clients} selected={selectedIds} onChange={setSelectedIds} />
+          )}
           <div className="flex items-center rounded-[10px] border border-white/[0.08] bg-[#0b1216] p-1">
             {PERIODS.filter(p => p.value !== 'yesterday').map((p) => (
               <button

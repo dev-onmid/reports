@@ -3,6 +3,8 @@
 import { useEffect, useState } from 'react';
 import Image from 'next/image';
 import { LogOut, Menu } from 'lucide-react';
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import { clearAuthSession } from '@/lib/auth-store';
 import { useSessaoLocal } from '@/lib/modo-cliente';
 import { Sidebar } from '@/components/layout/sidebar';
@@ -26,13 +28,24 @@ import {
  * conta dele. Só o CRM, o nome dele e o botão de sair.
  */
 function ClienteShell({ children }: { children: React.ReactNode }) {
-  const nome = useSessaoLocal()?.name ?? '';
+  const sessao = useSessaoLocal();
+  const nome = sessao?.name ?? '';
+  const gestor = sessao?.perfil === 'gestor';
+  const pathname = usePathname();
+  const aba = (href: string, rotulo: string) => (
+    <Link href={href} className={`rounded-md px-3 py-1 text-xs font-semibold ${pathname.startsWith(href) ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground'}`}>
+      {rotulo}
+    </Link>
+  );
   useEffect(() => { document.title = 'Onmid CRM'; }, []);
   return (
     <AuthGuard>
       <div className="flex h-screen w-full flex-col overflow-hidden bg-background">
         <header className="flex h-12 shrink-0 items-center justify-between border-b border-border px-4">
-          <Image src="/brand/onmid-logo-white.png" alt="Onmid" width={84} height={20} className="h-5 w-auto" unoptimized />
+          <div className="flex items-center gap-4">
+            <Image src="/brand/onmid-logo-white.png" alt="Onmid" width={84} height={20} className="h-5 w-auto" unoptimized />
+            {gestor && <nav className="flex items-center gap-1">{aba('/crm', 'CRM')}{aba('/dashboard', 'Dashboard')}</nav>}
+          </div>
           <div className="flex items-center gap-3 text-xs text-muted-foreground">
             <span className="hidden sm:inline">{nome}</span>
             <button

@@ -1,3 +1,5 @@
+import type { NextRequest } from 'next/server';
+import { escopoDoCliente } from '@/lib/acesso';
 import { makeServerPool } from '@/lib/server-db';
 
 /**
@@ -11,7 +13,8 @@ import { makeServerPool } from '@/lib/server-db';
  * conexão (mesma regra do painel em /api/clients/[id]/cardapioweb). Duas
  * queries baratas; sem tabela → objeto vazio, nunca 500.
  */
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const meus = escopoDoCliente(req.headers);
   const pool = makeServerPool();
   try {
     const flags: Record<string, true> = {};
@@ -23,7 +26,7 @@ export async function GET() {
         `SELECT DISTINCT client_id FROM public.client_anota_ai_stores WHERE active = true`
       ).catch(() => ({ rows: [] as { client_id: string }[] })),
     ]);
-    for (const r of [...cw.rows, ...anota.rows]) flags[r.client_id] = true;
+    for (const r of [...cw.rows, ...anota.rows]) if (!meus || meus.includes(r.client_id)) flags[r.client_id] = true;
     return Response.json(flags);
   } catch {
     return Response.json({});

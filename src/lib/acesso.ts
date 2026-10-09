@@ -143,12 +143,43 @@ export const ROTAS_CLIENTE: Regra[] = [
  * por ele — o proxy confere que é o dele antes de deixar passar.
  */
 export const ROTAS_GESTOR: Regra[] = [
-  { padrao: /^\/api\/clients\/[^/]+\/metrics$/, metodos: ['GET'], exigeCliente: true },
-  { padrao: /^\/api\/crm\/por-canal$/, metodos: ['GET'], exigeCliente: true },
-  { padrao: /^\/api\/crm\/desempenho$/, metodos: ['GET'], exigeCliente: true },
-  { padrao: /^\/api\/crm\/funil$/, metodos: ['GET'], exigeCliente: true },
+  // equipe do próprio cliente
   { padrao: /^\/api\/crm\/equipe-cliente$/, metodos: ['GET', 'POST', 'PATCH'], exigeCliente: true },
+  // aba Atendimento do CRM (nota, auditoria e o relatório em PDF). Só LEITURA:
+  // gerar auditoria nova (POST) gasta IA e é da rotina da agência.
+  { padrao: /^\/api\/crm\/attendance$/, metodos: ['GET'], exigeCliente: true },
+  { padrao: /^\/api\/crm\/attendance\/(audit|relatorio)$/, metodos: ['GET'], exigeCliente: true },
+  // A DASHBOARD do reports, presa ao cliente dele (2026-10-10). Inventário de
+  // tudo que a página chama: rotas que recebem o cliente por query/caminho
+  // conferem aqui; as que listam TODOS os clientes (`exigeCliente: false`)
+  // filtram pelo cabeçalho x-onmid-clientes via `escopoDoCliente` no handler.
+  // Ficam FORA de propósito: saldo das contas de anúncio (/api/meta|google/
+  // account-balances e /api/clients/links — dinheiro da agência), o editor de
+  // modelo (PUT/DELETE) e o detalhe de conjuntos/anúncios (identificado por
+  // id de campanha, sem cliente para conferir).
+  { padrao: /^\/api\/clients\/[^/]+\/(metrics|ga4|cardapioweb)$/, metodos: ['GET'], exigeCliente: true },
+  { padrao: /^\/api\/clients\/bulk-settings$/, metodos: ['GET'], exigeCliente: true },
+  { padrao: /^\/api\/clients\/(avatars|delivery-flags)$/, metodos: ['GET'], exigeCliente: false },
+  { padrao: /^\/api\/crm\/summary$/, metodos: ['GET'], exigeCliente: false },
+  { padrao: /^\/api\/crm\/(por-canal|desempenho|funil|funil-leads)$/, metodos: ['GET'], exigeCliente: true },
+  { padrao: /^\/api\/(campaigns|audience)$/, metodos: ['GET'], exigeCliente: true },
+  { padrao: /^\/api\/google\/keywords$/, metodos: ['GET'], exigeCliente: true },
+  { padrao: /^\/api\/meta\/(top-creatives|page-insights|ig-posts)$/, metodos: ['GET'], exigeCliente: true },
+  { padrao: /^\/api\/creative-library$/, metodos: ['GET'], exigeCliente: true },
+  { padrao: /^\/api\/creative-library\/enrich$/, metodos: ['POST'], exigeCliente: true }, // items[].clientId
+  { padrao: /^\/api\/dashboard\/modelo$/, metodos: ['GET'], exigeCliente: false }, // layout por segmento, sem dado de cliente
 ];
+
+/**
+ * Clientes que o handler pode devolver: `null` = sem restrição (equipe da
+ * Onmid); lista = usuário de cliente, só esses. Para rotas que listam TODOS os
+ * clientes (`/api/clients`, avatars, delivery-flags, crm/summary) — o proxy
+ * grava o cabeçalho a partir do banco e apaga qualquer valor forjado.
+ */
+export function escopoDoCliente(headers: Headers): string[] | null {
+  if (headers.get('x-onmid-team') !== TEAM_CLIENTE) return null;
+  return (headers.get('x-onmid-clientes') ?? '').split(',').map(s => s.trim()).filter(Boolean);
+}
 
 export function regraCliente(pathname: string, metodo: string, gestor = false): Regra | null {
   const m = metodo.toUpperCase() === 'HEAD' ? 'GET' : metodo.toUpperCase();
@@ -187,6 +218,12 @@ export function clientesCitados(query: URLSearchParams, corpo: unknown): string[
     const c = corpo as Record<string, unknown>;
     for (const k of ['clientId', 'client_id']) if (typeof c[k] === 'string' && c[k]) out.push(c[k] as string);
     if (Array.isArray(c.clientIds)) out.push(...c.clientIds.filter((x): x is string => typeof x === 'string'));
+    // /api/creative-library/enrich: { items: [{ clientId, adIds }] }
+    if (Array.isArray(c.items)) {
+      for (const it of c.items) {
+        if (it && typeof it === 'object' && typeof (it as Record<string, unknown>).clientId === 'string') out.push((it as Record<string, string>).clientId);
+      }
+    }
   }
   return out;
 }

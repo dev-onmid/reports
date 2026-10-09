@@ -111,7 +111,10 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
     // agência (ele não tem linha lá, e o padrão negaria o CRM). Quem garante o
     // que ele vê é o servidor — o proxy recusa qualquer rota fora da lista dele.
     if (session.team === 'cliente') {
-      if (pathname === '/crm' || pathname.startsWith('/crm/')) {
+      const gestor = session.perfil === 'gestor';
+      const ok = pathname === '/crm' || pathname.startsWith('/crm/')
+        || (gestor && (pathname === '/dashboard' || pathname.startsWith('/dashboard/')));
+      if (ok) {
         setAllowed(true);
       } else {
         setAllowed(false);
