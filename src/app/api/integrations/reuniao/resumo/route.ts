@@ -1,7 +1,7 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { resolveClientByName } from '@/lib/reuniao-intake';
-import { parseChecklist, parseDataReuniao, salvarResumoReuniao } from '@/lib/reuniao-resumos';
+import { dataPeloTldv, parseChecklist, parseDataReuniao, salvarResumoReuniao } from '@/lib/reuniao-resumos';
 import { conferirSegredoIntegracao, respostaSegredo } from '@/lib/integration-secret';
 import { enviarChecklistReuniao } from '@/lib/reuniao-whatsapp';
 
@@ -66,15 +66,20 @@ export async function POST(req: NextRequest) {
     const gravacao = [body.gravacao_url, body.recording_url, body.video_url, body.gravacao]
       .find((v): v is string => typeof v === 'string' && v.trim().length > 0) ?? null;
 
+    // O Make não manda `data`; sem isto a reunião ficaria carimbada com a hora
+    // do processamento, que vem em lote e já errou por dias.
+    const meetingId = typeof body.meeting_id === 'string' ? body.meeting_id : null;
+    const quando = parseDataReuniao(body.data ?? body.reuniao_em) ?? await dataPeloTldv(pool, meetingId);
+
     const r = await salvarResumoReuniao(pool, {
       clientId: match.id,
       resumo,
       titulo: typeof body.titulo === 'string' ? body.titulo : null,
-      meetingId: typeof body.meeting_id === 'string' ? body.meeting_id : null,
+      meetingId,
       docUrl: typeof body.doc_url === 'string' ? body.doc_url : null,
       recordingUrl: gravacao,
       checklist: parseChecklist(body.checklist ?? body.pendencias ?? ia.checklist ?? body.acoes),
-      reuniaoEm: parseDataReuniao(body.data ?? body.reuniao_em),
+      reuniaoEm: quando,
     });
     // Checklist no grupo do tráfego. Fica DEPOIS de gravar e nunca lança: o
     // resumo já está salvo e a aba Reuniões não pode depender do WhatsApp.

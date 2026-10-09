@@ -136,6 +136,25 @@ export function mesclarChecklist(
  * Reexecução do cenário do Make com o mesmo `meeting_id` sobrescreve o texto —
  * a versão mais recente da IA é sempre a que vale.
  */
+/**
+ * Data REAL da reunião, do TLDV, quando o Make não manda o campo `data`.
+ *
+ * ⚠️ Sem isto `reuniao_em` cai em NOW() = hora do PROCESSAMENTO, e o Make
+ * processa em lote: em 06/10/2026 seis resumos entraram no mesmo minuto, dois
+ * deles de reuniões de 01 e 02/10. A data saía errada no checklist do grupo e
+ * na aba Reuniões. O `happened_at` do TLDV é quando a reunião aconteceu de
+ * verdade. Best-effort: instalação sem a tabela do polling só não ganha o
+ * fallback.
+ */
+export async function dataPeloTldv(pool: Pool, meetingId: string | null): Promise<Date | null> {
+  if (!meetingId?.trim()) return null;
+  try {
+    const { rows: [r] } = await pool.query<{ happened_at: Date | null }>(
+      'SELECT happened_at FROM public.tldv_reunioes WHERE meeting_id = $1', [meetingId.trim()]);
+    return r?.happened_at ? new Date(r.happened_at) : null;
+  } catch { return null; }
+}
+
 export async function salvarResumoReuniao(pool: Pool, input: ResumoInput): Promise<{ id: string; atualizado: boolean }> {
   await ensureReuniaoResumoSchema(pool);
   const meetingId = input.meetingId?.trim() || null;
