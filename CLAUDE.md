@@ -1,3 +1,18 @@
+## Mídia do chat — faxina de 90 dias que POUPA o áudio, com teto de disco (2026-10-09)
+
+Pergunta do Matheus logo depois do conserto do Supabase: "tem um limite por cliente ou tempo? 30 dias é mais que suficiente, né?". A resposta mudou **depois de medir**, e os números é que valem.
+
+- **Medido em operação real** (79 arquivos na primeira meia hora): **áudio é 72% dos arquivos e custa ~42 KB cada** (~250 MB/mês); quem pesa é foto (260 KB), vídeo e documento. Ritmo total **~1 GB/mês** para **69 GB livres**. Ou seja: apagar áudio aos 30 dias economiza quase nada e joga fora justamente onde o cliente aprova orçamento e remarca consulta.
+- **⚠️ O risco real não é custo, é o disco ser COMPARTILHADO com a Evolution.** As sessões de WhatsApp de todas as instâncias moram no mesmo `/`. Encher o disco derruba o WhatsApp da carteira inteira, não só a mídia. É isso que justifica um teto — não a conta de armazenamento.
+- **Decisão do Matheus com os números na mesa: 90 dias (não 30), poupando o áudio.** 30 dias foi descartado porque **ciclo de venda de franquia e tratamento de clínica passam disso** — o áudio do combinado sumiria no meio da negociação.
+- **Duas camadas, de propósito** (`expurgarMidia` em `crm-midia.ts`): (1) **prazo de 90 dias** só para foto/vídeo/documento; (2) **teto de 20 GB** como rede de segurança, que derruba o mais antigo primeiro — aí **sim incluindo áudio**, porque nesse ponto proteger a operação vem antes do histórico. O prazo cuida de privacidade e arrumação; o teto cuida do disco. Um não cobre o outro.
+- **⚠️ A linha de `crm_midia` NUNCA é apagada** — ganha `expurgada_em`. A rota responde **410 (não 404)** e o chat mostra "Foto não disponível — arquivos saem do servidor depois de 90 dias". **Antes o `onError` escondia a imagem (`display:none`)**, e bolha vazia e muda foi exatamente o que deixou a quebra do Supabase invisível por semanas; repetir isso a cada 90 dias, de propósito, seria pior.
+- **⚠️ A rota é `/api/crm/midia-expurgo`, FORA de `/api/crm/midia/`** — aquele caminho é o que SERVE o arquivo e é liberado por cliente no proxy; misturar os dois seria pedir para alguém afrouxar a errada. Entrada nova em `CRON_PREFIXES` (cron novo = sempre lembrar do proxy). Aceita `?dias=`, `?teto=` e `?dry=1`.
+- ✅ Verificado: **25 asserts** (`scratchpad/test-crm-midia-expurgo.mjs`, exercitando a função real com pool de mentira: áudio de 120 dias poupado pelo prazo e derrubado pelo teto, mais antigo primeiro, simulação sem tocar no disco, arquivo já sumido não derruba a rodada, `dias: -5` virando 1); tsc + `next build` + eslint limpos; **SQL conferida contra o Postgres de produção** antes do deploy; e **PROVADO EM PRODUÇÃO** plantando dois arquivos de 200 dias — a foto foi apagada do disco (`porPrazo: 1`) e **o áudio ficou**, com os registros de teste removidos depois.
+- **Cron na VPS**: `30 6 * * *` = **03h30 BRT** (backup em `/root/crontab-backup-antes-midia-expurgo.txt`).
+- ⚠️ Hoje a faxina não apaga nada: a mídia só passou a ser guardada em 09/10, então o primeiro expurgo real acontece por volta de **07/01/2027**. O teto é que pode disparar antes, se algum cliente novo começar a mandar vídeo pesado.
+
+
 ## Portal por link MORREU; "Acessos ao CRM" dentro do cliente (2026-10-10)
 
 Decisão do Matheus: "o portal passa a ser o crm.onmid.app… excluir ele… criar os acessos do cliente por ali, dentro do cliente".
