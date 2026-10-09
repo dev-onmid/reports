@@ -26,33 +26,14 @@ export async function GET(
   try {
     await migrateCrmMessages(pool);
 
-    const BASE_WITH_CONTACTS = `
-      WITH target AS (
-        SELECT id, client_id, numero
-          FROM public.crm_leads
-         WHERE id = $1
-         LIMIT 1
-      ),
-      lead_matches AS (
-        SELECT l2.id
-          FROM public.crm_leads l2
-          JOIN target t ON t.client_id = l2.client_id
-         WHERE l2.id = t.id
-            OR (
-              NULLIF(regexp_replace(COALESCE(l2.numero, ''), '\\D', '', 'g'), '') =
-              NULLIF(regexp_replace(COALESCE(t.numero, ''), '\\D', '', 'g'), '')
-              AND NULLIF(regexp_replace(COALESCE(t.numero, ''), '\\D', '', 'g'), '') IS NOT NULL
-            )
-      ),
-      contact_matches AS (
-        SELECT c.id
-          FROM public.crm_contacts c
-          JOIN target t ON t.client_id = c.client_id
-         WHERE NULLIF(regexp_replace(COALESCE(c.phone, ''), '\\D', '', 'g'), '') =
-               NULLIF(regexp_replace(COALESCE(t.numero, ''), '\\D', '', 'g'), '')
-           AND NULLIF(regexp_replace(COALESCE(t.numero, ''), '\\D', '', 'g'), '') IS NOT NULL
-      )`;
-    const BASE_WITHOUT_CONTACTS = `
+    // ⚠️ `crm_contacts` NÃO EXISTE neste banco (código morto que não veio na
+    // migração de setembro) e NENHUMA mensagem usa `contact_id` — medido: 0 de
+    // 83.512. O ramo de contatos só servia para a consulta estourar com
+    // "relation does not exist" e cair num plano B que respondia
+    // `'texto' AS tipo` para TUDO. Resultado: desde setembro o chat recebia
+    // toda mídia marcada como texto e mostrava a URL crua no lugar do player.
+    // Por isso a consulta é uma só agora — sem plano B que falsifique o dado.
+    const BASE = `
       WITH target AS (
         SELECT id, client_id, numero
           FROM public.crm_leads
@@ -71,43 +52,19 @@ export async function GET(
             )
       )`;
     const AFTER_CLAUSE = after ? `AND m.created_at > $2::timestamptz` : '';
-    const WHERE_WITH_CONTACTS = `
-      WHERE (m.lead_id IN (SELECT id FROM lead_matches)
-         OR m.contact_id IN (SELECT id FROM contact_matches))
-        ${AFTER_CLAUSE}
-      ORDER BY m.created_at ASC, m.id ASC
-      LIMIT 500`;
-    const WHERE_WITHOUT_CONTACTS = `
-      WHERE m.lead_id IN (SELECT id FROM lead_matches)
-        ${AFTER_CLAUSE}
-      ORDER BY m.created_at ASC, m.id ASC
-      LIMIT 500`;
     const queryParams = after ? [id, after] : [id];
 
-    // Try with tipo column first; fall back to 'texto' literal if column missing
-    let rows: unknown[] = [];
-    try {
-      const result = await pool.query(
-        `${BASE_WITH_CONTACTS}
-         SELECT m.id, m.direction, m.text, COALESCE(m.tipo, 'texto') AS tipo, m.created_at,
-                m.whatsapp_status, m.whatsapp_error, m.reply_to_text
-         FROM public.crm_messages m ${WHERE_WITH_CONTACTS}`,
-        queryParams,
-      );
-      rows = result.rows;
-    } catch (withContactsErr) {
-      const result = await pool.query(
-        `${BASE_WITHOUT_CONTACTS}
-         SELECT m.id, m.direction, m.text, 'texto' AS tipo, m.created_at,
-                m.whatsapp_status, m.whatsapp_error
-         FROM public.crm_messages m ${WHERE_WITHOUT_CONTACTS}`,
-        queryParams,
-      ).catch(async () => {
-        if (withContactsErr) throw withContactsErr;
-        throw new Error('Falha ao carregar mensagens');
-      });
-      rows = result.rows;
-    }
+    const { rows } = await pool.query(
+      `${BASE}
+       SELECT m.id, m.direction, m.text, COALESCE(m.tipo, 'texto') AS tipo, m.created_at,
+              m.whatsapp_status, m.whatsapp_error, m.reply_to_text, m.autor_nome
+       FROM public.crm_messages m
+       WHERE m.lead_id IN (SELECT id FROM lead_matches)
+         ${AFTER_CLAUSE}
+       ORDER BY m.created_at ASC, m.id ASC
+       LIMIT 500`,
+      queryParams,
+    );
 
     // Conversa na tela = lida. Este GET só é chamado com a conversa aberta (load
     // inicial + poll de 5s), então marcar aqui zera o contador de não-lidas do
