@@ -3,6 +3,7 @@ import { makeServerPool } from '@/lib/server-db';
 import { resolveClientByName } from '@/lib/reuniao-intake';
 import { parseChecklist, parseDataReuniao, salvarResumoReuniao } from '@/lib/reuniao-resumos';
 import { conferirSegredoIntegracao, respostaSegredo } from '@/lib/integration-secret';
+import { enviarChecklistReuniao } from '@/lib/reuniao-whatsapp';
 
 /**
  * Reunião pronta, chamado pelo Make no FINAL do cenário — irmão da rota
@@ -75,7 +76,19 @@ export async function POST(req: NextRequest) {
       checklist: parseChecklist(body.checklist ?? body.pendencias ?? ia.checklist ?? body.acoes),
       reuniaoEm: parseDataReuniao(body.data ?? body.reuniao_em),
     });
-    return Response.json({ ok: true, cliente: { id: match.id, nome: match.name }, resumo_id: r.id, atualizado: r.atualizado });
+    // Checklist no grupo do tráfego. Fica DEPOIS de gravar e nunca lança: o
+    // resumo já está salvo e a aba Reuniões não pode depender do WhatsApp.
+    // A trava de duplicata é o `whatsapp_em`, não o `atualizado` — reexecução
+    // do Make com resumo revisado não deve remandar a mensagem.
+    const wa = await enviarChecklistReuniao(pool, r.id);
+
+    return Response.json({
+      ok: true,
+      cliente: { id: match.id, nome: match.name },
+      resumo_id: r.id,
+      atualizado: r.atualizado,
+      whatsapp: wa,
+    });
   } catch (err) {
     console.error('[integracao reuniao resumo]', err);
     return Response.json({

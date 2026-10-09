@@ -30,10 +30,14 @@ export function ensureReuniaoResumoSchema(pool: Pool) {
       )
     `);
     // Aba Reuniões (2026-08-04): link da gravação + checklist de continuidade.
+    // `whatsapp_em` (2026-10-09): carimbo de quando o checklist foi para o grupo
+    // do tráfego. É o que impede reexecução do cenário do Make de mandar a mesma
+    // mensagem duas vezes — no grupo não há desfazer.
     await pool.query(`
       ALTER TABLE public.reuniao_resumos
         ADD COLUMN IF NOT EXISTS recording_url TEXT,
-        ADD COLUMN IF NOT EXISTS checklist JSONB
+        ADD COLUMN IF NOT EXISTS checklist JSONB,
+        ADD COLUMN IF NOT EXISTS whatsapp_em TIMESTAMPTZ
     `);
     // O Make reexecuta cenário com frequência — mesma reunião não pode duplicar.
     await pool.query(`
