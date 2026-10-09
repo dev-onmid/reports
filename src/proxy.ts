@@ -37,6 +37,11 @@ const PUBLIC_PREFIXES = [
   // Portal do cliente — o token na URL é a credencial.
   '/api/portal/',
 
+  // Link público da biblioteca "Formatos de Criativos" (/formatos/[token]).
+  // O token de 32 hex é a credencial; as rotas só entregam o que está no escopo
+  // dele (um formato ou a biblioteca), somente leitura.
+  '/api/formatos-publico/',
+
   // Imagem de publicação agendada: a Meta faz cURL nesta URL a partir da
   // internet para criar o container de mídia e não manda cookie. O token de
   // 32 hex é a credencial; não há listagem nem token derivável.
