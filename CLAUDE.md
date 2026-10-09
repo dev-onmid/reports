@@ -1,3 +1,14 @@
+## crm.onmid.app — porta de entrada dos clientes, mesmo sistema (2026-10-09)
+
+Decisão do Matheus: o funcionário do cliente acessa por **crm.onmid.app**, não por reports.onmid.app. É o MESMO container e o MESMO código — só outra porta.
+
+- **DNS**: registro A `crm → 2.25.144.71` no Cloudflare, **proxy desligado** (nuvem cinza), criado pelo Matheus no painel. ⚠️ O token em `~/.cf-pages-token` (das LPs) **não tem permissão de DNS** (`Authentication error` em `dns_records`) — registro novo é pelo painel ou por um token com DNS:Edit.
+- **Servidor**: routers `http-onmid-crm` / `https-onmid-crm` no `/opt/onmid-reports/docker-compose.yml` (mesmo service `onmid-reports`, certresolver `letsencrypt`); backup `docker-compose.yml.bak-antes-crm-*`. Certificado Let's Encrypt emitido na hora. ⚠️ O registro DNS foi criado ANTES de subir os labels de propósito — o Traefik não refaz o ACME sozinho depois de uma falha.
+- **Tela**: em `crm.*` o login vira "CRM / Atendimento e funil de vendas", e-mail sem "@onmid", e quem entra cai no `/crm`; a casca do usuário de cliente põe o título "Onmid CRM". O reports.onmid.app não muda.
+- `APP_URL` continua `https://reports.onmid.app` — webhooks e links de envio não mudam.
+- ⚠️ Cookie de sessão é por endereço: logar num não loga no outro (de propósito — não espalhar o cookie para os `*.onmid.app` das landing pages).
+- Pendente se o Matheus quiser: travar o reports.onmid.app para equipe e o crm.onmid.app para cliente (hoje os dois aceitam qualquer usuário; quem garante o acesso é a trava do servidor por cliente).
+
 ## CRM — o próprio cliente conecta/reconecta o WhatsApp, UM por cliente (2026-10-09)
 
 Pedido do Matheus: "o próprio cliente poder vincular o WhatsApp quando cair" + "limite a 1 WhatsApp, e esse WhatsApp precisa vincular diretamente ao cliente em questão".
