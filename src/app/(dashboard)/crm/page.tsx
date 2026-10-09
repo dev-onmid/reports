@@ -10,10 +10,10 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { useSortable, SortableContext, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable';
 import {
-  Plus, Search, MoreVertical, Settings2, RefreshCw,
+  Plus, Search, MoreVertical, RefreshCw,
   Users, CalendarDays, HeartHandshake, CircleDollarSign,
   ChevronLeft, ChevronRight, ChevronDown, SlidersHorizontal,
-  AlignJustify, Trash2, Pencil, Sparkles, Clock3, LayoutGrid, List, ArrowUpDown,
+  Trash2, Pencil, Sparkles, Clock3, LayoutGrid, List, ArrowUpDown,
   BarChart3, UserRound, MessageCircle, X, Send, GripVertical, Layers, WifiOff, Link2,
   Globe2, Clapperboard, Info, MapPin, ClipboardList, BadgeCheck, BookmarkPlus, Check, Star } from 'lucide-react';
 import { ChatView } from './chat-view';
@@ -142,7 +142,6 @@ type CrmTab = 'leads' | 'chat' | 'followup' | 'attendance' | 'disparos' | 'ads';
 // cliente (`?tab=rastreio&sub=captura`), junto das demais integrações. Quem
 // tiver 'capture' salvo no localStorage cai no fallback 'leads'.
 const ABAS_CRM = ['leads', 'chat', 'followup', 'attendance', 'disparos', 'ads'] as const;
-const VISOES_CRM = ['list', 'kanban'] as const;
 type DatePreset = 'all' | 'today' | 'yesterday' | 'last7' | 'last15' | 'last14' | 'last30' | 'last90' | 'thisMonth' | 'lastMonth' | 'thisYear' | 'custom';
 
 type AttendanceMetrics = {
@@ -198,34 +197,8 @@ type AttendanceMetrics = {
 
 // "Comprou" saiu (fundido em "Fechado" — um ganho só; ver crm-saneamento.ts).
 const STATUS_OPTIONS = ['Em Atendimento', 'Agendado', 'Reagendado', 'Fechado', 'Paciente', 'Não Retorna', 'Distante', 'Sem Interesse', 'Desqualificado'];
-const CANAL_OPTIONS  = ['Whatsapp', 'Facebook', 'Instagram', 'Google', 'WHATS PRINCIPAL', 'FACHADA', 'Indicação', 'Site', 'TikTok', 'YouTube', 'Outro'];
-const PAGAMENTO_OPTIONS = ['Boleto', 'Cartão', 'PIX', 'Dinheiro', 'Financiamento'];
 
-const STATUS_BADGE: Record<string, string> = {
-  'Em Atendimento': 'bg-sky-100 text-sky-900',
-  'Agendado':       'bg-blue-700 text-white',
-  'Reagendado':     'bg-sky-200 text-blue-800',
-  'Fechado':         'bg-emerald-700 text-white',
-  'Comprou':         'bg-emerald-700 text-white',
-  'Paciente':        'bg-zinc-200 text-zinc-800',
-  'Não Retorna':    'bg-zinc-700 text-white',
-  'Distante':       'bg-orange-500 text-black',
-  'Sem Interesse':  'bg-red-700 text-white',
-  'Desqualificado': 'bg-red-700 text-white',
-};
 
-const STATUS_COLOR: Record<string, string> = {
-  'Em Atendimento': 'text-sky-300',
-  'Agendado':       'text-blue-400',
-  'Reagendado':     'text-sky-300',
-  'Fechado':         'text-emerald-400',
-  'Comprou':         'text-emerald-400',
-  'Paciente':        'text-zinc-300',
-  'Não Retorna':    'text-zinc-300',
-  'Distante':       'text-orange-400',
-  'Sem Interesse':  'text-red-400',
-  'Desqualificado': 'text-red-400',
-};
 
 const STATUS_KANBAN_COLOR: Record<string, string> = {
   'Em Atendimento': '#0ea5e9',
@@ -306,14 +279,6 @@ const CHANNEL_MATCHES: ChannelMatch[] = [
   { id: 'youtube',   label: 'YouTube',   bg: 'bg-red-600',   icon: <IconText value="yt" />, keywords: ['youtube', 'you tube'] },
 ];
 
-function freshDraft(): Draft {
-  return {
-    data: new Date().toISOString().split('T')[0],
-    status: 'Em Atendimento',
-    dia1: false, dia2: false, dia3: false, dia4: false,
-    video_dra: false, compareceu: false, fechou: false, analise_credito: false,
-  };
-}
 
 function toD(v: string | null | undefined) { return v ? String(v).split('T')[0] : ''; }
 function monthFromDate(v: string | null | undefined) { return toD(v).slice(0, 7); }
@@ -407,7 +372,6 @@ function fmtN(v: number | string | null) {
   const value = toMoneyNumber(v);
   return value ? formatCurrencyBRL(value) : '';
 }
-function plain(v: unknown) { return String(v ?? '').toLowerCase(); }
 function normalizeChannelText(v: string) {
   return v
     .toLowerCase()
@@ -530,14 +494,6 @@ function inferLeadAiTag(lead: CrmLead) {
   if (lead.analise_credito) return 'Análise de crédito';
   return 'IA: qualificar';
 }
-function dateText(v: string | null) {
-  const shortDate = fmtD(v);
-  const rawDate = toD(v);
-  return `${shortDate} ${rawDate}`.toLowerCase();
-}
-function moneyText(v: number | string | null) {
-  return `${v ?? ''} ${fmtN(v)}`.toLowerCase();
-}
 function temperatureBadgeClass(value: string | null | undefined) {
   return value ? TEMPERATURE_BADGE[value] ?? 'border-border bg-muted text-muted-foreground' : 'border-border bg-muted text-muted-foreground';
 }
@@ -553,63 +509,14 @@ function relativeAnalysisTime(iso: string | null | undefined) {
   return `Última análise há ${Math.floor(hours / 24)}d`;
 }
 
-function columnValueText(lead: CrmLead, key: ColumnKey) {
-  switch (key) {
-    case 'select':
-    case 'actions':
-      return '';
-    case 'data':
-    case 'last_contact_at':
-    case 'data_agendada':
-      return dateText(lead[key] ?? null);
-    case 'valor_rs':
-    case 'orcamento':
-      return moneyText(lead[key]);
-    case 'dia1':
-    case 'dia2':
-    case 'dia3':
-    case 'dia4':
-    case 'fechou':
-      return lead[key] ? 'sim true fechado marcado' : 'nao não false';
-    default:
-      return plain(lead[key]);
-  }
-}
-
-function passesColumnFilter(lead: CrmLead, key: ColumnKey, value: string) {
-  if (!value) return true;
-  if (key === 'temperatura') {
-    return value === 'sem' ? !lead.temperatura : lead.temperatura === value;
-  }
-  if (['dia1', 'dia2', 'dia3', 'dia4', 'fechou'].includes(key)) {
-    return value === 'yes' ? Boolean(lead[key as 'fechou']) : !lead[key as 'fechou'];
-  }
-  return columnValueText(lead, key).includes(value.toLowerCase());
-}
-
-function sortValue(lead: CrmLead, key: SortableColumnKey): string | number | boolean | null {
-  if (key === 'data' || key === 'data_agendada' || key === 'last_contact_at') {
-    const raw = lead[key];
-    if (!raw) return null;
-    const time = new Date(raw).getTime();
-    return Number.isFinite(time) ? time : null;
-  }
-  if (key === 'valor_rs' || key === 'orcamento') return toMoneyNumber(lead[key]);
-  if (key === 'dia1' || key === 'dia2' || key === 'dia3' || key === 'dia4' || key === 'fechou') return Boolean(lead[key]);
-  if (key === 'temperatura') {
-    const order: Record<string, number> = { quente: 0, morno: 1, frio: 2 };
-    return lead.temperatura ? order[lead.temperatura] ?? 3 : 4;
-  }
-  return columnValueText(lead, key);
-}
-
-function compareSortValues(a: string | number | boolean | null, b: string | number | boolean | null) {
-  if (a === null && b === null) return 0;
-  if (a === null) return 1;
-  if (b === null) return -1;
-  if (typeof a === 'number' && typeof b === 'number') return a - b;
-  if (typeof a === 'boolean' && typeof b === 'boolean') return Number(a) - Number(b);
-  return String(a).localeCompare(String(b), 'pt-BR', { numeric: true, sensitivity: 'base' });
+/** Mais recente primeiro (lead sem data no topo, como sempre foi). */
+function ordemPorData(a: CrmLead, b: CrmLead): number {
+  const t = (l: CrmLead) => { const x = l.data ? new Date(l.data).getTime() : NaN; return Number.isFinite(x) ? x : null; };
+  const ta = t(a), tb = t(b);
+  if (ta === null && tb === null) return 0;
+  if (ta === null) return -1;
+  if (tb === null) return 1;
+  return tb - ta;
 }
 
 /**
@@ -769,44 +676,6 @@ function TrackingSourcePanel({ lead }: { lead: CrmLead }) {
   );
 }
 
-const cell    = 'px-2 py-0 h-9 text-xs focus:outline-none focus:bg-primary/10 bg-transparent border-0 w-full text-foreground placeholder:text-muted-foreground/30';
-const cellSel = cn(cell, 'cursor-pointer appearance-none');
-const cellNew = 'px-2 py-0 h-9 text-xs focus:outline-none focus:bg-primary/10 bg-transparent border-0 w-full text-foreground placeholder:text-muted-foreground/50';
-
-const COLS = [
-  { key: 'select', label: '', width: 44, min: 40, filter: 'none' },
-  { key: 'data', label: 'Data', width: 110, min: 96, filter: 'text' },
-  { key: 'nome', label: 'Nome', width: 170, min: 120, filter: 'text' },
-  { key: 'numero', label: 'Número', width: 120, min: 96, filter: 'text' },
-  { key: 'last_contact_at', label: 'Últ. contato', width: 125, min: 110, filter: 'text' },
-  { key: 'canal', label: 'Origem', width: 120, min: 90, filter: 'text' },
-  { key: 'status', label: 'Status', width: 150, min: 120, filter: 'select' },
-  { key: 'qualificado', label: 'Qualif.', width: 64, min: 56, filter: 'boolean' },
-  { key: 'temperatura', label: 'Temp.', width: 115, min: 94, filter: 'select' },
-  { key: 'dia1', label: '1D', width: 46, min: 40, filter: 'boolean' },
-  { key: 'dia2', label: '2D', width: 46, min: 40, filter: 'boolean' },
-  { key: 'dia3', label: '3D', width: 46, min: 40, filter: 'boolean' },
-  { key: 'dia4', label: '4D', width: 46, min: 40, filter: 'boolean' },
-  { key: 'data_agendada', label: 'Data Ag.', width: 110, min: 96, filter: 'text' },
-  { key: 'fechou', label: 'Fechou', width: 70, min: 56, filter: 'boolean' },
-  { key: 'valor_rs', label: 'Valor R$', width: 130, min: 110, filter: 'text' },
-  { key: 'pagamento', label: 'Pagamento', width: 120, min: 100, filter: 'select' },
-  { key: 'orcamento', label: 'Orçamento', width: 130, min: 110, filter: 'text' },
-  { key: 'observacao', label: 'Observação', width: 240, min: 150, filter: 'text' },
-  { key: 'bairro', label: 'Bairro', width: 130, min: 100, filter: 'text' },
-  { key: 'actions', label: '', width: 48, min: 44, filter: 'none' },
-] as const;
-type ColumnKey = typeof COLS[number]['key'];
-type ColumnFilterKind = typeof COLS[number]['filter'];
-type SortableColumnKey = Exclude<ColumnKey, 'select' | 'actions'>;
-type SortDirection = 'asc' | 'desc';
-
-const DEFAULT_COL_WIDTHS = COLS.reduce<Record<ColumnKey, number>>((acc, col) => {
-  acc[col.key] = col.width;
-  return acc;
-}, {} as Record<ColumnKey, number>);
-const LOCKED_COLUMNS: ColumnKey[] = ['select', 'data', 'nome', 'numero', 'last_contact_at', 'actions'];
-const DEFAULT_VISIBLE_COLUMNS = COLS.map(col => col.key);
 
 // ── Styled select with icon ──────────────────────────────────────────────
 function IconSelect({ icon: Icon, value, onChange, placeholder, children, className }: {
@@ -3238,26 +3107,12 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
   const [datePreset, setDatePreset] = useState<DatePreset>('thisMonth');
   const [funnelMenuOpen, setFunnelMenuOpen] = useState(false);
   const [dateMenuOpen, setDateMenuOpen] = useState(false);
-  const [columnFilters, setColumnFilters] = useState<Partial<Record<ColumnKey, string>>>({});
-  const [colWidths, setColWidths] = useState<Record<ColumnKey, number>>(DEFAULT_COL_WIDTHS);
-  const [visibleColumnKeys, setVisibleColumnKeys] = useState<ColumnKey[]>(DEFAULT_VISIBLE_COLUMNS);
-  const [columnMenuOpen, setColumnMenuOpen] = useState(false);
-  const [sortConfig, setSortConfig] = useState<{ key: SortableColumnKey; direction: SortDirection }>({ key: 'data', direction: 'desc' });
   const [saving, setSaving]         = useState(false);
-  const [saveError, setSaveError]   = useState<string | null>(null);
-  const [page, setPage]             = useState(1);
-  const [pageSize, setPageSize]     = useState(0);
-  const [selectedLeadIds, setSelectedLeadIds] = useState<Set<string>>(new Set());
-  const [menuId, setMenuId]         = useState<string | null>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
   const dateMenuRef = useRef<HTMLDivElement>(null);
   const [chatFocusLeadId, setChatFocusLeadId] = useState<string | null>(() => {
     if (typeof window === 'undefined') return null;
     return new URLSearchParams(window.location.search).get('lead');
   });
-  // Kanban é SEMPRE a visão padrão ao entrar no CRM (pedido do Matheus) —
-  // o toggle pra lista vale só durante a sessão, sem persistir.
-  const [viewMode, setViewMode] = useAbaPersistida('crm-visao', VISOES_CRM, 'kanban', { param: 'visao' });
   // Chegou por deep-link de lead → abre direto na conversa (`forcar`), senão a
   // aba salva venceria e o lead pedido não apareceria em lugar nenhum.
   const [crmView, setCrmView] = useAbaPersistida('crm', ABAS_CRM, 'leads', {
@@ -3282,21 +3137,6 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
   useEffect(() => {
     if (lockedClientId) setClientId(lockedClientId);
   }, [lockedClientId]);
-
-  // ── NEW ROW ──────────────────────────────────────────────────────────
-  const [newDraft, setNewDraft] = useState<Draft>(freshDraft());
-  const newDraftRef = useRef<Draft>(newDraft);
-  newDraftRef.current = newDraft;
-  const newRowRef   = useRef<HTMLTableRowElement | null>(null);
-  const newSavingRef = useRef(false);
-  const newPendingRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // ── EXISTING EDITING ─────────────────────────────────────────────────
-  const [editId, setEditId]     = useState<string | null>(null);
-  const [editDraft, setEditDraft] = useState<Draft>({});
-  const editDraftRef = useRef<Draft>(editDraft);
-  editDraftRef.current = editDraft;
-  const editPendingRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const clientSegments = useMemo(() => (
     Array.from(new Set(activeClients.map(client => client.segment).filter(Boolean))).sort((a, b) => a.localeCompare(b))
@@ -3341,55 +3181,6 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
     const id = setInterval(check, 30_000);
     return () => clearInterval(id);
   }, [clientId, statusTick]);
-
-  useEffect(() => {
-    try {
-      const stored = localStorage.getItem('crm:column-widths');
-      if (stored) setColWidths(prev => ({ ...prev, ...(JSON.parse(stored) as Partial<Record<ColumnKey, number>>) }));
-    } catch {
-      setColWidths(DEFAULT_COL_WIDTHS);
-    }
-  }, []);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem('crm:column-widths', JSON.stringify(colWidths));
-    } catch {
-      // Browser storage can be unavailable in private mode.
-    }
-  }, [colWidths]);
-
-  useEffect(() => {
-    if (!clientId) {
-      setVisibleColumnKeys(DEFAULT_VISIBLE_COLUMNS);
-      return;
-    }
-    try {
-      const stored = localStorage.getItem(`crm:visible-columns:${clientId}`);
-      if (!stored) {
-        setVisibleColumnKeys(DEFAULT_VISIBLE_COLUMNS);
-        return;
-      }
-      const parsed = JSON.parse(stored) as ColumnKey[];
-      const allowed = new Set(COLS.map(col => col.key));
-      const next = parsed.filter(key => allowed.has(key));
-      LOCKED_COLUMNS.forEach(key => {
-        if (!next.includes(key)) next.push(key);
-      });
-      setVisibleColumnKeys(next.length > 0 ? next : DEFAULT_VISIBLE_COLUMNS);
-    } catch {
-      setVisibleColumnKeys(DEFAULT_VISIBLE_COLUMNS);
-    }
-  }, [clientId]);
-
-  useEffect(() => {
-    if (!clientId) return;
-    try {
-      localStorage.setItem(`crm:visible-columns:${clientId}`, JSON.stringify(visibleColumnKeys));
-    } catch {
-      // Browser storage can be unavailable in private mode.
-    }
-  }, [clientId, visibleColumnKeys]);
 
   useEffect(() => {
     try { if (clientId) localStorage.setItem('crm:last-client', clientId); } catch { /* ignore */ }
@@ -3497,14 +3288,11 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
 
   useEffect(() => {
     function onDown(e: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuId(null);
       if (dateMenuRef.current && !dateMenuRef.current.contains(e.target as Node)) setDateMenuOpen(false);
     }
     document.addEventListener('mousedown', onDown);
     return () => document.removeEventListener('mousedown', onDown);
   }, []);
-
-  useEffect(() => { setPage(1); }, [statusFilter, temperatureFilter, monthFilter, dateFromFilter, dateToFilter, search, clientId, columnFilters]);
 
   useEffect(() => {
     if (!clientId) { setFunnels([]); setSelectedFunnelId(''); setStages([]); return; }
@@ -3545,34 +3333,8 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
     };
   }, [clientId, selectedFunnelId]);
 
-  function toggleSort(key: ColumnKey) {
-    if (key === 'select' || key === 'actions') return;
-    setSortConfig(prev => (
-      prev.key === key
-        ? { key, direction: prev.direction === 'asc' ? 'desc' : 'asc' }
-        : { key, direction: 'asc' }
-    ));
-  }
 
-  function isColumnVisible(key: ColumnKey) {
-    return visibleColumnKeys.includes(key);
-  }
 
-  function toggleColumnVisibility(key: ColumnKey) {
-    if (LOCKED_COLUMNS.includes(key)) return;
-    setVisibleColumnKeys(prev => {
-      const next = prev.includes(key)
-        ? prev.filter(item => item !== key)
-        : [...prev, key].sort((a, b) => COLS.findIndex(col => col.key === a) - COLS.findIndex(col => col.key === b));
-      setColumnFilters(filters => {
-        if (next.includes(key)) return filters;
-        const copy = { ...filters };
-        delete copy[key];
-        return copy;
-      });
-      return next;
-    });
-  }
 
   function applyDatePreset(nextPreset: DatePreset) {
     setDatePreset(nextPreset);
@@ -3600,11 +3362,6 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
   }
 
   // 1D–4D são marcações de cadência da agência; para quem atende não dizem nada.
-  const visibleCols = useMemo(
-    () => COLS.filter(col => visibleColumnKeys.includes(col.key)
-      && !(modoCliente && ['dia1', 'dia2', 'dia3', 'dia4'].includes(col.key))),
-    [visibleColumnKeys, modoCliente],
-  );
 
   // Busca procura em TODOS os períodos: com "Mês atual" escolhido, quem buscava
   // um lead de setembro não achava e concluía que ele não existia.
@@ -3621,15 +3378,12 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
     }
     if (soAtendimentoRuim && !(temNota(l) && l.nota_atendimento <= 2)) return false;
     if (busca && !leadCasaBusca(l, busca)) return false;
-    for (const [key, value] of Object.entries(columnFilters) as [ColumnKey, string][]) {
-      if (!passesColumnFilter(l, key, value)) return false;
-    }
     return true;
   }).sort((a, b) => {
     if (a.time_interno !== b.time_interno) return a.time_interno ? 1 : -1;
-    const result = compareSortValues(sortValue(a, sortConfig.key), sortValue(b, sortConfig.key));
-    return sortConfig.direction === 'asc' ? result : -result;
-  }), [leads, busca, atalho, meuNome, soAtendimentoRuim, statusFilter, temperatureFilter, monthFilter, dateFromFilter, dateToFilter, columnFilters, sortConfig]);
+    // Mais recente primeiro dentro de cada coluna do Kanban.
+    return ordemPorData(a, b);
+  }), [leads, busca, atalho, meuNome, soAtendimentoRuim, statusFilter, temperatureFilter, monthFilter, dateFromFilter, dateToFilter]);
 
   const contagemAtalho = useMemo(() => ({
     meus: meuNome ? leads.filter(l => passaAtalho(l, 'meus', meuNome)).length : 0,
@@ -3653,23 +3407,10 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
     return true;
   }), [leads, monthFilter, dateFromFilter, dateToFilter]);
 
-  const totalPages = pageSize === 0 ? 1 : Math.max(1, Math.ceil(filtered.length / pageSize));
-  const paginated  = pageSize === 0 ? filtered : filtered.slice((page - 1) * pageSize, page * pageSize);
-  const selectedLeads = useMemo(
-    () => leads.filter(lead => selectedLeadIds.has(lead.id)),
-    [leads, selectedLeadIds],
-  );
-  const selectedVisibleCount = paginated.filter(lead => selectedLeadIds.has(lead.id)).length;
-  const allVisibleSelected = paginated.length > 0 && selectedVisibleCount === paginated.length;
   const kanbanLeads = useMemo(
     () => filtered.filter(lead => lead.time_interno !== true),
     [filtered],
   );
-  const tableMinWidth = useMemo(() => visibleCols.reduce((sum, col) => sum + colWidths[col.key], 0), [colWidths, visibleCols]);
-  const filteredTotals = useMemo(() => ({
-    faturamento: filtered.reduce((sum, lead) => sum + toMoneyNumber(lead.valor_rs), 0),
-    orcamento: filtered.reduce((sum, lead) => sum + toMoneyNumber(lead.orcamento), 0),
-  }), [filtered]);
 
   const stats = useMemo(() => {
     const closedLeads = kanbanLeads.filter(l => l.status === 'Comprou' || l.status === 'Fechado' || l.fechou);
@@ -3725,89 +3466,18 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
     }
   }
 
-  async function saveNew() {
-    if (newSavingRef.current) return;
-    const data = newDraftRef.current;
-    const hasData = data.nome || data.numero || data.observacao || data.canal || data.bairro || data.valor_rs;
-    if (!hasData) { focusNew(); return; }
-    newSavingRef.current = true; setSaving(true); setSaveError(null);
-    try {
-      const res = await fetch('/api/crm', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ clientId, funnel_id: selectedFunnelId || null, ...data }),
-      });
-      if (res.ok) {
-        const saved = await res.json() as CrmLead;
-        setLeads(prev => [saved, ...prev]);
-        setNewDraft(freshDraft());
-      } else {
-        const body = await res.json().catch(() => ({})) as { error?: string };
-        setSaveError(body.error ?? `Erro ${res.status}`);
-      }
-    } catch (err) {
-      setSaveError(err instanceof Error ? err.message : 'Erro de rede');
-    } finally { newSavingRef.current = false; setSaving(false); focusNew(); }
-  }
 
-  function handleNewBlur(e: React.FocusEvent<HTMLTableRowElement>) {
-    if (newPendingRef.current) clearTimeout(newPendingRef.current);
-    newPendingRef.current = setTimeout(() => {
-      if (e.currentTarget && !e.currentTarget.contains(document.activeElement)) void saveNew();
-    }, 150);
-  }
-  function handleNewFocus() { if (newPendingRef.current) clearTimeout(newPendingRef.current); }
-  function focusNew() {
-    setTimeout(() => newRowRef.current?.querySelector<HTMLElement>('input[type="date"]')?.focus(), 30);
-  }
 
-  async function saveExisting(id: string) {
-    const data = editDraftRef.current; setSaving(true);
-    try {
-      const res = await fetch(`/api/crm/${id}`, {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
-      });
-      if (res.ok) {
-        const saved = await res.json() as CrmLead;
-        setLeads(prev => prev.map(l => l.id === id ? saved : l));
-        setEditId(null);
-      } else {
-        notificar('Não foi possível salvar o lead — tente de novo.', 'erro');
-      }
-    } catch {
-      notificar('Não foi possível salvar o lead — tente de novo.', 'erro');
-    } finally { setSaving(false); }
-  }
 
-  function startEdit(lead: CrmLead) {
-    if (editId === lead.id) return;
-    if (editId) void saveExisting(editId);
-    setEditId(lead.id);
-    setEditDraft({ ...lead } as Draft);
-  }
 
-  function handleExistingBlur(e: React.FocusEvent<HTMLTableRowElement>, id: string) {
-    if (editPendingRef.current) clearTimeout(editPendingRef.current);
-    editPendingRef.current = setTimeout(() => {
-      if (e.currentTarget && !e.currentTarget.contains(document.activeElement)) void saveExisting(id);
-    }, 150);
-  }
-  function handleExistingFocus() { if (editPendingRef.current) clearTimeout(editPendingRef.current); }
 
   async function deleteRow(id: string) {
-    setMenuId(null);
     const alvo = leadsRef.current.find(l => l.id === id);
     // Exclusão é definitiva (fica registrada no histórico, mas o lead some).
     if (!window.confirm(`Excluir o lead "${alvo?.nome || alvo?.numero || 'sem nome'}"? Esta ação não pode ser desfeita.`)) return false;
     const res = await fetch(`/api/crm/${id}`, { method: 'DELETE' }).catch(() => null);
     if (res?.ok) {
       setLeads(prev => prev.filter(l => l.id !== id));
-      setSelectedLeadIds(prev => {
-        const next = new Set(prev);
-        next.delete(id);
-        return next;
-      });
-      if (editId === id) setEditId(null);
       return true;
     }
     notificar('Não foi possível excluir o lead — tente de novo.', 'erro');
@@ -3853,78 +3523,12 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
     await salvarStatus(id, status);
   }
 
-  function toggleLeadSelection(id: string) {
-    setSelectedLeadIds(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
-    });
-  }
 
-  function toggleVisibleSelection() {
-    setSelectedLeadIds(prev => {
-      const next = new Set(prev);
-      if (allVisibleSelected) {
-        paginated.forEach(lead => next.delete(lead.id));
-      } else {
-        paginated.forEach(lead => next.add(lead.id));
-      }
-      return next;
-    });
-  }
 
-  function clearLeadSelection() {
-    setSelectedLeadIds(new Set());
-  }
 
-  async function bulkUpdateSelected(patch: Draft) {
-    const targets = selectedLeads;
-    if (targets.length === 0) return;
-    setLeads(prev => prev.map(lead => selectedLeadIds.has(lead.id) ? { ...lead, ...patch } : lead));
 
-    const results = await Promise.all(
-      targets.map(lead =>
-        fetch(`/api/crm/${lead.id}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(patch),
-        }).then(async res => (res.ok ? await res.json() as CrmLead : null)).catch(() => null),
-      ),
-    );
 
-    const savedById = new Map(results.filter(Boolean).map(lead => [lead!.id, lead!]));
-    // Falhas revertem pro lead original (o otimista acima aplicou o patch em todos)
-    const failed = targets.filter(lead => !savedById.has(lead.id));
-    const failedById = new Map(failed.map(lead => [lead.id, lead]));
-    setLeads(prev => prev.map(lead => savedById.get(lead.id) ?? failedById.get(lead.id) ?? lead));
-    if (failed.length > 0) {
-      notificar(`${failed.length} de ${targets.length} leads não foram atualizados — tente de novo.`, 'erro');
-    }
-  }
 
-  async function bulkChangeStatus(status: string) {
-    if (!status) return;
-    await bulkUpdateSelected({ status });
-  }
-
-  async function bulkToggleInternal(nextTimeInterno: boolean) {
-    if (nextTimeInterno) {
-      const ok = window.confirm('Ao marcar como Time Interno, nenhuma automação será executada para estes contatos. Tem certeza?');
-      if (!ok) return;
-    }
-    await bulkUpdateSelected({ time_interno: nextTimeInterno });
-  }
-
-  async function bulkDeleteSelected() {
-    const ids = [...selectedLeadIds];
-    if (ids.length === 0) return;
-    const ok = window.confirm(`Excluir ${ids.length} lead${ids.length !== 1 ? 's' : ''} selecionado${ids.length !== 1 ? 's' : ''}?`);
-    if (!ok) return;
-    await Promise.all(ids.map(id => fetch(`/api/crm/${id}`, { method: 'DELETE' }).catch(() => null)));
-    setLeads(prev => prev.filter(lead => !selectedLeadIds.has(lead.id)));
-    setSelectedLeadIds(new Set());
-    if (editId && selectedLeadIds.has(editId)) setEditId(null);
-  }
 
   /**
    * ⚠️ Qualificado é decisão HUMANA e o critério muda por cliente (MQL) — por isso é um
@@ -3993,40 +3597,7 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
     } finally { setSaving(false); }
   }
 
-  function onNewBairroKey(e: React.KeyboardEvent) {
-    if (e.key === 'Enter' || (e.key === 'Tab' && !e.shiftKey)) { e.preventDefault(); void saveNew(); }
-  }
-  function onNewRowKey(e: React.KeyboardEvent) {
-    if (e.key === 'Enter' && (e.target as HTMLElement).tagName === 'INPUT') { e.preventDefault(); void saveNew(); }
-  }
 
-  function setN<K extends keyof Draft>(k: K, v: Draft[K]) { setNewDraft(prev => ({ ...prev, [k]: v })); }
-  function setE<K extends keyof Draft>(k: K, v: Draft[K]) { setEditDraft(prev => ({ ...prev, [k]: v })); }
-  function setColumnFilter(key: ColumnKey, value: string) {
-    setColumnFilters(prev => {
-      const next = { ...prev };
-      if (value) next[key] = value;
-      else delete next[key];
-      return next;
-    });
-  }
-  function clearColumnFilters() { setColumnFilters({}); }
-  function startColumnResize(key: ColumnKey, min: number, e: React.MouseEvent) {
-    e.preventDefault();
-    e.stopPropagation();
-    const startX = e.clientX;
-    const startWidth = colWidths[key];
-    const onMove = (event: MouseEvent) => {
-      const nextWidth = Math.max(min, startWidth + event.clientX - startX);
-      setColWidths(prev => ({ ...prev, [key]: nextWidth }));
-    };
-    const onUp = () => {
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
-    };
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
-  }
 
   const lockedClient = lockedClientId ? activeClients.find(c => c.id === lockedClientId) : null;
 
@@ -4060,7 +3631,6 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
           </p>
         </div>
         {saving    && <span className="ml-2 text-xs font-medium text-amber-400 animate-pulse">Salvando…</span>}
-        {saveError && <span className="ml-2 text-xs font-medium text-red-400">Erro: {saveError}</span>}
       </div>
       )}
 
@@ -4606,7 +4176,7 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
           {/* Table toolbar */}
           <div className="flex items-center justify-between px-4 py-2.5 border-b border-border shrink-0">
             <div className="flex items-center gap-2">
-              {viewMode === 'list' ? <AlignJustify className="h-4 w-4 text-primary" /> : <LayoutGrid className="h-4 w-4 text-primary" />}
+              <LayoutGrid className="h-4 w-4 text-primary" />
               <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Leads</span>
             </div>
             <div className="flex items-center gap-2">
@@ -4626,120 +4196,11 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
                   <span className="hidden sm:inline">Analisar com IA</span>
                 </button>
               )}
-              {/* View toggle */}
-              <div className="flex overflow-hidden rounded-lg border border-border bg-background/60 p-0.5">
-                <button type="button" onClick={() => setViewMode('kanban')} title="Kanban"
-                  className={cn('flex h-6 w-6 items-center justify-center rounded-md transition-colors', viewMode === 'kanban' ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground')}>
-                  <LayoutGrid className="h-3.5 w-3.5" />
-                </button>
-                <button type="button" onClick={() => setViewMode('list')} title="Lista"
-                  className={cn('flex h-6 w-6 items-center justify-center rounded-md transition-colors', viewMode === 'list' ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground')}>
-                  <List className="h-3.5 w-3.5" />
-                </button>
-              </div>
-              {viewMode === 'list' && (
-                <>
-                  {Object.keys(columnFilters).length > 0 && (
-                    <button type="button" onClick={clearColumnFilters}
-                      className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground">
-                      Limpar filtros
-                    </button>
-                  )}
-                  <div className="relative">
-                    <button
-                      type="button"
-                      onClick={() => setColumnMenuOpen(open => !open)}
-                      title="Editar colunas"
-                      className="flex h-7 w-7 items-center justify-center rounded-lg border border-border text-muted-foreground hover:text-foreground transition-colors"
-                    >
-                      <Settings2 className="h-3.5 w-3.5" />
-                    </button>
-                    {columnMenuOpen && (
-                      <div className="absolute right-0 top-9 z-50 w-64 rounded-xl border border-border bg-popover p-2 shadow-2xl">
-                        <div className="px-2 pb-2 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-                          Colunas da lista
-                        </div>
-                        <div className="max-h-72 overflow-y-auto pr-1">
-                          {COLS.filter(col => col.key !== 'select' && col.key !== 'actions').map(col => {
-                            const locked = LOCKED_COLUMNS.includes(col.key);
-                            return (
-                              <label key={col.key} className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-xs hover:bg-muted/60">
-                                <input
-                                  type="checkbox"
-                                  checked={visibleColumnKeys.includes(col.key)}
-                                  disabled={locked}
-                                  onChange={() => toggleColumnVisibility(col.key)}
-                                  className="h-3.5 w-3.5 accent-primary disabled:opacity-50"
-                                />
-                                <span className={cn('font-medium', locked ? 'text-muted-foreground' : 'text-foreground')}>{col.label}</span>
-                                {locked && <span className="ml-auto text-[9px] text-muted-foreground">fixa</span>}
-                              </label>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </>
-              )}
             </div>
           </div>
 
-          {viewMode === 'list' && selectedLeadIds.size > 0 && (
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-primary/20 bg-primary/5 px-4 py-2 shrink-0">
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold text-primary">
-                  {selectedLeadIds.size} selecionado{selectedLeadIds.size !== 1 ? 's' : ''}
-                </span>
-                <button
-                  type="button"
-                  onClick={clearLeadSelection}
-                  className="rounded-md px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
-                >
-                  Limpar
-                </button>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <select
-                  defaultValue=""
-                  onChange={event => {
-                    const value = event.target.value;
-                    event.target.value = '';
-                    if (value) void bulkChangeStatus(value);
-                  }}
-                  className="h-8 rounded-lg border border-border bg-background px-2 text-xs font-semibold text-foreground outline-none focus:border-primary"
-                >
-                  <option value="">Mudar status</option>
-                  {statusOptions.map(status => <option key={status} value={status}>{status}</option>)}
-                </select>
-                <button
-                  type="button"
-                  onClick={() => void bulkToggleInternal(true)}
-                  className="rounded-lg border border-border px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:border-primary/40 hover:text-foreground"
-                >
-                  Time interno
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void bulkToggleInternal(false)}
-                  className="rounded-lg border border-border px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:border-primary/40 hover:text-foreground"
-                >
-                  Remover interno
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void bulkDeleteSelected()}
-                  className="rounded-lg border border-red-500/30 px-3 py-1.5 text-xs font-semibold text-red-400 hover:bg-red-500/10"
-                >
-                  Excluir
-                </button>
-              </div>
-            </div>
-          )}
-
           {/* Kanban view — as colunas ocupam toda a altura; o scroll vertical é POR coluna */}
-          {viewMode === 'kanban' && (
-            <div className="flex flex-1 min-h-0 flex-col overflow-hidden p-2.5">
+          <div className="flex flex-1 min-h-0 flex-col overflow-hidden p-2.5">
               <KanbanView
                 leads={kanbanLeads}
                 stages={stages}
@@ -4751,400 +4212,8 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
                 activeFollowupIds={activeFollowupLeadIds}
                 onArrasteMudou={v => { arrastandoRef.current = v; }}
               />
-            </div>
-          )}
+          </div>
 
-          {/* Scrollable table */}
-          {viewMode === 'list' && <div className="overflow-auto flex-1 min-h-0">
-            <table className="w-full table-fixed border-collapse text-xs" style={{ minWidth: tableMinWidth }}>
-              <colgroup>
-                {visibleCols.map(col => (
-                  <col key={col.key} style={{ width: colWidths[col.key] }} />
-                ))}
-              </colgroup>
-              <thead className="sticky top-0 z-10 bg-card border-b border-border">
-                <tr>
-                  {visibleCols.map(col => (
-                    <th
-                      key={col.key}
-                      className="relative px-2 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"
-                      style={{ width: colWidths[col.key] }}
-                    >
-                      {col.key === 'select' ? (
-                        <input
-                          type="checkbox"
-                          checked={allVisibleSelected}
-                          disabled={paginated.length === 0}
-                          onChange={toggleVisibleSelection}
-                          className="h-3.5 w-3.5 accent-primary disabled:opacity-40"
-                          title="Selecionar visíveis"
-                        />
-                      ) : col.key === 'actions' ? null : (
-                        <button
-                          type="button"
-                          onClick={() => toggleSort(col.key)}
-                          className="inline-flex max-w-full items-center gap-1 text-left font-semibold uppercase tracking-wider hover:text-foreground"
-                        >
-                          <span className="truncate">{col.label}</span>
-                          <ArrowUpDown className={cn(
-                            'h-3 w-3 shrink-0',
-                            sortConfig.key === col.key ? 'text-primary' : 'text-muted-foreground/45',
-                          )} />
-                          {sortConfig.key === col.key && (
-                            <span className="text-[9px] text-primary">
-                              {sortConfig.direction === 'asc' ? '↑' : '↓'}
-                            </span>
-                          )}
-                        </button>
-                      )}
-                      {col.key !== 'actions' && col.key !== 'select' && (
-                        <button
-                          type="button"
-                          onMouseDown={e => startColumnResize(col.key, col.min, e)}
-                          className="absolute right-0 top-0 h-full w-2 cursor-col-resize touch-none border-r border-transparent transition-colors hover:border-primary/70"
-                          aria-label={`Redimensionar coluna ${col.label}`}
-                        />
-                      )}
-                    </th>
-                  ))}
-                </tr>
-                <tr className="border-t border-border/40 bg-card/95">
-                  {visibleCols.map(col => (
-                    <th key={`${col.key}-filter`} className="px-1.5 pb-2 text-left" style={{ width: colWidths[col.key] }}>
-                      <ColumnFilter
-                        kind={col.filter}
-                        columnKey={col.key}
-                        value={columnFilters[col.key] ?? ''}
-                        onChange={setColumnFilter}
-                        statusOptions={statusOptions}
-                      />
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-
-                {/* ── NEW ROW ── */}
-                <tr
-                  ref={newRowRef}
-                  onKeyDown={onNewRowKey}
-                  onBlur={handleNewBlur}
-                  onFocus={handleNewFocus}
-                  className="border-b border-primary/20 bg-primary/5 ring-1 ring-inset ring-primary/20"
-                >
-                  <Td center />
-                  {isColumnVisible('data') && <Td><input type="date" value={toD(newDraft.data)} onChange={e => setN('data', e.target.value || null)} className={cellNew} /></Td>}
-                  {isColumnVisible('nome') && <Td><input type="text" value={newDraft.nome ?? ''} onChange={e => setN('nome', e.target.value || null)} placeholder="Nome" className={cn(cellNew, 'text-primary placeholder:text-primary/40 font-semibold')} /></Td>}
-                  {isColumnVisible('numero') && <Td><input type="text" value={newDraft.numero ?? ''} onChange={e => setN('numero', e.target.value || null)} placeholder="Número" className={cellNew} /></Td>}
-                  {isColumnVisible('last_contact_at') && <Td><span className="px-2 text-[11px] text-muted-foreground">Automático</span></Td>}
-                  {isColumnVisible('canal') && <Td>
-                    <select value={newDraft.canal ?? ''} onChange={e => setN('canal', e.target.value || null)} className={cn(cellNew, 'cursor-pointer appearance-none')}>
-                      <option value=""></option>
-                      {CANAL_OPTIONS.map(o => <option key={o}>{o}</option>)}
-                    </select>
-                  </Td>}
-                  {isColumnVisible('status') && <Td>
-                    <select value={newDraft.status ?? ''} onChange={e => setN('status', e.target.value || null)} className={cn(cellNew, 'cursor-pointer appearance-none', STATUS_COLOR[newDraft.status ?? ''] ?? '')}>
-                      {statusOptions.map(o => <option key={o}>{o}</option>)}
-                    </select>
-                  </Td>}
-                  {isColumnVisible('temperatura') && <Td>
-                    <select value={newDraft.temperatura ?? ''} onChange={e => setN('temperatura', (e.target.value || null) as Draft['temperatura'])} className={cn(cellNew, 'cursor-pointer appearance-none')}>
-                      <option value=""></option>
-                      <option value="quente">Quente</option>
-                      <option value="morno">Morno</option>
-                      <option value="frio">Frio</option>
-                    </select>
-                  </Td>}
-                  {(['dia1','dia2','dia3','dia4'] as const).map(k => (
-                    isColumnVisible(k) && <Td key={k} center>
-                      <input type="checkbox" checked={!!newDraft[k]} onChange={e => setN(k, e.target.checked)} className="h-3.5 w-3.5 accent-primary cursor-pointer" />
-                    </Td>
-                  ))}
-                  {isColumnVisible('data_agendada') && <Td><input type="date" value={toD(newDraft.data_agendada)} onChange={e => setN('data_agendada', e.target.value || null)} className={cellNew} /></Td>}
-                  {isColumnVisible('fechou') && <Td center><input type="checkbox" checked={!!newDraft.fechou} onChange={e => setN('fechou', e.target.checked)} className="h-3.5 w-3.5 accent-primary cursor-pointer" /></Td>}
-                  {isColumnVisible('valor_rs') && <Td><input type="number" step="0.01" value={newDraft.valor_rs ?? ''} onChange={e => setN('valor_rs', e.target.value ? parseFloat(e.target.value) : null)} placeholder="0,00" className={cn(cellNew, 'text-primary font-semibold')} /></Td>}
-                  {isColumnVisible('pagamento') && <Td>
-                    <select value={newDraft.pagamento ?? ''} onChange={e => setN('pagamento', e.target.value || null)} className={cn(cellNew, 'cursor-pointer appearance-none')}>
-                      <option value=""></option>
-                      {PAGAMENTO_OPTIONS.map(o => <option key={o}>{o}</option>)}
-                    </select>
-                  </Td>}
-                  {isColumnVisible('orcamento') && <Td><input type="number" step="0.01" value={newDraft.orcamento ?? ''} onChange={e => setN('orcamento', e.target.value ? parseFloat(e.target.value) : null)} placeholder="0,00" className={cellNew} /></Td>}
-                  {isColumnVisible('observacao') && <Td><input type="text" value={newDraft.observacao ?? ''} onChange={e => setN('observacao', e.target.value || null)} placeholder="Observação" className={cellNew} /></Td>}
-                  {isColumnVisible('bairro') && <Td>
-                    <input type="text" value={newDraft.bairro ?? ''} onChange={e => setN('bairro', e.target.value || null)} placeholder="Bairro" className={cellNew} onKeyDown={onNewBairroKey} />
-                  </Td>}
-                  <Td center />
-                </tr>
-
-                {/* ── SAVED LEADS ── */}
-                {paginated.map((lead, idx) => {
-                  const isEditing = editId === lead.id;
-                  const d = isEditing ? editDraft : lead;
-                  const channels = detectChannels(lead.canal);
-                  const statusBadge = lead.status ? STATUS_BADGE[lead.status] ?? 'bg-zinc-600 text-white' : null;
-                  const isSelected = selectedLeadIds.has(lead.id);
-                  return (
-                    <tr
-                      key={lead.id}
-                      tabIndex={-1}
-                      onClick={() => !isEditing && startEdit(lead)}
-                      onBlur={isEditing ? e => handleExistingBlur(e, lead.id) : undefined}
-                      onFocus={isEditing ? handleExistingFocus : undefined}
-                      className={cn(
-                        'border-b border-border/30 transition-colors group',
-                        isEditing
-                          ? 'bg-blue-500/10 ring-1 ring-inset ring-blue-500/25'
-                          : isSelected
-                            ? 'bg-primary/10 ring-1 ring-inset ring-primary/20 hover:bg-primary/15 cursor-pointer'
-                            : idx % 2 === 0 ? 'hover:bg-muted/30 cursor-pointer' : 'bg-muted/10 hover:bg-muted/30 cursor-pointer'
-                      )}
-                    >
-                      {/* Seleção */}
-                      <Td center>
-                        <input
-                          type="checkbox"
-                          checked={isSelected}
-                          onClick={e => e.stopPropagation()}
-                          onChange={() => toggleLeadSelection(lead.id)}
-                          className="h-3.5 w-3.5 accent-primary cursor-pointer"
-                        />
-                      </Td>
-                      {/* Data + hora */}
-                      {isColumnVisible('data') && <Td>
-                        {isEditing
-                          ? <input type="date" value={toD(d.data)} onChange={e => setE('data', e.target.value || null)} className={cell} />
-                          : <div className="px-2 py-1">
-                              <div className="text-[11px] font-medium text-foreground">{fmtD(lead.data)}</div>
-                              <div className="text-[10px] text-muted-foreground">{fmtTime(lead.created_at)}</div>
-                            </div>}
-                      </Td>}
-                      {/* Nome */}
-                      {isColumnVisible('nome') && <Td>
-                        {isEditing
-                          ? <input type="text" value={d.nome ?? ''} onChange={e => setE('nome', e.target.value || null)} placeholder="Nome" className={cell} />
-                          : <span className="block truncate px-2 text-xs font-semibold text-primary" title={lead.nome ?? undefined}>{lead.nome ?? '–'}</span>}
-                      </Td>}
-                      {/* Número */}
-                      {isColumnVisible('numero') && <Td>
-                        {isEditing
-                          ? <input type="text" value={d.numero ?? ''} onChange={e => setE('numero', e.target.value || null)} placeholder="Número" className={cell} />
-                          : <span className="px-2 text-muted-foreground text-[11px]">{lead.numero ?? '–'}</span>}
-                      </Td>}
-                      {/* Último contato */}
-                      {isColumnVisible('last_contact_at') && <Td>
-                        <div className="px-2 py-1">
-                          <div className="text-[11px] font-medium text-foreground">{fmtD(lead.last_contact_at ?? lead.whatsapp_last_message_at ?? lead.updated_at ?? lead.created_at)}</div>
-                          <div className="text-[10px] text-muted-foreground">{fmtTime(lead.last_contact_at ?? lead.whatsapp_last_message_at ?? lead.updated_at ?? lead.created_at)}</div>
-                        </div>
-                      </Td>}
-                      {/* Canal */}
-                      {isColumnVisible('canal') && <Td>
-                        {isEditing
-                          ? <select value={d.canal ?? ''} onChange={e => setE('canal', e.target.value || null)} className={cellSel}>
-                              <option value=""></option>
-                              {d.canal && !CANAL_OPTIONS.includes(String(d.canal)) && <option>{d.canal}</option>}
-                              {CANAL_OPTIONS.map(o => <option key={o}>{o}</option>)}
-                            </select>
-                          : channels.length > 0
-                            ? <div className="flex items-center gap-1 px-2" title={lead.canal ?? undefined}>
-                                {channels.slice(0, 3).map(channel => (
-                                  <span
-                                    key={channel.id}
-                                    className={cn('inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-white shadow-sm ring-1 ring-white/10', channel.bg)}
-                                    title={channel.label}
-                                    aria-label={channel.label}
-                                  >
-                                    {channel.icon}
-                                  </span>
-                                ))}
-                                {channels.length > 3 && (
-                                  <span className="text-[10px] font-bold text-muted-foreground">+{channels.length - 3}</span>
-                                )}
-                              </div>
-                            : lead.canal
-                              ? <span className="block truncate px-2 text-[11px] font-semibold text-primary" title={lead.canal}>{lead.canal}</span>
-                              : <span className="px-2 text-muted-foreground text-[11px]">–</span>}
-                      </Td>}
-                      {/* Status */}
-                      {isColumnVisible('status') && <Td>
-                        {isEditing
-                          ? <select value={d.status ?? ''} onChange={e => setE('status', e.target.value || null)} className={cn(cellSel, STATUS_COLOR[d.status ?? ''] ?? '')}>
-                              {statusOptions.map(o => <option key={o}>{o}</option>)}
-                            </select>
-                          : statusBadge
-                            ? <div className="px-1">
-                                <span className={cn('inline-flex items-center rounded-lg px-2.5 py-1 text-[10px] font-bold leading-none shadow-sm whitespace-nowrap', statusBadge)}>
-                                  {lead.status}
-                                </span>
-                              </div>
-                            : null}
-                      </Td>}
-                      {/* Temperatura */}
-                      {isColumnVisible('temperatura') && <Td>
-                        {isEditing
-                          ? <select value={d.temperatura ?? ''} onChange={e => setE('temperatura', (e.target.value || null) as Draft['temperatura'])} className={cellSel}>
-                              <option value=""></option>
-                              <option value="quente">Quente</option>
-                              <option value="morno">Morno</option>
-                              <option value="frio">Frio</option>
-                            </select>
-                          : <div className="flex items-center gap-1 px-1">
-                              {lead.temperatura ? (
-                                <span className={cn('inline-flex rounded-lg border px-2 py-1 text-[10px] font-bold leading-none whitespace-nowrap', temperatureBadgeClass(lead.temperatura))}>
-                                  {TEMPERATURE_LABEL[lead.temperatura]}
-                                </span>
-                              ) : (
-                                <span className="px-1 text-[11px] text-muted-foreground">–</span>
-                              )}
-                              {lead.time_interno && (
-                                <span className="inline-flex rounded-lg border border-zinc-500/25 bg-zinc-500/10 px-1.5 py-1 text-[9px] font-bold leading-none text-zinc-300">
-                                  Interno
-                                </span>
-                              )}
-                            </div>}
-                      </Td>}
-                      {/* 1D–4D */}
-                      {(['dia1','dia2','dia3','dia4'] as const).map(k => (
-                        isColumnVisible(k) && <Td key={k} center>
-                          {isEditing
-                            ? <input type="checkbox" checked={!!d[k]} onChange={e => setE(k, e.target.checked)} className="h-3.5 w-3.5 accent-primary cursor-pointer" />
-                            : <span
-                                onClick={e => { e.stopPropagation(); startEdit(lead); }}
-                                className={cn('inline-flex h-4 w-4 items-center justify-center rounded text-[10px] cursor-pointer select-none', lead[k] ? 'bg-primary/20 text-primary font-bold' : 'text-muted-foreground/30')}
-                              >
-                                {lead[k] ? '✓' : '–'}
-                              </span>}
-                        </Td>
-                      ))}
-                      {/* Data Ag. */}
-                      {isColumnVisible('data_agendada') && <Td>
-                        {isEditing
-                          ? <input type="date" value={toD(d.data_agendada)} onChange={e => setE('data_agendada', e.target.value || null)} className={cell} />
-                          : <span className="px-2 text-muted-foreground text-[11px]">{fmtD(lead.data_agendada) || '–'}</span>}
-                      </Td>}
-                      {/* Fechou */}
-                      {isColumnVisible('fechou') && <Td center>
-                        {isEditing
-                          ? <input type="checkbox" checked={!!d.fechou} onChange={e => setE('fechou', e.target.checked)} className="h-3.5 w-3.5 accent-primary cursor-pointer" />
-                          : <span
-                              onClick={e => { e.stopPropagation(); startEdit(lead); }}
-                              className={cn('inline-flex h-5 w-5 items-center justify-center rounded-full text-[11px] cursor-pointer font-bold select-none', lead.fechou ? 'bg-green-500 text-white' : 'bg-muted/50 text-muted-foreground/40')}
-                            >
-                              {lead.fechou ? '✓' : '–'}
-                            </span>}
-                      </Td>}
-                      {/* Valor */}
-                      {isColumnVisible('valor_rs') && <Td>
-                        {isEditing
-                          ? <input type="number" step="0.01" value={d.valor_rs ?? ''} onChange={e => setE('valor_rs', e.target.value ? parseFloat(e.target.value) : null)} placeholder="0,00" className={cn(cell, 'text-primary font-semibold')} />
-                          : <span className="px-2 text-muted-foreground text-[11px]">{fmtN(lead.valor_rs) || '0,00'}</span>}
-                      </Td>}
-                      {/* Pagamento */}
-                      {isColumnVisible('pagamento') && <Td>
-                        {isEditing
-                          ? <select value={d.pagamento ?? ''} onChange={e => setE('pagamento', e.target.value || null)} className={cellSel}>
-                              <option value=""></option>
-                              {PAGAMENTO_OPTIONS.map(o => <option key={o}>{o}</option>)}
-                            </select>
-                          : <span className="block truncate px-2 text-[11px] text-muted-foreground" title={lead.pagamento ?? undefined}>{lead.pagamento ?? '–'}</span>}
-                      </Td>}
-                      {/* Orçamento */}
-                      {isColumnVisible('orcamento') && <Td>
-                        {isEditing
-                          ? <input type="number" step="0.01" value={d.orcamento ?? ''} onChange={e => setE('orcamento', e.target.value ? parseFloat(e.target.value) : null)} placeholder="0,00" className={cell} />
-                          : <span className="px-2 text-muted-foreground text-[11px]">{fmtN(lead.orcamento) || '0,00'}</span>}
-                      </Td>}
-                      {/* Observação */}
-                      {isColumnVisible('observacao') && <Td>
-                        {isEditing
-                          ? <input type="text" value={d.observacao ?? ''} onChange={e => setE('observacao', e.target.value || null)} placeholder="Observação" className={cell} />
-                          : <span className="block truncate px-2 text-[11px] text-muted-foreground" title={lead.observacao ?? undefined}>{lead.observacao || 'Observação'}</span>}
-                      </Td>}
-                      {/* Bairro */}
-                      {isColumnVisible('bairro') && <Td>
-                        {isEditing
-                          ? <input type="text" value={d.bairro ?? ''} onChange={e => setE('bairro', e.target.value || null)} placeholder="Bairro" className={cell} />
-                          : <span className="block truncate px-2 text-[11px] text-muted-foreground" title={lead.bairro ?? undefined}>{lead.bairro || 'Bairro'}</span>}
-                      </Td>}
-                      {/* ⋮ Menu */}
-                      <Td center>
-                        <div className="relative" ref={menuId === lead.id ? menuRef : undefined}>
-                          <button
-                            onClick={e => { e.stopPropagation(); setMenuId(menuId === lead.id ? null : lead.id); }}
-                            className="opacity-0 group-hover:opacity-100 flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
-                          >
-                            <MoreVertical className="h-4 w-4" />
-                          </button>
-                          {menuId === lead.id && (
-                            <div className="absolute right-0 top-7 z-50 min-w-[130px] rounded-lg border border-border bg-popover shadow-xl py-1">
-                              <button
-                                onClick={e => { e.stopPropagation(); startEdit(lead); setMenuId(null); }}
-                                className="flex w-full items-center gap-2 px-3 py-2 text-xs hover:bg-muted transition-colors"
-                              >
-                                <Pencil className="h-3.5 w-3.5" /> Editar
-                              </button>
-                              <button
-                                onClick={e => { e.stopPropagation(); void deleteRow(lead.id); }}
-                                className="flex w-full items-center gap-2 px-3 py-2 text-xs text-red-400 hover:bg-red-500/10 transition-colors"
-                              >
-                                <Trash2 className="h-3.5 w-3.5" /> Excluir
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      </Td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>}
-
-          {/* ── PAGINATION ── */}
-          {viewMode === 'list' && <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border bg-card px-4 py-2.5 shrink-0">
-            <div className="flex flex-wrap items-center gap-3">
-              <span className="text-xs text-muted-foreground">
-                {filtered.length === 0
-                  ? 'Nenhum lead'
-                  : pageSize === 0
-                    ? `Mostrando todos os ${filtered.length} lead${filtered.length !== 1 ? 's' : ''}`
-                    : `Mostrando ${(page-1)*pageSize+1} a ${Math.min(page*pageSize, filtered.length)} de ${filtered.length} lead${filtered.length !== 1 ? 's' : ''}`}
-              </span>
-              <div className="flex items-center gap-2 rounded-lg border border-border bg-background/60 px-3 py-1.5">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Total faturamento</span>
-                <span className="text-xs font-bold text-primary">{formatCurrencyBRL(filteredTotals.faturamento)}</span>
-              </div>
-              <div className="flex items-center gap-2 rounded-lg border border-border bg-background/60 px-3 py-1.5">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Total orçamento</span>
-                <span className="text-xs font-bold text-foreground">{formatCurrencyBRL(filteredTotals.orcamento)}</span>
-              </div>
-            </div>
-            <div className="flex items-center gap-1.5">
-              {pageSize !== 0 && (
-                <>
-                  <button onClick={() => setPage(p => Math.max(1, p-1))} disabled={page === 1}
-                    className="flex h-7 w-7 items-center justify-center rounded border border-border disabled:opacity-30 hover:bg-muted transition-colors">
-                    <ChevronLeft className="h-3.5 w-3.5" />
-                  </button>
-                  <span className="flex h-7 min-w-[28px] items-center justify-center rounded border border-primary bg-primary/10 px-2.5 text-xs font-bold text-primary">{page}</span>
-                  <button onClick={() => setPage(p => Math.min(totalPages, p+1))} disabled={page === totalPages}
-                    className="flex h-7 w-7 items-center justify-center rounded border border-border disabled:opacity-30 hover:bg-muted transition-colors">
-                    <ChevronRight className="h-3.5 w-3.5" />
-                  </button>
-                </>
-              )}
-              <div className="relative ml-2">
-                <select value={pageSize} onChange={e => { setPageSize(Number(e.target.value)); setPage(1); }}
-                  className="appearance-none rounded border border-border bg-card pl-2 pr-6 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-primary">
-                  <option value={0}>Todos</option>
-                  {[25, 50, 100, 250].map(n => <option key={n} value={n}>{n} / página</option>)}
-                </select>
-                <ChevronDown className="absolute right-1.5 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground pointer-events-none" />
-              </div>
-            </div>
-          </div>}
         </div>
       )}
 
@@ -5246,80 +4315,4 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
   );
 }
 
-function Td({ children, center }: { children?: React.ReactNode; center?: boolean }) {
-  return (
-    <td className={cn('border-r border-border/20 last:border-0 overflow-hidden', center && 'text-center')}>
-      {children}
-    </td>
-  );
-}
 
-function ColumnFilter({
-  kind,
-  columnKey,
-  value,
-  onChange,
-  statusOptions,
-}: {
-  kind: ColumnFilterKind;
-  columnKey: ColumnKey;
-  value: string;
-  onChange: (key: ColumnKey, value: string) => void;
-  statusOptions: string[];
-}) {
-  const baseClass = 'h-7 w-full rounded-md border border-border/70 bg-background/70 px-2 text-[10px] font-medium normal-case tracking-normal text-foreground outline-none transition-colors placeholder:text-muted-foreground/40 focus:border-primary';
-
-  if (kind === 'none') return <div className="h-7" />;
-  if (kind === 'boolean') {
-    return (
-      <select value={value} onChange={e => onChange(columnKey, e.target.value)} className={cn(baseClass, 'appearance-none')}>
-        <option value="">Todos</option>
-        <option value="yes">Sim</option>
-        <option value="no">Não</option>
-      </select>
-    );
-  }
-  if (columnKey === 'status') {
-    return (
-      <select value={value} onChange={e => onChange(columnKey, e.target.value)} className={cn(baseClass, 'appearance-none')}>
-        <option value="">Todos</option>
-        {statusOptions.map(option => <option key={option}>{option}</option>)}
-      </select>
-    );
-  }
-  if (columnKey === 'temperatura') {
-    return (
-      <select value={value} onChange={e => onChange(columnKey, e.target.value)} className={cn(baseClass, 'appearance-none')}>
-        <option value="">Todos</option>
-        <option value="quente">Quente</option>
-        <option value="morno">Morno</option>
-        <option value="frio">Frio</option>
-        <option value="sem">Sem IA</option>
-      </select>
-    );
-  }
-  if (columnKey === 'canal') {
-    return (
-      <select value={value} onChange={e => onChange(columnKey, e.target.value)} className={cn(baseClass, 'appearance-none')}>
-        <option value="">Todos</option>
-        {CANAL_OPTIONS.map(option => <option key={option}>{option}</option>)}
-      </select>
-    );
-  }
-  if (columnKey === 'pagamento') {
-    return (
-      <select value={value} onChange={e => onChange(columnKey, e.target.value)} className={cn(baseClass, 'appearance-none')}>
-        <option value="">Todos</option>
-        {PAGAMENTO_OPTIONS.map(option => <option key={option}>{option}</option>)}
-      </select>
-    );
-  }
-  return (
-    <input
-      value={value}
-      onChange={e => onChange(columnKey, e.target.value)}
-      placeholder="Filtrar"
-      className={baseClass}
-    />
-  );
-}
