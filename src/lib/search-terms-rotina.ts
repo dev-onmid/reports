@@ -130,11 +130,20 @@ export function termoTemMarca(termo: string, nomeCliente: string): boolean {
   return tokensMarca.some((m) => alvo.includes(m));
 }
 
+/** Campanha de conquista (nome com "CONCORRENTE"): os termos dela SÃO os nomes de
+ *  concorrentes, de propósito — a rotina não negativa nem promove nada ali. */
+export function ehCampanhaDeConcorrentes(nomeCampanha: string): boolean {
+  return /concorrente/i.test(String(nomeCampanha ?? ''));
+}
+
+/** Motivo da IA que aponta "é nome de concorrente/outro profissional". */
+const MOTIVO_CONCORRENTE = /concorr|nomead|outr[oa] (palestrante|profissional|pessoa|empresa)/i;
+
 export function planejarAplicacao(
   decisoes: DecisaoIa[],
   analisados: TermoBruto[],
   keywordsAtivas: string[],
-  opts: { maxNegativas?: number; maxKeywords?: number; cliquesMinimos?: number; nomeCliente?: string } = {},
+  opts: { maxNegativas?: number; maxKeywords?: number; cliquesMinimos?: number; nomeCliente?: string; conquistaConcorrentes?: boolean } = {},
 ): PlanoAplicacao {
   const maxNeg = opts.maxNegativas ?? MAX_NEGATIVAS_RODADA;
   const maxKw = opts.maxKeywords ?? MAX_KEYWORDS_RODADA;
@@ -163,6 +172,12 @@ export function planejarAplicacao(
       if (ativas.has(chave)) { recusadas.push({ termo: chave, decisao: d.decisao, motivo: 'é uma palavra-chave ATIVA da conta' }); continue; }
       if (opts.nomeCliente && termoTemMarca(chave, opts.nomeCliente)) {
         recusadas.push({ termo: chave, decisao: d.decisao, motivo: 'busca pela MARCA do cliente — negativar marca é decisão do gestor, não da rotina' });
+        continue;
+      }
+      // Cliente que faz conquista de concorrente: nome de concorrente é público-alvo,
+      // não desperdício — quem decide cortar é o gestor (caso Adriano Moleiro, 09/10/2026).
+      if (opts.conquistaConcorrentes && MOTIVO_CONCORRENTE.test(motivo)) {
+        recusadas.push({ termo: chave, decisao: d.decisao, motivo: 'cliente faz conquista de concorrente — nome de concorrente não é negativado pela rotina' });
         continue;
       }
       if (negativaConflitaComKeyword(chave, keywordsAtivas)) {

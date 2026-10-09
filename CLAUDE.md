@@ -1,3 +1,13 @@
+## Rotina de termos do Google — conquista de concorrente por cliente (2026-10-09)
+
+Decisão do Matheus no diagnóstico do Adriano Moleiro: "vamos fazer a campanha própria e não negativar mais". A rotina diária de termos (`/api/google/search-terms-cron`) negativava um nome de palestrante concorrente por dia (11 em 10 dias), justamente os termos que traziam 3 das 4 conversões da conta.
+
+- **`system_settings['gads_conquista_concorrentes']`** = array JSON de `client_id`. Para esses clientes a IA é avisada no contexto, e `planejarAplicacao(..., { conquistaConcorrentes: true })` **recusa** qualquer negativa cujo motivo fale em concorrente/nome de outro profissional (trava determinística, não só prompt).
+- **Campanha com "CONCORRENTE" no nome é ignorada pela rotina em QUALQUER cliente** (`ehCampanhaDeConcorrentes`): os termos dela são os nomes de propósito.
+- As negativas de concorrente que já estavam na campanha genérica ficam — elas mandam essas buscas para a campanha de conquista.
+- Adriano: campanha `[ON] [SEARCH] [CONCORRENTES] [PR] - 09/10` criada PAUSADA (34 nomes em frase, 32 negativas informacionais, R$ 10/dia). Anúncio nunca cita nome de concorrente (política de marca).
+- ⚠️ "Local actions - Directions" (GOOGLE_HOSTED) não aceita mutate na ação; tirar do lance = `customerConversionGoals/GET_DIRECTIONS~GOOGLE_HOSTED` com `biddable: false`.
+
 ## CRM — conversa em modo LID passa a vincular no ENVIO (caso CondoStore, 2026-10-08)
 
 Matheus: "os leads da CondoStore entram pela integração com o SULTS, mas os chats e atendimentos não estão sendo vinculados".
