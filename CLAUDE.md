@@ -58,6 +58,15 @@ Matheus: "os leads da CondoStore entram pela integração com o SULTS, mas os ch
 - **Retroativo**: 50 leads do SULTS ligados aos chats por **primeiro nome da saudação + movimento para Abordagem no SULTS (ou criação) a ±3 dias**, só com candidato único, chat citando um nome só, segundo nome batendo quando ela usa dois ("Ana Cláudia" ≠ "Ana Paula") e lead sem segundo chat. Histórico via `/api/crm/sync-history` (61 mensagens: a Evolution só guarda desde agosto). Leads do SULTS com conversa: **40 → 78**. Pares em `/root/backup-vinculo-lid-condostore-2026-10-08.json`. ~100 chats ficaram de fora por nome ambíguo.
 - ⚠️ A limpeza de fantasmas de 07/10 apagou **150 leads só-LID do CondoStore** que eram essas conversas sem telefone (sem mensagens gravadas, só a prévia); estão no backup daquele dia.
 
+## Datalytics — etapa como objeto e mudança de etapa sem telefone (Cost Odonto, 2026-10-09)
+
+Achado no diagnóstico de tráfego da Cost Odonto.
+
+- **"[object Object]" virava status de lead e coluna do Kanban**: o Datalytics manda `stage: { id, title }`, e `texto()` fazia `String(objeto)`. Agora `texto()` ignora objeto/array e `resolverEtapa` lê `title`/`name`/`label` de dentro do objeto. 4 leads e 1 coluna da Cost ficaram com esse rótulo.
+- **Mudança de etapa sem telefone era descartada**: o webhook "Engajado | Reports" chega só com o id do lead + etapa (28 entregas de "Agendado" em 30 dias, 7 leads). O receptor agora casa pelo `external_id` (onde o INSERT sempre gravou o id do Datalytics) e aplica a etapa; sem lead conhecido, segue o descarte `sem_telefone`. ⚠️ O receptor passava esse id só como `negocioExternoId`, que procura em `negocio_externo_id` — por isso a própria identidade do Datalytics nunca casava.
+- Conversão disparada por essa etapa usa o `numero` já gravado no lead.
+- Testes: `scratchpad/test-datalytics.mjs` (48 asserts; build com esbuild, ver cabeçalho).
+
 ## Discador — ligações de prospecção um clique por vez, lead no CRM (2026-10-01)
 
 Pedido do Matheus: baixar uma lista grande de leads (ON Prospecção) e ligar um a um sem

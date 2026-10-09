@@ -58,6 +58,9 @@ function texto(obj: Record<string, unknown>, aliases: string[]): string | null {
     const kl = k.toLowerCase();
     if (!aliases.includes(kl)) continue;
     if (v === null || v === undefined) continue;
+    // Objeto/array nunca vira texto: String({…}) é "[object Object]", e foi assim
+    // que essa string virou status de lead e coluna do Kanban (Cost Odonto, out/26).
+    if (typeof v === 'object') continue;
     const s = String(v).trim();
     if (s && s.toLowerCase() !== 'null' && s.toLowerCase() !== 'undefined') return s;
   }
@@ -111,6 +114,14 @@ function achatar(raw: unknown): Record<string, unknown> {
 export function resolverEtapa(plano: Record<string, unknown>): EtapaRecebida {
   const label = texto(plano, ['stage', 'stagename', 'stage_name', 'etapa', 'etapa_nome', 'stagetitle', 'funnelstage', 'funnel_stage']);
   if (label) return { label };
+  // O Datalytics manda a etapa também como OBJETO: `stage: { id, title }`.
+  for (const chave of ['stage', 'etapa']) {
+    const obj = Object.entries(plano).find(([k]) => k.toLowerCase() === chave)?.[1];
+    if (typeof obj === 'object' && obj !== null && !Array.isArray(obj)) {
+      const nome = texto(obj as Record<string, unknown>, ['title', 'name', 'label', 'nome', 'titulo']);
+      if (nome) return { label: nome };
+    }
+  }
   const id = texto(plano, ['stageid', 'stage_id']);
   if (id) return { idOpaco: id };
   return null;

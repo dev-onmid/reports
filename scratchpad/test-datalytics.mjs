@@ -85,3 +85,16 @@ eq(extrairLeadDatalytics('texto').telefone, null, 'payload string nao explode');
 eq(extrairLeadDatalytics([1, 2]).telefone, null, 'payload array nao explode');
 
 console.log(`OK — ${n} asserts`);
+
+// ---------------------------------------- etapa como objeto (Cost Odonto, out/26)
+{
+  const raw = { type: 'lead-created', lead: { id: 'abc-1', stage: { id: 'f04', title: 'Agendado' }, stageId: 'f04', utm_source: 'google' } };
+  const l = extrairLeadDatalytics(raw);
+  eq(l.etapa, { label: 'Agendado' }, 'stage {id,title} vira label pelo title');
+  eq(l.idExterno, 'abc-1', 'id do lead dentro do wrapper');
+  eq(l.telefone, null, 'payload de etapa vem sem telefone');
+  ok(!JSON.stringify(l).includes('[object Object]'), 'nenhum campo vira "[object Object]"');
+  eq(resolverEtapa({ stage: { id: 'x' }, stageId: 'x' }), { idOpaco: 'x' }, 'objeto sem title cai no id opaco');
+  eq(extrairLeadDatalytics({ name: { first: 'A' }, phone: '48999990000' }).nome, null, 'objeto em campo de texto é ignorado');
+}
+console.log(`OK — ${n} asserts`);
