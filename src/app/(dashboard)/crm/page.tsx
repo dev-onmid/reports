@@ -15,13 +15,14 @@ import {
   ChevronLeft, ChevronRight, ChevronDown, SlidersHorizontal,
   Trash2, Pencil, Sparkles, Clock3, LayoutGrid, List, ArrowUpDown,
   BarChart3, UserRound, MessageCircle, X, Send, GripVertical, Layers, WifiOff, Link2,
-  Clapperboard, Info, MapPin, ClipboardList, BadgeCheck, BookmarkPlus, Check, Star } from 'lucide-react';
+  Clapperboard, Info, MapPin, ClipboardList, BadgeCheck, BookmarkPlus, Check, Star, Tag } from 'lucide-react';
 import { ChatView } from './chat-view';
 import { ConectarWhatsappModal } from './conectar-whatsapp';
 import { LeadChatPanel } from './lead-chat-panel';
 import { CamposAtendimento, HistoricoLead, NovoLeadModal, opcoesDeOrigem } from './lead-operacao';
 import { ModoClienteContext, useEhGestorCliente, useEhUsuarioCliente, useMeuNome, useModoCliente } from '@/lib/modo-cliente';
 import { EquipeCliente } from './cliente-gestor';
+import { BotaoTags, FiltroTag, TagChips, TagsConfigModal, salvarTagsDoLead, useTagsDoCliente, type CrmTag } from './tags';
 import { AcessosClienteModal } from './acessos-cliente-modal';
 import { SeletorModeloFunil } from '@/components/crm/seletor-modelo-funil';
 import { AplicarModeloFunil } from '@/components/crm/aplicar-modelo-funil';
@@ -90,6 +91,8 @@ type CrmLead = {
   engajado?: boolean;
   temperatura?: 'quente' | 'morno' | 'frio' | null;
   temperatura_atualizada_em?: string | null;
+  /** Tags de qualificação (catálogo do cliente), montadas no SQL da listagem. */
+  tags?: CrmTag[];
   ia_ultimo_analise?: string | null;
   ia_confianca_ultimo?: number | null;
   /** Nota 0–5 do ATENDIMENTO deste lead (rotina diária). null = ainda sem nota ou não é lead. */
@@ -771,7 +774,7 @@ function ChatPreviewPanel({ leadId, onOpenChat }: { leadId: string; onOpenChat: 
 }
 
 function QuickEditModal({
-  lead, onSave, onClose, onDelete, statusOptions, onOpenChat, clientId,
+  lead, onSave, onClose, onDelete, statusOptions, onOpenChat, clientId, tags = [], onSetTags, onConfigurarTags,
 }: {
   lead: CrmLead;
   onSave: (data: Draft) => Promise<void>;
@@ -780,6 +783,10 @@ function QuickEditModal({
   statusOptions: string[];
   onOpenChat: (leadId: string) => void;
   clientId?: string;
+  tags?: CrmTag[];
+  /** Tag grava na hora (não espera o Salvar): é marcação, não edição de cadastro. */
+  onSetTags?: (lead: CrmLead, tagIds: string[]) => void;
+  onConfigurarTags?: () => void;
 }) {
   // Conversa ao lado do formulário — some em telas estreitas (aí vale o preview
   // + "ver conversa completa", que continua levando pro inbox).
@@ -895,6 +902,22 @@ function QuickEditModal({
               </select>
             </label>
           </div>
+          {onSetTags && (
+            <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-background/50 px-3 py-2">
+              <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Tags</span>
+              <TagChips tags={draft.tags} max={8} tamanho="sm" />
+              {!(draft.tags ?? []).length && <span className="text-xs text-muted-foreground">Nenhuma</span>}
+              <BotaoTags
+                compacto={false}
+                alinhar="left"
+                className="ml-auto"
+                tags={tags}
+                selecionadas={(draft.tags ?? []).map(t => t.id)}
+                onChange={ids => { set('tags', tags.filter(t => ids.includes(t.id))); onSetTags(lead, ids); }}
+                onConfigurar={onConfigurarTags}
+              />
+            </div>
+          )}
           <CamposAtendimento
             draft={draft}
             set={(k, v) => set(k as keyof Draft, v as never)}
@@ -1051,7 +1074,7 @@ function QuickEditModal({
 
 // ── Kanban Card (draggable) ──────────────────────────────────────────────────
 function KanbanCard({
-  lead, onEdit, onDelete, onToggleInternal, onToggleQualificado, isDragOverlay, hasActiveFollowup,
+  lead, onEdit, onDelete, onToggleInternal, onToggleQualificado, isDragOverlay, hasActiveFollowup, tags = [], onSetTags, onConfigurarTags,
 }: {
   lead: CrmLead;
   onEdit: (lead: CrmLead) => void;
@@ -1060,6 +1083,9 @@ function KanbanCard({
   onToggleQualificado: (lead: CrmLead) => void;
   isDragOverlay?: boolean;
   hasActiveFollowup?: boolean;
+  tags?: CrmTag[];
+  onSetTags?: (lead: CrmLead, tagIds: string[]) => void;
+  onConfigurarTags?: () => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: lead.id });
   const [menuOpen, setMenuOpen] = useState(false);
@@ -1136,6 +1162,14 @@ function KanbanCard({
           <UserRound className="h-3 w-3" />
         </button>
         )}
+        {onSetTags && (
+          <BotaoTags
+            tags={tags}
+            selecionadas={(lead.tags ?? []).map(t => t.id)}
+            onChange={ids => onSetTags(lead, ids)}
+            onConfigurar={onConfigurarTags}
+          />
+        )}
         <div className="relative" ref={menuRef}>
           <button
             onPointerDown={e => e.stopPropagation()}
@@ -1172,6 +1206,9 @@ function KanbanCard({
           </span>
         )}
       </div>
+
+      {/* Tags de qualificação, coladas no nome (pedido: "bem perto do nome") */}
+      <TagChips tags={lead.tags} className="mt-0.5" />
 
       {/* Linha 2: número + data */}
       <div className="mt-0.5 flex items-center justify-between gap-2">
@@ -1293,7 +1330,7 @@ function rotuloProximaAcao(lead: CrmLead): { texto: string; titulo: string; clas
 const CARDS_POR_COLUNA = 50;
 
 function KanbanColumn({
-  status, color, leads, onEdit, onDelete, onToggleInternal, onToggleQualificado, activeLead, activeFollowupIds,
+  status, color, leads, onEdit, onDelete, onToggleInternal, onToggleQualificado, activeLead, activeFollowupIds, tags, onSetTags, onConfigurarTags,
 }: {
   status: string;
   color: string;
@@ -1304,6 +1341,9 @@ function KanbanColumn({
   onToggleQualificado: (lead: CrmLead) => void;
   activeLead: CrmLead | null;
   activeFollowupIds: Set<string>;
+  tags: CrmTag[];
+  onSetTags: (lead: CrmLead, tagIds: string[]) => void;
+  onConfigurarTags?: () => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: status });
   // Receita quando a coluna é de ganho; negociação em aberto nas demais.
@@ -1393,6 +1433,9 @@ function KanbanColumn({
             onToggleInternal={onToggleInternal}
             onToggleQualificado={onToggleQualificado}
             hasActiveFollowup={activeFollowupIds.has(lead.id)}
+            tags={tags}
+            onSetTags={onSetTags}
+            onConfigurarTags={onConfigurarTags}
           />
         ))}
         {leads.length > visiveis.length && (
@@ -1418,7 +1461,7 @@ function KanbanColumn({
 
 // ── Kanban View ──────────────────────────────────────────────────────────────
 function KanbanView({
-  leads, stages, onEdit, onDelete, onStatusChange, onToggleInternal, onToggleQualificado, activeFollowupIds, onArrasteMudou,
+  leads, stages, onEdit, onDelete, onStatusChange, onToggleInternal, onToggleQualificado, activeFollowupIds, onArrasteMudou, tags, onSetTags, onConfigurarTags,
 }: {
   leads: CrmLead[];
   stages: CrmStage[];
@@ -1429,6 +1472,9 @@ function KanbanView({
   onToggleInternal: (lead: CrmLead) => void;
   onToggleQualificado: (lead: CrmLead) => void;
   activeFollowupIds: Set<string>;
+  tags: CrmTag[];
+  onSetTags: (lead: CrmLead, tagIds: string[]) => void;
+  onConfigurarTags?: () => void;
 }) {
   const [activeLead, setActiveLead] = useState<CrmLead | null>(null);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
@@ -1478,6 +1524,9 @@ function KanbanView({
             onToggleQualificado={onToggleQualificado}
             activeLead={activeLead}
             activeFollowupIds={activeFollowupIds}
+            tags={tags}
+            onSetTags={onSetTags}
+            onConfigurarTags={onConfigurarTags}
           />
         ))}
       </div>
@@ -3080,6 +3129,10 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
   const [showAiCriteria, setShowAiCriteria] = useState(false);
 
   const [leads, setLeads]           = useState<CrmLead[]>([]);
+  // Tags de qualificação do cliente (catálogo) + filtro + modal de configurar.
+  const { tags, setTags, recarregar: recarregarTags } = useTagsDoCliente(clientId);
+  const [tagFilter, setTagFilter] = useState('');
+  const [showTagsConfig, setShowTagsConfig] = useState(false);
   // ── Recarga leve e à prova de corrida ──────────────────────────────────────
   // A lista completa vem ao abrir e a cada 2 min; entre uma e outra, o poll de
   // 8 s busca só o que mudou (`since`). Com 3.500 leads (Atmos, 8,5 MB) baixar
@@ -3383,13 +3436,37 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
       if (temperatureFilter !== 'sem' && l.temperatura !== temperatureFilter) return false;
     }
     if (soAtendimentoRuim && !(temNota(l) && l.nota_atendimento <= 2)) return false;
+    if (tagFilter && !(l.tags ?? []).some(t => t.id === tagFilter)) return false;
     if (busca && !leadCasaBusca(l, busca)) return false;
     return true;
   }).sort((a, b) => {
     if (a.time_interno !== b.time_interno) return a.time_interno ? 1 : -1;
     // Mais recente primeiro dentro de cada coluna do Kanban.
     return ordemPorData(a, b);
-  }), [leads, busca, atalho, meuNome, soAtendimentoRuim, statusFilter, temperatureFilter, monthFilter, dateFromFilter, dateToFilter]);
+  }), [leads, busca, atalho, meuNome, soAtendimentoRuim, statusFilter, temperatureFilter, tagFilter, monthFilter, dateFromFilter, dateToFilter]);
+
+  /**
+   * Tag grava NA HORA (otimista) — é um clique no card, sem Salvar. Em erro
+   * volta ao que era. O servidor devolve a lista confirmada (ele descarta tag
+   * de outro cliente) e ela é a que fica; o catálogo é relido para a contagem
+   * do filtro acompanhar.
+   */
+  async function definirTags(lead: CrmLead, tagIds: string[]) {
+    const antes = lead.tags ?? [];
+    const aplicar = (lista: CrmTag[]) => {
+      setLeads(prev => prev.map(l => (l.id === lead.id ? { ...l, tags: lista } : l)));
+      setKanbanEditLead(prev => (prev && prev.id === lead.id ? { ...prev, tags: lista } : prev));
+    };
+    aplicar(tags.filter(t => tagIds.includes(t.id)));
+    try {
+      aplicar(await salvarTagsDoLead(lead.id, tagIds));
+      void recarregarTags();
+    } catch (e) {
+      aplicar(antes);
+      notificar(e instanceof Error ? e.message : 'Não foi possível salvar as tags.', 'erro');
+    }
+  }
+  const podeConfigurarTags = !modoCliente || gestorCliente;
 
   const contagemAtalho = useMemo(() => ({
     meus: meuNome ? leads.filter(l => passaAtalho(l, 'meus', meuNome)).length : 0,
@@ -4003,6 +4080,8 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
               )}
             </div>
 
+            {crmView === 'leads' && <FiltroTag tags={tags} valor={tagFilter} onChange={setTagFilter} />}
+
             {crmView === 'leads' && (
               <>
                 {/* A busca cresce e come a sobra da linha: espaço vazio numa
@@ -4202,6 +4281,17 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
               <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Leads</span>
             </div>
             <div className="flex items-center gap-2">
+              {clientId && podeConfigurarTags && (
+                <button
+                  type="button"
+                  onClick={() => setShowTagsConfig(true)}
+                  title="Criar e editar as tags de qualificação deste cliente"
+                  className="flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs font-semibold text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                >
+                  <Tag className="h-3.5 w-3.5" />
+                  <span className="hidden sm:inline">Tags</span>
+                </button>
+              )}
               {/* Análise de IA sob demanda — recupera o retroativo que a
                   automação desligada não fez (pedido do Matheus, 2026-10-02).
                   Age sobre `leadsDoPeriodo`: só o cliente aberto e o período
@@ -4233,6 +4323,9 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
                 onToggleInternal={lead => void toggleLeadInternal(lead)}
                 activeFollowupIds={activeFollowupLeadIds}
                 onArrasteMudou={v => { arrastandoRef.current = v; }}
+                tags={tags}
+                onSetTags={(lead, ids) => void definirTags(lead, ids)}
+                onConfigurarTags={podeConfigurarTags ? () => setShowTagsConfig(true) : undefined}
               />
           </div>
 
@@ -4274,7 +4367,14 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
           statusOptions={statusOptions}
           onOpenChat={openLeadChat}
           clientId={clientId}
+          tags={tags}
+          onSetTags={(lead, ids) => void definirTags(lead, ids)}
+          onConfigurarTags={podeConfigurarTags ? () => setShowTagsConfig(true) : undefined}
         />
+      )}
+
+      {showTagsConfig && clientId && (
+        <TagsConfigModal clientId={clientId} tags={tags} onChange={setTags} onClose={() => { setShowTagsConfig(false); void refreshLeads(); }} />
       )}
 
       {showNovoLead && clientId && (

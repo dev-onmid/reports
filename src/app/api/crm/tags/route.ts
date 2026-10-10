@@ -1,14 +1,16 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
-import { ensureCrmDisparoSchema } from '@/lib/crm-disparo';
+import { ensureCrmTagsSchema, normalizarCorTag, normalizarNomeTag } from '@/lib/crm-tags';
 
+export const dynamic = 'force-dynamic';
+
+/** Tags do cliente com a contagem de leads em cada uma (a tela de configurar mostra). */
 export async function GET(req: NextRequest) {
   const clientId = req.nextUrl.searchParams.get('clientId');
   if (!clientId) return Response.json({ error: 'clientId required' }, { status: 400 });
-
   const pool = makeServerPool();
   try {
-    await ensureCrmDisparoSchema(pool);
+    await ensureCrmTagsSchema(pool);
     const { rows } = await pool.query(
       `SELECT t.id, t.name, t.color, t.created_at,
               COUNT(a.lead_id)::int AS lead_count
@@ -16,7 +18,7 @@ export async function GET(req: NextRequest) {
          LEFT JOIN public.crm_lead_tag_assignments a ON a.tag_id = t.id
         WHERE t.client_id = $1
         GROUP BY t.id
-        ORDER BY t.name ASC`,
+        ORDER BY lower(t.name) ASC`,
       [clientId],
     );
     return Response.json(rows);
@@ -25,24 +27,23 @@ export async function GET(req: NextRequest) {
   }
 }
 
+/** Criar (ou, se já existe com o mesmo nome, devolver a existente). */
 export async function POST(req: NextRequest) {
-  const body = await req.json() as { clientId: string; name: string; color?: string };
-  const { clientId, name, color } = body;
-  if (!clientId || !name?.trim()) {
-    return Response.json({ error: 'clientId e name são obrigatórios.' }, { status: 400 });
-  }
-
+  const body = await req.json().catch(() => ({})) as { clientId?: string; name?: unknown; color?: unknown };
+  const clientId = typeof body.clientId === 'string' ? body.clientId : '';
+  const name = normalizarNomeTag(body.name);
+  if (!clientId || !name) return Response.json({ error: 'clientId e name são obrigatórios.' }, { status: 400 });
   const pool = makeServerPool();
   try {
-    await ensureCrmDisparoSchema(pool);
+    await ensureCrmTagsSchema(pool);
     const { rows: [tag] } = await pool.query(
       `INSERT INTO public.crm_lead_tags (client_id, name, color)
        VALUES ($1, $2, $3)
        ON CONFLICT (client_id, lower(name)) DO UPDATE SET name = EXCLUDED.name
        RETURNING id, name, color, created_at`,
-      [clientId, name.trim(), color || '#0ea5e9'],
+      [clientId, name, normalizarCorTag(body.color)],
     );
-    return Response.json(tag, { status: 201 });
+    return Response.json({ ...tag, lead_count: 0 }, { status: 201 });
   } finally {
     await pool.end();
   }

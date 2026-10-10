@@ -5,6 +5,7 @@ import { requireAdmin } from '@/lib/api-auth';
 import { autorDaRequisicao, ensureColunasOperacao, registrarEventos } from '@/lib/crm-eventos';
 import { ensureCrmMessagesSchema, ensureDefaultFunnel, getFirstFunnelStageLabel } from '@/lib/crm-conversation-sync';
 import { leadVisivelCrmSql } from '@/lib/lead-contagem';
+import { ensureCrmTagsSchema, tagsDoLeadSql } from '@/lib/crm-tags';
 
 async function ensureTableInterno(pool: ReturnType<typeof makeServerPool>) {
   await pool.query(`
@@ -118,6 +119,7 @@ export async function GET(req: NextRequest) {
     await ensureTable(pool);
     await ensureDefaultFunnel(pool, clientId);
     await ensureCrmMessagesSchema(pool);
+    await ensureCrmTagsSchema(pool);
     // Modo incremental: o CRM busca a lista completa ao abrir e, entre uma carga e
     // outra, só o que mudou. A Atmos tem 3.500+ leads (8,5 MB): baixar tudo a cada
     // 8 s travava a tela e, chegando no meio de um arraste, jogava o lead de volta.
@@ -129,7 +131,8 @@ export async function GET(req: NextRequest) {
                 COALESCE(l.lead_date, l.data) AS normalized_date,
                 COALESCE(l.lead_name, l.nome) AS normalized_name,
                 COALESCE(NULLIF(l.revenue, 0), l.valor_rs, 0)::float AS normalized_revenue,
-                COALESCE(l.whatsapp_last_message_at, lm.last_contact_at, l.updated_at, l.created_at) AS last_contact_at
+                COALESCE(l.whatsapp_last_message_at, lm.last_contact_at, l.updated_at, l.created_at) AS last_contact_at,
+                ${tagsDoLeadSql('l')} AS tags
            FROM public.crm_leads l
            LEFT JOIN LATERAL (
              SELECT MAX(m.created_at) AS last_contact_at
@@ -179,7 +182,8 @@ export async function GET(req: NextRequest) {
           AND ${leadVisivelCrmSql()}
       )
       SELECT ranked.*,
-             COALESCE(ranked.whatsapp_last_message_at, lm.last_contact_at, ranked.updated_at, ranked.created_at) AS last_contact_at
+             COALESCE(ranked.whatsapp_last_message_at, lm.last_contact_at, ranked.updated_at, ranked.created_at) AS last_contact_at,
+             ${tagsDoLeadSql('ranked')} AS tags
       FROM ranked
       LEFT JOIN LATERAL (
         SELECT MAX(m.created_at) AS last_contact_at

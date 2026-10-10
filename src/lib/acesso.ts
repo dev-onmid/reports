@@ -121,6 +121,9 @@ export const ROTAS_CLIENTE: Regra[] = [
   { padrao: new RegExp(`^/api/crm/${UUID}/eventos$`), metodos: ['GET'], exigeCliente: true },
   { padrao: /^\/api\/crm\/equipe$/, metodos: ['GET'], exigeCliente: true },
   { padrao: /^\/api\/crm\/respostas-rapidas$/, metodos: ['GET', 'POST', 'DELETE'], exigeCliente: true },
+  // tags de qualificação: quem atende lê e aplica; criar/renomear/apagar é do gestor
+  { padrao: /^\/api\/crm\/tags$/, metodos: ['GET'], exigeCliente: true },
+  { padrao: new RegExp(`^/api/crm/${UUID}/tags$`), metodos: ['PUT'], exigeCliente: true },
   // funil (só leitura — editar funil é da agência)
   { padrao: /^\/api\/crm\/funnels$/, metodos: ['GET'], exigeCliente: true },
   { padrao: new RegExp(`^/api/crm/funnels/${UUID}/stages$`), metodos: ['GET'], exigeCliente: false },
@@ -145,6 +148,9 @@ export const ROTAS_CLIENTE: Regra[] = [
 export const ROTAS_GESTOR: Regra[] = [
   // equipe do próprio cliente
   { padrao: /^\/api\/crm\/equipe-cliente$/, metodos: ['GET', 'POST', 'PATCH'], exigeCliente: true },
+  // catálogo de tags do cliente (o dono da tag é resolvido pelo id no proxy)
+  { padrao: /^\/api\/crm\/tags$/, metodos: ['POST'], exigeCliente: true },
+  { padrao: new RegExp(`^/api/crm/tags/${UUID}$`), metodos: ['PATCH', 'DELETE'], exigeCliente: true },
   // aba Atendimento do CRM (nota, auditoria e o relatório em PDF). Só LEITURA:
   // gerar auditoria nova (POST) gasta IA e é da rotina da agência.
   { padrao: /^\/api\/crm\/attendance$/, metodos: ['GET'], exigeCliente: true },
@@ -196,6 +202,12 @@ export function clienteNoCaminho(pathname: string): string | null {
 /** Dono da mídia do chat (para /api/crm/midia/<token>). */
 export async function clienteDaMidia(token: string): Promise<string | null> {
   const { rows } = await getPool().query(`SELECT client_id FROM public.crm_midia WHERE token = $1 LIMIT 1`, [token]).catch(() => ({ rows: [] as { client_id: string }[] }));
+  return rows[0]?.client_id ?? null;
+}
+
+/** Dono da tag (para /api/crm/tags/<id>). */
+export async function clienteDaTag(tagId: string): Promise<string | null> {
+  const { rows } = await getPool().query(`SELECT client_id FROM public.crm_lead_tags WHERE id::text = $1 LIMIT 1`, [tagId]).catch(() => ({ rows: [] as { client_id: string }[] }));
   return rows[0]?.client_id ?? null;
 }
 

@@ -1,5 +1,6 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
+import { ensureCrmTagsSchema, tagsPorLead, type CrmTag } from '@/lib/crm-tags';
 import {
   ensureDefaultFunnel,
   upsertLeadFromConversation,
@@ -393,6 +394,10 @@ export async function GET(req: NextRequest) {
       waMap = Object.fromEntries(wa.map(w => [w.id, { text: w.t, dir: w.d, at: w.a }]));
     } catch { /* columns may not exist */ }
 
+    // Tags de qualificação (marcadas no board ou aqui no chat).
+    let tagMap: Record<string, CrmTag[]> = {};
+    try { await ensureCrmTagsSchema(pool); tagMap = await tagsPorLead(pool, ids); } catch { /* sem tag não derruba o inbox */ }
+
     // Step 5: assemble result
     const result = unique.map(l => {
       const msg  = lastMsgs[l.id];
@@ -413,6 +418,7 @@ export async function GET(req: NextRequest) {
         last_status:     msg?.whatsapp_status ?? null,
         last_message_at: msg?.created_at ?? wa?.at ?? l.updated_at ?? l.created_at,
         unread_count:    unreadCounts[l.id] ?? 0,
+        tags:            tagMap[l.id] ?? [],
       };
     });
 

@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils';
 import { notificar } from '@/components/ui/toast';
 import { useModoCliente } from '@/lib/modo-cliente';
 import { ConectarWhatsappModal } from './conectar-whatsapp';
+import { BotaoTags, TagChips, salvarTagsDoLead, useTagsDoCliente, type CrmTag } from './tags';
 import { GerenciarRespostas, SugestoesResposta, aplicarVariaveis, respostasDoAtalho, useRespostasRapidas, type RespostaRapida } from './respostas-rapidas';
 import {
   Search, MessageCircle, RefreshCw, Send, Paperclip,
@@ -49,6 +50,7 @@ type InboxLead = {
   avatarUrl?: string | null;
   profilePicUrl?: string | null;
   created_at: string;
+  tags?: CrmTag[];
 };
 
 export type CrmMessage = {
@@ -795,6 +797,7 @@ export function ChatView({
   focusLeadId?: string | null;
 }) {
   const [leads,      setLeads]      = useState<InboxLead[]>([]);
+  const { tags: catalogoTags } = useTagsDoCliente(clientId);
   const [loading,    setLoading]    = useState(true);
   const [search,     setSearch]     = useState('');
   const modoCliente = useModoCliente();
@@ -1571,6 +1574,16 @@ export function ChatView({
     }
   }
 
+  /** Tag no chat: mesma gravação do Kanban (otimista, volta em erro). */
+  async function definirTagsDaConversa(tagIds: string[]) {
+    if (!selectedId || !selectedLead) return;
+    const antes = selectedLead.tags ?? [];
+    const aplicar = (lista: CrmTag[]) => setLeads(prev => prev.map(l => (l.id === selectedId ? { ...l, tags: lista } : l)));
+    aplicar(catalogoTags.filter(t => tagIds.includes(t.id)));
+    try { aplicar(await salvarTagsDoLead(selectedId, tagIds)); }
+    catch (e) { aplicar(antes); notificar(e instanceof Error ? e.message : 'Não foi possível salvar as tags.', 'erro'); }
+  }
+
   async function changeSelectedStatus(status: string) {
     if (!selectedId || !selectedLead) return;
     const previousStatus = selectedLead.status;
@@ -1961,8 +1974,15 @@ export function ChatView({
                     )}
                   </div>
                   <p className="text-xs text-muted-foreground">{formatPhoneBR(selectedLead.numero) || 'Sem número'}</p>
+                  <TagChips tags={selectedLead.tags} max={4} className="mt-0.5" />
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
+                  <BotaoTags
+                    compacto={false}
+                    tags={catalogoTags}
+                    selecionadas={(selectedLead.tags ?? []).map(t => t.id)}
+                    onChange={ids => void definirTagsDaConversa(ids)}
+                  />
                   <div className="relative">
                     <select
                       value={selectedLead.status ?? ''}
