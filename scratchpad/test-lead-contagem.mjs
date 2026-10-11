@@ -11,7 +11,7 @@
 //   node scratchpad/test-lead-contagem.mjs
 
 import assert from 'node:assert';
-import { naoLeadSql, portaSql, rastroPagoSql, leadContaSql } from './build/lead-contagem.mjs';
+import { naoLeadSql, portaSql, rastroPagoSql, leadContaSql, leadVisivelCrmSql, clientesChatInteiroSql, ENSURE_COLUNAS_CONTAGEM } from './build/lead-contagem.mjs';
 
 let n = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); n++; };
@@ -51,5 +51,14 @@ ok(lc.includes('planilha') && lc.includes('crm_externo') && lc.includes('formula
   'portas validadas contam sempre');
 ok(lc.includes("= 'chat'"), 'chat tem regra propria');
 ok(lc.includes('NOT ('), 'nao-lead sai da contagem');
+
+// ── Lei 3 REVISTA (2026-10-10): chat sem rastro só conta no cliente marcado ──
+ok(lc.includes('k.leads_chat_inteiro = TRUE'), 'chat inteiro depende do interruptor do cliente');
+ok(!lc.includes('NOT IN (SELECT v.client_id'), 'a ausência de planilha NÃO libera mais o chat inteiro');
+ok(leadVisivelCrmSql('l').includes('k.leads_chat_inteiro = TRUE'), 'o Kanban segue a mesma régua');
+ok(clientesChatInteiroSql().includes('public.clients'), 'interruptor mora em clients');
+ok(ENSURE_COLUNAS_CONTAGEM.includes('leads_chat_inteiro'), 'o ensure cria a coluna do interruptor');
+// LP grava canal = nome do site ("LP Cambé", "Lp São José"): é formulário, não manual
+ok(portaSql('l').includes("ILIKE 'lp %'"), 'canal "LP <nome>" é porta formulario');
 
 console.log(`OK — ${n} asserts (lei de contagem)`);

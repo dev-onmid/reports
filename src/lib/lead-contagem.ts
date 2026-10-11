@@ -11,13 +11,16 @@
  * Regra de contagem:
  *   planilha / crm_externo / formulario → contam SEMPRE (já filtrados na entrada:
  *     o relatório da clínica e o CRM externo só trazem o que passa pelo filtro deles)
- *   chat → depende do CLIENTE (Lei 3, reafirmada pelo Matheus em 2026-09-24):
- *     · cliente que TEM porta validada (alguma planilha/CRM externo/formulário
- *       na base): chat conta SÓ com rastro de tráfego pago (CTWA, código do link
- *       /r/, gclid, fbclid, UTM de campanha) — a conversa sem rastro é o que a
- *       planilha já trouxe, ou não é mérito nosso;
- *     · cliente SEM porta validada (Empas, Tokiomaki, Tapeçaria, Meta Pizzaria…
- *       — o CRM deles É o WhatsApp do Evolution): o chat inteiro são os leads.
+ *   chat → conta SÓ com rastro de tráfego pago (CTWA, código do link /r/,
+ *     gclid, fbclid, UTM de campanha). Lei 3 REVISTA pelo Matheus em 2026-10-10:
+ *     "prioridade sempre vai ser CRM/planilha, anúncios, e depois sim aberto a
+ *     todos os leads do chat — tirando a Atmos e a Onmid, que é uso interno, o
+ *     resto dos clientes queremos mérito daquilo que plantamos". Antes, cliente
+ *     SEM porta validada contava o chat inteiro, e no Adriano Moleiro isso virou
+ *     1.855 "leads" no mês (1.845 conversas orgânicas de um palestrante com o
+ *     WhatsApp cheio). A exceção virou interruptor por cliente —
+ *     `clients.leads_chat_inteiro` (Configurações do cliente → "Leads do chat"),
+ *     ligado na Atmos e na Onmid — e não mais a ausência de planilha.
  *   manual → não conta.
  * Tudo unido por telefone (régua única de identidade): quem está na planilha E
  * no chat é um lead só — e a porta "validada" vence a do chat.
@@ -47,7 +50,11 @@ export function portaSql(alias = ''): string {
       OR lower(${c('origin')}) IN ('sults', 'agendor', 'datalytics') THEN 'crm_externo'
     WHEN lower(${c('canal')}) = 'formulário meta' OR lower(${c('canal')}) = 'formulario meta'
       OR lower(${c('origin')}) IN ('site', 'lp', 'leadgen', 'landing')
-      OR ${c('canal')} ILIKE 'landing page%' OR ${c('canal')} ILIKE 'lp |%' THEN 'formulario'
+      OR ${c('canal')} ILIKE 'landing page%' OR ${c('canal')} ILIKE 'lp |%'
+      -- "LP Cambé", "Lp São José", "LP Adriano Moleiro": é o nome que a rota de
+      -- LP grava como canal (origem.nome). Sem esta linha caíam em 'manual' e
+      -- sumiam da dashboard (medido 2026-10-10: 10 leads em 5 clientes).
+      OR ${c('canal')} ILIKE 'lp %' THEN 'formulario'
     WHEN NULLIF(${c('instance_id')}, '') IS NOT NULL OR ${c('whatsapp_last_message_at')} IS NOT NULL THEN 'chat'
     ELSE 'manual' END)`;
 }
@@ -96,9 +103,18 @@ export function clientesComPortaValidadaSql(): string {
   return `(SELECT v.client_id FROM public.crm_leads v WHERE v.client_id IS NOT NULL AND ${portaValidadaSql('v')} GROUP BY v.client_id)`;
 }
 
-/** Chat que conta: com rastro pago, OU o cliente não tem porta validada (o chat É o CRM dele). */
+/**
+ * Chat que conta: com rastro pago, OU o cliente está marcado para contar o chat
+ * inteiro (`clients.leads_chat_inteiro` — uso interno: Atmos, Onmid).
+ * Subquery não correlacionada de propósito (avaliada uma vez, como a de porta).
+ */
 function chatContaSql(alias = ''): string {
-  return `(${rastroPagoSql(alias)} OR ${col(alias, 'client_id')} NOT IN ${clientesComPortaValidadaSql()})`;
+  return `(${rastroPagoSql(alias)} OR ${col(alias, 'client_id')} IN ${clientesChatInteiroSql()})`;
+}
+
+/** Clientes com o interruptor "contar o chat inteiro" ligado. */
+export function clientesChatInteiroSql(): string {
+  return `(SELECT k.id FROM public.clients k WHERE k.leads_chat_inteiro = TRUE)`;
 }
 
 /** Predicado: o lead CONTA na dashboard. */
@@ -183,8 +199,9 @@ export function portaValidadaSql(alias = ''): string {
   return `((${portaSql(alias)}) IN ('planilha', 'crm_externo', 'formulario'))`;
 }
 
-/** Colunas que `portaSql`/`rastroPagoSql` leem — garantidas por este ALTER (idempotente). */
+/** Colunas que `portaSql`/`rastroPagoSql`/`chatContaSql` leem — garantidas por este ALTER (idempotente). */
 export const ENSURE_COLUNAS_CONTAGEM = `
+  ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS leads_chat_inteiro BOOLEAN NOT NULL DEFAULT false;
   ALTER TABLE public.crm_leads
     ADD COLUMN IF NOT EXISTS porta TEXT,
     ADD COLUMN IF NOT EXISTS raw JSONB,

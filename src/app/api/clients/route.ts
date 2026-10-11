@@ -34,6 +34,8 @@ async function ensureColumns(pool: ReturnType<typeof makeServerPool>) {
   // campanha própria por dentro, e ligar isso sem querer significaria falar com
   // a base do cliente pelo WhatsApp DELE. Ver src/lib/fidelidade.ts.
   await pool.query(`ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS fidelidade_ativa BOOLEAN NOT NULL DEFAULT false`).catch(() => {});
+  // Lei 3 revista (2026-10-10): só uso interno conta o chat inteiro.
+  await pool.query(`ALTER TABLE public.clients ADD COLUMN IF NOT EXISTS leads_chat_inteiro BOOLEAN NOT NULL DEFAULT false`).catch(() => {});
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -52,6 +54,7 @@ function rowToJson(r: any) {
     onboarding_completed: r.onboarding_completed ?? true,
     funil_fonte_topo: r.funil_fonte_topo ?? 'auto',
     fidelidade_ativa: r.fidelidade_ativa === true,
+    leads_chat_inteiro: r.leads_chat_inteiro === true,
   };
 }
 
@@ -67,7 +70,7 @@ export async function GET(req: NextRequest) {
     const { rows } = await pool.query(`
       SELECT c.id, c.name, c.segment, c.status, c.gestor_id, c.ads_billing_mode,
              c.category_id, c.dashboard_type, c.onboarding_completed, c.funil_fonte_topo,
-             c.fidelidade_ativa,
+             c.fidelidade_ativa, c.leads_chat_inteiro,
              u.name as gestor_name, cat.name as category_name
       FROM public.clients c
       LEFT JOIN public.users u ON c.gestor_id = u.id
@@ -122,7 +125,7 @@ export async function PATCH(req: NextRequest) {
   const body = await req.json() as Partial<{
     name: string; segment: string; status: string;
     gestor_id: string | null; category_id: string | null; dashboard_type: string;
-    onboarding_completed: boolean; funil_fonte_topo: string; fidelidade_ativa: boolean;
+    onboarding_completed: boolean; funil_fonte_topo: string; fidelidade_ativa: boolean; leads_chat_inteiro: boolean;
   }>;
   const pool = makeServerPool();
   try {
@@ -150,6 +153,9 @@ export async function PATCH(req: NextRequest) {
     }
     if (body.fidelidade_ativa !== undefined) {
       sets.push(`fidelidade_ativa = $${idx++}`); vals.push(body.fidelidade_ativa === true);
+    }
+    if (body.leads_chat_inteiro !== undefined) {
+      sets.push(`leads_chat_inteiro = $${idx++}`); vals.push(body.leads_chat_inteiro === true);
     }
     if (sets.length === 0) return Response.json({ error: 'Nothing to update' }, { status: 400 });
     vals.push(id);

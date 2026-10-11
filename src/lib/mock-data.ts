@@ -114,6 +114,8 @@ export type Client = {
    * por dentro fica de fora sem ninguém precisar desligar nada.
    */
   fidelidade_ativa?: boolean;
+  /** Lei 3 revista: conta o chat inteiro na dashboard (uso interno: Atmos, Onmid). Padrão false = só chat com rastro de anúncio. */
+  leads_chat_inteiro?: boolean;
 };
 
 export const mockClients: Client[] = [
