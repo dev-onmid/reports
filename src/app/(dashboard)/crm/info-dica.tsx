@@ -44,7 +44,7 @@ export const DICAS_ATENDIMENTO = {
   notaIa: 'Nota de 0 a 100 dada pela IA ao ler uma amostra das conversas do período, quando alguém clica em "Gerar auditoria". Excelente 85+, Bom 70–84, Atenção 55–69, Crítico 40–54, Grave abaixo de 40. Não é recalculada todo dia: vale a data da última auditoria.',
   leads: 'Quantos leads foram captados no período (pela data do lead).',
   semResposta: 'Leads cuja ÚLTIMA mensagem é do cliente: a bola está com a clínica. É o número de "risco de perda". Quem já está em etapa de ganho ou perda fica fora.',
-  respostaMedia: 'Tempo médio entre o cliente escrever e a próxima mensagem nossa. Conta toda vez que o cliente fala, não só o primeiro contato. Mensagem que nunca foi respondida não entra nesta média (entra em "Sem resposta").',
+  respostaMedia: 'Tempo médio entre o cliente escrever e a próxima mensagem nossa. Conta toda vez que o cliente fala, não só o primeiro contato. Mensagem que nunca foi respondida não entra nesta média (entra em "Sem resposta").\n\n"1ª resposta ao lead" é só o primeiro contato: quanto tempo depois da PRIMEIRA mensagem do lead a clínica respondeu pela primeira vez.',
   taxaResposta: 'Das vezes em que o cliente falou, em quantas a clínica respondeu. 100% = ninguém ficou sem retorno.',
   conversasAtivas: 'Leads do período que trocaram pelo menos uma mensagem com a clínica.',
   variacao: 'As setas comparam com a janela anterior de mesma duração.',
