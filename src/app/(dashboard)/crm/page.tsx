@@ -22,6 +22,7 @@ import { LeadChatPanel } from './lead-chat-panel';
 import { CamposAtendimento, HistoricoLead, NovoLeadModal, opcoesDeOrigem } from './lead-operacao';
 import { ModoClienteContext, useEhGestorCliente, useEhUsuarioCliente, useMeuNome, useModoCliente } from '@/lib/modo-cliente';
 import { EquipeCliente } from './cliente-gestor';
+import { DICAS_ATENDIMENTO, InfoDica } from './info-dica';
 import { BotaoTags, FiltroTag, TagChips, TagsConfigModal, salvarTagsDoLead, useTagsDoCliente, type CrmTag } from './tags';
 import { AcessosClienteModal } from './acessos-cliente-modal';
 import { SeletorModeloFunil } from '@/components/crm/seletor-modelo-funil';
@@ -1701,11 +1702,11 @@ function AttendanceView({
   const varAtivas = variacao(activeConversations, prev?.active_conversations);
   const cls = data?.classification;
   const classificationRows = cls ? [
-    { label: 'Em atendimento', value: cls.em_atendimento, color: '#3B82F6' },
-    { label: 'Sem resposta', value: cls.sem_resposta, color: '#EF4444' },
-    { label: 'Aguardando retorno', value: cls.aguardando_retorno, color: '#FACC15' },
-    { label: 'Encerrados', value: cls.encerrado, color: '#8B5CF6' },
-    { label: 'Sem conversa', value: cls.sem_conversa, color: '#52525B' },
+    { label: 'Em atendimento', value: cls.em_atendimento, color: '#3B82F6', dica: DICAS_ATENDIMENTO.classEmAtendimento },
+    { label: 'Sem resposta', value: cls.sem_resposta, color: '#EF4444', dica: DICAS_ATENDIMENTO.classSemResposta },
+    { label: 'Aguardando retorno', value: cls.aguardando_retorno, color: '#FACC15', dica: DICAS_ATENDIMENTO.classAguardando },
+    { label: 'Encerrados', value: cls.encerrado, color: '#8B5CF6', dica: DICAS_ATENDIMENTO.classEncerrados },
+    { label: 'Sem conversa', value: cls.sem_conversa, color: '#52525B', dica: DICAS_ATENDIMENTO.classSemConversa },
   ].filter(r => r.value > 0) : [];
   const classificationTotal = Math.max(1, classificationRows.reduce((sum, row) => sum + row.value, 0));
 
@@ -1736,7 +1737,7 @@ function AttendanceView({
             <section className="relative overflow-hidden rounded-2xl border border-purple-500/35 bg-[radial-gradient(circle_at_70%_100%,rgba(139,92,246,0.28),transparent_45%),linear-gradient(135deg,rgba(139,92,246,0.24),rgba(13,21,25,0.96))] p-4 shadow-[0_0_38px_rgba(139,92,246,0.16)]">
               <div className="flex items-center justify-between">
                 <span className="flex items-center gap-2 text-sm font-semibold text-purple-200"><Sparkles className="h-4 w-4" /> Nota IA Atendimento</span>
-                <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] text-purple-100">i</span>
+                <InfoDica texto={DICAS_ATENDIMENTO.notaIa} className="text-purple-200 hover:text-white" />
               </div>
               <div className="mt-6 flex items-end gap-2">
                 <span className="font-heading text-5xl leading-none text-purple-400">{auditLoading ? '…' : aiScore ?? '—'}</span>
@@ -1786,15 +1787,15 @@ function AttendanceView({
             </section>
 
             {[
-              { label: 'Leads no período', value: totalLeads.toLocaleString('pt-BR'), sub: 'leads captados', badge: varLeads?.texto ?? null, badgeBom: varLeads?.bom, Icon: Users, tone: 'border-blue-500/20 bg-[#0D1519]', color: '#A78BFA', badgeTone: 'bg-blue-500/15 text-blue-300' },
-              { label: 'Sem resposta', value: unanswered.toLocaleString('pt-BR'), sub: 'leads aguardando retorno', badge: unanswered > 0 ? 'Risco alto de perda' : null, badgeBom: false, Icon: Clock3, tone: 'border-red-500/25 bg-red-500/10', color: '#EF4444', badgeTone: 'bg-red-500/15 text-red-300' },
-              { label: 'Resposta média', value: formatDuration(summary.avg_response_seconds), sub: 'tempo médio', badge: varResposta?.texto ?? null, badgeBom: varResposta?.bom, Icon: Sparkles, tone: 'border-emerald-500/20 bg-emerald-500/10', color: '#32E843', badgeTone: 'bg-emerald-500/15 text-emerald-300' },
-              { label: 'Taxa de resposta', value: `${responseRate}%`, sub: 'das conversas', badge: varTaxa?.texto ?? null, badgeBom: varTaxa?.bom, Icon: BarChart3, tone: 'border-emerald-500/20 bg-[#0B1B15]', color: '#32E843', badgeTone: 'bg-emerald-500/15 text-emerald-300' },
-              { label: 'Conversas ativas', value: activeConversations.toLocaleString('pt-BR'), sub: 'ativas agora', badge: varAtivas?.texto ?? null, badgeBom: varAtivas?.bom, Icon: MessageCircle, tone: 'border-blue-500/20 bg-blue-500/10', color: '#3B82F6', badgeTone: 'bg-blue-500/15 text-blue-300' },
+              { label: 'Leads no período', dica: DICAS_ATENDIMENTO.leads, value: totalLeads.toLocaleString('pt-BR'), sub: 'leads captados', badge: varLeads?.texto ?? null, badgeBom: varLeads?.bom, Icon: Users, tone: 'border-blue-500/20 bg-[#0D1519]', color: '#A78BFA', badgeTone: 'bg-blue-500/15 text-blue-300' },
+              { label: 'Sem resposta', dica: DICAS_ATENDIMENTO.semResposta, value: unanswered.toLocaleString('pt-BR'), sub: 'leads aguardando retorno', badge: unanswered > 0 ? 'Risco alto de perda' : null, badgeBom: false, Icon: Clock3, tone: 'border-red-500/25 bg-red-500/10', color: '#EF4444', badgeTone: 'bg-red-500/15 text-red-300' },
+              { label: 'Resposta média', dica: DICAS_ATENDIMENTO.respostaMedia, value: formatDuration(summary.avg_response_seconds), sub: 'tempo médio', badge: varResposta?.texto ?? null, badgeBom: varResposta?.bom, Icon: Sparkles, tone: 'border-emerald-500/20 bg-emerald-500/10', color: '#32E843', badgeTone: 'bg-emerald-500/15 text-emerald-300' },
+              { label: 'Taxa de resposta', dica: DICAS_ATENDIMENTO.taxaResposta, value: `${responseRate}%`, sub: 'das conversas', badge: varTaxa?.texto ?? null, badgeBom: varTaxa?.bom, Icon: BarChart3, tone: 'border-emerald-500/20 bg-[#0B1B15]', color: '#32E843', badgeTone: 'bg-emerald-500/15 text-emerald-300' },
+              { label: 'Conversas ativas', dica: DICAS_ATENDIMENTO.conversasAtivas, value: activeConversations.toLocaleString('pt-BR'), sub: 'ativas agora', badge: varAtivas?.texto ?? null, badgeBom: varAtivas?.bom, Icon: MessageCircle, tone: 'border-blue-500/20 bg-blue-500/10', color: '#3B82F6', badgeTone: 'bg-blue-500/15 text-blue-300' },
             ].map(card => (
               <section key={card.label} className={cn('min-h-[178px] rounded-2xl border p-4 shadow-[0_18px_60px_rgba(0,0,0,0.22)]', card.tone)}>
                 <card.Icon className="mb-5 h-5 w-5" style={{ color: card.color }} />
-                <p className="text-sm font-semibold" style={{ color: card.color }}>{card.label}</p>
+                <p className="flex items-center gap-1.5 text-sm font-semibold" style={{ color: card.color }}>{card.label} <InfoDica texto={`${card.dica}\n\n${DICAS_ATENDIMENTO.variacao}`} /></p>
                 <p className="mt-5 font-heading text-4xl leading-none text-zinc-100">{card.value}</p>
                 <p className="mt-2 text-sm text-zinc-400">{card.sub}</p>
                 {card.badge && (
@@ -1817,7 +1818,7 @@ function AttendanceView({
             <section className="rounded-2xl border border-white/[0.08] bg-[#0D1519] p-5 shadow-[0_24px_70px_rgba(0,0,0,0.26)]">
               <div className="mb-5 flex items-start justify-between gap-3">
                 <div>
-                  <h3 className="text-base font-bold">Desempenho de resposta ao longo do tempo</h3>
+                  <h3 className="flex items-center gap-1.5 text-base font-bold">Desempenho de resposta ao longo do tempo <InfoDica texto={DICAS_ATENDIMENTO.desempenho} /></h3>
                   <div className="mt-4 flex items-center gap-5 text-xs text-zinc-400">
                     <span className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-sm bg-primary" /> Tempo médio de resposta</span>
                     <span className="flex items-center gap-2"><span className="h-px w-7 border-t border-dashed border-zinc-500" /> Meta</span>
@@ -1858,7 +1859,7 @@ function AttendanceView({
             </section>
 
             <section className="rounded-2xl border border-white/[0.08] bg-[#0D1519] p-5 shadow-[0_24px_70px_rgba(0,0,0,0.26)]">
-              <h3 className="text-base font-bold">SLA de resposta</h3>
+              <h3 className="flex items-center gap-1.5 text-base font-bold">SLA de resposta <InfoDica texto={DICAS_ATENDIMENTO.sla} /></h3>
               <div className="mt-7 space-y-5">
                 {slaRows.map(row => {
                   const percent = responseTotal > 0 ? Math.round((row.value / responseTotal) * 100) : 0;
@@ -1877,7 +1878,7 @@ function AttendanceView({
             </section>
 
             <section className="rounded-2xl border border-white/[0.08] bg-[#0D1519] p-5 shadow-[0_24px_70px_rgba(0,0,0,0.26)]">
-              <h3 className="text-base font-bold">Classificação dos atendimentos</h3>
+              <h3 className="flex items-center gap-1.5 text-base font-bold">Classificação dos atendimentos <InfoDica texto={DICAS_ATENDIMENTO.classificacao} /></h3>
               <div className="mt-7 grid grid-cols-1 items-center gap-5 sm:grid-cols-[150px_1fr]">
                 <div className="relative h-[150px] w-[150px]">
                   <svg viewBox="0 0 120 120" className="h-full w-full -rotate-90">
@@ -1911,7 +1912,7 @@ function AttendanceView({
                     const percent = Math.round((row.value / Math.max(totalLeads, 1)) * 100);
                     return (
                       <div key={row.label} className="grid grid-cols-[1fr_auto] gap-3 text-xs">
-                        <span className="flex items-center gap-2 text-zinc-300"><span className="h-2.5 w-2.5 rounded-full" style={{ background: row.color }} />{row.label}</span>
+                        <span className="flex items-center gap-2 text-zinc-300"><span className="h-2.5 w-2.5 rounded-full" style={{ background: row.color }} />{row.label} <InfoDica texto={row.dica} /></span>
                         <span className="text-zinc-400">{percent}% ({row.value})</span>
                       </div>
                     );
@@ -1923,7 +1924,7 @@ function AttendanceView({
 
           <div className="grid gap-4 xl:grid-cols-[1.45fr_0.82fr]">
             <section className="rounded-2xl border border-white/[0.08] bg-[#0D1519] p-5 shadow-[0_24px_70px_rgba(0,0,0,0.26)]">
-              <h3 className="text-base font-bold">Risco de perda (leads sem resposta)</h3>
+              <h3 className="flex items-center gap-1.5 text-base font-bold">Risco de perda (leads sem resposta) <InfoDica texto={DICAS_ATENDIMENTO.risco} /></h3>
               <div className="mt-5 grid grid-cols-1 gap-5 md:grid-cols-[180px_1fr]">
                 <div>
                   <p className="flex items-center gap-2 text-sm text-zinc-400"><span className="h-2.5 w-2.5 rounded-sm bg-red-400" /> Leads em risco</p>
@@ -1969,7 +1970,7 @@ function AttendanceView({
             </section>
 
             <section className="relative overflow-hidden rounded-2xl border border-white/[0.08] bg-[#0D1519] p-5 shadow-[0_24px_70px_rgba(0,0,0,0.26)]">
-              <h3 className="text-base font-bold">Retomada de conversas paradas</h3>
+              <h3 className="flex items-center gap-1.5 text-base font-bold">Retomada de conversas paradas <InfoDica texto={DICAS_ATENDIMENTO.retomada} /></h3>
               {followupRate === null ? (
                 <>
                   <p className="mt-8 font-heading text-5xl leading-none text-zinc-500">—</p>
@@ -1991,7 +1992,7 @@ function AttendanceView({
 
           <div className="grid gap-4 xl:grid-cols-2">
             <section className="rounded-2xl border border-white/[0.08] bg-[#0D1519] p-5 shadow-[0_24px_70px_rgba(0,0,0,0.26)]">
-              <h3 className="text-base font-bold">Por atendente</h3>
+              <h3 className="flex items-center gap-1.5 text-base font-bold">Por atendente <InfoDica texto={DICAS_ATENDIMENTO.porAtendente} /></h3>
               {(data?.atendentes ?? []).length === 0 ? (
                 <p className="mt-6 text-sm text-zinc-500">
                   Ainda não há mensagem com autor registrado. A partir de agora, toda resposta
@@ -2030,7 +2031,7 @@ function AttendanceView({
             </section>
 
             <section className="rounded-2xl border border-white/[0.08] bg-[#0D1519] p-5 shadow-[0_24px_70px_rgba(0,0,0,0.26)]">
-              <h3 className="text-base font-bold">Por que perdemos</h3>
+              <h3 className="flex items-center gap-1.5 text-base font-bold">Por que perdemos <InfoDica texto={DICAS_ATENDIMENTO.porQuePerdemos} /></h3>
               {(data?.motivosPerda ?? []).length === 0 ? (
                 <p className="mt-6 text-sm text-zinc-500">
                   Nenhum motivo registrado ainda. A partir de agora, mover um lead para uma etapa
@@ -2129,7 +2130,7 @@ function EvolucaoMensal({ meses }: { meses: MesAtendimento[] }) {
     <section className="min-w-0 rounded-2xl border border-white/[0.08] bg-[#0D1519] p-5 shadow-[0_24px_70px_rgba(0,0,0,0.26)]">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
-          <h3 className="text-base font-bold">Evolução mês a mês</h3>
+          <h3 className="flex items-center gap-1.5 text-base font-bold">Evolução mês a mês <InfoDica texto={DICAS_ATENDIMENTO.evolucao} /></h3>
           <p className="mt-1 text-xs text-zinc-500">Pelo mês da mensagem · setas comparam com o mês anterior · não segue o filtro de período</p>
         </div>
       </div>
@@ -2142,7 +2143,7 @@ function EvolucaoMensal({ meses }: { meses: MesAtendimento[] }) {
               <thead>
                 <tr className="text-left text-[10px] font-bold uppercase tracking-widest text-zinc-500">
                   <th className="pb-2 pr-3">Mês</th>
-                  {cols.map(c => <th key={c.k} className="pb-2 pr-3" title={c.dica}>{c.titulo}</th>)}
+                  {cols.map(c => <th key={c.k} className="pb-2 pr-3"><span className="inline-flex items-center gap-1">{c.titulo} <InfoDica texto={c.dica} /></span></th>)}
                 </tr>
               </thead>
               <tbody>
@@ -2195,7 +2196,7 @@ function TentativasContatoCard({ t }: { t: TentativasContato | null }) {
   const n1 = (v: number | null) => (v == null ? '—' : v.toLocaleString('pt-BR', { maximumFractionDigits: 1 }));
   return (
     <section className="min-w-0 rounded-2xl border border-white/[0.08] bg-[#0D1519] p-5 shadow-[0_24px_70px_rgba(0,0,0,0.26)]">
-      <h3 className="text-base font-bold">Tentativas de contato</h3>
+      <h3 className="flex items-center gap-1.5 text-base font-bold">Tentativas de contato <InfoDica texto={DICAS_ATENDIMENTO.tentativas} /></h3>
       <p className="mt-1 text-xs text-zinc-500">Pessoas que receberam a 1ª mensagem nossa no período selecionado</p>
       {!t || t.tentados === 0 ? (
         <p className="mt-6 text-sm text-zinc-500">Nenhuma tentativa de contato registrada neste período.</p>

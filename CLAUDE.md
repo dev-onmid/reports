@@ -1,3 +1,11 @@
+## Aba Atendimento — ícone "i" com a explicação de cada métrica (2026-10-10)
+
+Pedido do Matheus: "cada descrição ficasse um botão onde passar o mouse… tipo aqueles de 'i' de informação… para que o cliente ou o time, ao apresentar, saiba o que é".
+
+- **`crm/info-dica.tsx`**: `InfoDica` (Tooltip do Base UI com `delay 350ms` — não dispara ao cruzar a tela — e `closeDelay 120`; balão claro, até 320px, `whitespace-pre-line` para listas) e **`DICAS_ATENDIMENTO`**, o dicionário com os textos — a mesma explicação que foi dada ao Matheus no chat, uma por métrica. Texto novo ou corrigido entra ali, nunca inline na tela.
+- **Onde está**: Nota IA (o "i" decorativo virou o de verdade), os 5 cards do topo (cada um com a sua explicação + a nota de que as setas comparam com a janela anterior), os 9 cabeçalhos de seção (Desempenho, SLA, Classificação, Risco, Retomada, Por atendente, Por que perdemos, Evolução mês a mês, Tentativas), cada fatia da legenda da Classificação e cada coluna da Evolução (o `title=` que já existia virou ícone).
+- ✅ tsc + eslint limpos; harness no browser (bundle esbuild + Tailwind CLI): balão abre no hover com o texto em tópicos, legível (`rgb(245,245,245)` sobre texto escuro, 320px). ⚠️ Não visto na aba real com dados — conferir no primeiro uso.
+
 ## Lei 3 revista — chat só conta com rastro de anúncio; "chat inteiro" virou interruptor (2026-10-10)
 
 Print do Matheus: dashboard do Adriano Moleiro com **1.855 leads no mês** (8833% da meta). "Precisa contar só os de campanhas no funil e na dashboard. Prioridade sempre: CRM/planilha → anúncios → depois sim aberto a todos os leads do chat. Tirando a Atmos e a Onmid, que é uso interno, o resto dos clientes queremos mérito daquilo que plantamos."
