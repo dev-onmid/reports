@@ -9,24 +9,33 @@
  * aberto enquanto o cursor estiver em cima; no toque, um clique abre.
  */
 import { Info } from 'lucide-react';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { Tooltip as TooltipPrimitive } from '@base-ui/react/tooltip';
 import { cn } from '@/lib/utils';
 
+/**
+ * Balão no padrão escuro do sistema (o `TooltipContent` compartilhado é claro,
+ * `bg-foreground`, e destoava — print do Matheus: "ficou beeem feio"). Aqui
+ * é a superfície dos cards (#0d1519), borda fina, texto pequeno, sem seta.
+ */
 export function InfoDica({ texto, className, lado = 'bottom' }: { texto: string; className?: string; lado?: 'top' | 'bottom' | 'left' | 'right' }) {
   return (
-    <TooltipProvider delay={350} closeDelay={120}>
-      <Tooltip>
-        <TooltipTrigger
+    <TooltipPrimitive.Provider delay={350} closeDelay={120}>
+      <TooltipPrimitive.Root>
+        <TooltipPrimitive.Trigger
           aria-label="O que é esta métrica"
-          className={cn('inline-flex h-4 w-4 shrink-0 cursor-help items-center justify-center rounded-full text-zinc-500 transition-colors hover:text-zinc-200', className)}
+          className={cn('inline-flex h-3.5 w-3.5 shrink-0 cursor-help items-center justify-center rounded-full text-zinc-600 transition-colors hover:text-zinc-300 data-[popup-open]:text-zinc-300', className)}
         >
-          <Info className="h-3.5 w-3.5" />
-        </TooltipTrigger>
-        <TooltipContent side={lado} className="max-w-[320px] whitespace-pre-line text-left leading-relaxed">
-          {texto}
-        </TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
+          <Info className="h-3 w-3" />
+        </TooltipPrimitive.Trigger>
+        <TooltipPrimitive.Portal>
+          <TooltipPrimitive.Positioner side={lado} sideOffset={6} className="isolate z-50">
+            <TooltipPrimitive.Popup className="z-50 w-max max-w-[260px] whitespace-pre-line rounded-sm border border-white/[0.1] bg-[#0d1519] px-3 py-2 text-left text-[11px] font-normal leading-relaxed text-zinc-300 shadow-[0_12px_32px_rgba(0,0,0,0.5)] data-closed:animate-out data-closed:fade-out-0 data-open:animate-in data-open:fade-in-0">
+              {texto}
+            </TooltipPrimitive.Popup>
+          </TooltipPrimitive.Positioner>
+        </TooltipPrimitive.Portal>
+      </TooltipPrimitive.Root>
+    </TooltipPrimitive.Provider>
   );
 }
 
