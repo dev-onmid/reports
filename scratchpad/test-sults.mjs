@@ -40,6 +40,21 @@ eq(telefoneSults('(34) 99999-8888'), '34999998888', 'tira máscara');
 eq(telefoneSults('999'), null, 'curto demais vira null');
 eq(telefoneSults(null), null, 'null');
 
+// ⚠️ NONO DÍGITO. O JID do WhatsApp traz celular antigo sem o 9; sem restaurar,
+// o SULTS concatena as duas formas e o contato fica com 21 dígitos (medido no
+// CondoStore, 70 negócios). Caso real: lead 554191111309.
+eq(telefoneSults('554191111309'), '41991111309', 'celular sem o 9 ganha o nono dígito');
+eq(telefoneSults('554184232443'), '41984232443', 'caso real do negócio 4874');
+eq(telefoneSults('4388138850'), '43988138850', 'sem DDI, mesma correção');
+eq(telefoneSults('557498000909'), '74998000909', 'assinante começando em 8 também é celular');
+eq(telefoneSults('5541671234567'.slice(0, 12)), '41967123456', 'assinante começando em 6 é celular');
+// ⚠️ Fixo NÃO pode ganhar o 9 — viraria número inexistente do outro lado.
+eq(telefoneSults('554133334444'), '4133334444', 'fixo começando em 3 fica intacto');
+eq(telefoneSults('551123456789'), '1123456789', 'fixo começando em 2 fica intacto');
+eq(telefoneSults('554555556666'), '4555556666', 'fixo começando em 5 fica intacto');
+// Quem já vem certo não é tocado.
+eq(telefoneSults('5543999003906'), '43999003906', '11 dígitos passa inalterado');
+
 // ---- temperatura: texto livre nosso → 1..5 do SULTS
 eq(temperaturaSults('Gelado'), 1, 'gelado');
 eq(temperaturaSults('frio'), 2, 'frio');

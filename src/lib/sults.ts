@@ -91,9 +91,26 @@ function txt(v: unknown, max: number): string | null {
  * `5511987654321` cria o negócio do mesmo jeito — com um telefone que ninguém
  * consegue discar a partir do CRM do cliente, e que não casa com nada na
  * planilha de conferência. `chaveTelefone` já é a régua do repo pra isso.
+ *
+ * ⚠️⚠️ O NONO DÍGITO é restaurado aqui, e isso não é cosmético. O JID do
+ * WhatsApp traz celular antigo SEM o 9 (`554191111309`), então `chaveTelefone`
+ * devolvia `4191111309` — 10 dígitos. Medido no CondoStore em 14/10/2026: o
+ * SULTS recebe esse número, acrescenta o 9 por conta própria e GUARDA OS DOIS
+ * CONCATENADOS (`419111130941991111309`, 21 dígitos). O contato fica com um
+ * telefone que não existe: ninguém liga, ninguém chama no WhatsApp, e o
+ * cadastro não casa com a pessoa que já estava lá. Eram 70 negócios assim, em
+ * todos os canais.
+ *
+ * A régua é a do país: depois do DDD, assinante de 8 dígitos começando em 2-5 é
+ * FIXO e fica como está; começando em 6-9 é celular antigo e recebe o 9 na
+ * frente. Inserir o 9 em fixo criaria um número inválido do outro lado.
  */
 export function telefoneSults(numero: unknown): string | null {
-  return chaveTelefone(numero);
+  const d = chaveTelefone(numero);
+  if (!d) return null;
+  if (d.length !== 10) return d;
+  const assinante = d.slice(2);
+  return /^[6-9]/.test(assinante) ? `${d.slice(0, 2)}9${assinante}` : d;
 }
 
 /**
