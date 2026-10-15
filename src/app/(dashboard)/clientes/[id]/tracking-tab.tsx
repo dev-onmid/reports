@@ -267,10 +267,13 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
   const [importTolki, setImportTolki]   = useState<Record<string, ImportTolki>>({});
 
   async function importarHistoricoTolki(inst: Instance) {
-    const estado: ImportTolki = { rodando: true, pagina: 0, total: 0, leads: 0, mensagens: 0, erro: null, fim: false };
+    // Retoma de onde parou se a rodada anterior deu erro (o que já entrou é dedup por wamid).
+    const anterior = importTolki[inst.id];
+    const inicio = anterior?.erro && anterior.pagina > 0 ? anterior.pagina : 1;
+    const estado: ImportTolki = { rodando: true, pagina: inicio - 1, total: anterior?.total ?? 0, leads: anterior?.leads ?? 0, mensagens: anterior?.mensagens ?? 0, erro: null, fim: false };
     setImportTolki(prev => ({ ...prev, [inst.id]: estado }));
     try {
-      for (let pagina = 1; pagina <= 500; pagina++) {
+      for (let pagina = inicio; pagina <= 500; pagina++) {
         const res = await fetch(`/api/clients/${clientId}/tracking/instances/${inst.id}/tolki-import`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pagina, por_pagina: 20, dias: 180 }),
         });

@@ -46,24 +46,51 @@ export async function POST(
     if (!lista.ok) return Response.json({ error: `Tolki: ${lista.error}` }, { status: 502 });
 
     let leads = 0, mensagens = 0, repetidas = 0, puladas = 0, foraDoPeriodo = 0;
+    const falhas: string[] = [];
     for (const conversa of lista.data.conversas) {
       const quando = conversa.lastMessageAt ?? conversa.createdAt;
       if (quando && new Date(quando).getTime() < corte) { foraDoPeriodo++; continue; }
       const phone = (conversa.contact?.phone ?? '').replace(/\D/g, '');
       if (!phone) { puladas++; continue; } // webchat / contato sem número
 
-      const { id: leadId } = await upsertLeadFromConversation(pool, {
-        clientId,
-        phone,
-        name: conversa.contact?.name ?? undefined,
-        instanceId: inst.instance_id,
-      });
+      // Uma conversa com problema não pode derrubar a página inteira: quando o
+      // upsert colide (dois leads antigos para o mesmo número, com e sem o 9),
+      // usa o lead que já existe com esse número; sem nenhum, pula e registra.
+      let leadId: string | null = null;
+      try {
+        leadId = (await upsertLeadFromConversation(pool, {
+          clientId,
+          phone,
+          name: conversa.contact?.name ?? undefined,
+          instanceId: inst.instance_id,
+        })).id;
+      } catch (err) {
+        const { rows: [existente] } = await pool.query<{ id: string }>(
+          `SELECT id FROM public.crm_leads
+            WHERE client_id = $1 AND regexp_replace(COALESCE(numero, ''), '\\D', '', 'g') IN ($2, $3)
+            ORDER BY created_at ASC LIMIT 1`,
+          [clientId, phone, phone.replace(/^(55\d{2})9(\d{8})$/, '$1$2')],
+        ).catch(() => ({ rows: [] as Array<{ id: string }> }));
+        if (!existente) {
+          puladas++;
+          falhas.push(`${phone}: ${err instanceof Error ? err.message : String(err)}`);
+          continue;
+        }
+        leadId = existente.id;
+      }
       leads++;
 
       for (let p = 1; p <= 50; p++) {
         const msgs = await listarMensagensTolki(apiKey, conversa.id, p, 100);
         if (!msgs.ok) break;
         for (const m of msgs.data) {
+          const externalId = m.externalId ?? `tolki:${m.id}`;
+          // Já importada (rodada anterior): não baixa a mídia de novo.
+          const { rows: [ja] } = await pool.query(
+            `SELECT 1 FROM public.crm_messages WHERE lead_id = $1 AND external_id = $2 LIMIT 1`,
+            [leadId, externalId],
+          );
+          if (ja) { repetidas++; continue; }
           const tipoMidia = tipoDeMidiaTolki(m.type, m.mediaMimeType);
           let text = placeholderTolki(m.type, m.body);
           let tipo = 'texto';
@@ -78,7 +105,6 @@ export async function POST(
             if (salva) { text = salva.url; tipo = tipoMidia; }
           }
           if (!text) { puladas++; continue; }
-          const externalId = m.externalId ?? `tolki:${m.id}`;
           const r = await pool.query(
             `INSERT INTO public.crm_messages (lead_id, client_id, direction, text, tipo, external_id, created_at, whatsapp_status)
              VALUES ($1, $2, $3, $4, $5, $6, $7::timestamptz, $8)
@@ -106,7 +132,8 @@ export async function POST(
 
     const total = lista.data.total;
     const fim = pagina * porPagina >= total || lista.data.conversas.length === 0;
-    return Response.json({ ok: true, pagina, por_pagina: porPagina, total, fim, leads, mensagens, repetidas, puladas, fora_do_periodo: foraDoPeriodo });
+    if (falhas.length) console.warn('[tolki-import] conversas puladas:', falhas.join(' | '));
+    return Response.json({ ok: true, pagina, por_pagina: porPagina, total, fim, leads, mensagens, repetidas, puladas, fora_do_periodo: foraDoPeriodo, falhas });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error('[tolki-import]', msg);
