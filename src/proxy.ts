@@ -56,6 +56,8 @@ const PUBLIC_PREFIXES = [
 
   // Webhooks de entrada — quem chama é Meta/Evolution/integrações, sem cookie.
   '/api/webhook/whatsapp',
+  // WhatsApp oficial (Meta Cloud API): assinatura X-Hub-Signature-256 é a credencial.
+  '/api/webhook/whatsapp-oficial',
   '/api/webhook/cardapioweb',
   '/api/webhook/anotaai',
   '/api/meta/webhook',
