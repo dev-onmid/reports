@@ -116,21 +116,24 @@ async function jaProcessados(pool: Pool, ids: string[]): Promise<Set<string>> {
  */
 async function formulariosParaVarrer(
   pool: Pool, pagina: PaginaDoCliente, clientId: string,
-): Promise<Array<{ id: string; nome: string }>> {
-  const porId = new Map<string, string>();
+): Promise<Array<{ id: string; nome: string; leadsTotal: number | null }>> {
+  // leadsTotal = null quando a fonte não sabe (banco/criativo); 0 só vem da
+  // listagem da Meta, e aí é seguro pular — formulário que nunca teve resposta
+  // não tem o que recuperar. No CondoStore isso corta 22 das 23 consultas.
+  const porId = new Map<string, { nome: string; leadsTotal: number | null }>();
   const { formularios } = await listarFormularios(pagina);
-  for (const f of formularios) porId.set(f.id, f.nome);
+  for (const f of formularios) porId.set(f.id, { nome: f.nome, leadsTotal: f.leadsTotal ?? null });
 
   const { rows } = await pool.query<{ form_id: string; form_name: string | null }>(
     `SELECT form_id, form_name FROM public.meta_leadgen_forms WHERE page_id = $1 OR client_id = $2`,
     [pagina.pageId, clientId],
   ).catch(() => ({ rows: [] as Array<{ form_id: string; form_name: string | null }> }));
-  for (const r of rows) if (!porId.has(r.form_id)) porId.set(r.form_id, r.form_name ?? r.form_id);
+  for (const r of rows) if (!porId.has(r.form_id)) porId.set(r.form_id, { nome: r.form_name ?? r.form_id, leadsTotal: null });
 
   for (const id of await formulariosDosCriativos(pool, clientId, pagina.pageToken)) {
-    if (!porId.has(id)) porId.set(id, id);
+    if (!porId.has(id)) porId.set(id, { nome: id, leadsTotal: null });
   }
-  return [...porId].map(([id, nome]) => ({ id, nome }));
+  return [...porId].map(([id, v]) => ({ id, nome: v.nome, leadsTotal: v.leadsTotal }));
 }
 
 /** O formulário que os anúncios do cliente estão usando agora. */
@@ -186,6 +189,7 @@ export async function recuperarLeadsDoCliente(
 
   for (const form of formularios) {
     if (Date.now() - t0 > orcamento) { res.semTempo = true; break; }
+    if (form.leadsTotal === 0) continue; // nunca teve resposta — nada a buscar
     const { ids, erro: erroIds } = await idsDoFormulario(form.id, pagina.pageToken, desde);
     if (erroIds && ids.length === 0) {
       if (!res.motivosDeFalha.includes(erroIds)) res.motivosDeFalha.push(erroIds);
@@ -231,12 +235,21 @@ export async function recuperarLeadsDaCarteira(
   await ensureLeadgenFormsSchema(pool);
   const t0 = Date.now();
   const orcamento = opts.orcamentoMs ?? 240_000;
+  // ⚠️ A ORDEM É DE RODÍZIO, não alfabética. Uma rodada raramente cabe no
+  // orçamento (a carteira inteira estoura os 240s), e ordenada por nome ela
+  // varreria SEMPRE os mesmos primeiros clientes — quem está no fim do alfabeto
+  // nunca seria olhado, e a falha ficaria invisível exatamente como a da Meta.
+  // Ordenar por "quem esperou mais" faz toda a carteira ser coberta ao longo
+  // das rodadas.
+  await pool.query(
+    `ALTER TABLE public.meta_leadgen_paginas ADD COLUMN IF NOT EXISTS recuperado_em TIMESTAMPTZ`,
+  ).catch(() => null);
   const { rows } = await pool.query<{ client_id: string; name: string }>(
     `SELECT p.client_id, COALESCE(c.name, p.client_id) AS name
        FROM public.meta_leadgen_paginas p
        LEFT JOIN public.clients c ON c.id = p.client_id
       WHERE p.assinada = true
-      ORDER BY name`,
+      ORDER BY p.recuperado_em ASC NULLS FIRST, name`,
   ).catch(() => ({ rows: [] as Array<{ client_id: string; name: string }> }));
 
   const clientes: Array<ResultadoRecuperacao & { nome: string }> = [];
@@ -244,6 +257,10 @@ export async function recuperarLeadsDaCarteira(
   for (const c of rows) {
     if (Date.now() - t0 > orcamento) { semTempo = true; break; }
     const r = await recuperarLeadsDoCliente(pool, c.client_id, { ...opts, orcamentoMs: orcamento, iniciadoEm: t0 });
+    if (!opts.dry) {
+      await pool.query(`UPDATE public.meta_leadgen_paginas SET recuperado_em = NOW() WHERE client_id = $1`,
+        [c.client_id]).catch(() => null);
+    }
     clientes.push({ ...r, nome: c.name });
     novos += r.novos;
     if (r.semTempo) { semTempo = true; break; }
