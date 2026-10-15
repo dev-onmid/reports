@@ -58,6 +58,8 @@ const PUBLIC_PREFIXES = [
   '/api/webhook/whatsapp',
   // WhatsApp oficial (Meta Cloud API): assinatura X-Hub-Signature-256 é a credencial.
   '/api/webhook/whatsapp-oficial',
+  // Tolki (CRM com API oficial): UUID da instância na URL + token Bearer gerado aqui.
+  '/api/webhook/tolki',
   '/api/webhook/cardapioweb',
   '/api/webhook/anotaai',
   '/api/meta/webhook',

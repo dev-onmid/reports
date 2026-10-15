@@ -207,7 +207,7 @@ export async function carregarVinculos(pool: Pool): Promise<VinculoBruto[]> {
             czi.instance_id AS "instanceId", czi.nome, czi.provider
        FROM public.client_zapi_instances czi
        LEFT JOIN public.clients c ON c.id = czi.client_id
-      WHERE czi.ativo = true AND czi.provider <> 'meta'
+      WHERE czi.ativo = true AND czi.provider NOT IN ('meta', 'tolki')
       ORDER BY c.name NULLS LAST, czi.created_at DESC`,
   );
   return rows as VinculoBruto[];
@@ -266,7 +266,7 @@ export async function resolverDestino(
        FROM public.client_zapi_instances czi
        LEFT JOIN public.clients c ON c.id = czi.client_id
       WHERE czi.client_id = $1 AND czi.instance_id = $2 AND czi.ativo = true
-        AND czi.provider <> 'meta'
+        AND czi.provider NOT IN ('meta', 'tolki')
       LIMIT 1`,
     [clientId, instanceId],
   );

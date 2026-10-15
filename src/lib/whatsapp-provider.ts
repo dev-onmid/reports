@@ -1,6 +1,6 @@
 // Abstraction layer for Z-API, Evolution API and Meta Cloud API inbound webhook payloads
 
-export type WhatsAppProvider = 'zapi' | 'evolution' | 'meta';
+export type WhatsAppProvider = 'zapi' | 'evolution' | 'meta' | 'tolki';
 
 export type NormalizedMessage = {
   phone: string;
@@ -195,6 +195,44 @@ export function metaMediaOf(m: Record<string, any>): MetaMedia | null {
     mimetype: String(obj.mime_type ?? 'application/octet-stream'),
     kind,
     caption: String(obj.caption ?? '').trim() || null,
+  };
+}
+
+// ── Tolki (webhook `message.received` / `message.sent`) ──────────────────────
+// `data.message` traz id (wamid), from/to, body, fromMe, messageType, mediaUrl,
+// metadata livre; `data.contact` traz o nome. O referral do anúncio não está na
+// documentação — `extrairReferralTolki` procura no metadata, se vier.
+
+export function normalizeTolkiMessage(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  body: Record<string, any>,
+  referral: { ctwaClid?: string; sourceId?: string; sourceUrl?: string; headline?: string; body?: string },
+  texto: string,
+): NormalizedMessage | null {
+  const m = body?.data?.message ?? {};
+  const contato = body?.data?.contact ?? null;
+  const fromMe = m.fromMe === true;
+  // Recebida: o contato é `from`. Enviada pelo atendente: o contato é `to`.
+  const bruto = fromMe ? (m.to ?? m.remoteJid ?? contato?.phone) : (m.from ?? m.remoteJid ?? contato?.phone);
+  const phone = normalizePhone(String(bruto ?? ''));
+  if (!phone) return null;
+  return {
+    phone,
+    lid: undefined,
+    fromMe,
+    text: texto,
+    timestamp: m.timestamp ?? body?.timestamp ?? undefined,
+    externalId: typeof m.id === 'string' && m.id ? m.id : undefined,
+    ctwaClid: referral.ctwaClid,
+    sourceId: referral.sourceId,
+    sourceUrl: referral.sourceUrl,
+    campaignName: undefined,
+    adsetName: undefined,
+    adName: referral.headline,
+    creativeName: referral.body,
+    pushName: !fromMe && contato?.name ? String(contato.name) : undefined,
+    profilePictureUrl: undefined,
+    quotedText: undefined,
   };
 }
 
