@@ -130,7 +130,7 @@ export function mesclarCamposAssinados(existentes: string[] | null | undefined, 
 
 // ── Token e Página ───────────────────────────────────────────────────────────
 
-async function tokenDeUsuario(pool: Pool, clientId: string): Promise<string | null> {
+export async function tokenDeUsuario(pool: Pool, clientId: string): Promise<string | null> {
   // Preferência: a conexão vinculada à conta de anúncio do cliente; senão a
   // conexão conectada mais recente (é a de agência, vê todas as Páginas).
   const { rows: links } = await pool.query<{ connection_id: string | null }>(
