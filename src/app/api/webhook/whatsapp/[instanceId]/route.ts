@@ -1,9 +1,18 @@
 import { makeServerPool } from '@/lib/server-db';
 import { normalizeWebhookPayload, type WhatsAppProvider } from '@/lib/whatsapp-provider';
 import { ensureCrmMessagesSchema } from '@/lib/crm-conversation-sync';
-import { fetchEvolutionMediaBase64, uploadBase64ToStorage } from '@/lib/evolution-media';
+import { fetchEvolutionMediaBase64 } from '@/lib/evolution-media';
+import { salvarMidia } from '@/lib/crm-midia';
 import { registrarMensagemWhatsApp } from '@/lib/whatsapp-inbound';
+import { timingSafeEqual } from 'node:crypto';
 import type { NextRequest } from 'next/server';
+
+function webhookAutenticado(body: unknown, tokenEsperado: unknown): boolean {
+  const recebido = body && typeof body === 'object' ? (body as { apikey?: unknown }).apikey : undefined;
+  if (typeof recebido !== 'string' || typeof tokenEsperado !== 'string' || !recebido || !tokenEsperado) return false;
+  const a = Buffer.from(recebido), b = Buffer.from(tokenEsperado);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
 
 // O download de mídia recebida (getBase64FromMediaMessage, timeout 15s) + upload pro
 // storage não cabem no orçamento default de 10s do Hobby — sem isso, fotos/áudios
@@ -112,9 +121,14 @@ export async function POST(
 
   try {
     // 1. Resolve instance → client + provider (accepts UUID or instance_id name)
+    // ⚠️ Só pelo UUID da linha (é o que vai na URL do webhook). Aceitar o NOME
+    // da instância deixava a URL adivinhável ("crm-<cliente>").
+    if (!/^[0-9a-f-]{36}$/i.test(instanceId)) {
+      return Response.json({ ok: false, error: 'Instância não encontrada ou inativa' }, { status: 404 });
+    }
     const { rows: [inst] } = await pool.query(
-      `SELECT id, client_id, provider, instance_id FROM public.client_zapi_instances
-       WHERE (id::text = $1 OR instance_id = $1) AND ativo = true`,
+      `SELECT id, client_id, provider, instance_id, token FROM public.client_zapi_instances
+       WHERE id::text = $1 AND ativo = true`,
       [instanceId],
     );
     if (!inst) {
@@ -131,6 +145,17 @@ export async function POST(
     // 2. Parse and normalize payload based on provider
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const body: any = await req.json().catch(() => ({}));
+
+    // ⚠️ A Evolution manda `apikey` (o token da instância) em todo webhook —
+    // conferido no bundle dela (`...,sender:a,apikey:c`). Sem esta checagem
+    // qualquer um na internet postava uma "mensagem recebida" aqui: criava
+    // lead, disparava conversão no Meta, gastava IA e, via follow-up, mandava
+    // WhatsApp do número do CLIENTE para quem quisesse (auditoria 2026-10-10).
+    // Medido antes de ligar: 29 de 29 instâncias ativas com token igual ao da
+    // Evolution. Z-API não manda credencial no corpo e não tem instância ativa.
+    if (!webhookAutenticado(body, inst.token)) {
+      return Response.json({ ok: false, error: 'Credencial do webhook inválida' }, { status: 401 });
+    }
 
     if (provider === 'evolution') {
       const statusUpdates = extractEvolutionStatusUpdates(body);
@@ -218,6 +243,7 @@ export async function POST(
     let messageTipo: string = 'texto';
     let resolvedMessageText: string = msg.text;
     let mediaCaption: string | null = null;
+    let midiaToken: string | null = null;
     const evoMsg = provider === 'evolution' ? body?.data?.message : null;
     const mediaKind: string | null = evoMsg?.audioMessage ? 'audio'
       : evoMsg?.imageMessage ? 'imagem'
@@ -228,7 +254,13 @@ export async function POST(
     if (mediaKind && body?.data?.key) {
       const media = await fetchEvolutionMediaBase64(evolutionInstanceName, body.data.key);
       if (media) {
-        const mediaUrl = await uploadBase64ToStorage(media.base64, media.mimetype);
+        // Disco da VPS, atrás de rota autenticada (crm-midia.ts). O lead ainda
+        // não existe neste ponto — o vínculo entra depois do upsert.
+        const salva = await salvarMidia(pool, {
+          clientId, bytes: Buffer.from(media.base64, 'base64'), mime: media.mimetype, origem: 'recebida',
+        }).catch(err => { console.error('[webhook midia]', err instanceof Error ? err.message : err); return null; });
+        const mediaUrl = salva?.url ?? null;
+        if (salva) midiaToken = salva.token;
         if (mediaUrl) {
           resolvedMessageText = mediaUrl;
           messageTipo = mediaKind;
@@ -246,7 +278,7 @@ export async function POST(
       instanceRowId: String(inst.id),
       instanceName: evolutionInstanceName,
       msg,
-      media: { text: resolvedMessageText, tipo: messageTipo, caption: mediaCaption },
+      media: { text: resolvedMessageText, tipo: messageTipo, caption: mediaCaption, midiaToken },
       rawPayload: body,
     });
 

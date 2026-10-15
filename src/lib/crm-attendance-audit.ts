@@ -347,8 +347,10 @@ export async function runAttendanceAudit(pool: Pool, clientId: string, from: str
 
 export async function fetchLatestAudit(pool: Pool, clientId: string): Promise<{ result: AttendanceAudit; periodFrom: string; periodTo: string; createdAt: string } | null> {
   await ensureAuditSchema(pool);
+  // ⚠️ period_* é DATE: o driver devolve Date, que vira ISO com hora no JSON e a
+  // tela montava "…T03:00:00.000ZT12:00:00" → "Invalid Date". Texto puro resolve.
   const { rows } = await pool.query<{ resultado: AttendanceAudit; period_from: string; period_to: string; created_at: string }>(
-    `SELECT resultado, period_from, period_to, created_at
+    `SELECT resultado, period_from::text AS period_from, period_to::text AS period_to, created_at
        FROM public.crm_atendimento_auditorias
       WHERE client_id = $1
       ORDER BY created_at DESC
@@ -357,4 +359,34 @@ export async function fetchLatestAudit(pool: Pool, clientId: string): Promise<{ 
   );
   if (!rows[0]) return null;
   return { result: rows[0].resultado, periodFrom: rows[0].period_from, periodTo: rows[0].period_to, createdAt: rows[0].created_at };
+}
+
+export type ItemHistoricoAuditoria = { nota: number; classificacao: string; periodFrom: string; periodTo: string; createdAt: string };
+
+/** Notas anteriores do cliente, da mais antiga para a mais nova — é o que o card desenha. */
+export async function fetchAuditHistory(pool: Pool, clientId: string, limite = 12): Promise<ItemHistoricoAuditoria[]> {
+  await ensureAuditSchema(pool);
+  const { rows } = await pool.query<{ nota_geral: number; classificacao: string; period_from: string; period_to: string; created_at: string }>(
+    `SELECT nota_geral, classificacao, period_from::text AS period_from, period_to::text AS period_to, created_at
+       FROM public.crm_atendimento_auditorias
+      WHERE client_id = $1
+      ORDER BY created_at DESC
+      LIMIT $2`,
+    [clientId, limite],
+  );
+  return rows.reverse().map(r => ({ nota: r.nota_geral, classificacao: r.classificacao, periodFrom: r.period_from, periodTo: r.period_to, createdAt: r.created_at }));
+}
+
+/** Nome de cada lead citado na auditoria — a tela mostrava só o UUID. */
+export async function fetchAuditLeadNames(pool: Pool, clientId: string, audit: AttendanceAudit): Promise<Record<string, string>> {
+  const ids = [
+    ...(audit.bons_exemplos ?? []).map(b => b.lead_id),
+    ...(audit.oportunidades_perdidas ?? []).map(o => o.lead_id),
+  ].filter(id => typeof id === 'string' && /^[0-9a-f-]{36}$/i.test(id));
+  if (ids.length === 0) return {};
+  const { rows } = await pool.query<{ id: string; nome: string | null; numero: string | null }>(
+    `SELECT id::text AS id, nome, numero FROM public.crm_leads WHERE client_id = $1 AND id::text = ANY($2::text[])`,
+    [clientId, ids],
+  );
+  return Object.fromEntries(rows.map(r => [r.id, (r.nome?.trim() || r.numero || 'Lead sem nome')]));
 }

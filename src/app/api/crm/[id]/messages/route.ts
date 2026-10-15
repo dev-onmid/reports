@@ -1,8 +1,10 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { getClientInstance, sendFollowupMessage } from '@/lib/followup-send';
+import { vincularLidAposEnvio } from '@/lib/crm-lid-vinculo';
 import { analisarConversa } from '@/lib/crm-ai-analysis';
 import { ensureCrmMessagesSchema, ensureDefaultFunnel } from '@/lib/crm-conversation-sync';
+import { readSession } from '@/lib/session';
 
 // Ensures crm_messages has all columns the code expects.
 // The original migration only had: id, contact_id, client_id(?), direction, text, created_at.
@@ -24,33 +26,14 @@ export async function GET(
   try {
     await migrateCrmMessages(pool);
 
-    const BASE_WITH_CONTACTS = `
-      WITH target AS (
-        SELECT id, client_id, numero
-          FROM public.crm_leads
-         WHERE id = $1
-         LIMIT 1
-      ),
-      lead_matches AS (
-        SELECT l2.id
-          FROM public.crm_leads l2
-          JOIN target t ON t.client_id = l2.client_id
-         WHERE l2.id = t.id
-            OR (
-              NULLIF(regexp_replace(COALESCE(l2.numero, ''), '\\D', '', 'g'), '') =
-              NULLIF(regexp_replace(COALESCE(t.numero, ''), '\\D', '', 'g'), '')
-              AND NULLIF(regexp_replace(COALESCE(t.numero, ''), '\\D', '', 'g'), '') IS NOT NULL
-            )
-      ),
-      contact_matches AS (
-        SELECT c.id
-          FROM public.crm_contacts c
-          JOIN target t ON t.client_id = c.client_id
-         WHERE NULLIF(regexp_replace(COALESCE(c.phone, ''), '\\D', '', 'g'), '') =
-               NULLIF(regexp_replace(COALESCE(t.numero, ''), '\\D', '', 'g'), '')
-           AND NULLIF(regexp_replace(COALESCE(t.numero, ''), '\\D', '', 'g'), '') IS NOT NULL
-      )`;
-    const BASE_WITHOUT_CONTACTS = `
+    // ⚠️ `crm_contacts` NÃO EXISTE neste banco (código morto que não veio na
+    // migração de setembro) e NENHUMA mensagem usa `contact_id` — medido: 0 de
+    // 83.512. O ramo de contatos só servia para a consulta estourar com
+    // "relation does not exist" e cair num plano B que respondia
+    // `'texto' AS tipo` para TUDO. Resultado: desde setembro o chat recebia
+    // toda mídia marcada como texto e mostrava a URL crua no lugar do player.
+    // Por isso a consulta é uma só agora — sem plano B que falsifique o dado.
+    const BASE = `
       WITH target AS (
         SELECT id, client_id, numero
           FROM public.crm_leads
@@ -69,43 +52,19 @@ export async function GET(
             )
       )`;
     const AFTER_CLAUSE = after ? `AND m.created_at > $2::timestamptz` : '';
-    const WHERE_WITH_CONTACTS = `
-      WHERE (m.lead_id IN (SELECT id FROM lead_matches)
-         OR m.contact_id IN (SELECT id FROM contact_matches))
-        ${AFTER_CLAUSE}
-      ORDER BY m.created_at ASC, m.id ASC
-      LIMIT 500`;
-    const WHERE_WITHOUT_CONTACTS = `
-      WHERE m.lead_id IN (SELECT id FROM lead_matches)
-        ${AFTER_CLAUSE}
-      ORDER BY m.created_at ASC, m.id ASC
-      LIMIT 500`;
     const queryParams = after ? [id, after] : [id];
 
-    // Try with tipo column first; fall back to 'texto' literal if column missing
-    let rows: unknown[] = [];
-    try {
-      const result = await pool.query(
-        `${BASE_WITH_CONTACTS}
-         SELECT m.id, m.direction, m.text, COALESCE(m.tipo, 'texto') AS tipo, m.created_at,
-                m.whatsapp_status, m.whatsapp_error, m.reply_to_text
-         FROM public.crm_messages m ${WHERE_WITH_CONTACTS}`,
-        queryParams,
-      );
-      rows = result.rows;
-    } catch (withContactsErr) {
-      const result = await pool.query(
-        `${BASE_WITHOUT_CONTACTS}
-         SELECT m.id, m.direction, m.text, 'texto' AS tipo, m.created_at,
-                m.whatsapp_status, m.whatsapp_error
-         FROM public.crm_messages m ${WHERE_WITHOUT_CONTACTS}`,
-        queryParams,
-      ).catch(async () => {
-        if (withContactsErr) throw withContactsErr;
-        throw new Error('Falha ao carregar mensagens');
-      });
-      rows = result.rows;
-    }
+    const { rows } = await pool.query(
+      `${BASE}
+       SELECT m.id, m.direction, m.text, COALESCE(m.tipo, 'texto') AS tipo, m.created_at,
+              m.whatsapp_status, m.whatsapp_error, m.reply_to_text, m.autor_nome
+       FROM public.crm_messages m
+       WHERE m.lead_id IN (SELECT id FROM lead_matches)
+         ${AFTER_CLAUSE}
+       ORDER BY m.created_at ASC, m.id ASC
+       LIMIT 500`,
+      queryParams,
+    );
 
     // Conversa na tela = lida. Este GET só é chamado com a conversa aberta (load
     // inicial + poll de 5s), então marcar aqui zera o contador de não-lidas do
@@ -122,6 +81,25 @@ export async function GET(
   } finally {
     await pool.end();
   }
+}
+
+/**
+ * A Evolution baixa a mídia da URL que mandamos — de dentro da rede do
+ * servidor. URL de host interno (evolution, banco, 169.254…) viraria leitura
+ * da rede privada entregue no WhatsApp do atacante. Só https com nome de
+ * domínio público, ou o próprio arquivo em base64 (`data:`).
+ */
+function urlDeMidiaPermitida(raw: unknown): boolean {
+  const v = String(raw ?? '').trim();
+  if (!v) return false;
+  if (/^data:(image|audio|video|application)\//i.test(v)) return true;
+  if (/^\/api\/crm\/midia\/[0-9a-f]{32}$/.test(v)) return true;
+  let u: URL;
+  try { u = new URL(v); } catch { return false; }
+  if (u.protocol !== 'https:') return false;
+  const h = u.hostname.toLowerCase();
+  if (!h.includes('.') || /^[0-9.]+$/.test(h) || h.includes(':') || /\.(local|internal|lan)$/.test(h)) return false;
+  return true;
 }
 
 export async function POST(
@@ -141,7 +119,12 @@ export async function POST(
   };
 
   const tipo = body.tipo ?? 'texto';
-  const direction = body.direction ?? 'out';
+  // Usuário de cliente só ENVIA: gravar uma "recebida" forjada falsearia a nota
+  // de atendimento e acionaria a IA (auditoria 2026-10-10).
+  const direction = req.headers.get('x-onmid-team') === 'cliente' ? 'out' : (body.direction ?? 'out');
+  if (tipo !== 'texto' && tipo !== 'localizacao' && !urlDeMidiaPermitida(body.url)) {
+    return Response.json({ error: 'Endereço de mídia não permitido.' }, { status: 400 });
+  }
 
   // Build display text for DB
   let dbText: string;
@@ -190,6 +173,7 @@ export async function POST(
     let waSent = false;
     let waError: string | undefined;
     let waExternalId: string | undefined;
+    let waInstanceName: string | null = null;
     let whatsappStatus: string | null = direction === 'out' ? 'pending' : null;
 
     if (direction === 'out') {
@@ -217,6 +201,7 @@ export async function POST(
             waSent = result.ok;
             waError = result.error;
             waExternalId = result.externalId;
+            if (waSent && instance.provider === 'evolution') waInstanceName = instance.instanceId;
           }
         } else {
           waError = 'Nenhuma instância WhatsApp ativa para este cliente';
@@ -227,12 +212,28 @@ export async function POST(
       whatsappStatus = waSent ? 'sent' : 'failed';
     }
 
+    // Autoria: só para mensagem que SAI pela tela, e só da sessão — o proxy
+    // sobrescreve o header com o cookie assinado, então não dá para forjar.
+    // Follow-up, disparo e webhook continuam sem autor de propósito.
+    let autorId: string | null = null;
+    let autorNome: string | null = null;
+    if (direction === 'out') {
+      const sess = readSession(req);
+      if (sess?.uid) {
+        autorId = sess.uid;
+        const { rows: [u] } = await pool.query<{ name: string | null }>(
+          `SELECT name FROM public.users WHERE id = $1`, [sess.uid],
+        ).catch(() => ({ rows: [] as { name: string | null }[] }));
+        autorNome = u?.name ?? null;
+      }
+    }
+
     const { rows: [msg] } = await pool.query(
       `INSERT INTO public.crm_messages
-        (lead_id, client_id, direction, text, tipo, external_id, whatsapp_status, whatsapp_error)
-       VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''), $7, NULLIF($8, ''))
-       RETURNING id, direction, text, tipo, created_at, whatsapp_status, whatsapp_error`,
-      [targetLeadId, lead.client_id, direction, dbText, tipo, waExternalId ?? '', whatsappStatus, waError ?? ''],
+        (lead_id, client_id, direction, text, tipo, external_id, whatsapp_status, whatsapp_error, autor_id, autor_nome)
+       VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''), $7, NULLIF($8, ''), $9, $10)
+       RETURNING id, direction, text, tipo, created_at, whatsapp_status, whatsapp_error, autor_nome`,
+      [targetLeadId, lead.client_id, direction, dbText, tipo, waExternalId ?? '', whatsappStatus, waError ?? '', autorId, autorNome],
     );
     await pool.query(
       `UPDATE public.crm_leads
@@ -251,6 +252,14 @@ export async function POST(
           )`,
       [lead.client_id, id, lead.numero ?? null, dbText, direction],
     );
+    // Modo LID: o envio é o único momento em que o WhatsApp revela o código do
+    // contato. Guardado no lead, a resposta e o que o atendente mandar depois
+    // pelo celular deixam de cair num lead sem telefone (caso CondoStore).
+    if (waInstanceName && lead.numero && !String(lead.whatsapp_lid ?? '').trim()) {
+      await vincularLidAposEnvio(pool, {
+        clientId: lead.client_id, leadId: targetLeadId, phone: lead.numero, instanceName: waInstanceName,
+      });
+    }
     if (lead.time_interno !== true) {
       await analisarConversa(pool, targetLeadId).catch(err => console.error('[messages analisarConversa]', err));
     }

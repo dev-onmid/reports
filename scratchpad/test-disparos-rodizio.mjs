@@ -1,7 +1,7 @@
 /**
  * Compile antes de rodar:
  *   npx esbuild src/lib/disparos-rodizio.ts src/lib/whatsapp-texto.ts src/lib/cardapioweb-recorrencia.ts \
- *     --outdir=scratchpad/build --format=esm --platform=node
+ *     --outdir=scratchpad/build --format=esm --platform=node --out-extension:.js=.mjs
  *   npx esbuild src/lib/disparos-chip.ts --bundle --outfile=scratchpad/build/disparos-chip.mjs \
  *     --format=esm --platform=node --external:pg
  *   node scratchpad/test-disparos-rodizio.mjs
@@ -11,7 +11,7 @@
  */
 import assert from 'node:assert/strict';
 import { lerImagens, gravarImagens, doRodizio, parDoRodizio, combinacoesRodizio } from './build/disparos-rodizio.mjs';
-import { humanizarTexto, tirarMarcacao } from './build/whatsapp-texto.mjs';
+import { humanizarTexto, tirarMarcacao, perfilDaMensagem, regrasDeFormato } from './build/whatsapp-texto.mjs';
 import { pedeParaParar, chaveOptout } from './build/disparos-chip.mjs';
 
 let n = 0;
@@ -155,6 +155,33 @@ eq(humanizarTexto('Oi {nome}, seu fone {telefone}'), 'Oi {nome}, seu fone {telef
 eq(humanizarTexto('arquivo nome_do_produto aqui'), 'arquivo nome_do_produto aqui', 'underscore no MEIO da palavra fica');
 eq(tirarMarcacao('_a_ e _b_'), 'a e b', 'duas marcações na mesma linha');
 eq(humanizarTexto(null), '', 'null vira string vazia');
+
+// ── espelhar o formato da original (2026-10-02) ──
+eq(humanizarTexto('É *grátis* mesmo', { manterMarcacao: true }), 'É *grátis* mesmo', 'manterMarcacao preserva o negrito');
+eq(humanizarTexto('Olha — *isso*', { manterMarcacao: true }), 'Olha - *isso*', 'manterMarcacao ainda troca o travessão');
+eq(humanizarTexto('- um\n- dois', { manterListas: true }), '- um\n- dois', 'manterListas preserva marcador');
+eq(humanizarTexto('- um\n- dois'), 'um\ndois', 'sem a opção continua tirando marcador');
+eq(humanizarTexto('🌯 Pediu *um*, leva dois!\n\nCorre lá 🍹'), '🌯 Pediu um, leva dois!\n\nCorre lá 🍹', 'emoji e parágrafo nunca são removidos pela limpeza');
+const orig = '🌯 *Pediu um, leva dois!*\n\nNa compra de um *Bowl ou Burrito* + Pink Lemonade, você ganha outro igual ou de menor valor 🥳\n\nVálido até 31/10.\n\nMostra essa mensagem na hora 😉';
+const perfil = perfilDaMensagem(orig);
+eq(perfil.paragrafos, 4, 'conta 4 parágrafos separados por linha em branco');
+eq(perfil.emojis, 3, 'conta 3 emojis');
+eq(perfil.negrito, true, 'detecta negrito com asterisco');
+eq(perfil.italico, false, 'sem itálico');
+eq(perfil.listas, false, 'sem lista');
+eq(perfil.caracteres, orig.length, 'tamanho em caracteres');
+const liso = perfilDaMensagem('oi, tudo bem? passando pra avisar da promo de hoje');
+eq(liso.paragrafos, 1, 'texto corrido = 1 parágrafo'); eq(liso.emojis, 0, 'sem emoji'); eq(liso.negrito, false, 'sem negrito');
+eq(perfilDaMensagem('').paragrafos, 0, 'vazio = 0 parágrafos');
+eq(perfilDaMensagem('1. um\n2. dois').listas, true, 'detecta lista numerada');
+eq(perfilDaMensagem('arquivo nome_do_produto aqui').italico, false, 'underscore no meio da palavra não é itálico');
+const rf = regrasDeFormato(perfil).join('\n');
+assert.ok(rf.includes('4 parágrafos'), 'regra pede 4 parágrafos'); n++;
+assert.ok(rf.includes('entre 2 e 4') && rf.includes('a original tem 3'), 'regra de emoji em faixa ±1'); n++;
+assert.ok(rf.includes('Negrito: a original destaca'), 'regra manda espelhar o negrito'); n++;
+assert.ok(rf.includes(`a original tem ${orig.length}`), 'regra de tamanho cita a original'); n++;
+const rl = regrasDeFormato(liso).join('\n');
+assert.ok(rl.includes('texto corrido') && rl.includes('Formatação: ZERO') && rl.includes('a original não usa'), 'original crua gera regras cruas'); n++;
 eq(humanizarTexto('   '), '', 'só espaço vira vazio');
 eq(humanizarTexto('2 * 3 = 6'), '2 * 3 = 6', 'asterisco solto com espaço não é marcação');
 

@@ -1,6 +1,24 @@
 import { makeServerPool } from '@/lib/server-db';
 import { verifyPassword, hashPassword } from '@/lib/password';
 import { createSessionToken, sessionCookieHeader, sessionSecretMissing } from '@/lib/session';
+import { hostDaRequisicao, hostSoEquipe, MSG_USAR_CRM, URL_CRM } from '@/lib/host-acesso';
+import { ipDaRequisicao, resposta429, tentativaPermitida } from '@/lib/rate-limit';
+
+let colunasLogin: Promise<void> | null = null;
+function garantirColunasLogin(pool: ReturnType<typeof makeServerPool>): Promise<void> {
+  if (!colunasLogin) {
+    colunasLogin = pool.query(`ALTER TABLE public.users
+      ADD COLUMN IF NOT EXISTS team TEXT NOT NULL DEFAULT 'onmid',
+      ADD COLUMN IF NOT EXISTS client_ids TEXT[] NOT NULL DEFAULT '{}',
+      ADD COLUMN IF NOT EXISTS perfil_cliente TEXT NOT NULL DEFAULT 'atendente'`)
+      .then(() => undefined).catch((e) => { colunasLogin = null; throw e; });
+  }
+  return colunasLogin;
+}
+
+// Hash de ninguém: e-mail desconhecido também paga o scrypt, para o tempo de
+// resposta não dizer quem tem conta.
+const HASH_FICTICIO = 'scrypt$16384$8$1$AAAAAAAAAAAAAAAAAAAAAA==$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=';
 
 /**
  * Login server-side.
@@ -35,21 +53,36 @@ export async function POST(req: Request) {
   // respostas distintas permitiriam enumerar quem tem conta.
   const deny = () => Response.json({ error: 'E-mail ou senha inválidos, ou usuário inativo.' }, { status: 401 });
 
+  // Freio de força bruta (auditoria 2026-10-10): por IP e por e-mail, 15 min.
+  const ip = ipDaRequisicao(req);
+  if (!tentativaPermitida(`login:ip:${ip}`, 30, 15 * 60_000)) return resposta429();
+  if (!tentativaPermitida(`login:email:${email}`, 8, 15 * 60_000)) return resposta429();
+
   const pool = makeServerPool();
   try {
+    // ⚠️ O login roda ANTES de qualquer sessão — ninguém mais garante as
+    // colunas novas aqui. Em 10/10 o deploy saiu sem `perfil_cliente` no banco
+    // e TODO login respondeu 500 até a coluna existir. Memoizado por processo.
+    await garantirColunasLogin(pool);
     const { rows } = await pool.query(
-      `SELECT id, name, email, password, role, status, COALESCE(team, 'onmid') AS team
+      `SELECT id, name, email, password, role, status, COALESCE(team, 'onmid') AS team,
+              COALESCE(perfil_cliente, 'atendente') AS perfil
          FROM public.users
         WHERE LOWER(TRIM(email)) = $1
         LIMIT 1`,
       [email],
     );
     const user = rows[0];
-    if (!user) return deny();
+    if (!user) { await verifyPassword(password, HASH_FICTICIO); return deny(); }
 
     const { ok, needsRehash } = await verifyPassword(password, user.password);
     if (!ok) return deny();
     if (user.status !== 'Ativo') return deny();
+    // reports.onmid.app é da equipe: funcionário do cliente entra pelo crm.
+    // Depois da senha conferida, para não revelar quem tem conta.
+    if (user.team === 'cliente' && hostSoEquipe(hostDaRequisicao(req))) {
+      return Response.json({ error: MSG_USAR_CRM, usarCrm: URL_CRM }, { status: 403 });
+    }
 
     // Migração transparente: a conta guardava a senha em texto puro (ou com
     // parâmetros de hash antigos) e acabou de provar que sabe a senha — este é
@@ -73,6 +106,7 @@ export async function POST(req: Request) {
         email: user.email,
         role: user.role,
         team: user.team,
+        perfil: user.team === 'cliente' ? user.perfil : undefined,
       },
       { headers: { 'Set-Cookie': sessionCookieHeader(token) } },
     );

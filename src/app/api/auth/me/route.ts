@@ -1,5 +1,6 @@
 import { makeServerPool } from '@/lib/server-db';
 import { readSession } from '@/lib/session';
+import { hostDaRequisicao, hostSoEquipe, MSG_USAR_CRM, URL_CRM } from '@/lib/host-acesso';
 
 /**
  * Fonte de verdade da sessão para o cliente.
@@ -16,7 +17,8 @@ export async function GET(req: Request) {
   const pool = makeServerPool();
   try {
     const { rows } = await pool.query(
-      `SELECT id, name, email, role, status, COALESCE(team, 'onmid') AS team
+      `SELECT id, name, email, role, status, COALESCE(team, 'onmid') AS team,
+              COALESCE(perfil_cliente, 'atendente') AS perfil
          FROM public.users WHERE id = $1 LIMIT 1`,
       [session.uid],
     );
@@ -24,8 +26,14 @@ export async function GET(req: Request) {
     if (!user || user.status !== 'Ativo') {
       return Response.json({ error: 'Não autenticado.' }, { status: 401 });
     }
+    // Sessão de cliente aberta no reports (de antes da trava): a tela some e
+    // ele é mandado para o crm.onmid.app.
+    if (user.team === 'cliente' && hostSoEquipe(hostDaRequisicao(req))) {
+      return Response.json({ error: MSG_USAR_CRM, usarCrm: URL_CRM }, { status: 401 });
+    }
     return Response.json({
       userId: String(user.id), name: user.name, email: user.email, role: user.role, team: user.team,
+      perfil: user.team === 'cliente' ? user.perfil : undefined,
     });
   } catch {
     // auditoria 2026-08-22: falha de banco NÃO é sessão inválida. Devolver 401

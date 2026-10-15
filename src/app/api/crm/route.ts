@@ -1,8 +1,11 @@
 import type { NextRequest } from 'next/server';
 import { memoizarSchema } from '@/lib/schema-memo';
 import { makeServerPool } from '@/lib/server-db';
+import { requireAdmin } from '@/lib/api-auth';
+import { autorDaRequisicao, ensureColunasOperacao, registrarEventos } from '@/lib/crm-eventos';
 import { ensureCrmMessagesSchema, ensureDefaultFunnel, getFirstFunnelStageLabel } from '@/lib/crm-conversation-sync';
 import { leadVisivelCrmSql } from '@/lib/lead-contagem';
+import { ensureCrmTagsSchema, tagsDoLeadSql } from '@/lib/crm-tags';
 
 async function ensureTableInterno(pool: ReturnType<typeof makeServerPool>) {
   await pool.query(`
@@ -78,6 +81,11 @@ async function ensureTableInterno(pool: ReturnType<typeof makeServerPool>) {
       ADD COLUMN IF NOT EXISTS temperatura_atualizada_em TIMESTAMPTZ,
       ADD COLUMN IF NOT EXISTS ia_ultimo_analise TIMESTAMPTZ,
       ADD COLUMN IF NOT EXISTS ia_confianca_ultimo INTEGER,
+      ADD COLUMN IF NOT EXISTS nota_atendimento SMALLINT,
+      ADD COLUMN IF NOT EXISTS nota_atendimento_motivo TEXT,
+      ADD COLUMN IF NOT EXISTS nota_atendimento_ajuste TEXT,
+      ADD COLUMN IF NOT EXISTS nota_atendimento_trecho JSONB,
+      ADD COLUMN IF NOT EXISTS nota_atendimento_em TIMESTAMPTZ,
       ADD COLUMN IF NOT EXISTS time_interno BOOLEAN NOT NULL DEFAULT false;
   `);
 }
@@ -87,6 +95,18 @@ async function ensureTableInterno(pool: ReturnType<typeof makeServerPool>) {
 // concorrentes se enfileiram no lock da tabela e a rota estoura — foi o apagão do
 // CRM em 16/09/2026. Ver src/lib/schema-memo.ts.
 const ensureTable = memoizarSchema(ensureTableInterno);
+
+/**
+ * `raw` é a linha ORIGINAL da planilha importada — a tela nunca lê, e era o que
+ * mais pesava: o CRM da Romanza baixava 24 MB por abertura (medido 09/10), num
+ * CRM que agora roda no celular da recepção do cliente.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function semCru(row: any) {
+  const { raw: _raw, ...resto } = row;
+  void _raw;
+  return resto;
+}
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
@@ -99,10 +119,20 @@ export async function GET(req: NextRequest) {
     await ensureTable(pool);
     await ensureDefaultFunnel(pool, clientId);
     await ensureCrmMessagesSchema(pool);
+    await ensureCrmTagsSchema(pool);
+    // Modo incremental: o CRM busca a lista completa ao abrir e, entre uma carga e
+    // outra, só o que mudou. A Atmos tem 3.500+ leads (8,5 MB): baixar tudo a cada
+    // 8 s travava a tela e, chegando no meio de um arraste, jogava o lead de volta.
+    // ⚠️ Mesmos filtros da lista completa (funil + número válido + lead visível),
+    // senão o incremental traz linha que a carga completa não mostra.
     if (since) {
       const { rows } = await pool.query(
         `SELECT l.*,
-                COALESCE(l.whatsapp_last_message_at, lm.last_contact_at, l.updated_at, l.created_at) AS last_contact_at
+                COALESCE(l.lead_date, l.data) AS normalized_date,
+                COALESCE(l.lead_name, l.nome) AS normalized_name,
+                COALESCE(NULLIF(l.revenue, 0), l.valor_rs, 0)::float AS normalized_revenue,
+                COALESCE(l.whatsapp_last_message_at, lm.last_contact_at, l.updated_at, l.created_at) AS last_contact_at,
+                ${tagsDoLeadSql('l')} AS tags
            FROM public.crm_leads l
            LEFT JOIN LATERAL (
              SELECT MAX(m.created_at) AS last_contact_at
@@ -110,11 +140,16 @@ export async function GET(req: NextRequest) {
               WHERE m.lead_id = l.id
            ) lm ON true
           WHERE l.client_id = $1 AND l.updated_at > $2
+            AND ($3::uuid IS NULL OR l.funnel_id = $3::uuid)
+            AND (
+              NULLIF(regexp_replace(COALESCE(l.numero, ''), '\\D', '', 'g'), '') IS NULL
+              OR regexp_replace(l.numero, '\\D', '', 'g') ~ '^[0-9]{8,15}$'
+            )
             AND ${leadVisivelCrmSql('l')}
           ORDER BY l.updated_at DESC`,
-        [clientId, since],
+        [clientId, since, funnelId ?? null],
       );
-      return Response.json(rows);
+      return Response.json(rows.map(semCru));
     }
     const { rows } = await pool.query(
       `WITH ranked AS (
@@ -147,7 +182,8 @@ export async function GET(req: NextRequest) {
           AND ${leadVisivelCrmSql()}
       )
       SELECT ranked.*,
-             COALESCE(ranked.whatsapp_last_message_at, lm.last_contact_at, ranked.updated_at, ranked.created_at) AS last_contact_at
+             COALESCE(ranked.whatsapp_last_message_at, lm.last_contact_at, ranked.updated_at, ranked.created_at) AS last_contact_at,
+             ${tagsDoLeadSql('ranked')} AS tags
       FROM ranked
       LEFT JOIN LATERAL (
         SELECT MAX(m.created_at) AS last_contact_at
@@ -158,7 +194,7 @@ export async function GET(req: NextRequest) {
       ORDER BY COALESCE(normalized_date, data) DESC NULLS LAST, created_at DESC`,
       [clientId, funnelId ?? null]
     );
-    return Response.json(rows);
+    return Response.json(rows.map(semCru));
   } finally {
     await pool.end();
   }
@@ -172,6 +208,11 @@ export async function POST(req: NextRequest) {
   try {
     await ensureTable(pool);
     const fallbackFunnelId = await ensureDefaultFunnel(pool, clientId);
+    // Funil informado tem de ser DESTE cliente (auditoria 2026-10-10).
+    if (f.funnel_id) {
+      const { rowCount } = await pool.query(`SELECT 1 FROM public.crm_funnels WHERE id::text = $1 AND client_id = $2`, [String(f.funnel_id), clientId]);
+      if (!rowCount) return Response.json({ error: 'Funil não pertence a este cliente.' }, { status: 400 });
+    }
     const fallbackStatus = await getFirstFunnelStageLabel(pool, String(f.funnel_id ?? fallbackFunnelId));
     // Normaliza o número na ENTRADA (só dígitos; vazio → NULL) — o webhook e o GET
     // já trabalham com número normalizado; sem isso, número digitado formatado
@@ -198,17 +239,35 @@ export async function POST(req: NextRequest) {
         f.funnel_id??fallbackFunnelId, f.temperatura??null, f.time_interno === true,
       ]
     );
+    // Responsável escolhido na criação conta como definido à mão (a integração
+    // não reescreve). Fora do INSERT posicional de propósito: aquela lista de
+    // 29 parâmetros já foi fonte de bug de posição.
+    if (typeof f.responsavel === 'string' && f.responsavel.trim()) {
+      await ensureColunasOperacao(pool);
+      await pool.query(
+        `UPDATE public.crm_leads SET responsavel = $2, responsavel_manual = TRUE WHERE id = $1`,
+        [lead.id, f.responsavel.trim().slice(0, 120)],
+      );
+      lead.responsavel = f.responsavel.trim().slice(0, 120);
+    }
+    await registrarEventos(pool, {
+      leadId: lead.id, clientId, autor: autorDaRequisicao(req),
+      eventos: [{ tipo: 'criado', campo: null, de: null, para: [lead.nome, lead.status].filter(Boolean).join(' · ') }],
+    });
     return Response.json(lead, { status: 201 });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error('[CRM POST error]', msg);
-    return Response.json({ error: msg }, { status: 500 });
+    return Response.json({ error: 'Não foi possível criar o lead.' }, { status: 500 });
   } finally {
     await pool.end();
   }
 }
 
 export async function DELETE(req: NextRequest) {
+  // Apaga TODOS os leads de um cliente — só administrador, conferido no banco.
+  const admin = await requireAdmin(req);
+  if (!admin.ok) return admin.response;
   const clientId = new URL(req.url).searchParams.get('clientId');
   if (!clientId) return Response.json({ error: 'clientId required' }, { status: 400 });
 

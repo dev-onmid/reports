@@ -32,13 +32,17 @@ const META_SECTIONS: ReportSectionDef[] = [
 
 export const REPORT_SECTIONS: Record<ReportTemplateKey, ReportSectionDef[]> = {
   performance: [
-    { key: 'visao_geral',      label: 'Visão geral (CRM)',        desc: 'Faturamento, pedidos e ticket médio' },
+    { key: 'visao_geral',      label: 'Visão geral (CRM)',        desc: 'Faturamento, vendas e ticket médio' },
+    { key: 'funil',            label: 'Funil comercial',          desc: 'Etapas do CRM e conversão entre elas' },
+    { key: 'canais',           label: 'Canais',                   desc: 'Leads e faturamento por canal de origem' },
     { key: 'regioes',          label: 'Regiões',                  desc: 'Bairros/regiões dos clientes' },
     { key: 'trafego_resumo',   label: 'Tráfego pago — resumo',    desc: 'Meta e Google lado a lado' },
     ...META_SECTIONS,
     { key: 'google_resumo',    label: 'Google Ads — resumo',      desc: 'Investimento, cliques e conversões' },
     { key: 'google_campanhas', label: 'Google Ads — campanhas',   desc: 'Cards por campanha' },
     { key: 'google_keywords',  label: 'Google Ads — palavras-chave', desc: 'Top palavras-chave compradas' },
+    { key: 'site_resumo',      label: 'Site / landing pages',     desc: 'Visitas, contatos e origem (Google Analytics)' },
+    { key: 'site_audiencia',   label: 'Comportamento da audiência', desc: 'Dispositivos, cidades, páginas de entrada e horários' },
     ...CONTEUDO_SECTIONS,
   ],
   delivery: [

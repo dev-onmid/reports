@@ -2,6 +2,9 @@ import type { NextRequest } from 'next/server';
 import { parseRecorte, filtroRegiaoSql, type ContagemRegioes } from '@/lib/regiao-recorte';
 import { ENSURE_COLUNAS_CONTAGEM, leadContaSql, rastreadoForaDoCrmSql, rastroPagoSql } from '@/lib/lead-contagem';
 import { makeServerPool } from '@/lib/server-db';
+import { escopoDoCliente } from '@/lib/acesso';
+import { FUNIS_PLANILHA } from '@/lib/funil-planilha';
+import { lerFunilPlanilha } from '@/lib/funil-planilha-server';
 import {
   contarFunil,
   contarFunilPorStage,
@@ -234,7 +237,20 @@ export async function GET(req: NextRequest) {
     // União: cliente com ZERO leads no recorte continua na resposta (funil
     // zerado + suas `regioes`), senão os chips sumiriam junto e não daria
     // para desfazer o filtro.
-    const clientes = new Set<string>([...leadsPorCliente.keys(), ...regioesPorCliente.keys(), ...contagemPorCliente.keys()]);
+    // Usuário de CLIENTE (gestor na dashboard) só recebe o próprio cliente —
+    // a consulta é da base inteira, o recorte é na resposta.
+    const meus = escopoDoCliente(req.headers);
+    const clientes = new Set<string>([...leadsPorCliente.keys(), ...regioesPorCliente.keys(), ...contagemPorCliente.keys()]
+      .filter(id => !meus || meus.includes(id)));
+    // Funil contado DIRETO da planilha, com as regras dela (funil-planilha.ts) —
+    // só para cliente com regra cadastrada e dado no período. Com recorte de
+    // região não vale: a planilha não sabe filtrar por região do lead.
+    const funisPlanilha = recorte
+      ? new Map()
+      : await lerFunilPlanilha(pool, Object.keys(FUNIS_PLANILHA), from, to).catch(err => {
+          console.error('[crm summary] funil da planilha', err);
+          return new Map();
+        });
     return Response.json(
       [...clientes].map((clientId) => {
         const leads = leadsPorCliente.get(clientId) ?? [];
@@ -249,6 +265,8 @@ export async function GET(req: NextRequest) {
           funil,
           /** Etapas reais do Kanban (nome/cor/ordem/contagem) ou null. */
           funilStages: porStage.degraus.length ? porStage : null,
+          /** Funil da planilha do cliente (vence o do Kanban na dashboard) ou null. */
+          funilPlanilha: funisPlanilha.get(clientId) ?? null,
           /** Receita dos fechados (nome herdado do shape antigo). */
           total: funil.receita,
           /** ISO da última entrada/atualização de lead deste cliente (selo de frescor). */

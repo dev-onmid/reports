@@ -1,4 +1,5 @@
 import type { NextRequest } from 'next/server';
+import { statusFechouSql } from '@/lib/importacao-origem';
 import { parseRecorte, filtroRegiaoSql } from '@/lib/regiao-recorte';
 import { leadContaSql } from '@/lib/lead-contagem';
 import { makeServerPool } from '@/lib/server-db';
@@ -99,7 +100,7 @@ export async function GET(req: NextRequest) {
   const pool = makeServerPool();
   try {
     const VALOR = `COALESCE(NULLIF(revenue, 0), valor_rs, 0)`;
-    const VENDEU = `(${VALOR} > 0 OR fechou = TRUE)`;
+    const VENDEU = `(${VALOR} > 0 OR fechou = TRUE OR ${statusFechouSql()})`;
     const JANELA_GANHO = `(COALESCE(fechado_em, lead_date, data) IS NULL
                            OR COALESCE(fechado_em, lead_date, data) BETWEEN $2 AND $3)`;
     const JANELA_LEAD = `(COALESCE(lead_date, data) IS NULL

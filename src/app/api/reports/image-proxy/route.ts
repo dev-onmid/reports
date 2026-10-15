@@ -11,6 +11,12 @@ function isBlockedHost(hostname: string): boolean {
     /^172\.(1[6-9]|2\d|3[01])\./.test(h);
 }
 
+const HOSTS_PERMITIDOS = [/(^|\.)fbcdn\.net$/, /(^|\.)cdninstagram\.com$/, /(^|\.)facebook\.com$/, /(^|\.)fbsbx\.com$/, /(^|\.)googleusercontent\.com$/, /(^|\.)gstatic\.com$/, /(^|\.)unavatar\.io$/, /(^|\.)instagram\.com$/];
+function hostPermitido(hostname: string): boolean {
+  const h = hostname.toLowerCase();
+  return HOSTS_PERMITIDOS.some(r => r.test(h));
+}
+
 export async function GET(request: NextRequest) {
   const url = request.nextUrl.searchParams.get('url');
   if (!url) return Response.json({ error: 'Missing url' }, { status: 400 });
@@ -21,19 +27,25 @@ export async function GET(request: NextRequest) {
   } catch {
     return Response.json({ error: 'Invalid url' }, { status: 400 });
   }
-  if (target.protocol !== 'https:' || isBlockedHost(target.hostname)) {
+  // Só os CDNs de onde os criativos vêm (auditoria 2026-10-10): a lista de
+  // bloqueio sozinha deixava passar redirecionamento para host interno
+  // (169.254…, evolution, localhost:3000) e devolvia HTML no nosso domínio.
+  if (target.protocol !== 'https:' || isBlockedHost(target.hostname) || !hostPermitido(target.hostname)) {
     return Response.json({ error: 'Url not allowed' }, { status: 400 });
   }
 
   try {
-    const upstream = await fetch(target.toString());
-    if (!upstream.ok || !upstream.body) {
+    const upstream = await fetch(target.toString(), { redirect: 'manual', signal: AbortSignal.timeout(15_000) });
+    const tipo = (upstream.headers.get('content-type') ?? '').toLowerCase();
+    if (!upstream.ok || !upstream.body || !tipo.startsWith('image/')) {
       return Response.json({ error: 'Upstream fetch failed' }, { status: 502 });
     }
     return new Response(upstream.body, {
       status: 200,
       headers: {
-        'Content-Type': upstream.headers.get('content-type') ?? 'image/jpeg',
+        'Content-Type': tipo,
+        'X-Content-Type-Options': 'nosniff',
+        'Content-Disposition': 'inline',
         'Cache-Control': 'public, max-age=3600',
         'Access-Control-Allow-Origin': '*',
       },

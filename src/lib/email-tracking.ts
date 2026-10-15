@@ -1,3 +1,10 @@
+import { createHmac } from 'node:crypto';
+
+/** Assinatura do destino: o /track/click só redireciona para URL que nós mesmos escrevemos no e-mail. */
+export function assinarDestino(url: string): string {
+  return createHmac('sha256', process.env.SESSION_SECRET ?? '').update(url).digest('base64url').slice(0, 24);
+}
+
 function getBaseUrl(): string {
   if (process.env.NEXT_PUBLIC_BASE_URL) return process.env.NEXT_PUBLIC_BASE_URL.replace(/\/$/, '');
   if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
@@ -14,7 +21,7 @@ export function injectTracking(
 
   const withClicks = html.replace(
     /href="(https?:\/\/[^"]+)"/gi,
-    (_, url: string) => `href="${base}/api/email/track/click?${param}&url=${encodeURIComponent(url)}"`,
+    (_, url: string) => `href="${base}/api/email/track/click?${param}&url=${encodeURIComponent(url)}&s=${assinarDestino(url)}"`,
   );
 
   const pixel = `<img src="${base}/api/email/track/open?${param}" `

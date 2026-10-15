@@ -51,7 +51,7 @@ export const allPermission: Permission = Object.fromEntries(
 // Orthogonal to `role`: which org someone belongs to. Only matters inside Disparos
 // today — 'onmid' sees every instance/campaign, 'parceiro' sees only their own.
 // Admins (role) always see everything regardless of team.
-export type Team = 'onmid' | 'parceiro';
+export type Team = 'onmid' | 'parceiro' | 'cliente';
 
 export type User = {
   id: string;
@@ -114,6 +114,8 @@ export type Client = {
    * por dentro fica de fora sem ninguém precisar desligar nada.
    */
   fidelidade_ativa?: boolean;
+  /** Lei 3 revista: conta o chat inteiro na dashboard (uso interno: Atmos, Onmid). Padrão false = só chat com rastro de anúncio. */
+  leads_chat_inteiro?: boolean;
 };
 
 export const mockClients: Client[] = [

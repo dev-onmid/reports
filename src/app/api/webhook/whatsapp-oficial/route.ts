@@ -2,7 +2,7 @@ import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { normalizeMetaMessage, metaMediaOf } from '@/lib/whatsapp-provider';
 import { registrarMensagemWhatsApp, parseProviderTimestamp } from '@/lib/whatsapp-inbound';
-import { uploadBase64ToStorage } from '@/lib/evolution-media';
+import { salvarMidia } from '@/lib/crm-midia';
 import { ensureCrmMessagesSchema, upsertLeadFromConversation } from '@/lib/crm-conversation-sync';
 import { resolverLeadExistente } from '@/lib/lead-identity';
 import {
@@ -111,15 +111,22 @@ async function processarRecebida(
   let tipo = 'texto';
   let text = msg.text;
   let caption: string | null = null;
+  let midiaToken: string | null = null;
   const media = metaMediaOf(m);
   if (media) {
     const token = lerTokenMeta(inst.token);
     const bytes = token ? await fetchMetaMediaBase64(media.id, token) : null;
-    const url = bytes ? await uploadBase64ToStorage(bytes.base64, bytes.mimetype) : null;
-    if (url) {
-      text = url;
+    // Mesmo destino da mídia do Evolution: disco da VPS atrás de rota autenticada.
+    const salva = bytes
+      ? await salvarMidia(pool, {
+          clientId: inst.client_id, bytes: Buffer.from(bytes.base64, 'base64'), mime: bytes.mimetype, origem: 'recebida',
+        }).catch(err => { console.error('[whatsapp-oficial midia]', err instanceof Error ? err.message : err); return null; })
+      : null;
+    if (salva) {
+      text = salva.url;
       tipo = media.kind;
       caption = media.caption;
+      midiaToken = salva.token;
     }
   }
 
@@ -128,7 +135,7 @@ async function processarRecebida(
     instanceRowId: inst.id,
     instanceName: inst.instance_id,
     msg,
-    media: { text, tipo, caption },
+    media: { text, tipo, caption, midiaToken },
     rawPayload,
   });
 }

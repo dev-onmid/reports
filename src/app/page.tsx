@@ -26,13 +26,20 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [expirado, setExpirado] = useState(false);
   const [destino, setDestino] = useState('/inicio');
+  // crm.onmid.app é o MESMO sistema, com a porta de entrada dos clientes: o
+  // login troca o título e quem entra cai direto no CRM.
+  const [ehCrm, setEhCrm] = useState(false);
 
   // auditoria 2026-08-22: lido do window (e não de useSearchParams) pra não
   // exigir Suspense nesta página, que é a raiz do app.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     setExpirado(params.get('expirado') === '1');
-    setDestino(destinoSeguro(params.get('next')));
+    if (params.get('usar_crm') === '1') setError('Seu acesso é pelo crm.onmid.app — entre por lá.');
+    const crm = window.location.hostname.startsWith('crm.');
+    setEhCrm(crm);
+    if (crm) document.title = 'Onmid CRM';
+    setDestino(params.get('next') ? destinoSeguro(params.get('next')) : crm ? '/crm' : '/inicio');
   }, []);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -44,6 +51,12 @@ export default function LoginPage() {
     const resultado = await authenticateUser(email, password);
     setLoading(false);
 
+    if (!resultado.ok && resultado.motivo === 'usar_crm') {
+      setExpirado(false);
+      setError('Seu acesso é pelo crm.onmid.app — levando você para lá…');
+      window.setTimeout(() => { window.location.href = `${resultado.destino ?? 'https://crm.onmid.app'}/`; }, 1500);
+      return;
+    }
     if (!resultado.ok) {
       setExpirado(false);
       setError(
@@ -54,8 +67,9 @@ export default function LoginPage() {
       return;
     }
 
-    // Volta pra tela em que a sessão expirou, não pro início fixo.
-    router.push(destino);
+    // Funcionário do cliente só tem o CRM; o resto, volta pra tela em que a
+    // sessão expirou, não pro início fixo.
+    router.push(resultado.session.team === 'cliente' ? '/crm' : destino);
   }
 
   return (
@@ -74,8 +88,8 @@ export default function LoginPage() {
             alt="Onmid"
             className="mb-6 h-14 w-auto max-w-[260px] object-contain"
           />
-          <h1 className="text-3xl font-heading font-normal tracking-wider text-foreground uppercase">Acesso Restrito</h1>
-          <p className="text-sm text-muted-foreground mt-2 font-medium">Plataforma de Relatórios Estratégicos</p>
+          <h1 className="text-3xl font-heading font-normal tracking-wider text-foreground uppercase">{ehCrm ? 'CRM' : 'Acesso Restrito'}</h1>
+          <p className="text-sm text-muted-foreground mt-2 font-medium">{ehCrm ? 'Atendimento e funil de vendas' : 'Plataforma de Relatórios Estratégicos'}</p>
         </div>
 
         {expirado && (
@@ -86,13 +100,13 @@ export default function LoginPage() {
 
         <form onSubmit={handleSubmit} className="space-y-5">
           <div className="space-y-2">
-            <Label htmlFor="email" className="text-foreground/80 uppercase text-xs tracking-wider">E-mail corporativo</Label>
+            <Label htmlFor="email" className="text-foreground/80 uppercase text-xs tracking-wider">{ehCrm ? 'E-mail' : 'E-mail corporativo'}</Label>
             <Input
               id="email"
               type="email"
               value={email}
               onChange={(event) => setEmail(event.target.value)}
-              placeholder="nome@onmid.com.br"
+              placeholder={ehCrm ? 'seu@email.com' : 'nome@onmid.com.br'}
               className="bg-background border-border/50 focus-visible:border-primary focus-visible:ring-1 focus-visible:ring-primary h-12"
             />
           </div>

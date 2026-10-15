@@ -4,14 +4,29 @@ import { Fragment, useEffect, useState, useRef, useCallback, useMemo } from 'rea
 import type { ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 import { notificar } from '@/components/ui/toast';
+import { useModoCliente } from '@/lib/modo-cliente';
+import { ConectarWhatsappModal } from './conectar-whatsapp';
+import { BotaoTags, TagChips, salvarTagsDoLead, useTagsDoCliente, type CrmTag } from './tags';
+import { GerenciarRespostas, SugestoesResposta, aplicarVariaveis, respostasDoAtalho, useRespostasRapidas, type RespostaRapida } from './respostas-rapidas';
 import {
   Search, MessageCircle, RefreshCw, Send, Paperclip,
   Image, Mic, Video, FileText, MapPin, X, CheckCircle2,
   AlertCircle, History, Filter, MoreHorizontal, Smile,
   CheckSquare2, Square, Trash2, Ban, UserX,
   Wifi, WifiOff, AlertTriangle, Check, CheckCheck, Clock3,
-  Play, Pause, Download,
+  Play, Pause, Download, Zap,
+  ImageOff,
+  Loader2,
 } from 'lucide-react';
+
+function ChevronLeftIcon() {
+  return <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2"><path d="M15 18l-6-6 6-6" /></svg>;
+}
+
+/** URL externa OU a nossa mídia autenticada (relativa, /api/crm/midia/<token>). */
+function ehUrlDeMidia(text: string): boolean {
+  return text.startsWith('http') || text.startsWith('/api/crm/midia/');
+}
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -35,6 +50,7 @@ type InboxLead = {
   avatarUrl?: string | null;
   profilePicUrl?: string | null;
   created_at: string;
+  tags?: CrmTag[];
 };
 
 export type CrmMessage = {
@@ -121,12 +137,12 @@ function leadName(lead: InboxLead | null) {
 function inboxPreview(lead: InboxLead): string {
   const text = (lead.last_message ?? '').trim();
   const tipo = lead.last_tipo ?? 'texto';
-  if (tipo === 'imagem' || (text.startsWith('http') && isImageUrl(text)) || text === '[Imagem]') return '📷 Foto';
-  if (tipo === 'video' || (text.startsWith('http') && isVideoUrl(text)) || text === '[Vídeo]') return '🎥 Vídeo';
-  if (tipo === 'audio' || (text.startsWith('http') && isAudioUrl(text)) || text === '[Áudio]') return '🎤 Mensagem de voz';
+  if (tipo === 'imagem' || (ehUrlDeMidia(text) && isImageUrl(text)) || text === '[Imagem]') return '📷 Foto';
+  if (tipo === 'video' || (ehUrlDeMidia(text) && isVideoUrl(text)) || text === '[Vídeo]') return '🎥 Vídeo';
+  if (tipo === 'audio' || (ehUrlDeMidia(text) && isAudioUrl(text)) || text === '[Áudio]') return '🎤 Mensagem de voz';
   if (tipo === 'localizacao') return '📍 Localização';
   if (text === '[Sticker]' || text === '[Figurinha]') return '🩵 Figurinha';
-  if (tipo === 'documento' || /^\[doc\]/i.test(text) || (text.startsWith('http') && /\.(pdf|docx?|xlsx?|pptx?|zip)(\?.*)?$/i.test(text))) {
+  if (tipo === 'documento' || /^\[doc\]/i.test(text) || (ehUrlDeMidia(text) && /\.(pdf|docx?|xlsx?|pptx?|zip)(\?.*)?$/i.test(text))) {
     const nomeArq = text.replace(/^\[doc\]\s*/i, '').split('/').pop()?.split('?')[0];
     return `📄 ${nomeArq || 'Documento'}`;
   }
@@ -234,12 +250,25 @@ export function DateSeparator({ label }: { label: string }) {
   );
 }
 
+// ⚠️ Mídia que não carrega NÃO pode sumir calada: a bolha vazia foi o que
+// escondeu a quebra do Supabase por semanas. Depois de 90 dias a faxina apaga
+// foto/vídeo/documento (ver expurgarMidia), e o chat precisa DIZER isso.
+function MidiaIndisponivel({ oQue }: { oQue: string }) {
+  return (
+    <div className="flex items-center gap-2 rounded-lg bg-muted/40 px-3 py-2 text-[12px] text-muted-foreground">
+      <ImageOff className="h-4 w-4 shrink-0" />
+      <span>{oQue} não disponível — arquivos saem do servidor depois de 90 dias.</span>
+    </div>
+  );
+}
+
 export function MessageBubble({ msg, onImageClick }: { msg: CrmMessage; onImageClick?: (src: string) => void }) {
   const isOut = msg.direction === 'out';
   const t = msg.tipo ?? 'texto';
   const text = msg.text;
   const time = msgTimeFmt(msg.created_at);
   const waStatus = msg.whatsapp_status ?? (isOut ? 'sent' : null);
+  const [falhou, setFalhou] = useState(false);
 
   const content = (() => {
     if (t === 'localizacao') {
@@ -251,12 +280,13 @@ export function MessageBubble({ msg, onImageClick }: { msg: CrmMessage; onImageC
       );
     }
     if (t === 'imagem' || (t === 'texto' && isImageUrl(text))) {
+      if (falhou) return <MidiaIndisponivel oQue="Foto" />;
       return (
         <div className="space-y-1">
           <img src={text} alt="Imagem"
             className="max-w-full rounded-lg object-cover max-h-60 cursor-zoom-in hover:opacity-90 transition-opacity"
             onClick={() => onImageClick?.(text)}
-            onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+            onError={() => setFalhou(true)} />
         </div>
       );
     }
@@ -264,18 +294,19 @@ export function MessageBubble({ msg, onImageClick }: { msg: CrmMessage; onImageC
       return <VoiceMessagePlayer src={text} isOut={isOut} />;
     }
     if (t === 'video' || (t === 'texto' && isVideoUrl(text))) {
-      return <video controls src={text} className="max-w-full max-h-52 rounded-lg" />;
+      if (falhou) return <MidiaIndisponivel oQue="Vídeo" />;
+      return <video controls src={text} className="max-w-full max-h-52 rounded-lg" onError={() => setFalhou(true)} />;
     }
     // Documento vira cartão estilo WhatsApp — tanto com arquivo baixável (URL)
     // quanto o placeholder "[Doc] nome.pdf" de mensagens cujo arquivo não foi salvo.
-    const isDocUrl = text.startsWith('http') && /\.(pdf|docx?|xlsx?|pptx?|zip|csv|txt)(\?.*)?$/i.test(text);
+    const isDocUrl = ehUrlDeMidia(text) && /\.(pdf|docx?|xlsx?|pptx?|zip|csv|txt)(\?.*)?$/i.test(text);
     const isDocPlaceholder = /^\[doc\]/i.test(text.trim());
     if (t === 'documento' || isDocUrl || isDocPlaceholder) {
       const fileName = (isDocPlaceholder
         ? text.trim().replace(/^\[doc\]\s*/i, '')
         : decodeURIComponent(text.split('/').pop()?.split('?')[0] ?? '')) || 'Documento';
       const ext = (fileName.split('.').pop() ?? '').toUpperCase();
-      const hasFile = text.startsWith('http');
+      const hasFile = ehUrlDeMidia(text);
       const card = (
         <div className={cn(
           'flex min-w-[220px] max-w-full items-center gap-3 rounded-lg px-3 py-2.5',
@@ -339,17 +370,50 @@ function fmtAudioTime(s: number) {
   return `${m}:${sec.toString().padStart(2, '0')}`;
 }
 
+// Velocidade da escuta, no padrão do WhatsApp. A escolha é LEMBRADA para os
+// próximos áudios: quem ouve em 2× normalmente quer ouvir tudo em 2×, e trocar
+// bolha a bolha seria pior que não ter o botão.
+const VELOCIDADES = [1, 1.5, 2] as const;
+const CHAVE_VELOCIDADE = 'crm:audio-velocidade';
+
+function velocidadeSalva(): number {
+  if (typeof window === 'undefined') return 1;
+  const v = Number(window.localStorage.getItem(CHAVE_VELOCIDADE));
+  return (VELOCIDADES as readonly number[]).includes(v) ? v : 1;
+}
+
 function VoiceMessagePlayer({ src, isOut }: { src: string; isOut: boolean }) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [playing, setPlaying] = useState(false);
   const [duration, setDuration] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
+  // Preferência lida na criação do estado, não num efeito: o player só existe
+  // no cliente (as mensagens chegam por fetch), então não há risco de o
+  // servidor renderizar um valor e o navegador outro.
+  const [velocidade, setVelocidade] = useState<number>(velocidadeSalva);
+  const velocidadeRef = useRef(1);
+
+  // `playbackRate` é do elemento: mudar só o estado do React não acelera nada.
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    audio.playbackRate = velocidade;
+    // Sem isto a voz fica de desenho animado em 2× em alguns navegadores.
+    audio.preservesPitch = true;
+    velocidadeRef.current = velocidade;
+  }, [velocidade]);
 
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
     const onTime = () => setCurrentTime(audio.currentTime);
-    const onLoaded = () => setDuration(audio.duration || 0);
+    const onLoaded = () => {
+      setDuration(audio.duration || 0);
+      // Alguns navegadores devolvem playbackRate a 1 quando a mídia carrega —
+      // sem isto o primeiro play sai em velocidade normal mesmo com 2× escolhido.
+      audio.playbackRate = velocidadeRef.current;
+      audio.preservesPitch = true;
+    };
     const onEnd = () => { setPlaying(false); setCurrentTime(0); };
     audio.addEventListener('timeupdate', onTime);
     audio.addEventListener('loadedmetadata', onLoaded);
@@ -366,6 +430,12 @@ function VoiceMessagePlayer({ src, isOut }: { src: string; isOut: boolean }) {
     if (!audio) return;
     if (playing) audio.pause(); else void audio.play();
     setPlaying(!playing);
+  }
+
+  function trocarVelocidade() {
+    const prox = VELOCIDADES[(VELOCIDADES.indexOf(velocidade as 1 | 1.5 | 2) + 1) % VELOCIDADES.length];
+    setVelocidade(prox);
+    try { window.localStorage.setItem(CHAVE_VELOCIDADE, String(prox)); } catch { /* aba anônima */ }
   }
 
   function seekTo(ratio: number) {
@@ -419,6 +489,19 @@ function VoiceMessagePlayer({ src, isOut }: { src: string; isOut: boolean }) {
       <span className="text-[11px] text-muted-foreground tabular-nums shrink-0 w-9 text-right">
         {fmtAudioTime(currentTime > 0 ? currentTime : duration)}
       </span>
+      <button
+        onClick={trocarVelocidade}
+        className={cn(
+          'shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold tabular-nums transition-colors',
+          velocidade === 1
+            ? 'text-muted-foreground hover:bg-muted/50'
+            : cn('text-white', isOut ? 'bg-emerald-600' : 'bg-primary'),
+        )}
+        title="Velocidade da reprodução"
+        aria-label={`Velocidade ${String(velocidade).replace('.', ',')}x — clique para trocar`}
+      >
+        {String(velocidade).replace('.', ',')}×
+      </button>
     </div>
   );
 }
@@ -444,12 +527,28 @@ function MessageDeliveryIcon({ status, error }: { status: string | null; error?:
 
 // ── Media attachment modal ────────────────────────────────────────────────────
 
+// O que o seletor de arquivo oferece por tipo. A validação de verdade é do
+// servidor (`mimePermitido`) — isto é só para não listar o que será recusado.
+const ACEITA_POR_TIPO: Record<MediaType, string> = {
+  imagem: 'image/jpeg,image/png,image/webp,image/gif',
+  audio: 'audio/*',
+  video: 'video/mp4,video/quicktime,video/webm',
+  documento: '.pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.zip',
+  localizacao: '',
+};
+
 function MediaModal({
   tipo,
+  clientId,
+  leadId,
+  arquivoInicial,
   onSend,
   onClose,
 }: {
   tipo: MediaType;
+  clientId: string;
+  leadId: string | null;
+  arquivoInicial?: File | null;
   onSend: (payload: Record<string, unknown>) => Promise<void>;
   onClose: () => void;
 }) {
@@ -459,6 +558,13 @@ function MediaModal({
   const [lng,    setLng]    = useState('');
   const [name,   setName]   = useState('');
   const [sending, setSending] = useState(false);
+  const [arquivo, setArquivo] = useState<File | null>(null);
+  const [previa, setPrevia] = useState<string | null>(null);
+  const [subindo, setSubindo] = useState(false);
+  const [erro, setErro] = useState<string | null>(null);
+  const [arrastando, setArrastando] = useState(false);
+  const inputArquivo = useRef<HTMLInputElement>(null);
+  const isLocation = tipo === 'localizacao';
 
   const labels: Record<MediaType, string> = {
     imagem: 'Imagem', audio: 'Áudio (voz)', video: 'Vídeo', documento: 'Documento', localizacao: 'Localização',
@@ -471,6 +577,55 @@ function MediaModal({
     localizacao: <MapPin className="h-4 w-4" />,
   };
 
+  // Sobe assim que o arquivo é escolhido: o gestor vê a prévia e já sabe que
+  // deu certo antes de clicar em Enviar. A URL devolvida é a nossa, autenticada.
+  const subirArquivo = useCallback(async (f: File) => {
+    setErro(null);
+    setArquivo(f);
+    setPrevia(f.type.startsWith('image/') ? URL.createObjectURL(f) : null);
+    setSubindo(true);
+    try {
+      const form = new FormData();
+      form.append('file', f);
+      const res = await fetch(
+        `/api/upload?clientId=${encodeURIComponent(clientId)}${leadId ? `&leadId=${encodeURIComponent(leadId)}` : ''}`,
+        { method: 'POST', body: form },
+      );
+      const data = await res.json().catch(() => ({})) as { url?: string; error?: string };
+      if (!res.ok || !data.url) {
+        setErro(data.error ?? 'Não foi possível enviar o arquivo');
+        setArquivo(null); setPrevia(null);
+        return;
+      }
+      setUrl(data.url);
+    } catch {
+      setErro('Falha de conexão ao enviar o arquivo');
+      setArquivo(null); setPrevia(null);
+    } finally {
+      setSubindo(false);
+    }
+  }, [clientId, leadId]);
+
+  // Arrastado de fora do modal (direto no chat) já entra pronto.
+  useEffect(() => {
+    if (!arquivoInicial) return;
+    // Fora do tick do efeito (mesmo padrão do load de mensagens): o upload
+    // mexe em quatro estados de uma vez e não deve disparar durante o render.
+    const t = window.setTimeout(() => void subirArquivo(arquivoInicial), 0);
+    return () => window.clearTimeout(t);
+  }, [arquivoInicial, subirArquivo]);
+
+  // Colar print (Ctrl+V) é como a maior parte das fotos de atendimento chega.
+  useEffect(() => {
+    if (isLocation) return;
+    const onPaste = (e: ClipboardEvent) => {
+      const f = Array.from(e.clipboardData?.files ?? [])[0];
+      if (f) { e.preventDefault(); void subirArquivo(f); }
+    };
+    window.addEventListener('paste', onPaste);
+    return () => window.removeEventListener('paste', onPaste);
+  }, [isLocation, subirArquivo]);
+
   async function handleSend() {
     setSending(true);
     if (tipo === 'localizacao') {
@@ -481,8 +636,7 @@ function MediaModal({
     setSending(false);
   }
 
-  const isLocation = tipo === 'localizacao';
-  const canSend = isLocation ? (lat && lng) : url.trim().length > 0;
+  const canSend = isLocation ? Boolean(lat && lng) : url.trim().length > 0;
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={onClose}>
@@ -516,11 +670,64 @@ function MediaModal({
             </>
           ) : (
             <>
-              <label className="block space-y-1">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">URL do arquivo</span>
-                <input value={url} onChange={e => setUrl(e.target.value)} placeholder="https://..."
-                  className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary" />
-              </label>
+              {/* ⚠️ Antes aqui só havia um campo de URL — ninguém no atendimento
+                  tem a foto numa URL: ela está no computador, ou foi copiada.
+                  Escolher, arrastar ou colar cobre os três jeitos reais. */}
+              <input
+                ref={inputArquivo}
+                type="file"
+                accept={ACEITA_POR_TIPO[tipo]}
+                className="hidden"
+                onChange={e => { const f = e.target.files?.[0]; if (f) void subirArquivo(f); e.target.value = ''; }}
+              />
+              <div
+                onDragOver={e => { e.preventDefault(); setArrastando(true); }}
+                onDragLeave={() => setArrastando(false)}
+                onDrop={e => {
+                  e.preventDefault(); setArrastando(false);
+                  const f = e.dataTransfer.files?.[0];
+                  if (f) void subirArquivo(f);
+                }}
+                onClick={() => inputArquivo.current?.click()}
+                className={cn(
+                  'flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed px-4 py-6 text-center transition-colors',
+                  arrastando ? 'border-primary bg-primary/10' : 'border-border hover:border-primary/50 hover:bg-muted/30',
+                )}
+              >
+                {subindo ? (
+                  <>
+                    <Loader2 className="h-6 w-6 animate-spin text-primary" />
+                    <span className="text-xs text-muted-foreground">Enviando {arquivo?.name}…</span>
+                  </>
+                ) : arquivo ? (
+                  <>
+                    {previa
+                      ? <img src={previa} alt="Prévia" className="max-h-32 rounded-md object-contain" />
+                      : <FileText className="h-7 w-7 text-primary" />}
+                    <span className="max-w-full truncate text-xs font-semibold">{arquivo.name}</span>
+                    <span className="text-[11px] text-muted-foreground">Clique para trocar</span>
+                  </>
+                ) : (
+                  <>
+                    <Paperclip className="h-6 w-6 text-muted-foreground" />
+                    <span className="text-xs font-semibold">Clique para escolher o arquivo</span>
+                    <span className="text-[11px] text-muted-foreground">ou arraste aqui · ou cole com Ctrl+V</span>
+                  </>
+                )}
+              </div>
+
+              {erro && <p className="text-xs text-red-400">{erro}</p>}
+
+              {/* Link continua servindo para quem já tem a mídia hospedada. */}
+              {!arquivo && (
+                <details className="group">
+                  <summary className="cursor-pointer list-none text-[11px] text-muted-foreground hover:text-foreground">
+                    ou usar um link da internet
+                  </summary>
+                  <input value={url} onChange={e => setUrl(e.target.value)} placeholder="https://..."
+                    className="mt-2 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary" />
+                </details>
+              )}
               {(tipo === 'imagem' || tipo === 'video') && (
                 <label className="block space-y-1">
                   <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Legenda (opcional)</span>
@@ -590,8 +797,13 @@ export function ChatView({
   focusLeadId?: string | null;
 }) {
   const [leads,      setLeads]      = useState<InboxLead[]>([]);
+  const { tags: catalogoTags } = useTagsDoCliente(clientId);
   const [loading,    setLoading]    = useState(true);
   const [search,     setSearch]     = useState('');
+  const modoCliente = useModoCliente();
+  const [filtroInbox, setFiltroInbox] = useState<'todas' | 'nao_lidas' | 'aguardando'>('todas');
+  const respostas = useRespostasRapidas(clientId);
+  const [gerenciarRespostas, setGerenciarRespostas] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [messages,   setMessages]   = useState<CrmMessage[]>([]);
   const [msgLoading, setMsgLoading] = useState(false);
@@ -603,6 +815,18 @@ export function ChatView({
   const [sendStatus, setSendStatus] = useState<'ok' | 'err' | null>(null);
   const [attachMenu, setAttachMenu] = useState(false);
   const [mediaModal, setMediaModal] = useState<MediaType | null>(null);
+  // Arrastar o arquivo para DENTRO da conversa (pedido do Matheus): abre o
+  // mesmo modal já com o arquivo subindo, em vez de obrigar a passar pelo
+  // menu de anexo.
+  const [arquivoArrastado, setArquivoArrastado] = useState<File | null>(null);
+  const [arrastandoNoChat, setArrastandoNoChat] = useState(false);
+
+  function tipoDoArquivo(f: File): MediaType {
+    if (f.type.startsWith('image/')) return 'imagem';
+    if (f.type.startsWith('video/')) return 'video';
+    if (f.type.startsWith('audio/')) return 'audio';
+    return 'documento';
+  }
   const [syncing,    setSyncing]    = useState(false);
   const [syncResult, setSyncResult] = useState<string | null>(null);
   const [sendError,  setSendError]  = useState<string | null>(null);
@@ -627,6 +851,8 @@ export function ChatView({
   // Instance status
   const [instanceStatus,  setInstanceStatus]  = useState<InstanceStatus>('checking');
   const [instanceInfos,   setInstanceInfos]   = useState<InstanceInfo[]>([]);
+  // undefined = fechado; null = conectar o WhatsApp único (cria se não houver); id = reconectar aquele
+  const [conectarId, setConectarId] = useState<string | null | undefined>(undefined);
   const [instanceAlertOpen, setInstanceAlertOpen] = useState(false);
 
   // Confirm dialog
@@ -1271,7 +1497,7 @@ export function ChatView({
       formData.append('file', new File([blob], `audio-${Date.now()}.${ext}`, {
         type: blob.type || 'audio/webm',
       }));
-      const res = await fetch('/api/upload', { method: 'POST', body: formData });
+      const res = await fetch(`/api/upload?clientId=${encodeURIComponent(clientId)}${selectedId ? `&leadId=${encodeURIComponent(selectedId)}` : ''}`, { method: 'POST', body: formData });
       const data = await res.json().catch(() => ({})) as { url?: string; error?: string };
       if (!res.ok || !data.url) {
         setSendStatus('err');
@@ -1348,6 +1574,16 @@ export function ChatView({
     }
   }
 
+  /** Tag no chat: mesma gravação do Kanban (otimista, volta em erro). */
+  async function definirTagsDaConversa(tagIds: string[]) {
+    if (!selectedId || !selectedLead) return;
+    const antes = selectedLead.tags ?? [];
+    const aplicar = (lista: CrmTag[]) => setLeads(prev => prev.map(l => (l.id === selectedId ? { ...l, tags: lista } : l)));
+    aplicar(catalogoTags.filter(t => tagIds.includes(t.id)));
+    try { aplicar(await salvarTagsDoLead(selectedId, tagIds)); }
+    catch (e) { aplicar(antes); notificar(e instanceof Error ? e.message : 'Não foi possível salvar as tags.', 'erro'); }
+  }
+
   async function changeSelectedStatus(status: string) {
     if (!selectedId || !selectedLead) return;
     const previousStatus = selectedLead.status;
@@ -1374,7 +1610,19 @@ export function ChatView({
     }
   }
 
+  function escolherResposta(r: RespostaRapida) {
+    setReplyText(aplicarVariaveis(r.texto, selectedLead?.nome));
+    requestAnimationFrame(() => textareaRef.current?.focus());
+  }
+
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    // "/atalho" + Enter troca pelo texto da resposta em vez de enviar o atalho.
+    const sugestoes = respostasDoAtalho(replyText, respostas.lista);
+    if (e.key === 'Enter' && !e.shiftKey && sugestoes.length > 0) {
+      e.preventDefault();
+      escolherResposta(sugestoes[0]);
+      return;
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       void sendText();
@@ -1388,7 +1636,14 @@ export function ChatView({
     el.style.height = `${Math.min(el.scrollHeight, 140)}px`;
   }
 
+  const contagemInbox = {
+    nao_lidas: leads.filter(l => (l.unread_count ?? 0) > 0).length,
+    aguardando: leads.filter(l => l.last_direction === 'in').length,
+  };
   const filtered = leads.filter(l => {
+    // "Aguardando resposta" = a última mensagem foi do lead: é a fila de quem atende.
+    if (filtroInbox === 'nao_lidas' && !((l.unread_count ?? 0) > 0)) return false;
+    if (filtroInbox === 'aguardando' && l.last_direction !== 'in') return false;
     if (!search) return true;
     const q = search.toLowerCase();
     return (l.nome ?? '').toLowerCase().includes(q) || (l.numero ?? '').includes(q);
@@ -1408,8 +1663,10 @@ export function ChatView({
       {/* ── Main layout ── */}
       <div className="flex h-full min-h-0 overflow-hidden rounded-[var(--radius)] border border-border bg-card">
 
-        {/* ── Left: Inbox list ── */}
-        <div className="flex w-[340px] shrink-0 flex-col border-r border-border bg-card min-h-0">
+        {/* ── Left: Inbox list ──
+            Celular: uma coisa por vez — a lista some quando há conversa aberta
+            (e a conversa tem botão de voltar). Do md para cima, lado a lado. */}
+        <div className={cn('flex w-full md:w-[340px] shrink-0 flex-col border-r border-border bg-card min-h-0', selectedLead && 'max-md:hidden')}>
           {/* Header */}
           <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
             {selectMode ? (
@@ -1478,6 +1735,7 @@ export function ChatView({
                   >
                     <CheckSquare2 className="h-3.5 w-3.5" />
                   </button>
+                  {!modoCliente && (
                   <button
                     onClick={() => {
                       const wrongName = window.prompt(
@@ -1502,6 +1760,7 @@ export function ChatView({
                   >
                     <Filter className="h-3.5 w-3.5" />
                   </button>
+                  )}
                 </div>
               </>
             )}
@@ -1530,6 +1789,19 @@ export function ChatView({
             {importResult && (
               <p className="mt-2 text-[11px] text-muted-foreground">{importResult}</p>
             )}
+            <div className="mt-2 flex gap-1">
+              {([
+                ['todas', 'Todas', 0],
+                ['nao_lidas', 'Não lidas', contagemInbox.nao_lidas],
+                ['aguardando', 'Aguardando resposta', contagemInbox.aguardando],
+              ] as const).map(([id, rotulo, n]) => (
+                <button key={id} type="button" onClick={() => setFiltroInbox(id)}
+                  className={cn('flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-semibold transition-colors',
+                    filtroInbox === id ? 'border-primary/40 bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:text-foreground')}>
+                  {rotulo}{n > 0 && <span className="rounded bg-muted px-1 text-[10px]">{n}</span>}
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* Lead list */}
@@ -1662,7 +1934,7 @@ export function ChatView({
         </div>
 
         {/* ── Right: Conversation ── */}
-        <div className="relative flex min-w-0 min-h-0 flex-1 flex-col bg-background/50">
+        <div className={cn('relative flex min-w-0 min-h-0 flex-1 flex-col bg-background/50', !selectedLead && 'max-md:hidden')}>
           {recordingAudio && (
             <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center">
               <div
@@ -1687,7 +1959,11 @@ export function ChatView({
           ) : (
             <>
               {/* Conversation header */}
-              <div className="flex items-center gap-3 border-b border-border bg-card px-4 py-3 shrink-0">
+              <div className="flex flex-wrap items-center gap-3 border-b border-border bg-card px-4 py-3 shrink-0">
+                <button type="button" onClick={() => setSelectedId(null)} aria-label="Voltar para as conversas"
+                  className="md:hidden -ml-1 flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted">
+                  <ChevronLeftIcon />
+                </button>
                 <ContactAvatar lead={selectedLead} size="md" avatarOverride={selectedAvatar} />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
@@ -1698,8 +1974,15 @@ export function ChatView({
                     )}
                   </div>
                   <p className="text-xs text-muted-foreground">{formatPhoneBR(selectedLead.numero) || 'Sem número'}</p>
+                  <TagChips tags={selectedLead.tags} max={4} className="mt-0.5" />
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
+                  <BotaoTags
+                    compacto={false}
+                    tags={catalogoTags}
+                    selecionadas={(selectedLead.tags ?? []).map(t => t.id)}
+                    onChange={ids => void definirTagsDaConversa(ids)}
+                  />
                   <div className="relative">
                     <select
                       value={selectedLead.status ?? ''}
@@ -1735,6 +2018,7 @@ export function ChatView({
                     <History className="h-3 w-3" />
                     {syncing ? 'Buscando…' : 'Histórico'}
                   </button>
+                  {!modoCliente && (
                   <button
                     onClick={async () => {
                       if (!selectedId) return;
@@ -1757,6 +2041,7 @@ export function ChatView({
                     <AlertCircle className="h-3 w-3" />
                     Debug
                   </button>
+                  )}
 
                   {/* More options dropdown */}
                   <div className="relative">
@@ -1827,8 +2112,8 @@ export function ChatView({
                 >
                   <WifiOff className="h-3.5 w-3.5 shrink-0 animate-pulse" />
                   {instanceStatus === 'no_instance'
-                    ? 'Nenhuma instância WhatsApp configurada. Clique para saber mais.'
-                    : 'WhatsApp desconectado — mensagens podem não ser enviadas. Clique para detalhes.'}
+                    ? 'Nenhum WhatsApp conectado. Clique para conectar.'
+                    : 'WhatsApp desconectado — clique para reconectar.'}
                 </button>
               )}
 
@@ -1842,8 +2127,37 @@ export function ChatView({
               {/* Messages */}
               <div
                 ref={messagesAreaRef}
-                className="min-h-0 flex-1 overflow-y-auto px-4 py-4 space-y-2 [background-image:linear-gradient(rgba(14,15,20,0.84),rgba(14,15,20,0.84)),radial-gradient(circle_at_1px_1px,rgba(255,255,255,0.08)_1px,transparent_0)] [background-size:auto,18px_18px]"
+                onDragOver={e => {
+                  // Só reage a ARQUIVO: arrastar texto ou um lead do Kanban não
+                  // pode acender a área de soltar.
+                  if (!e.dataTransfer.types.includes('Files')) return;
+                  e.preventDefault();
+                  setArrastandoNoChat(true);
+                }}
+                onDragLeave={e => {
+                  // sair para um filho não conta como sair da área
+                  if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+                  setArrastandoNoChat(false);
+                }}
+                onDrop={e => {
+                  if (!e.dataTransfer.types.includes('Files')) return;
+                  e.preventDefault();
+                  setArrastandoNoChat(false);
+                  const f = e.dataTransfer.files?.[0];
+                  if (!f) return;
+                  setArquivoArrastado(f);
+                  setMediaModal(tipoDoArquivo(f));
+                }}
+                className={cn(
+                  'relative min-h-0 flex-1 overflow-y-auto px-4 py-4 space-y-2 [background-image:linear-gradient(rgba(14,15,20,0.84),rgba(14,15,20,0.84)),radial-gradient(circle_at_1px_1px,rgba(255,255,255,0.08)_1px,transparent_0)] [background-size:auto,18px_18px]',
+                  arrastandoNoChat && 'ring-2 ring-inset ring-primary',
+                )}
               >
+                {arrastandoNoChat && (
+                  <div className="pointer-events-none sticky top-1/2 z-10 mx-auto w-fit rounded-xl bg-primary/90 px-5 py-3 text-sm font-bold text-primary-foreground shadow-xl">
+                    Solte para enviar o arquivo
+                  </div>
+                )}
                 {msgLoading && messages.length === 0 ? (
                   <div className="text-center text-xs text-muted-foreground py-8">Carregando mensagens…</div>
                 ) : messages.length === 0 ? (
@@ -1875,6 +2189,7 @@ export function ChatView({
                       : <><AlertCircle  className="h-3.5 w-3.5" /> {sendError ?? 'Salvo — falha ao enviar pelo WhatsApp'}</>}
                   </div>
                 )}
+                <SugestoesResposta itens={respostasDoAtalho(replyText, respostas.lista)} onEscolher={escolherResposta} />
                 {recordingAudio && (
                   <div className="flex items-center gap-2 border-b border-red-500/20 bg-red-500/10 px-4 py-1.5 text-xs font-semibold text-red-300">
                     <span className="h-2 w-2 animate-pulse rounded-full bg-red-400" />
@@ -1906,13 +2221,19 @@ export function ChatView({
                     )}
                   </div>
 
+                  <button type="button" onClick={() => setGerenciarRespostas(true)}
+                    title="Respostas rápidas (ou digite / na mensagem)"
+                    className="mb-1.5 flex h-8 w-8 shrink-0 items-center justify-center self-end rounded-[var(--radius)] text-muted-foreground transition-colors hover:bg-muted/50 hover:text-primary">
+                    <Zap className="h-4 w-4" />
+                  </button>
+
                   {/* Textarea */}
                   <textarea
                     ref={textareaRef}
                     value={replyText}
                     onChange={handleTextareaChange}
                     onKeyDown={handleKeyDown}
-                    placeholder="Mensagem… (Enter enviar, Shift+Enter quebra linha)"
+                    placeholder="Mensagem… (Enter envia, / respostas rápidas)"
                     rows={1}
                     className="flex-1 resize-none rounded-[var(--radius)] border border-border bg-background px-3 py-3 pr-11 text-sm focus:outline-none focus:ring-1 focus:ring-primary overflow-hidden"
                     style={{ minHeight: 44, maxHeight: 140 }}
@@ -1998,7 +2319,7 @@ export function ChatView({
 
       {/* Media modal */}
       {mediaModal && (
-        <MediaModal tipo={mediaModal} onSend={sendMedia} onClose={() => setMediaModal(null)} />
+        <MediaModal tipo={mediaModal} clientId={clientId} leadId={selectedId} arquivoInicial={arquivoArrastado} onSend={sendMedia} onClose={() => { setMediaModal(null); setArquivoArrastado(null); }} />
       )}
 
       {/* Confirm dialog */}
@@ -2045,6 +2366,17 @@ export function ChatView({
           onConfirm={confirmDialog.onConfirm}
           onClose={() => setConfirmDialog(null)}
         />
+      )}
+
+      {conectarId !== undefined && (
+        <ConectarWhatsappModal clientId={clientId} instanciaId={conectarId}
+          onFechar={() => { setConectarId(undefined); loadInstanceStatus(); }}
+          onConectou={loadInstanceStatus} />
+      )}
+
+      {gerenciarRespostas && (
+        <GerenciarRespostas clientId={clientId} lista={respostas.lista}
+          onMudou={respostas.recarregar} onFechar={() => setGerenciarRespostas(false)} />
       )}
 
       {/* Debug modal */}
@@ -2097,11 +2429,15 @@ export function ChatView({
                 <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4">
                   <div className="flex items-start gap-3">
                     <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
-                    <p className="text-xs text-muted-foreground leading-relaxed">
-                      Nenhuma instância WhatsApp está configurada para este cliente. Configure em{' '}
-                      <span className="font-semibold text-foreground">Clientes → Rastreamento</span>{' '}
-                      para enviar e receber mensagens.
-                    </p>
+                    <div className="space-y-2">
+                      <p className="text-xs text-muted-foreground leading-relaxed">
+                        Nenhum WhatsApp está conectado a este CRM. Conecte o número que atende os clientes para enviar e receber mensagens por aqui.
+                      </p>
+                      <button type="button" onClick={() => { setInstanceAlertOpen(false); setConectarId(null); }}
+                        className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90">
+                        Conectar WhatsApp
+                      </button>
+                    </div>
                   </div>
                 </div>
               ) : instanceStatus !== 'connected' ? (
@@ -2109,9 +2445,17 @@ export function ChatView({
                   <div className="flex items-start gap-3">
                     <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-red-400" />
                     <p className="text-xs text-muted-foreground leading-relaxed">
-                      A instância está desconectada. Mensagens <span className="font-semibold text-foreground">não serão enviadas</span> até que o WhatsApp seja reconectado.
-                      Acesse <span className="font-semibold text-foreground">Clientes → Rastreamento</span> para escanear o QR Code e reconectar.
+                      O WhatsApp está desconectado. Mensagens <span className="font-semibold text-foreground">não serão enviadas nem recebidas</span> até reconectar.
                     </p>
+                    <button type="button"
+                      onClick={() => {
+                        const caida = instanceInfos.find(i => i.provider === 'evolution' && i.status !== 'connected');
+                        setInstanceAlertOpen(false);
+                        setConectarId(caida?.id ?? null);
+                      }}
+                      className="mt-2 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90">
+                      Reconectar agora
+                    </button>
                   </div>
                 </div>
               ) : (
@@ -2132,7 +2476,7 @@ export function ChatView({
                     <div key={inst.id} className="flex items-center justify-between gap-3 rounded-lg border border-border bg-background/60 px-3 py-2.5">
                       <div className="min-w-0">
                         <p className="text-xs font-semibold truncate">{inst.nome}</p>
-                        <p className="text-[10px] text-muted-foreground">{inst.provider === 'evolution' ? 'Evolution API' : 'Z-API'}</p>
+                        {!modoCliente && <p className="text-[10px] text-muted-foreground">{inst.provider === 'evolution' ? 'Evolution API' : 'Z-API'}</p>}
                       </div>
                       <span className={cn(
                         'flex items-center gap-1 rounded-full px-2 py-1 text-[10px] font-bold shrink-0',
@@ -2148,6 +2492,12 @@ export function ChatView({
                             ? <><Wifi className="h-2.5 w-2.5" /> Desconhecido</>
                             : <><WifiOff className="h-2.5 w-2.5" /> Desconectado</>}
                       </span>
+                      {inst.provider === 'evolution' && inst.status !== 'connected' && (
+                        <button type="button" onClick={() => { setInstanceAlertOpen(false); setConectarId(inst.id); }}
+                          className="shrink-0 rounded-md border border-primary/40 px-2 py-1 text-[10px] font-bold text-primary hover:bg-primary/10">
+                          Reconectar
+                        </button>
+                      )}
                     </div>
                   ))}
                 </div>

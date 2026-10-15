@@ -4,7 +4,11 @@ import { normalizarNegocio, type NegocioAgendor, type PessoaAgendor } from '@/li
 import {
   agendorFetch, AGENDOR_API, listarConexoesAgendorAtivas, type ConexaoAgendor,
 } from '@/lib/agendor-server';
-import { buscarPessoaAgendor, conferirFiltros, ingerirNegocioAgendor, posProcessarIngestao } from '@/lib/agendor-ingest';
+import {
+  bloqueioDefinitivo, buscarPessoaAgendor, conferirFiltros, ingerirNegocioAgendor,
+  posProcessarIngestao, removerNegocioForaDoFiltro, revisarOrigensAgendor, type ResumoRevisao,
+} from '@/lib/agendor-ingest';
+import { passoReleituraAgendor, type ResumoReleitura } from '@/lib/agendor-releitura';
 
 /**
  * Sincronismo Agendor: backfill do histórico + reconciliação.
@@ -38,6 +42,8 @@ type Resultado = {
   backfill_importados: number;
   backfill_concluido: boolean;
   reconciliados: number;
+  revisao?: ResumoRevisao;
+  releitura?: ResumoReleitura | { erro: string };
   erro?: string;
 };
 
@@ -56,7 +62,15 @@ async function processarLote(
       pessoa = cachePessoas.get(n.pessoa.id) ?? null;
     }
     const { negocio: nf, bloqueado } = await conferirFiltros(conn, n, pessoa);
-    if (bloqueado) continue; // fora do filtro: nem log por item no backfill (viraria ruído aos milhares)
+    if (bloqueado) {
+      // fora do filtro: nem log por item no backfill (viraria ruído aos milhares).
+      // ⚠️ Mas se ele JÁ estava no CRM (entrou quando passava, e a origem ou o
+      // funil mudou depois), sai — senão segue somando no faturamento.
+      if (bloqueioDefinitivo(bloqueado)) {
+        await removerNegocioForaDoFiltro(pool, conn.client_id, `agendor:${n.idExterno}`, bloqueado);
+      }
+      continue;
+    }
     const r = await ingerirNegocioAgendor(pool, conn.client_id, nf, pessoa);
     await posProcessarIngestao(pool, conn, nf, pessoa, r, { sync: origem, dealId: nf.idExterno },
       origem === 'backfill' ? 'backfill' : (r.criado ? 'criado' : 'atualizado'));
@@ -140,6 +154,26 @@ export async function GET(req: NextRequest) {
           `UPDATE public.agendor_connections SET ultimo_erro = $2 WHERE client_id = $1`,
           [conn.client_id, r.erro],
         ).catch(() => {});
+      }
+      // ---- fase 3: revisão de origem — pega a origem editada na ficha da
+      // empresa/pessoa, que não mexe no updatedAt do negócio. Fora do try da
+      // reconciliação: um timeout lá não pode desligar a revisão.
+      if (r.backfill_concluido && Date.now() - inicio < ORCAMENTO_MS) {
+        try {
+          r.revisao = await revisarOrigensAgendor(pool, conn);
+        } catch (err) {
+          r.revisao = { revisados: 0, canalAtualizado: 0, removidos: 0, manuais: 0,
+            pulou: `erro: ${err instanceof Error ? err.message.slice(0, 120) : String(err)}` };
+        }
+      }
+      // ---- fase 4: releitura diária (poucas páginas por rodada) + conferência
+      // de totais com aviso no sino — pega o que nenhuma regra acima prevê.
+      if (r.backfill_concluido && Date.now() - inicio < ORCAMENTO_MS) {
+        try {
+          r.releitura = await passoReleituraAgendor(pool, conn, inicio + ORCAMENTO_MS);
+        } catch (err) {
+          r.releitura = { erro: err instanceof Error ? err.message.slice(0, 160) : String(err) };
+        }
       }
       resultados.push(r);
     }

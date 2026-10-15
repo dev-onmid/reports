@@ -100,7 +100,7 @@ async function upsertLead(
   try {
     await pool.query(
       `SELECT pg_advisory_xact_lock(hashtext($1))`,
-      [`datalytics:${clientId}:${lead.telefone}`],
+      [`datalytics:${clientId}:${lead.telefone ?? lead.idExterno}`],
     );
 
     const funnelId = await ensureDefaultFunnel(pool, clientId);
@@ -111,6 +111,9 @@ async function upsertLead(
     // webhook e comparava em JS — com 27 mil leads na base, uma varredura
     // inteira por mensagem recebida.
     const achado = await resolverLeadExistente(pool, clientId, {
+      // O INSERT abaixo grava o id da origem em external_id — é por ele que a
+      // entrega seguinte (às vezes sem telefone) acha o mesmo lead.
+      externalId: lead.idExterno,
       telefone: lead.telefoneBruto ?? lead.telefone,
       negocioExternoId: lead.idExterno,
       email: lead.email,
@@ -252,7 +255,14 @@ export async function receberWebhook(req: NextRequest, token: string) {
 
     const lead = extrairLeadDatalytics(raw);
 
-    if (!lead.telefone) {
+    // Sem telefone, mas com o id do lead na origem: o Datalytics manda mudança de
+    // etapa assim (webhook "Engajado | Reports", Cost Odonto). Se já temos esse
+    // lead, a etapa é aplicada; se não temos, não dá para criar — segue o descarte.
+    const conhecidoPorId = !lead.telefone && lead.idExterno
+      ? await resolverLeadExistente(pool, conn.client_id, { externalId: lead.idExterno })
+      : null;
+
+    if (!lead.telefone && !conhecidoPorId) {
       const etapaOpaca = lead.etapa && 'idOpaco' in lead.etapa;
       await registrarLogWebhook(pool, {
         clientId: conn.client_id, conexaoId: conn.id, raw,
@@ -298,8 +308,12 @@ export async function receberWebhook(req: NextRequest, token: string) {
     // Mesmo gatilho de conversão do caminho da UI — deduplicado internamente
     // por hasSuccessfulConversion, então entrega repetida não duplica evento.
     if (r.criado || r.statusNovo !== (r.statusAnterior ?? '')) {
+      // Entrega só com o id (sem telefone): o número sai do lead já gravado.
+      const phone = lead.telefoneBruto ?? lead.telefone ?? (await pool.query<{ numero: string | null }>(
+        `SELECT numero FROM public.crm_leads WHERE id = $1`, [r.leadId],
+      ).catch(() => ({ rows: [] as { numero: string | null }[] }))).rows[0]?.numero ?? '';
       await dispararEventosPorStatus(pool, conn.client_id, r.statusNovo, {
-        id: r.leadId, phone: lead.telefoneBruto ?? lead.telefone,
+        id: r.leadId, phone,
       }, lead.valor).catch(err => console.error('[webhook-entrada] conversao', err));
     }
 

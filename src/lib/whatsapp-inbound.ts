@@ -6,6 +6,7 @@ import { analisarConversa } from '@/lib/crm-ai-analysis';
 import { enviarEventoMeta, enviarEventoGoogle, hasSuccessfulConversion } from '@/lib/conversions';
 import { upsertLeadFromConversation, ensureCrmMessagesSchema } from '@/lib/crm-conversation-sync';
 import { resolverLeadExistente } from '@/lib/lead-identity';
+import { vincularMidiaAoLead } from '@/lib/crm-midia';
 import { logMissingAdTracking } from '@/lib/crm-tracking-debug';
 import { resolveMetaAdHierarchy } from '@/lib/meta-ad-resolver';
 import {
@@ -28,8 +29,8 @@ export type EntradaMensagem = {
   /** Identificador da instância no provedor (nome Evolution, phone_number_id da Meta…). */
   instanceName: string;
   msg: NormalizedMessage;
-  /** Texto já resolvido (URL pública quando é mídia), tipo e legenda separada. */
-  media: { text: string; tipo: string; caption: string | null };
+  /** Texto já resolvido (URL quando é mídia), tipo, legenda separada e o token da mídia salva no disco. */
+  media: { text: string; tipo: string; caption: string | null; midiaToken?: string | null };
   rawPayload: unknown;
 };
 
@@ -217,6 +218,8 @@ export async function registrarMensagemWhatsApp(pool: Pool, entrada: EntradaMens
     creativeName: creativeName ?? null,
     instanceId: instanceName,
   });
+  // A mídia foi salva antes de o lead existir — o vínculo entra agora.
+  await vincularMidiaAoLead(pool, media.midiaToken ?? null, leadId);
 
   // ── Atribuição estendida + região (first-touch: nunca sobrescreve) ────────
   // Região: prioriza a geolocalização do clique (localização real via headers

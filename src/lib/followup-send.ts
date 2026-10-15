@@ -1,3 +1,4 @@
+import { resolverMidiaParaEnvio } from '@/lib/crm-midia';
 import type { Pool } from 'pg';
 import { sendText as zapiSendText, sendImage as zapiSendImage } from '@/lib/zapi';
 
@@ -132,6 +133,8 @@ async function sendViaEvolution(
 
   const targets = buildEvolutionTargets(phone, vars.whatsapp_lid);
   const errors: string[] = [];
+  // Mídia guardada por nós (/api/crm/midia/<token>) exige sessão: vai em base64.
+  conteudo = await resolverMidiaParaEnvio(conteudo);
 
   // Evolution API expects either a plain http URL or raw base64 (no data: prefix).
   // Canvas uploads arrive as data URLs — strip the prefix before sending.
@@ -154,7 +157,8 @@ async function sendViaEvolution(
       ? await postEvolutionMessage(`${base}/message/sendWhatsAppAudio/${instanceName}`, headers, {
           number: target,
           options: { delay: 1200, encoding: true },
-          audio: conteudo,
+          // Áudio aceita URL ou base64 cru; o data: URL vira só o base64.
+          audio: conteudo.replace(/^data:[^;]+;base64,/, ''),
         })
       : await postEvolutionMessage(`${base}/message/sendMedia/${instanceName}`, headers, {
           number: target,
@@ -179,8 +183,11 @@ function buildEvolutionTargets(phone: string, lid?: string): string[] {
   if (raw.includes('@')) targets.push(raw);
   if (lidDigits) targets.push(`${lidDigits}@lid`);
   if (digits.length > 13 && !digits.startsWith('55')) targets.push(`${digits}@lid`);
-  if (digits) targets.push(digits);
+  // Número brasileiro guardado sem o 55 (padrão do SULTS): o 55 vem PRIMEIRO.
+  // Tentar o número cru antes mandaria "41 99924-8433" para a Suíça (+41) se
+  // por azar existisse lá — só vale como último recurso.
   if ((digits.length === 10 || digits.length === 11) && !digits.startsWith('55')) targets.push(`55${digits}`);
+  if (digits) targets.push(digits);
 
   return Array.from(new Set(targets.filter(Boolean)));
 }

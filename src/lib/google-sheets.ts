@@ -118,31 +118,77 @@ export function resolverAbaDoMes(abas: string[], ref: Date): AbaResolvida {
  * letras, ano de 4, de 2 ou ausente). Null quando o nome não é de mês —
  * "RESUMO", "TIKTOK", "FUNIL ATUAL" e afins.
  */
+/**
+ * Abreviações que não são prefixo do nome do mês e aparecem em planilha real.
+ * ⚠️ Só entra aqui o que foi VISTO numa planilha de cliente — inventar
+ * abreviação faz aba de outra coisa virar mês e ser importada como base.
+ */
+const APELIDOS_MES: Record<string, number> = { AGT: 7, SETEM: 8, OUTUB: 9 };
+
+/**
+ * Mês e ano de uma aba pelo nome. `ano: 0` = o nome tem o mês mas não o ano.
+ *
+ * ⚠️ Casa a parte de LETRAS como prefixo do nome do mês, com no mínimo 3 — é o
+ * que faz `AGOS2026` e `SETE 26` serem datadas. A versão anterior exigia
+ * exatamente 3 letras ou o nome inteiro, então `AGOS2026`, `AGOS25` e `AGT24`
+ * voltavam nulas na planilha da Romanza e eram tratadas como aba sem data.
+ */
 export function periodoDaAba(nome: string): { ano: number; mes: number } | null {
   const n = normalizarNomeAba(nome);
-  for (let i = 0; i < MESES.length; i++) {
-    const cheio = MESES[i];
-    const curto = cheio.slice(0, 3);
-    const pref = n.startsWith(cheio) ? cheio : n.startsWith(curto) ? curto : null;
-    if (!pref) continue;
-    const resto = n.slice(pref.length);
-    if (/^\d{4}$/.test(resto)) return { ano: Number(resto), mes: i };
-    if (/^\d{2}$/.test(resto)) return { ano: 2000 + Number(resto), mes: i };
-    if (resto === '') return { ano: 0, mes: i };  // sem ano: não dá para datar
-  }
-  return null;
+  const m = n.match(/^([A-Z]+)(\d*)$/);
+  if (!m) return null;
+  const [, letras, digitos] = m;
+  if (letras.length < 3) return null;
+
+  let mes = MESES.findIndex(x => x.startsWith(letras));
+  if (mes < 0 && letras in APELIDOS_MES) mes = APELIDOS_MES[letras];
+  if (mes < 0) return null;
+
+  if (/^\d{4}$/.test(digitos)) return { ano: Number(digitos), mes };
+  if (/^\d{2}$/.test(digitos)) return { ano: 2000 + Number(digitos), mes };
+  if (digitos === '') return { ano: 0, mes };  // sem ano: não dá para datar
+  return null;  // "JUL242" e afins: número que não é ano
 }
 
-/** Teto de abas por rodada — ver `escolherAbas`. */
-export const MAX_ABAS_POR_RODADA = 12;
+/**
+ * Assinatura do conteúdo de uma aba, para saber se ela mudou desde a última
+ * importação.
+ *
+ * ⚠️ Hash do CONTEÚDO, não do número de linhas: o gestor corrige um telefone
+ * numa linha existente e o total não muda — a aba pareceria idêntica e a
+ * correção nunca chegaria ao CRM.
+ */
+export function assinaturaDaAba(conteudo: string): string {
+  // FNV-1a: curto, sem dependência, e aqui só precisa detectar diferença.
+  let h = 0x811c9dc5;
+  for (let i = 0; i < conteudo.length; i++) {
+    h ^= conteudo.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return `${conteudo.length.toString(36)}-${h.toString(36)}`;
+}
+
+/**
+ * Teto de abas por rodada — ver `escolherAbas`.
+ *
+ * ⚠️ 12 era palpite, nunca medido, e cortava histórico que cabia folgado.
+ * Cronometrado na Romanza em 07/10/2026: **12 abas e 10.996 linhas em 9,5 s**,
+ * ~0,8 s por aba, contra um `maxDuration` de 300 s. 36 abas (três anos de
+ * histórico mensal) ficam em ~30 s, ou seja 10% do orçamento. A defesa contra
+ * planilha fora da curva não é este número e sim a parada por tempo dentro de
+ * `sincronizarSheets` — teto baixo só garantia que o histórico nunca entrasse.
+ */
+export const MAX_ABAS_POR_RODADA = 36;
 
 export type EscolhaAbas = {
   /** As abas que vão para a importação, na ordem em que a planilha as lista. */
   abas: string[];
   /** Abas pedidas que não existem mais na planilha (renomeadas/apagadas). */
   sumidas: string[];
-  /** Abas cortadas pelo teto. */
+  /** Abas cortadas pelo teto que AINDA faltam importar (ou mudaram). */
   cortadas: string[];
+  /** Cortadas que já estão no banco e não mudaram — não é pendência. */
+  jaEstavam: string[];
   /** A aba do mês, quando `seguirMes` — separada porque a tela a mostra. */
   abaDoMes: string | null;
   motivoAbaDoMes: AbaResolvida['motivo'];
@@ -173,7 +219,14 @@ export type EscolhaAbas = {
  */
 export function escolherAbas(
   todas: string[],
-  cfg: { fixas?: string[] | null; seguirMes?: boolean },
+  cfg: {
+    fixas?: string[] | null;
+    seguirMes?: boolean;
+    /** `aba -> assinatura do conteúdo` na última importação bem-sucedida. */
+    jaImportadas?: Record<string, string> | null;
+    /** Assinatura ATUAL de cada aba, para saber o que mudou. */
+    assinaturas?: Record<string, string> | null;
+  },
   hoje = new Date(),
 ): EscolhaAbas {
   const { aba: abaDoMes, motivo } = resolverAbaDoMes(todas, hoje);
@@ -210,9 +263,46 @@ export function escolherAbas(
     if (!py) return 1;
     return px.ano - py.ano || px.mes - py.mes;
   });
+  // ⚠️⚠️ O CORTE fica com as MAIS RECENTES — a ordem acima é crescente, então
+  // `slice(0, MAX)` levava as mais ANTIGAS e jogava fora justamente o mês
+  // corrente. Medido na Romanza (35 abas marcadas): entravam JAN24..JUL24 e
+  // "OUT 2026" ficava de fora, ou seja, a rotina importava 2024 todo dia e a
+  // tela do cliente parava no passado. A aba do mês é intocável, e aba que não
+  // dá para datar só entra se sobrar vaga (ela não é base de mês).
+  const posicao = new Map(naOrdem.map((a, i) => [a, i]));
+  // Já importada E idêntica: só entra se sobrar vaga depois de todo o resto.
+  const inalterada = (a: string): boolean => {
+    const antes = cfg.jaImportadas?.[a];
+    const agora = cfg.assinaturas?.[a];
+    return !!antes && !!agora && antes === agora;
+  };
+  const recencia = (a: string): number => {
+    if (seguirMes && abaDoMes && a === abaDoMes) return Number.MAX_SAFE_INTEGER;
+    const p = periodoDaAba(a);
+    // Entre abas que não dá para datar, vale a ordem da planilha: a primeira
+    // tem o maior ranque, para o corte manter as de cima (o teste do teto com
+    // "ABA 0".."ABA N" cobre exatamente isso).
+    if (!p || p.ano === 0) return -1_000_000 - (posicao.get(a) ?? 0);
+    return p.ano * 12 + p.mes;
+  };
+  // ⚠️ Aba já importada e idêntica é PULADA, não só despriorizada: reimportar
+  // todo dia o mesmo histórico é trabalho à toa — tempo de rodada e escrita no
+  // banco para reescrever o que já está lá. A do mês nunca é pulada (ela muda
+  // todo dia), e a assinatura carrega o de-para (ver `sheets-sync`), então
+  // ajustar as colunas faz tudo voltar a ser importado.
+  const pendentes = naOrdem.filter(a => !(inalterada(a) && a !== abaDoMes));
+  const mantidas = new Set(
+    [...pendentes].sort((x, y) => recencia(y) - recencia(x)).slice(0, MAX_ABAS_POR_RODADA),
+  );
+  const fora = naOrdem.filter(a => !mantidas.has(a));
   return {
-    abas: naOrdem.slice(0, MAX_ABAS_POR_RODADA),
-    cortadas: naOrdem.slice(MAX_ABAS_POR_RODADA),
+    // Importa na ordem cronológica crescente — ver o bloco acima sobre o upsert.
+    abas: naOrdem.filter(a => mantidas.has(a)),
+    // Separados porque dizem coisas diferentes ao gestor: uma é pendência, a
+    // outra é trabalho concluído. Juntar faz a tela gritar todo dia sobre aba
+    // que já está no banco.
+    cortadas: fora.filter(a => !inalterada(a)),
+    jaEstavam: fora.filter(a => inalterada(a)),
     sumidas,
     abaDoMes,
     motivoAbaDoMes: motivo,
@@ -229,6 +319,29 @@ export function escolherAbas(
  * não importar mês nenhum. Aqui a aba incompatível é separada COM o nome das
  * colunas que faltam, e a tela diz qual é o problema.
  */
+/**
+ * O nome REAL da coluna no cabeçalho desta aba, dado o nome guardado no de-para.
+ * `null` quando ela não existe mesmo.
+ *
+ * ⚠️⚠️ Casa ignorando CAIXA e ACENTO, mas devolve o nome como está NA ABA — a
+ * rota de importação procura a coluna pelo texto exato, então devolver o nome do
+ * de-para faria a aba passar na checagem e falhar na importação.
+ *
+ * Medido na Romanza: o de-para foi feito sobre OUT 2026 (`CANAL`,
+ * `DATA DE CONTATO`, `OBSERVAÇÃO`) e os meses anteriores escrevem `Canal`,
+ * `Data de Contato`, `Observação`. Só a caixa das letras reprovava 9 das 12 abas
+ * escolhidas — quase um ano de histórico que a rotina recusava todo dia.
+ */
+export function colunaEquivalente(cabecalho: string[], alvo: string): string | null {
+  const exata = cabecalho.find(h => h === alvo) ?? cabecalho.find(h => h.trim() === alvo.trim());
+  if (exata !== undefined) return exata;
+  const chave = normalizarNomeAba(alvo);
+  if (!chave) return null;
+  // Primeira ocorrência: cabeçalho com "Data" e "DATA" na mesma aba é raro, e
+  // escolher a primeira é o mesmo critério que a importação usa ao procurar.
+  return cabecalho.find(h => normalizarNomeAba(h) === chave) ?? null;
+}
+
 export function abasCompativeis(
   cabecalhoPorAba: Record<string, string[]>,
   abas: string[],
@@ -244,12 +357,8 @@ export function abasCompativeis(
   const incompativeis: { aba: string; faltam: string[] }[] = [];
   for (const aba of abas) {
     const headers = cabecalhoPorAba[aba] ?? [];
-    // ⚠️ Compara com trim dos DOIS lados. Cabeçalho de planilha de cliente vem
-    // com espaço sobrando (" Data de agendamento " é real), e o de-para guarda o
-    // nome EXATO da coluna. Comparar um trimado contra o outro cru reprovava uma
-    // aba perfeitamente boa — foi o que derrubou a importação de um cliente que
-    // já rodava, assim que a checagem entrou.
-    const faltam = exigidas.filter(c => !headers.some(h => h === c || h.trim() === c.trim()));
+    // A comparação (espaço sobrando, caixa, acento) mora em `colunaEquivalente`.
+    const faltam = exigidas.filter(c => colunaEquivalente(headers, c) === null);
     if (faltam.length) incompativeis.push({ aba, faltam });
     else ok.push(aba);
   }

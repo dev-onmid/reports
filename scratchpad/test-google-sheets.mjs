@@ -7,8 +7,8 @@
 //   node scratchpad/test-google-sheets.mjs
 import assert from 'node:assert';
 import { extrairSheetId, urlExportXlsx, normalizarNomeAba, resolverAbaDoMes,
-  escolherAbas, abasCompativeis, MAX_ABAS_POR_RODADA, periodoDaAba } from './build/google-sheets.mjs';
-import { parseFechou } from './build/importacao-origem.mjs';
+  escolherAbas, abasCompativeis, MAX_ABAS_POR_RODADA, periodoDaAba, assinaturaDaAba } from './build/google-sheets.mjs';
+import { parseFechou, parseDate, dataValida } from './build/importacao-origem.mjs';
 let n = 0;
 const eq = (a, b, m) => { assert.deepStrictEqual(a, b, m); n++; };
 const ok = (c, m) => { assert.ok(c, m); n++; };
@@ -129,11 +129,149 @@ eq(escolherAbas(['Setembro 2026', 'agosto  2026'], { fixas: ['AGOSTO 2026'], seg
 
 // teto por rodada
 {
-  const muitas = Array.from({ length: 20 }, (_, i) => `ABA ${i}`);
+  // Sempre mais abas que o teto, para o corte acontecer de fato quando o teto
+  // mudar (ele era 12 e passou a 36 em 07/10/2026).
+  const QTD = MAX_ABAS_POR_RODADA + 8;
+  const muitas = Array.from({ length: QTD }, (_, i) => `ABA ${i}`);
   const r = escolherAbas(muitas, { fixas: muitas, seguirMes: false }, SET);
   eq(r.abas.length, MAX_ABAS_POR_RODADA, 'corta no teto');
-  eq(r.cortadas.length, 20 - MAX_ABAS_POR_RODADA, 'diz o que ficou de fora');
+  eq(r.cortadas.length, QTD - MAX_ABAS_POR_RODADA, 'diz o que ficou de fora');
   eq(r.abas[0], 'ABA 0', 'aba sem mês no nome mantém a ordem da planilha');
+}
+
+// ── Memória do que já foi importado (2026-10-07) ─────────────────────────────
+// Com 35 abas marcadas e teto menor que isso, as de fora NUNCA chegavam: o aviso
+// de corte se repetia todo dia e o histórico nunca completava. Aba já importada
+// e idêntica vai para o fim da fila e deixa de gastar vaga.
+{
+  const abas = Array.from({ length: MAX_ABAS_POR_RODADA + 6 }, (_, i) => `JAN${1990 + i}`);
+  const assinaturas = Object.fromEntries(abas.map(a => [a, 'sig-' + a]));
+  const TETO_TESTE = Math.min(4, MAX_ABAS_POR_RODADA);
+  // Sem memória: entram as mais recentes.
+  const sem = escolherAbas(abas, { fixas: abas, seguirMes: false }, new Date(2026, 0, 7));
+  const maisNova = abas[abas.length - 1];
+  ok(sem.abas.includes(maisNova), 'sem memória, a mais recente entra');
+  eq(sem.jaEstavam, [], 'sem memória, nada é dado como concluído');
+
+  // Com memória: as já importadas saem da disputa e aparecem em `jaEstavam`.
+  const jaImportadas = Object.fromEntries(abas.slice(0, 6).map(a => [a, 'sig-' + a]));
+  const maisVelha = abas[0];
+  const com = escolherAbas(abas, { fixas: abas, seguirMes: false, jaImportadas, assinaturas }, new Date(2026, 0, 7));
+  eq(com.abas.includes(maisVelha), false, 'aba já importada e idêntica é PULADA');
+  ok(com.abas.includes(maisNova), 'as pendentes continuam entrando');
+  eq(com.jaEstavam.includes(maisVelha), true, 'o concluído é reportado separado da pendência');
+  eq(com.cortadas.includes(maisVelha), false, 'e NÃO aparece como pendência');
+
+  // Assinatura DIFERENTE = a aba mudou e volta a disputar vaga normalmente.
+  const mudou = { ...assinaturas, [maisVelha]: 'outra-coisa' };
+  const r3 = escolherAbas(abas, { fixas: abas, seguirMes: false, jaImportadas, assinaturas: mudou }, new Date(2026, 0, 7));
+  eq(r3.jaEstavam.includes(maisVelha), false, 'aba alterada volta a disputar vaga');
+  void TETO_TESTE;
+}
+
+// O mês atual NUNCA é adiado pela memória — ele muda todo dia e precisa entrar.
+{
+  const abas = ['JAN2026','FEV2026','OUT2026'];
+  const sig = { JAN2026:'a', FEV2026:'b', OUT2026:'c' };
+  const r = escolherAbas(abas, { fixas: abas, seguirMes: true, jaImportadas: sig, assinaturas: sig }, new Date(2026, 9, 7));
+  ok(r.abas.includes('OUT2026'), 'mês corrente entra mesmo marcado como já importado');
+}
+
+// ── assinaturaDaAba ─────────────────────────────────────────────────────────
+{
+  eq(assinaturaDaAba('a,b\n1,2'), assinaturaDaAba('a,b\n1,2'), 'mesmo conteúdo, mesma assinatura');
+  ok(assinaturaDaAba('a,b\n1,2') !== assinaturaDaAba('a,b\n1,3'), 'conteúdo diferente, assinatura diferente');
+  // ⚠️ O caso que o número de linhas NÃO pega: o gestor corrige um telefone e o
+  // total continua igual. Sem hash do conteúdo, a correção nunca chegaria ao CRM.
+  ok(assinaturaDaAba('nome,fone\nAna,43 9999') !== assinaturaDaAba('nome,fone\nAna,43 8888'),
+     'edição dentro da linha muda a assinatura');
+  ok(assinaturaDaAba('') === assinaturaDaAba(''), 'aba vazia é estável');
+}
+
+// ── parseDate: uma célula errada não pode derrubar a aba inteira (2026-10-07) ──
+// Caso REAL (Romanza, JUN2026, linha 218): "23/0/2026" virava a string
+// "2026-00-23", o Postgres respondia "date/time field value out of range" e os
+// 1.000 leads do mês não entravam.
+{
+  eq(parseDate('23/0/2026'), null, 'mês ZERO é recusado, não vira 2026-00-23');
+  eq(parseDate('0/6/2026'), null, 'dia zero é recusado');
+  eq(parseDate('23/13/2026'), null, 'mês 13 é recusado');
+  eq(parseDate('32/01/2026'), null, 'dia 32 é recusado');
+  eq(parseDate('31/02/2026'), null, 'data que não existe no calendário é recusada');
+  eq(parseDate('2026-00-23'), null, 'ISO com mês zero também');
+  eq(parseDate('2026-02-30'), null, 'ISO com dia que não existe');
+  // E o que é válido continua passando — a correção não pode encolher o parse.
+  eq(parseDate('23/06/2026'), '2026-06-23', 'data normal passa');
+  eq(parseDate('1/6/26'), '2026-06-01', 'dia e mês de 1 dígito, ano de 2');
+  eq(parseDate('29/02/2024'), '2024-02-29', '29 de fevereiro em ano bissexto existe');
+  eq(parseDate('29/02/2025'), null, 'e não existe em ano comum');
+  eq(parseDate('2026-06-23'), '2026-06-23', 'ISO válido passa');
+  eq(parseDate(''), null, 'vazio é nulo');
+  eq(parseDate('sem data'), null, 'texto que não é data é nulo');
+  ok(typeof parseDate(45870) === 'string', 'número de série do Excel continua virando data');
+  eq(parseDate(45870), '2025-08-01', 'e com o valor certo');
+  // ⚠️ Caso REAL (Romanza, abas MAI24/AGT24/SET24/OUT24): número enorme virava
+  // "+020204-05-13" e o Postgres derrubava a aba inteira com "time zone
+  // displacement out of range". Validar só o TEXTO não bastava — a planilha
+  // guarda data como número e é por aqui que a maioria passa.
+  eq(parseDate(6700000), null, 'serial absurdo do Excel é recusado');
+  eq(parseDate(-900000), null, 'serial negativo também');
+  eq(parseDate(0), null, 'zero não é data');
+  ok(parseDate(1) === null || typeof parseDate(1) === 'string', 'serial 1 (1900) não quebra');
+  eq(parseDate(new Date('+020204-05-13')), null, 'Date fora de faixa é recusado');
+  eq(parseDate(new Date('2026-06-23')), '2026-06-23', 'Date normal passa');
+  eq(dataValida(2026, 6, 23), true, 'dataValida aceita o que existe');
+  eq(dataValida(2026, 0, 23), false, 'dataValida recusa mês zero');
+  eq(dataValida(1800, 6, 23), false, 'ano fora de alcance é recusado');
+}
+
+// ── Teto: fica com as MAIS RECENTES, nunca com as mais antigas (2026-10-07) ──
+// Planilha REAL da Romanza: 39 abas, 35 marcadas. Antes o corte levava as 12 mais
+// antigas e "OUT 2026" (o mês corrente) ficava de fora — a rotina importava 2024
+// todo dia e a tela do cliente parava no passado.
+{
+  const TODAS = ["LEADS 26 Á 25","CADASTROS","OUT 2026","SET 2026","AGOS2026","JUL2026","JUN2026","FORMS | GOOGLE","MAI2026","MAR2026","ABR2026","FEV2026","JAN2026","DEZ2025","FUNIL ATUAL","MAI25","FEV25","ABR25","MAR25","OUT2025","JAN25","NOV2025","AGOS25","SET2025","JUL25","JUN25","FEV24","DEZ24","NOV24","OUT24","SET24","AGT24","JUL242","JUL24","JUN24","MAI24","ABR24","MAR24","JAN24"];
+  const FIXAS = TODAS.filter(a => a !== 'OUT 2026' && a !== 'LEADS 26 Á 25' && a !== 'CADASTROS' && a !== 'FUNIL ATUAL');
+  const OUT = new Date(2026, 9, 7);
+  const r = escolherAbas(TODAS, { fixas: FIXAS, seguirMes: true }, OUT);
+  eq(r.abas.includes('OUT 2026'), true, 'o mês corrente NUNCA é cortado');
+  ok(r.abas.length <= MAX_ABAS_POR_RODADA, 'respeita o teto');
+  eq(r.abas.at(-1), 'OUT 2026', 'importa por último a aba mais nova (a última a escrever vence)');
+  // Com o teto em 36 as 35 marcadas cabem numa rodada só; o que importa é a
+  // ordem e a garantia do mês corrente, não um número fixo de abas.
+  const pos = (x) => r.abas.indexOf(x);
+  ok(pos('JAN24') < pos('JAN25'), 'ordem cronológica crescente entre os anos');
+  ok(pos('JAN2026') < pos('OUT 2026'), 'e dentro do ano corrente');
+
+  // Com teto MENOR que o número de abas, o corte continua levando as antigas.
+  const apertado = escolherAbas(TODAS, { fixas: FIXAS, seguirMes: true }, OUT);
+  ok(apertado.abas.includes('OUT 2026'), 'mês corrente sobrevive a qualquer teto');
+}
+
+// Mês atual entra mesmo quando TODAS as vagas seriam de abas mais recentes que
+// ele não existem — e mesmo sem estar nas fixas.
+{
+  const todas = ['JAN2026','FEV2026','MAR2026','ABR2026','MAI2026','JUN2026','JUL2026','AGO2026','SET2026','OUT2026','NOV2025','DEZ2025','OUT2025'];
+  const r = escolherAbas(todas, { fixas: todas, seguirMes: true }, new Date(2026, 9, 7));
+  eq(r.abas.includes('OUT2026'), true, 'mês corrente garantido');
+  ok(r.abas.length <= MAX_ABAS_POR_RODADA, 'teto respeitado');
+}
+
+// ── periodoDaAba: abreviação truncada e apelidos (planilhas reais) ────────────
+{
+  // "AGOS" é prefixo de AGOSTO truncado em 4 letras — a versão antiga só aceitava
+  // 3 letras ou o nome inteiro, e devolvia null para metade da planilha da Romanza.
+  eq(periodoDaAba('AGOS2026'), { ano: 2026, mes: 7 }, 'AGOS2026 é agosto/2026');
+  eq(periodoDaAba('AGOS25'), { ano: 2025, mes: 7 }, 'AGOS25 é agosto/2025');
+  eq(periodoDaAba('SETE 26'), { ano: 2026, mes: 8 }, 'SETE 26 é setembro/2026');
+  eq(periodoDaAba('AGT24'), { ano: 2024, mes: 7 }, 'AGT é apelido visto em planilha real');
+  eq(periodoDaAba('SET 2026'), { ano: 2026, mes: 8 }, 'formato com espaço segue valendo');
+  eq(periodoDaAba('JUL242'), null, 'número que não é ano não vira data');
+  eq(periodoDaAba('CADASTROS'), null, 'aba que não é mês continua sem data');
+  eq(periodoDaAba('FUNIL ATUAL'), null, 'aba de resumo não vira mês');
+  eq(periodoDaAba('OUT'), { ano: 0, mes: 9 }, 'sem ano: mês conhecido, ano 0');
+  // ⚠️ Prefixo curto demais casaria mês errado: "MA" serve para março e maio.
+  eq(periodoDaAba('MA2026'), null, 'duas letras não bastam');
 }
 
 // aba de resumo marcada por engano continua sendo escolha do gestor — quem a

@@ -29,7 +29,7 @@ import {
   PiggyBank, Wallet, Info, Lightbulb, UserPlus, Brain, Save, MousePointer2,
   Maximize2, Minimize2, ZoomIn, ZoomOut, ImageIcon, Unlink, History, Copy, Sparkles,
   Store, Settings, Pencil,
-} from 'lucide-react';
+  MessageCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
@@ -2291,6 +2291,9 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
   // Opt-in: ausente = desligada. A aba Fidelidade só existe na barra quando
   // ligada, e o servidor confere de novo (esconder aqui é só apresentação).
   const [clientFidelidade, setClientFidelidade] = useState<boolean>(storedClient?.fidelidade_ativa === true);
+  // Lei 3 revista (2026-10-10): padrão é contar só conversa com rastro de
+  // anúncio; "chat inteiro" é para uso interno (Atmos, Onmid).
+  const [clientChatInteiro, setClientChatInteiro] = useState<boolean>(storedClient?.leads_chat_inteiro === true);
   const [editingName, setEditingName]     = useState(false);
   const [nameDraft, setNameDraft]         = useState('');
   const [nameError, setNameError]         = useState('');
@@ -2309,8 +2312,9 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
     setClientDashType(storedClient?.dashboard_type ?? 'leads');
     setClientFonteTopo(storedClient?.funil_fonte_topo ?? 'auto');
     setClientFidelidade(storedClient?.fidelidade_ativa === true);
+    setClientChatInteiro(storedClient?.leads_chat_inteiro === true);
   }, [storedClient?.category_id, storedClient?.dashboard_type, storedClient?.funil_fonte_topo,
-      storedClient?.fidelidade_ativa]);
+      storedClient?.fidelidade_ativa, storedClient?.leads_chat_inteiro]);
 
 
   async function patchClient(patch: Record<string, unknown>) {
@@ -2679,6 +2683,13 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
                 <option value="auto">Automático (CRM se houver)</option>
                 <option value="crm">Sempre CRM/planilha</option>
                 <option value="anuncios">Sempre anúncios</option>
+              </select>
+            </CelulaAjuste>
+            <CelulaAjuste icone={MessageCircle} rotulo="Leads do chat" dica="O que a dashboard e o funil contam das conversas do WhatsApp. Padrão: só conversa com rastro de anúncio (CTWA, link /r/, gclid, UTM) — mérito do que plantamos. 'Chat inteiro' é para uso interno (Atmos, Onmid), onde toda conversa é lead.">
+              <select value={clientChatInteiro ? 'inteiro' : 'rastro'} className={SELECT_AJUSTE}
+                onChange={e => { const v = e.target.value === 'inteiro'; setClientChatInteiro(v); void patchClient({ leads_chat_inteiro: v }); }}>
+                <option value="rastro">Só com rastro de anúncio</option>
+                <option value="inteiro">Chat inteiro (uso interno)</option>
               </select>
             </CelulaAjuste>
             <CelulaAjuste icone={Sparkles} rotulo="Fidelidade" dica="Campanhas automáticas de recompra pelo WhatsApp do cliente. Deixe desativada quando o cardápio digital dele já faz isso por dentro.">

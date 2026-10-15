@@ -10,6 +10,7 @@ import { sendTextOnmid } from '@/lib/whatsapp-send';
 import {
   filtrarTermosParaAnalise, planejarAplicacao, parseDecisoesIa, resumoParaHistorico,
   PROMPT_SISTEMA_TERMOS, type TermoBruto,
+  ehCampanhaDeConcorrentes,
 } from '@/lib/search-terms-rotina';
 
 /**
@@ -145,6 +146,12 @@ export async function GET(req: NextRequest) {
       return r;
     });
 
+    // Clientes que fazem conquista de concorrente de propósito (lista de client_id).
+    const conquista = new Set<string>(await pool
+      .query(`SELECT value FROM public.system_settings WHERE key = 'gads_conquista_concorrentes'`)
+      .then((r) => { try { const v = JSON.parse(String(r.rows[0]?.value ?? '[]')); return Array.isArray(v) ? v.map(String) : []; } catch { return []; } })
+      .catch(() => [] as string[]));
+
     for (const cliente of clientes) {
       if (Date.now() - started > deadlineMs) { semTempo = true; break; }
       const res: ResultadoCliente = { client_id: cliente.id, nome: cliente.name };
@@ -173,7 +180,8 @@ export async function GET(req: NextRequest) {
           cliques: Number(r.metrics?.clicks ?? 0),
           gasto: Number(r.metrics?.costMicros ?? 0) / 1_000_000,
           conversoes: Number(r.metrics?.conversions ?? 0),
-        })).filter((t) => t.termo && t.campaignId && t.adGroupId);
+        })).filter((t) => t.termo && t.campaignId && t.adGroupId && !ehCampanhaDeConcorrentes(t.campanha));
+        const fazConquista = conquista.has(String(cliente.id));
 
         const analisar = filtrarTermosParaAnalise(brutos);
         res.analisados = analisar.length;
@@ -190,6 +198,7 @@ export async function GET(req: NextRequest) {
         const contexto = [
           `Cliente: ${cliente.name ?? '(sem nome)'}`,
           cliente.city ? `Área de atendimento: ${cliente.city}` : 'Área de atendimento: não informada (não negative por cidade sem certeza)',
+          ...(fazConquista ? ['ESTE CLIENTE FAZ CONQUISTA DE CONCORRENTE DE PROPÓSITO: nunca negative um termo por ser nome de concorrente ou de outro profissional do ramo — para esses termos, responda "ignorar".'] : []),
           `Palavras-chave ativas da conta: ${keywordsAtivas.slice(0, 60).join(' | ') || '(nenhuma)'}`,
           '',
           'Termos de pesquisa dos últimos 30 dias (termo | impressões | cliques | gasto R$ | conversões):',
@@ -210,7 +219,7 @@ export async function GET(req: NextRequest) {
         }).catch(() => {});
 
         const texto = msg.content.filter((c) => c.type === 'text').map((c) => (c as { text: string }).text).join('\n');
-        const plano = planejarAplicacao(parseDecisoesIa(texto), analisar, keywordsAtivas, { nomeCliente: cliente.name ?? '' });
+        const plano = planejarAplicacao(parseDecisoesIa(texto), analisar, keywordsAtivas, { nomeCliente: cliente.name ?? '', conquistaConcorrentes: fazConquista });
         res.recusadas = plano.recusadas.length;
 
         let negativadas = 0;

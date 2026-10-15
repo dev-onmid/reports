@@ -1,6 +1,7 @@
 import { makeServerPool } from '@/lib/server-db';
 import { verifyPassword, hashPassword } from '@/lib/password';
 import { getSession, unauthorized } from '@/lib/api-auth';
+import { ipDaRequisicao, resposta429, tentativaPermitida } from '@/lib/rate-limit';
 
 /**
  * Reconfirmação de senha antes de uma ação sensível (ex: mudar status de
@@ -11,7 +12,11 @@ import { getSession, unauthorized } from '@/lib/api-auth';
  * de login virou.
  */
 export async function POST(req: Request) {
-  if (!getSession(req)) return unauthorized();
+  const sessao = getSession(req);
+  if (!sessao) return unauthorized();
+  // Mesmo freio do login: isto era um oráculo de senha sem limite para quem
+  // já tinha qualquer sessão (auditoria 2026-10-10).
+  if (!tentativaPermitida(`verify:${sessao.uid}:${ipDaRequisicao(req)}`, 8, 15 * 60_000)) return resposta429();
 
   let email: string, password: string;
   try {

@@ -338,15 +338,100 @@ export function indexarOcorrencias<T>(linhas: T[], chaveDe: (l: T) => string): {
   });
 }
 
+/**
+ * Status que significa conversão. "Cadastrou" é a conversão da Romanza (a
+ * revendedora se cadastrou) — único cliente que usa o termo (medido 07/10/2026:
+ * 171 leads, todos dela). Uma régua só, usada aqui e em `statusFechouSql`.
+ */
+const PADRAO_FECHOU = 'efetivad|fechad|vendid|comprou|contratad|paciente|cadastrou';
+
+/**
+ * Status de conversão que as telas de criativos contam como venda mesmo sem
+ * `fechou` — mover o lead no Kanban NÃO marca `fechou` (só a importação marca),
+ * e a venda feita pelo Kanban não aparecia cruzada com o criativo.
+ *
+ * ⚠️ Por ora SÓ "Cadastrou" (Romanza). A régua inteira (`PADRAO_FECHOU`) foi
+ * medida em 07/10/2026 e mudaria outros clientes sem pedido: 206 leads em
+ * "Fechado" sem `fechou`, quase todos de delivery (Dominos 19→110 vendas,
+ * PicoLocos 0→50, Tokiomaki 17→58). Ampliar é decisão do Matheus.
+ */
+const PADRAO_FECHOU_KANBAN = 'cadastrou';
+
+export function statusFechouSql(alias = ''): string {
+  const c = alias ? `${alias}.` : '';
+  return `(lower(COALESCE(${c}status, '')) ~ '${PADRAO_FECHOU_KANBAN}')`;
+}
+
 export function sinaisDoStatus(status: unknown): SinaisDeEtapa {
   const s = normalizarOrigem(status); // reaproveita: sem acento, sem caixa
 
   // "Efetivada" é a venda concluída; "Realizada" é só o comparecimento.
-  const fechou = /efetivad|fechad|vendid|comprou|contratad|paciente/.test(s);
+  const fechou = new RegExp(PADRAO_FECHOU).test(s);
   // Compareceu inclui quem fechou: não dá pra efetivar sem ter comparecido.
   const compareceu = fechou || /realizad|compareceu|atendid[oa] na avaliacao/.test(s);
   // Agendou inclui quem faltou — o agendamento aconteceu, a presença não.
   const agendou = compareceu || /agendad|remarcad|reagendad|com falta|faltou|nao compareceu/.test(s);
 
   return { compareceu, fechou, agendou };
+}
+
+/**
+ * Uma data só é aceita se existir de verdade no calendário.
+ *
+ * ⚠️⚠️ Sem isto, uma ÚNICA célula digitada errada derruba a importação inteira
+ * daquela aba. Caso real (Romanza, JUN2026, linha 218): `23/0/2026` virava a
+ * string `2026-00-23`, o Postgres respondia *"date/time field value out of
+ * range"* e os **1.000 leads do mês** não entravam. Recusar a célula e deixar a
+ * linha entrar sem data é muito melhor do que perder o mês.
+ */
+export /** Data que um CRM pode ter de verdade — fora disso é lixo de planilha. */
+function emFaixa(d: Date): boolean {
+  if (!Number.isFinite(d.getTime())) return false;
+  const ano = d.getUTCFullYear();
+  return ano >= 1900 && ano <= 2200;
+}
+
+export function dataValida(ano: number, mes: number, dia: number): boolean {
+  if (!Number.isInteger(ano) || ano < 1900 || ano > 2200) return false;
+  if (mes < 1 || mes > 12 || dia < 1 || dia > 31) return false;
+  // Pega 31/02 e afins: o Date "transborda" para março e os componentes mudam.
+  const d = new Date(Date.UTC(ano, mes - 1, dia));
+  return d.getUTCFullYear() === ano && d.getUTCMonth() === mes - 1 && d.getUTCDate() === dia;
+}
+
+export function parseDate(val: unknown): string | null {
+  if (!val) return null;
+  if (val instanceof Date) return emFaixa(val) ? val.toISOString().split('T')[0] : null;
+  if (typeof val === 'number') {
+    // ⚠️⚠️ O número de série do Excel também precisa de faixa. Caso REAL
+    // (Romanza, abas MAI24/AGT24/SET24/OUT24): células com um número enorme
+    // viravam `+020204-05-13`, o Postgres respondia *"time zone displacement out
+    // of range"* e as abas falhavam inteiras. Validar só o texto não bastava:
+    // a planilha guarda data como número, e é por aqui que a maioria passa.
+    const d = new Date((val - 25569) * 86400 * 1000);
+    return emFaixa(d) ? d.toISOString().split('T')[0] : null;
+  }
+  const s = String(val).trim();
+
+  // ⚠️⚠️ ISO PRIMEIRO. O padrão dd/mm/aaaa abaixo casa DENTRO de uma data ISO:
+  // em "2026-06-23" ele pega "26-06-23" e devolve 26/06/2023 — dia trocado com
+  // o ano e três anos de diferença, em silêncio. Enquanto o ISO era testado por
+  // último, esse ramo nunca era alcançado.
+  const iso = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?!\d)/);
+  if (iso) {
+    const [, y, m, d] = iso;
+    if (!dataValida(Number(y), Number(m), Number(d))) return null;
+    return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+  }
+
+  // `(?<!\d)` e `(?!\d)` impedem o mesmo erro ao contrário: casar um pedaço de
+  // número maior ("120/06/20261") e inventar uma data que a célula não tem.
+  const parts = s.match(/(?<!\d)(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})(?!\d)/);
+  if (parts) {
+    const [, d, m, y] = parts;
+    const year = y.length === 2 ? `20${y}` : y;
+    if (!dataValida(Number(year), Number(m), Number(d))) return null;
+    return `${year}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+  }
+  return null;
 }

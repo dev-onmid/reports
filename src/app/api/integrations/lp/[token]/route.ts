@@ -145,8 +145,8 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ token: str
         const { rows } = await pool.query<{ id: string }>(
           `INSERT INTO public.crm_leads
              (client_id, mes, data, nome, numero, email, city, canal, origin,
-              observacao, status, funnel_id, created_at, updated_at)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,NOW(),NOW())
+              observacao, status, funnel_id, porta, created_at, updated_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'formulario',NOW(),NOW())
            RETURNING id`,
           [
             origem.client_id,
@@ -255,6 +255,8 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ token: str
           cpf: txt(c.cpf) ?? null,
           utmSource: tracking.utm_source ?? null,
           utmMedium: tracking.utm_medium ?? null,
+          campanha: nomes.campaign ?? tracking.utm_campaign ?? null,
+          pageUrl: tracking.source_url ?? null,
         },
       ).catch(err => ({ ok: false as const, motivo: String(err) }));
       // ⚠️ Vai para o log da TELA, não só para o console. Esta feature existe

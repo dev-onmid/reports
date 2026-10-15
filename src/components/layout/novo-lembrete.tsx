@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { AlarmClockPlus, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getAuthSession } from '@/lib/auth-store';
@@ -117,7 +118,15 @@ export function NovoLembrete() {
 
       {/* ⚠️ z-350: acima do alarme (z-300). Um lembrete que tocasse enquanto a pessoa
           estivesse criando outro cobria o botão "Criar lembrete" e travava a ação. */}
-      {aberto && (
+      {/* ⚠️⚠️ PORTAL PARA O <body>, e isso NÃO é estilo: este componente é renderizado
+          DENTRO do <header>, que tem `backdrop-blur-sm`. `backdrop-filter` faz o header
+          virar o bloco de contenção de todo filho `position: fixed` — então o
+          `inset-0` abaixo valia a faixa de 56px do header, não a tela. Medido: overlay
+          de 56px em vez de 800px, e o modal centralizado nessa faixa saía metade POR
+          CIMA do topo da tela, escondendo justamente o campo obrigatório. Tirar o blur
+          do header também resolveria, mas voltaria a quebrar no dia em que alguém
+          puser transform/filter/perspective em qualquer ancestral. */}
+      {aberto && createPortal(
         <div className="fixed inset-0 z-[350] flex items-center justify-center bg-black/60 p-4"
              onClick={() => setAberto(false)}>
           {/* ⚠️ `max-h` + `flex-col` no CONTAINER, não só no corpo. Antes o corpo tinha
@@ -229,7 +238,8 @@ export function NovoLembrete() {
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </>
   );

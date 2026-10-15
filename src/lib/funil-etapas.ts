@@ -134,7 +134,7 @@ export function classificarEtapa(label: string | null | undefined): EtapaFunil {
   // "Vendas" e "Contratação" caíam todos em 'contato'. Medido em 14/09: os 503
   // leads ganhos da Londrigifts contavam como topo de funil no Radar e na
   // dashboard. Mesma família de defeito em agendamento e comparecimento abaixo.
-  if (/efetivad|fechad|fechament|vendid|\bvendas?\b|comprou|contratad|contratac|\bcontrato\b|ganho|\bwon\b/.test(s)) return 'fechamento';
+  if (/efetivad|fechad|fechament|vendid|\bvendas?\b|comprou|contratad|contratac|\bcontrato\b|ganho|\bwon\b|cadastrou/.test(s)) return 'fechamento';
   // Ausência explícita ANTES de comparecimento: "No-Show" contém "show" mas é
   // o oposto — agendou e faltou.
   if (/no show|nao compareceu|com falta|faltou/.test(s)) return 'agendamento';

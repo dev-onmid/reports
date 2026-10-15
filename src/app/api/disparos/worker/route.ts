@@ -11,10 +11,13 @@
  */
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
+import { cronAutorizado } from '@/lib/cron-auth';
 import { sendText, sendImage } from '@/lib/zapi';
 import { sendFollowupMessage, type WaInstance } from '@/lib/followup-send';
 import { isWithinWindow, isActiveDayNow } from '@/lib/disparos-schedule';
 import { lerImagens, parDoRodizio } from '@/lib/disparos-rodizio';
+import { etiquetarQuemRecebeu, lidDoEnvio } from '@/lib/disparos-lid';
+import { montarMensagem } from '@/lib/disparos-mensagem';
 import {
   garantirProtecaoChip, reservarEnvioNoChip, removerOptoutDaFila,
   podeSincronizarOptout, sincronizarOptout,
@@ -27,8 +30,10 @@ export const maxDuration = 30;
 
 const BUDGET_MS = 25_000;
 
+// {nome}/{primeiro_nome}/{telefone} + frase recomposta quando falta o nome —
+// a MESMA função da prévia da tela (disparos-mensagem.ts).
 function interpolate(template: string, phone: string, name: string) {
-  return template.replace(/\{telefone\}/g, phone).replace(/\{nome\}/g, name);
+  return montarMensagem(template, { phone, name });
 }
 
 function sleep(ms: number) {
@@ -38,21 +43,14 @@ function sleep(ms: number) {
 async function runWorker(req: NextRequest) {
   // Mesma família de secrets dos outros crons (CRON_SECRET da Vercel é
   // write-only — os workflows do GitHub usam REPORTS_CRON_SECRET).
-  const validSecrets = [process.env.CRON_SECRET, process.env.REPORTS_CRON_SECRET, process.env.CRM_CRON_SECRET]
-    .filter(Boolean);
-  if (validSecrets.length > 0) {
-    const authHeader = req.headers.get('authorization');
-    const urlSecret = new URL(req.url).searchParams.get('secret');
-    const ok = validSecrets.some(s => authHeader === `Bearer ${s}` || urlSecret === s);
-    if (!ok) {
-      return Response.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-  }
+  // Falha FECHADA e em tempo constante (auditoria 2026-10-10).
+  if (!cronAutorizado(req)) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
   const pool = makeServerPool();
   const startTime = Date.now();
   let processed = 0;
   let optout = 0;
+  let etiquetaFalhou = 0;
   let chipOcupado = 0;
 
   try {
@@ -64,6 +62,10 @@ async function runWorker(req: NextRequest) {
     await pool.query(`ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS message_index INT NOT NULL DEFAULT 0`);
     await pool.query(`ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS active_days TEXT`);
     await pool.query(`ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS daily_limit INT`);
+    await pool.query(`ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS label_id TEXT`);
+    await pool.query(`ALTER TABLE public.zapi_campaigns ADD COLUMN IF NOT EXISTS label_nome TEXT`);
+    await pool.query(`ALTER TABLE public.zapi_numbers ADD COLUMN IF NOT EXISTS lid TEXT`);
+    await pool.query(`ALTER TABLE public.zapi_numbers ADD COLUMN IF NOT EXISTS etiquetado_em TIMESTAMPTZ`);
     await garantirProtecaoChip(pool);
 
     // Transition pending campaigns whose start time has arrived
@@ -90,6 +92,7 @@ async function runWorker(req: NextRequest) {
       interval_min: number;
       interval_max: number;
       daily_limit: number | null;
+      label_id: string | null;
       client_id: string;
       instance_id: string;
       token: string;
@@ -98,7 +101,7 @@ async function runWorker(req: NextRequest) {
     }>(`
       SELECT c.id, c.name, c.status, c.message, c.messages, c.message_index, c.image_url, c.ends_at,
              c.active_from, c.active_until, c.active_days, c.interval_min, c.interval_max,
-             c.daily_limit, c.client_id,
+             c.daily_limit, c.label_id, c.client_id,
              cl.instance_id, cl.token, cl.security_token, cl.provider, cl.name AS client_name
         FROM public.zapi_campaigns c
         JOIN public.zapi_clients cl ON cl.id = c.client_id
@@ -297,10 +300,33 @@ async function runWorker(req: NextRequest) {
           break;
         }
 
+        // Etiqueta no WhatsApp do cliente: só para quem REALMENTE recebeu, e
+        // sempre best-effort. A mensagem já saiu — falhar em pendurar o rótulo
+        // não pode marcar o contato como falha nem parar a campanha.
+        let notaEtiqueta: string | null = null;
+        let lidGravar: string | null = null;
+        let etiquetou = false;
+        if (result.ok && isEvolution) {
+          // O LID nasce no envio e morre no re-pareamento — guardar SEMPRE,
+          // com ou sem etiqueta, é o que permite etiquetar depois.
+          lidGravar = await lidDoEnvio({ instanceName: campaign.instance_id, phone: number.phone }).catch(() => null);
+          if (campaign.label_id) {
+            const et = await etiquetarQuemRecebeu({ instanceName: campaign.instance_id, phone: number.phone, labelId: campaign.label_id, lid: lidGravar });
+            if (et.aplicada) etiquetou = true;
+            else { etiquetaFalhou++; notaEtiqueta = `etiqueta: ${et.motivo}`; }
+          }
+        }
+
         const newStatus = result.ok ? 'sent' : 'failed';
+        // `error_msg` guarda a nota da etiqueta SEM mudar o status: a mensagem
+        // foi entregue; o que falhou foi o rótulo, e isso precisa ficar visível.
         await pool.query(
-          `UPDATE public.zapi_numbers SET status = $1, sent_at = NOW(), error_msg = $2 WHERE id = $3`,
-          [newStatus, result.error ?? null, number.id],
+          `UPDATE public.zapi_numbers
+              SET status = $1, sent_at = NOW(), error_msg = $2,
+                  lid = COALESCE($4, lid),
+                  etiquetado_em = CASE WHEN $5::boolean THEN NOW() ELSE etiquetado_em END
+            WHERE id = $3`,
+          [newStatus, result.error ?? notaEtiqueta ?? null, number.id, lidGravar, etiquetou],
         );
 
         const field = result.ok ? 'sent = sent + 1' : 'failed = failed + 1';
@@ -328,7 +354,7 @@ async function runWorker(req: NextRequest) {
       }
     }
 
-    return Response.json({ ok: true, processed, optout, chipOcupado, elapsed: Date.now() - startTime });
+    return Response.json({ ok: true, processed, optout, chipOcupado, etiquetaFalhou, elapsed: Date.now() - startTime });
   } finally {
     await pool.end();
   }

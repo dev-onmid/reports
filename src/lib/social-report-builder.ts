@@ -3,9 +3,9 @@ import { makeServerPool } from '@/lib/server-db';
 import {
   fetchInstagramData,
   sCapa, sInstagram, sInstagramCalendar, sInstagramPosts, sInstagramSpotlight,
-  sInstagramTodosConteudos, ordenarPostsPorData, TODOS_CONTEUDOS_POR_PAGINA,
+  sInstagramTodosConteudos, ordenarPostsPorData, TODOS_CONTEUDOS_POR_PAGINA, postsParaListar, mesesCheios,
   monthsBetweenInclusive, FONT_LINK, CANVAS, INTER,
-  resolveReportCover, fetchReportRotationSeed, sanitizeJsonValue,
+  resolveReportCover, fetchReportRotationSeed, sanitizeJsonValue, rotuloPeriodo, autoPreviousPeriod,
   type DiagJson, type ParsedData, type CompareOverride,
 } from './delivery-report-builder';
 import { sectionEnabled } from './report-sections';
@@ -65,11 +65,11 @@ export async function buildSocialReport(input: {
 
   const fromDate = new Date(periodFrom + 'T12:00:00');
   const toDate   = new Date(periodTo   + 'T12:00:00');
-  const MONTHS   = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
-  const periodo     = `${MONTHS[fromDate.getMonth()]}/${fromDate.getFullYear()}`;
-  // Label do período anterior: usa o override explícito quando houver, senão o mês-calendário anterior.
-  const prevFromDate = compare ? new Date(compare.from + 'T12:00:00') : new Date(fromDate.getFullYear(), fromDate.getMonth() - 1, 1);
-  const prevPeriodo  = compare === null ? '' : `${MONTHS[prevFromDate.getMonth()]}/${prevFromDate.getFullYear()}`;
+  const periodo     = rotuloPeriodo(periodFrom, periodTo);
+  // Label do período anterior: o override explícito quando houver, senão a janela anterior
+  // automática (mesmo cálculo que o Instagram usa) — cobre o período inteiro, não só o mês inicial.
+  const prevJanela  = compare === null ? null : (compare ?? autoPreviousPeriod(periodFrom, periodTo));
+  const prevPeriodo = prevJanela ? rotuloPeriodo(prevJanela.from, prevJanela.to) : '';
 
   const [instagramFull, rotationSeed] = await Promise.all([
     // Called unconditionally — fetchInstagramData resolves a directly-linked Instagram
@@ -97,7 +97,8 @@ export async function buildSocialReport(input: {
   const hasCalendario         = hasInstagramPosts && en('calendario');
   const hasTopConteudos       = hasInstagramPosts && en('top_conteudos');
   const hasInstagramSpotlight = hasInstagramPosts && en('melhor_conteudo');
-  const todosConteudosPages   = hasTodosConteudos ? Math.ceil(igPosts.length / TODOS_CONTEUDOS_POR_PAGINA) : 0;
+  const todosListar           = postsParaListar(ordenarPostsPorData(igPosts));
+  const todosConteudosPages   = hasTodosConteudos ? todosListar.paginas : 0;
 
   const total = 1
     + (hasInstagram      ? 1 : 0)
@@ -122,13 +123,14 @@ export async function buildSocialReport(input: {
     }
   }
   if (hasTodosConteudos) {
-    const ordered = ordenarPostsPorData(igPosts);
+    const ordered = todosListar.lista;
     for (let start = 0, page = 1; start < ordered.length; start += TODOS_CONTEUDOS_POR_PAGINA, page++) {
-      slides.push(sInstagramTodosConteudos(ordered.slice(start, start + TODOS_CONTEUDOS_POR_PAGINA), ++i, total, page, todosConteudosPages));
+      slides.push(sInstagramTodosConteudos(ordered.slice(start, start + TODOS_CONTEUDOS_POR_PAGINA), ++i, total, page, todosConteudosPages, todosListar.totalPosts));
     }
   }
-  if (hasTopConteudos)       slides.push(sInstagramPosts(igPosts, ++i, total));
-  if (hasInstagramSpotlight) slides.push(sInstagramSpotlight(igPosts, ++i, total));
+  const periodoEhMes = mesesCheios(periodFrom, periodTo) === 1;
+  if (hasTopConteudos)       slides.push(sInstagramPosts(igPosts, ++i, total, periodoEhMes));
+  if (hasInstagramSpotlight) slides.push(sInstagramSpotlight(igPosts, ++i, total, periodoEhMes));
 
   return { html: `${FONT_LINK}<div class="onmid-report" style="background:${CANVAS};padding:28px;font-family:${INTER}">${slides.join('')}</div>` };
 }

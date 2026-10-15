@@ -58,6 +58,7 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { useClients } from '@/lib/client-store';
+import { useEhUsuarioCliente } from '@/lib/modo-cliente';
 import { cn, formatCurrencyBRL } from '@/lib/utils';
 import { T } from '@/lib/dashboard-tipografia';
 import { ClientAvatar } from '@/components/client-avatar';
@@ -87,6 +88,7 @@ import {
   ETAPAS_FUNIL,
   type ContagemFunil, type EtapaFunil, type FunilPorStage,
 } from '@/lib/funil-etapas';
+import type { FunilPlanilha } from '@/lib/funil-planilha';
 import { FunilLeadsModal } from '@/components/funil-leads-modal';
 import { normalizarSegmento, perfilDaSelecao } from '@/lib/dashboard-segmento';
 import { Chapter } from '@/components/dashboard';
@@ -112,7 +114,7 @@ import { IndicadorCard, IndicadorMini, FaixaIndicadores, IconeBadge } from '@/co
 
 type Period = 'yesterday' | 'last_7d' | 'last_14d' | 'last_30d' | 'this_month' | 'last_month' | 'last_3m' | 'last_6m' | 'this_year' | 'all_time' | 'custom';
 type VendasCohort = { periodo: number; anteriores: number; semData: number };
-type ClientSheetsSummary = { leads: number; funil: ContagemFunil; total: number; funilStages: FunilPorStage | null; conversasFora: number; leadsValidados: number; rastreadosForaDoCrm: number; vendasCohort: VendasCohort | null };
+type ClientSheetsSummary = { leads: number; funil: ContagemFunil; total: number; funilStages: FunilPorStage | null; funilPlanilha: FunilPlanilha | null; conversasFora: number; leadsValidados: number; rastreadosForaDoCrm: number; vendasCohort: VendasCohort | null };
 type ApiMetrics = {
   meta: { spend: number; reach?: number; impressions: number; clicks: number; leads: number; formLeads?: number; siteLeads?: number; conversations?: number; cpl: number } | null;
   google: { cost: number; impressions: number; clicks: number; cpc: number; conversions: number; cpa: number;
@@ -1787,6 +1789,7 @@ function CampaignPerformanceTable({
       ad: new Map((vendas?.criativos ?? []).filter(c => c.adId).map(c => [c.adId as string, c])),
     };
   }, [vendas]);
+  const modoClienteTabela = useEhUsuarioCliente();
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [childrenMap, setChildrenMap] = useState<Record<string, ChildState>>({});
   const [adPreview, setAdPreview] = useState<{ ad: MetaAdWithMetrics; x: number; y: number } | null>(null);
@@ -1954,7 +1957,9 @@ function CampaignPerformanceTable({
     }
 
     const isExpanded = 'fetchUrl' in row && expanded.has(row.key);
-    const expandable = canExpand(row);
+    // Gestor do cliente: sem detalhe de conjuntos/anúncios (as rotas são por
+    // id de campanha, sem cliente para o servidor conferir — ver acesso.ts).
+    const expandable = canExpand(row) && !modoClienteTabela;
 
     let displayStatus: string;
     let displayName: string;
@@ -5265,8 +5270,12 @@ export default function GeneralDashboard() {
   const { clients } = useClients();
   const session = getAuthSession();
   const isAdmin = session?.role === 'Administrador';
+  // Gestor do CLIENTE (team='cliente'): a mesma dashboard, presa ao cliente
+  // dele — sem seletor de carteira, sem editor de modelo. O servidor só
+  // devolve dados desse cliente (ROTAS_GESTOR em src/lib/acesso.ts).
+  const modoCliente = useEhUsuarioCliente();
 
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => {
+  const [selectedIdsSalvos, setSelectedIds] = useState<Set<string>>(() => {
     if (typeof window === 'undefined') return new Set();
     try {
       const stored = localStorage.getItem('dashboard-selected-clients');
@@ -5274,6 +5283,14 @@ export default function GeneralDashboard() {
     } catch { /* ignore */ }
     return new Set();
   });
+  // No modo cliente a seleção é DERIVADA (o id do único cliente que /api/clients
+  // devolve), não estado: nada do que a tela faça troca de cliente. Dep pelo id
+  // (string), não pelo array — identidade nova de `clients` refaria todo fetch.
+  const meuClienteId = modoCliente ? (clients[0]?.id ?? null) : null;
+  const selectedIds = useMemo(
+    () => (meuClienteId ? new Set([meuClienteId]) : selectedIdsSalvos),
+    [meuClienteId, selectedIdsSalvos],
+  );
   const [prevMetricsByClient, setPrevMetricsByClient] = useState<Record<string, ApiMetrics>>({});
   const [period, setPeriod] = useState<Period>('this_month');
   const [customDateFrom, setCustomDateFrom] = useState('');
@@ -5765,6 +5782,9 @@ export default function GeneralDashboard() {
 
   // Fetch balances and account links used by the general balance cards
   useEffect(() => {
+    // Saldo das contas é dinheiro da agência: o gestor do cliente não vê (e as
+    // rotas nem estão liberadas para ele).
+    if (modoCliente) return; // estado inicial já é vazio
     setBalancesLoading(true);
     Promise.all([
       fetch('/api/meta/account-balances'),
@@ -5788,12 +5808,12 @@ export default function GeneralDashboard() {
         setClientLinks([]);
       })
       .finally(() => setBalancesLoading(false));
-  }, []);
+  }, [modoCliente]);
 
   useEffect(() => {
     const params = new URLSearchParams({ from: faixaSel.from, to: faixaSel.to });
     fetch(`/api/crm/summary?${params}`)
-      .then(r => r.ok ? r.json() as Promise<{ clientId: string; leads: number; funil: ContagemFunil; total: number; funilStages: FunilPorStage | null; ultimaAtualizacao?: string | null; conversasFora?: number; leadsValidados?: number; rastreadosForaDoCrm?: number; vendasCohort?: VendasCohort | null }[]> : [])
+      .then(r => r.ok ? r.json() as Promise<{ clientId: string; leads: number; funil: ContagemFunil; total: number; funilStages: FunilPorStage | null; funilPlanilha?: FunilPlanilha | null; ultimaAtualizacao?: string | null; conversasFora?: number; leadsValidados?: number; rastreadosForaDoCrm?: number; vendasCohort?: VendasCohort | null }[]> : [])
       .then(data => {
         const map: Record<string, ClientSheetsSummary> = {};
         // Guarda a última entrada de lead POR cliente: o selo de frescor deriva
@@ -5801,7 +5821,7 @@ export default function GeneralDashboard() {
         // refazer este fetch (que já é da carteira inteira) ao trocar de cliente.
         const ultimas: Record<string, string> = {};
         for (const item of data) {
-          map[item.clientId] = { leads: item.leads, funil: item.funil, total: item.total, funilStages: item.funilStages ?? null, conversasFora: item.conversasFora ?? 0, leadsValidados: item.leadsValidados ?? 0, rastreadosForaDoCrm: item.rastreadosForaDoCrm ?? 0, vendasCohort: item.vendasCohort ?? null };
+          map[item.clientId] = { leads: item.leads, funil: item.funil, total: item.total, funilStages: item.funilStages ?? null, funilPlanilha: item.funilPlanilha ?? null, conversasFora: item.conversasFora ?? 0, leadsValidados: item.leadsValidados ?? 0, rastreadosForaDoCrm: item.rastreadosForaDoCrm ?? 0, vendasCohort: item.vendasCohort ?? null };
           if (item.ultimaAtualizacao) ultimas[item.clientId] = item.ultimaAtualizacao;
         }
         setCrmSummary(map);
@@ -6576,9 +6596,18 @@ export default function GeneralDashboard() {
   const stageFunilSolo = selectedIds.size === 1
     ? (crmSummary[[...selectedIds][0]]?.funilStages ?? null)
     : null;
-  const usaStageFunil = !!stageFunilSolo && stageFunilSolo.degraus.length > 0;
+  // Funil contado DIRETO da planilha do cliente, com as fórmulas dela (pedido do
+  // Matheus para a Romanza, 2026-10-07): degraus e números iguais ao resumo da
+  // planilha. Vence o Kanban e o semântico — é a régua que o cliente usa.
+  const planilhaSolo = selectedIds.size === 1 && !deliverySoloId
+    ? (crmSummary[[...selectedIds][0]]?.funilPlanilha ?? null)
+    : null;
+  const usaFunilPlanilha = !!planilhaSolo && planilhaSolo.degraus.length > 0;
+  const usaStageFunil = !usaFunilPlanilha && !!stageFunilSolo && stageFunilSolo.degraus.length > 0;
 
-  const funnelStepsNew = usaStageFunil
+  const funnelStepsNew = usaFunilPlanilha
+    ? planilhaSolo!.degraus.map(d => ({ label: d.rotulo, actual: d.valor, planned: 0, color: d.cor }))
+    : usaStageFunil
     ? stageFunilSolo!.degraus.map((d, i) => {
         // A quebra "a comparecer / faltaram" vai no ÚLTIMO degrau de agendamento
         // que tenha um comparecimento depois. Os números vêm do funil semântico
@@ -6624,7 +6653,9 @@ export default function GeneralDashboard() {
     for (let i = ds.length - 1; i >= 0; i--) if (ds[i].etapa === etapa) return i;
     return -1;
   };
-  const funnelSemiDegraus: SemiDegrau[] = deliverySoloId ? [] : usaStageFunil
+  const funnelSemiDegraus: SemiDegrau[] = deliverySoloId ? [] : usaFunilPlanilha
+    ? planilhaSolo!.desvios.filter(d => d.valor > 0).map(d => ({ apos: d.apos, rotulo: d.rotulo, valor: d.valor, tom: d.tom }))
+    : usaStageFunil
     ? semiDegrausSemantico({ contato: ultimoIdx('contato'), qualificado: ultimoIdx('qualificado'), agendamento: ultimoIdx('agendamento'), comparecimento: ultimoIdx('comparecimento') })
     : semiDegrausSemantico({ contato: 0, qualificado: 1, agendamento: 2, comparecimento: 3 });
   // Funil de cada canal alinhado aos degraus exibidos (seletor do mock). Cada
@@ -6641,7 +6672,9 @@ export default function GeneralDashboard() {
     .filter(l => !l.semCanal && l.leads > 0)
     .map(l => ({ canal: l.canal, valores: etapasDosDegraus.map(e => valorDaEtapa(l, e)) }));
   // Conversão geral do funil real = fechamento (último degrau) sobre o topo dele.
-  const funnelTaxaFinal = usaStageFunil && stageFunilSolo!.degraus.length > 1
+  const funnelTaxaFinal = usaFunilPlanilha
+    ? (planilhaSolo!.degraus[planilhaSolo!.degraus.length - 1].valor / Math.max(planilhaSolo!.degraus[0].valor, 1)) * 100
+    : usaStageFunil && stageFunilSolo!.degraus.length > 1
     ? (stageFunilSolo!.degraus[stageFunilSolo!.degraus.length - 1].alcancaram
         / Math.max(stageFunilSolo!.degraus[0].alcancaram, 1)) * 100
     : funnelTaxa;
@@ -6785,7 +6818,7 @@ export default function GeneralDashboard() {
                 <div className="rounded-[12px] border border-white/[0.08] bg-[#071014] p-3">
                   <div className="mb-3 flex items-center gap-2 text-sm font-black uppercase tracking-[0.06em] text-[#f4f7f8]"><MetaAdsMark className="h-5 w-5 text-[#168BFF]" /> Meta Ads</div>
                   <div className="grid gap-2 sm:grid-cols-3">
-                    <MiniPlatformMetric label="Saldo Meta Ads" value={metaBalance > 0 ? premiumValue(metaBalance, 'currency') : '—'} logo={<MetaAdsMark className="h-4 w-4 text-[#168BFF]" />} sub="Saldo disponível" />
+                    {!modoCliente && <MiniPlatformMetric label="Saldo Meta Ads" value={metaBalance > 0 ? premiumValue(metaBalance, 'currency') : '—'} logo={<MetaAdsMark className="h-4 w-4 text-[#168BFF]" />} sub="Saldo disponível" />}
                     <MiniPlatformMetric label="Alcance" value={metaReach > 0 ? premiumValue(metaReach) : '—'} icon={Users} change={pct(metaReach, prevMetaReach)} comparacao={rotuloComp} />
                     {/* CPM: preço para aparecer. Queda é boa (inverseChange). */}
                     <MiniPlatformMetric label="CPM" value={metaCpm > 0 ? premiumValue(metaCpm, 'currency') : '—'} icon={Eye} change={metaCpm > 0 && prevMetaCpm > 0 ? pct(metaCpm, prevMetaCpm) : null} inverseChange comparacao={rotuloComp} />
@@ -6801,7 +6834,7 @@ export default function GeneralDashboard() {
                 <div className="rounded-[12px] border border-white/[0.08] bg-[#071014] p-3">
                   <div className="mb-3 flex items-center gap-2 text-sm font-black uppercase tracking-[0.06em] text-[#f4f7f8]"><GoogleAdsMark className="h-5 w-5" /> Google Ads</div>
                   <div className="grid gap-2 sm:grid-cols-3">
-                    <MiniPlatformMetric label="Saldo Google Ads" value={googleBalance > 0 ? premiumValue(googleBalance, 'currency') : '—'} logo={<GoogleAdsMark className="h-4 w-4" />} sub="Saldo disponível" />
+                    {!modoCliente && <MiniPlatformMetric label="Saldo Google Ads" value={googleBalance > 0 ? premiumValue(googleBalance, 'currency') : '—'} logo={<GoogleAdsMark className="h-4 w-4" />} sub="Saldo disponível" />}
                     <MiniPlatformMetric label="Impressões" value={hasGoogleData ? premiumValue(googleImpressions) : '—'} icon={BarChart3} change={hasGoogleData ? pct(googleImpressions, prevGoogleImpressions) : null} comparacao={rotuloComp} />
                     {/* CPM: preço para aparecer. Queda é boa (inverseChange). */}
                     <MiniPlatformMetric label="CPM" value={googleCpm > 0 ? premiumValue(googleCpm, 'currency') : '—'} icon={Eye} change={googleCpm > 0 && prevGoogleCpm > 0 ? pct(googleCpm, prevGoogleCpm) : null} inverseChange comparacao={rotuloComp} />
@@ -7224,7 +7257,13 @@ export default function GeneralDashboard() {
 
       <div className="sticky top-0 z-20 border-b border-white/[0.08] bg-[#060a0d]/92 px-4 py-3 backdrop-blur-xl xl:px-6">
         <div className="flex items-center gap-3 overflow-x-auto">
-          <ClientSelector clients={clients} selected={selectedIds} onChange={setSelectedIds} />
+          {modoCliente ? (
+            <div className="flex h-10 shrink-0 items-center gap-2 rounded-[10px] border border-white/[0.08] bg-[#0b1216] px-3 text-sm font-bold text-[#f4f7f8]">
+              {clients[0]?.name ?? 'Carregando…'}
+            </div>
+          ) : (
+            <ClientSelector clients={clients} selected={selectedIds} onChange={setSelectedIds} />
+          )}
           <div className="flex items-center rounded-[10px] border border-white/[0.08] bg-[#0b1216] p-1">
             {PERIODS.filter(p => p.value !== 'yesterday').map((p) => (
               <button
@@ -7564,7 +7603,7 @@ export default function GeneralDashboard() {
                       {deliverySoloId ? (
                         <DeliveryResumoCard clientId={deliverySoloId} from={deliveryRange.from} to={deliveryRange.to} />
                       ) : (
-                        <SimpleFunnel steps={funnelStepsNew} totalRate={funnelTaxaFinal > 0 ? premiumValue(funnelTaxaFinal, 'percent') : '—'} fonteLabel={usaStageFunil ? 'fonte: CRM' : fonteTopoLabel} onStageClick={setFunilStageIdx} todosClicaveis={usaStageFunil} semiDegraus={funnelSemiDegraus} porCanal={mostraFunilCanal ? undefined : funilPorCanal} rastreadosForaDoCrm={rastreadosForaDoCrm} onVerForaDoCrm={() => setVerForaDoCrm(true)} />
+                        <SimpleFunnel steps={funnelStepsNew} totalRate={funnelTaxaFinal > 0 ? premiumValue(funnelTaxaFinal, 'percent') : '—'} fonteLabel={usaFunilPlanilha ? 'fonte: planilha do cliente' : usaStageFunil ? 'fonte: CRM' : fonteTopoLabel} onStageClick={usaFunilPlanilha ? undefined : setFunilStageIdx} todosClicaveis={usaStageFunil} semiDegraus={funnelSemiDegraus} porCanal={mostraFunilCanal || usaFunilPlanilha ? undefined : funilPorCanal} rastreadosForaDoCrm={rastreadosForaDoCrm} onVerForaDoCrm={() => setVerForaDoCrm(true)} />
                       )}
                       <ChannelSummaryTable rows={channelRows} total={channelTotal} metaCpl={cplMetaSel} comparacao={rotuloComp} />
                     </div>

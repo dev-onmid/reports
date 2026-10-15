@@ -4,6 +4,7 @@ import { makeServerPool } from '@/lib/server-db';
 import { resolveMetaPeriod, resolveGaqlPeriod, applyMetaDateToUrl } from '@/lib/period-utils';
 import { parseRecorte, filtroRegiaoSql } from '@/lib/regiao-recorte';
 import { ENSURE_COLUNAS_CONTAGEM, leadContaSql } from '@/lib/lead-contagem';
+import { CRM_PERIODO_SQL, crmDoPeriodoDaLinha } from '@/lib/crm-metricas';
 import { getFreshMetaToken } from '@/lib/meta-token';
 import { getCached, setCached, cachedJson, TTL_4H } from '@/lib/api-cache';
 
@@ -348,40 +349,10 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     //    faturamento de JULHO, igual ao painel do CRM externo. Lead sem
     //    fechado_em (planilha, WhatsApp) continua caindo na data do lead.
     // "Data NULL fica dentro" preservado nas duas janelas.
-    const crmRows = await safeRows(
-      pool,
-      `SELECT
-          COALESCE(SUM(COALESCE(NULLIF(revenue, 0), valor_rs, 0)) FILTER (WHERE
-            COALESCE(fechado_em, lead_date, data) IS NULL
-            OR COALESCE(fechado_em, lead_date, data) BETWEEN $2 AND $3
-          ), 0)::float AS revenue,
-          COUNT(*) FILTER (WHERE
-            (COALESCE(NULLIF(revenue, 0), valor_rs, 0) > 0 OR fechou = TRUE)
-            AND (
-              COALESCE(fechado_em, lead_date, data) IS NULL
-              OR COALESCE(fechado_em, lead_date, data) BETWEEN $2 AND $3
-            )
-          )::int AS sales,
-          COUNT(*) FILTER (WHERE
-            COALESCE(lead_date, data) IS NULL
-            OR COALESCE(lead_date, data) BETWEEN $2 AND $3
-          )::int AS leads
-         FROM public.crm_leads
-        -- A LEI (lead-contagem.ts): só lead que conta na dashboard.
-        WHERE client_id = $1 AND ${leadContaSql()}${regiao.sql}`,
-      crmParams,
-    );
-    const crm = crmRows[0];
-    if (crm) {
-      const revenue = Number(crm.revenue ?? 0);
-      const sales = Number(crm.sales ?? 0);
-      crmResult = {
-        revenue,
-        sales,
-        leads: Number(crm.leads ?? 0),
-        ticket: sales > 0 ? revenue / sales : 0,
-      };
-    }
+    // ⚠️ A query mora em `crm-metricas.ts` porque o relatório de performance
+    // precisa do MESMO número — duas cópias já divergiram uma vez.
+    const crmRows = await safeRows(pool, `${CRM_PERIODO_SQL}${regiao.sql}`, crmParams);
+    crmResult = crmDoPeriodoDaLinha(crmRows[0]);
     // Série diária com as mesmas duas réguas do total: uma query por régua,
     // mescladas por dia (leads no dia da criação; receita/vendas no dia do ganho).
     const [leadsDia, vendasDia] = await Promise.all([

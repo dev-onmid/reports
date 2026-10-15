@@ -8,7 +8,7 @@ import {
   LayoutDashboard, Users, TableProperties, FileText, BarChart3,
   WalletCards, Bot, ShieldCheck, Zap, Plug, ClipboardList, WandSparkles,
   Wifi, WifiOff, QrCode, RefreshCw, Power, X,
-  Link2, Link2Off, AlertTriangle, CheckCircle2, Loader2,
+  Link2, Link2Off, AlertTriangle, CheckCircle2, Loader2, EyeOff,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -31,11 +31,13 @@ import { mockUsers as initialUsers, mockPermissions as initialPermissions, defau
 import { IntegrationsPanel } from '@/components/settings/integrations-panel';
 import EmailRemetenteTab from '@/components/settings/email-remetente-tab';
 import { LogsPanel } from '@/components/settings/logs-panel';
+import { RotinasPanel } from '@/components/settings/rotinas-panel';
 import type { User as UserType, Permission, Team } from '@/lib/mock-data';
 import { cn } from '@/lib/utils';
 import { useAbaPersistida } from '@/lib/aba-persistida';
 import { callerHeaders } from '@/lib/auth-store';
 import { notificar } from '@/components/ui/toast';
+import { useClients } from '@/lib/client-store';
 import { USD_TO_BRL } from '@/lib/ai-usage-config';
 
 // Mirrors the sidebar nav order (src/components/layout/sidebar.tsx) so admins
@@ -61,6 +63,7 @@ const ROLES = ['Administrador', 'Usuário', 'Visualizador'];
 const TEAMS: { value: Team; label: string }[] = [
   { value: 'onmid', label: 'Time Onmid' },
   { value: 'parceiro', label: 'Parceiro' },
+  { value: 'cliente', label: 'Cliente (só o CRM dele)' },
 ];
 
 // O setor decide o destino da tarefa gerada a partir de uma reunião: tráfego vai
@@ -76,7 +79,7 @@ function setorLabel(setor: string | null | undefined): string | null {
 
 const emptyForm = {
   name: '', email: '', password: '', role: 'Usuário', status: 'Ativo', team: 'onmid' as Team,
-  setor: '',
+  setor: '', clientIds: [] as string[], perfilCliente: 'atendente' as 'gestor' | 'atendente',
 };
 
 /**
@@ -84,7 +87,7 @@ const emptyForm = {
  * do mock-data, que é compartilhado com o auth-store e a semente de UI. Estender
  * aqui evita mexer num tipo usado por meio sistema por causa de uma tela só.
  */
-type UserRow = UserType & { setor?: string | null; clickup_id?: string | null };
+type UserRow = UserType & { setor?: string | null; clickup_id?: string | null; client_ids?: string[]; perfil_cliente?: string };
 
 // ── Vínculo ONMID ↔ ClickUp (GET/POST /api/clickup/members) ──────────────────
 
@@ -195,6 +198,7 @@ type AdminInstance = {
   phone: string | null;
   vinculos: string[];
   active: boolean | null; // null = órfã (sem registro no banco)
+  oculta?: boolean; // fora da operação: fica só no painel da Evolution
 };
 
 function InstancesTab() {
@@ -207,6 +211,7 @@ function InstancesTab() {
   const [qrData, setQrData] = useState<{ base64?: string; error?: string } | null>(null);
   const [qrPhase, setQrPhase] = useState<'loading' | 'qr' | 'success' | 'error'>('loading');
   const [qrSeconds, setQrSeconds] = useState(40);
+  const [mostrarOcultas, setMostrarOcultas] = useState(false);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -230,6 +235,23 @@ function InstancesTab() {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ instanceName: inst.name, action: inst.active ? 'deactivate' : 'activate' }),
+      });
+      const d = await res.json() as { ok?: boolean; error?: string };
+      if (!d.ok) notificar(d.error ?? 'Não foi possível alterar', 'erro');
+      load();
+    } finally { setBusy(null); }
+  }
+
+  // Ocultar ≠ desativar: desativar silencia uma instância DA operação; ocultar
+  // tira da lista um WhatsApp que nunca foi da operação (ex.: pessoal) e vive
+  // só no painel da Evolution. Reversível pela seção "ocultas" no rodapé.
+  async function toggleOculta(inst: AdminInstance) {
+    setBusy(inst.name);
+    try {
+      const res = await fetch('/api/admin/instances', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ instanceName: inst.name, action: inst.oculta ? 'unhide' : 'hide' }),
       });
       const d = await res.json() as { ok?: boolean; error?: string };
       if (!d.ok) notificar(d.error ?? 'Não foi possível alterar', 'erro');
@@ -350,11 +372,11 @@ function InstancesTab() {
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {instances.map(inst => {
+              {instances.filter(i => mostrarOcultas ? i.oculta : !i.oculta).map(inst => {
                 const si = statusInfo(inst.status);
                 const isBusy = busy === inst.name;
                 return (
-                  <tr key={inst.name} className={cn('hover:bg-muted/30 transition-colors', inst.active === false && 'opacity-50')}>
+                  <tr key={inst.name} className={cn('hover:bg-muted/30 transition-colors', (inst.active === false || inst.oculta) && 'opacity-50')}>
                     <td className="px-6 py-3.5">
                       <p className="font-semibold">{inst.profileName ?? inst.name}</p>
                       <p className="text-[11px] text-muted-foreground">{inst.name}</p>
@@ -409,6 +431,15 @@ function InstancesTab() {
                         <button
                           type="button"
                           disabled={isBusy}
+                          onClick={() => void toggleOculta(inst)}
+                          title={inst.oculta ? 'Voltar a mostrar nesta lista' : 'Ocultar desta lista (fica só no painel da Evolution; alertas ignoram)'}
+                          className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted/40 hover:text-foreground disabled:opacity-50 transition-colors"
+                        >
+                          {inst.oculta ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isBusy}
                           onClick={() => void removeInstance(inst)}
                           title="Excluir da VPS"
                           className="flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-red-500/10 hover:text-red-400 disabled:opacity-50 transition-colors"
@@ -422,6 +453,19 @@ function InstancesTab() {
               })}
             </tbody>
           </table>
+        )}
+        {!loading && !error && instances.some(i => i.oculta) && (
+          <div className="border-t border-border px-6 py-2.5">
+            <button
+              type="button"
+              onClick={() => setMostrarOcultas(v => !v)}
+              className="text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+            >
+              {mostrarOcultas
+                ? '← Voltar para as instâncias da operação'
+                : `Mostrar ${instances.filter(i => i.oculta).length} oculta(s) — ficam só no painel da Evolution`}
+            </button>
+          </div>
         )}
       </div>
 
@@ -502,9 +546,42 @@ function InstancesTab() {
   );
 }
 
-const ABAS_CONFIG = ['usuarios', 'permissoes', 'ia', 'instancias', 'otimizador', 'email', 'integracoes', 'logs', 'legal'] as const;
+const ABAS_CONFIG = ['usuarios', 'permissoes', 'ia', 'rotinas', 'instancias', 'otimizador', 'email', 'integracoes', 'logs', 'legal'] as const;
+
+/**
+ * Clientes que um usuário de CLIENTE enxerga no CRM. Normalmente é um só (a
+ * recepção da clínica); rede com várias unidades marca mais de um.
+ */
+function EscolherClientes({ selecionados, onChange }: { selecionados: string[]; onChange: (ids: string[]) => void }) {
+  const { clients: visibleClients } = useClients();
+  const [busca, setBusca] = useState('');
+  const sem = (t: string) => t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const lista = visibleClients.filter(c => !busca || sem(c.name).includes(sem(busca)));
+  const marcado = new Set(selecionados);
+  return (
+    <div className="space-y-1.5">
+      <Label>Clientes que este usuário vê ({selecionados.length})</Label>
+      <Input value={busca} onChange={e => setBusca(e.target.value)} placeholder="Buscar cliente..." className="h-8" />
+      <div className="max-h-44 overflow-y-auto rounded-lg border border-border">
+        {lista.map(c => (
+          <label key={c.id} className="flex cursor-pointer items-center gap-2 px-3 py-1.5 text-sm hover:bg-muted/40">
+            <input
+              type="checkbox"
+              checked={marcado.has(c.id)}
+              onChange={() => onChange(marcado.has(c.id) ? selecionados.filter(id => id !== c.id) : [...selecionados, c.id])}
+            />
+            {c.name}
+          </label>
+        ))}
+        {lista.length === 0 && <p className="px-3 py-2 text-xs text-muted-foreground">Nenhum cliente encontrado.</p>}
+      </div>
+    </div>
+  );
+}
 
 export default function ConfiguracoesPage() {
+  const { allClients: todosClientes } = useClients();
+  const clientesPorId = new Map(todosClientes.map(c => [c.id, c.name]));
   const [users, setUsers] = useState<UserRow[]>([]);
   const [permissions, setPermissions] = useState<Record<string, Permission>>(initialPermissions);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -733,12 +810,18 @@ export default function ConfiguracoesPage() {
       status: user.status,
       team: user.team ?? 'onmid',
       setor: user.setor ?? '',
+      clientIds: user.client_ids ?? [],
+      perfilCliente: user.perfil_cliente === 'gestor' ? 'gestor' : 'atendente',
     });
     setDialogOpen(true);
   }
 
   async function handleSaveUser() {
     if (!form.name.trim() || !form.email.trim()) return;
+    if (form.team === 'cliente' && form.clientIds.length === 0) {
+      notificar('Escolha ao menos um cliente para este usuário.', 'erro');
+      return;
+    }
     // Password required only when creating; blank = keep current when editing
     if (!editingUserId && !form.password.trim()) return;
 
@@ -757,6 +840,8 @@ export default function ConfiguracoesPage() {
         status: form.status,
         team: form.team,
         setor: form.setor || null,
+        client_ids: form.team === 'cliente' ? form.clientIds : [],
+        perfil_cliente: form.perfilCliente,
       };
       const snapshot = users;
       setUsers((prev) => prev.map((u) => u.id === editingUserId ? updated : u));
@@ -784,6 +869,8 @@ export default function ConfiguracoesPage() {
       status: form.status,
       team: form.team,
       setor: form.setor || null,
+      client_ids: form.team === 'cliente' ? form.clientIds : [],
+      perfil_cliente: form.perfilCliente,
     };
     const snapshot = users;
     setUsers((prev) => [...prev, user]);
@@ -847,6 +934,7 @@ export default function ConfiguracoesPage() {
     { key: 'usuarios' as const, label: 'Usuários' },
     { key: 'permissoes' as const, label: 'Permissões' },
     { key: 'ia' as const, label: 'Uso IA' },
+    { key: 'rotinas' as const, label: 'Rotinas' },
     { key: 'instancias' as const, label: 'Instâncias' },
     { key: 'otimizador' as const, label: 'Alertas WhatsApp' }, // ex-aba Otimizador: sobrou só o destino dos alertas
     { key: 'email' as const, label: 'E-mail' },
@@ -1019,9 +1107,13 @@ export default function ConfiguracoesPage() {
                           'inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium',
                           user.team === 'parceiro'
                             ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
-                            : 'bg-zinc-700/50 text-zinc-400 border border-zinc-600/50',
-                        )}>
-                          {user.team === 'parceiro' ? 'Parceiro' : 'Time Onmid'}
+                            : user.team === 'cliente'
+                              ? 'bg-sky-500/10 text-sky-300 border border-sky-500/20'
+                              : 'bg-zinc-700/50 text-zinc-400 border border-zinc-600/50',
+                        )} title={user.team === 'cliente' ? (user.client_ids ?? []).map(id => clientesPorId.get(id) ?? id).join(', ') : undefined}>
+                          {user.team === 'parceiro' ? 'Parceiro'
+                            : user.team === 'cliente' ? `Cliente · ${(user.client_ids ?? []).map(id => clientesPorId.get(id) ?? '?').join(', ')} · ${user.perfil_cliente === 'gestor' ? 'Gestor' : 'Atendente'}`
+                            : 'Time Onmid'}
                         </span>
                       </td>
                       {/* Setor + vínculo ClickUp — sem o vínculo a pessoa não
@@ -1693,6 +1785,8 @@ export default function ConfiguracoesPage() {
           TAB: OTIMIZADOR
       ══════════════════════════════════ */}
       {/* ── INSTÂNCIAS (Evolution) ── */}
+      {activeTab === 'rotinas' && <RotinasPanel />}
+
       {activeTab === 'instancias' && <InstancesTab />}
 
       {/* ── INTEGRAÇÕES e LOGS (ex-páginas próprias, ver src/components/settings/) ── */}
@@ -1920,7 +2014,11 @@ export default function ConfiguracoesPage() {
             </div>
             <div className="space-y-1.5">
               <Label>Equipe</Label>
-              <Select value={form.team} onValueChange={(team) => team && setForm({ ...form, team: team as Team })}>
+              <Select value={form.team} onValueChange={(team) => team && setForm({
+                ...form, team: team as Team,
+                // usuário de cliente nunca é administrador (o servidor recusa)
+                role: team === 'cliente' && form.role === 'Administrador' ? 'Usuário' : form.role,
+              })}>
                 <SelectTrigger className="w-full">
                   <SelectValue>{(v: Team) => TEAMS.find((t) => t.value === v)?.label ?? v}</SelectValue>
                 </SelectTrigger>
@@ -1933,9 +2031,31 @@ export default function ConfiguracoesPage() {
                 </SelectContent>
               </Select>
               <p className="text-xs text-muted-foreground">
-                Parceiro só vê as próprias instâncias e campanhas em Disparos — nunca as de outras pessoas.
+                {form.team === 'cliente'
+                  ? 'Funcionário do cliente: entra direto no CRM e só enxerga os clientes marcados abaixo. Não vê configurações, anúncios nem a carteira da Onmid.'
+                  : 'Parceiro só vê as próprias instâncias e campanhas em Disparos — nunca as de outras pessoas.'}
               </p>
             </div>
+            {form.team === 'cliente' && (
+              <>
+                <div className="space-y-1.5">
+                  <Label>Perfil no cliente</Label>
+                  <select
+                    value={form.perfilCliente}
+                    onChange={(e) => setForm({ ...form, perfilCliente: e.target.value === 'gestor' ? 'gestor' : 'atendente' })}
+                    className="h-9 w-full rounded-lg border border-input bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                  >
+                    <option value="atendente">Atendente — só o CRM (leads e conversas)</option>
+                    <option value="gestor">Gestor — CRM + resultados + cadastra a própria equipe</option>
+                  </select>
+                  <p className="text-xs text-muted-foreground">O gestor (dono ou gerente) cria e desativa os atendentes dele dentro do CRM. Você só precisa criar o gestor.</p>
+                </div>
+                <EscolherClientes
+                  selecionados={form.clientIds}
+                  onChange={(clientIds) => setForm({ ...form, clientIds })}
+                />
+              </>
+            )}
             <div className="space-y-1.5">
               <Label>Setor</Label>
               <select

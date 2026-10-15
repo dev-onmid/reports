@@ -5,6 +5,9 @@ import { getFreshMetaToken } from '@/lib/meta-token';
 import { randomUUID } from 'crypto';
 import { logAiUsage } from '@/lib/ai-usage-logger';
 import { sectionEnabled } from '@/lib/report-sections';
+import { ROTULOS_CANAL_GA4, ROTULOS_DISPOSITIVO_GA4, seletorContatos, type Ga4Consolidado, type Ga4Seg } from '@/lib/ga4-landing';
+import type { ComercialDaPlataforma } from '@/lib/canal-plataforma';
+import { buscarSerieSeguidores, registrarSerieSeguidores, lerSerieSeguidores, ganhoNoPeriodo, type GanhoSeguidores } from '@/lib/ig-seguidores';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -97,8 +100,14 @@ export const FONT_LINK = `<style>@import url('https://fonts.googleapis.com/css2?
 const REPORT_MONTHS = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
 
 function nextMonthName(periodo: string): string {
-  const [monthName] = periodo.split('/');
-  const index = REPORT_MONTHS.findIndex((month) => month.toLowerCase() === monthName.toLowerCase());
+  // O rótulo pode cobrir vários meses ("Julho a Setembro/2026", "1 de jul a 15 de set/2026"):
+  // o "próximo mês" é o seguinte ao ÚLTIMO citado.
+  const texto = periodo.split('/')[0].toLowerCase();
+  let index = -1;
+  for (const m of texto.match(/[a-zç]+/g) ?? []) {
+    const i = REPORT_MONTHS.findIndex((month) => month.toLowerCase() === m || (m.length === 3 && month.toLowerCase().startsWith(m)));
+    if (i >= 0) index = i;
+  }
   return REPORT_MONTHS[(index >= 0 ? index + 1 : 5) % REPORT_MONTHS.length];
 }
 
@@ -186,6 +195,10 @@ export type CampanhaGoogleDetalhada = {
     cliques: number;
     conversoes: number;
     valorConversoes: number;
+    /** Conversões de COMPRA de verdade (categoria PURCHASE/STORE_SALE da ação de conversão). */
+    compras?: number;
+    /** Valor das conversões de compra — o único que pode virar "valor de venda"/ROAS. */
+    valorCompras?: number;
   };
 };
 
@@ -205,6 +218,11 @@ export type GoogleAdsFull = {
   cliques: number;
   conversoes: number;
   valorConversoes: number;
+  /** Compras de verdade e o valor delas, somados das campanhas (ver CampanhaGoogleDetalhada). */
+  compras?: number;
+  valorCompras?: number;
+  /** Investimento, cliques e conversões por dia — alimenta o gráfico do resumo. */
+  diario?: Array<{ date: string; investimento: number; cliques: number; conversoes: number }>;
   campanhas: CampanhaGoogleDetalhada[];
   palavrasChave: PalavraChaveGoogle[];
 };
@@ -229,21 +247,32 @@ export type InstagramData = {
   username: string;
   followers: number;
   followers_period?: number;
+  /** Quantos dias do período o ganho de seguidores cobre (a Meta só entrega 30 dias). */
+  followers_cobertura?: GanhoSeguidores;
   reach: number;
   impressions: number;
   profile_views: number;
   website_clicks: number;
   accounts_engaged: number;
+  /** Métricas parciais do período atual (ver InstagramPeriodMetrics.incompletas). */
+  incompletas?: string[];
   previous?: InstagramPeriodMetrics | null;
 };
 
 export type InstagramPeriodMetrics = {
   followers_period: number;
+  followers_cobertura?: GanhoSeguidores;
   reach: number;
   impressions: number;
   profile_views: number;
   website_clicks: number;
   accounts_engaged: number;
+  /**
+   * Métricas cujo valor é PARCIAL: algum pedaço do período a Meta não devolveu (ela
+   * só guarda 2 anos de insights, e o comparativo de um relatório anual cai fora).
+   * Parcial não entra em comparativo — era daí que saía "+3022% de visualizações".
+   */
+  incompletas?: string[];
 };
 
 // Período de comparação escolhido na geração do relatório.
@@ -264,9 +293,13 @@ export function autoPreviousPeriod(from: string, to: string): { from: string; to
   const isFirst = d1.getUTCDate() === 1;
   const lastDayOfEndMonth = new Date(Date.UTC(d2.getUTCFullYear(), d2.getUTCMonth() + 1, 0)).getUTCDate();
   const isLast = d2.getUTCDate() === lastDayOfEndMonth;
-  const sameMonth = d1.getUTCFullYear() === d2.getUTCFullYear() && d1.getUTCMonth() === d2.getUTCMonth();
-  if (isFirst && isLast && sameMonth) {
-    const prevFirst = new Date(Date.UTC(d1.getUTCFullYear(), d1.getUTCMonth() - 1, 1));
+  // Período de meses-calendário CHEIOS (um ou vários): o anterior é o MESMO número de
+  // meses cheios logo antes. Jul→Jun; Jul–Set→Abr–Jun. Sem isso, um trimestre comparava
+  // com 92 dias corridos começando em 31/03, e a página chamava o comparativo de "Março"
+  // (caso Incorpast, 07/10/2026).
+  const meses = mesesCheios(from, to);
+  if (isFirst && isLast && meses > 0) {
+    const prevFirst = new Date(Date.UTC(d1.getUTCFullYear(), d1.getUTCMonth() - meses, 1));
     const prevLast  = new Date(Date.UTC(d1.getUTCFullYear(), d1.getUTCMonth(), 0));
     return { from: fmt(prevFirst), to: fmt(prevLast) };
   }
@@ -274,6 +307,40 @@ export function autoPreviousPeriod(from: string, to: string): { from: string; to
   const prevTo = new Date(d1.getTime() - 86400000);
   const prevFrom = new Date(prevTo.getTime() - durationMs + 86400000);
   return { from: fmt(prevFrom), to: fmt(prevTo) };
+}
+
+/** Quantos meses-calendário CHEIOS [from, to] cobre; 0 se as pontas não fecham meses. */
+export function mesesCheios(from: string, to: string): number {
+  const [fy, fm, fd] = from.split('-').map(Number);
+  const [ty, tm, td] = to.split('-').map(Number);
+  if (!fy || !ty || fd !== 1) return 0;
+  if (td !== new Date(Date.UTC(ty, tm, 0)).getUTCDate()) return 0;
+  const n = (ty - fy) * 12 + (tm - fm) + 1;
+  return n > 0 ? n : 0;
+}
+
+/**
+ * Rótulo do período no formato que TODO slide consome (`"<nome>/<ano>"`, lido com
+ * `split('/')[0]`): "Julho/2026" para um mês cheio, "Julho a Setembro/2026" para vários,
+ * "1 de jul a 15 de set/2026" para intervalo quebrado. Antes o rótulo era sempre o mês
+ * da data INICIAL — um relatório de Jul–Set saía como "Julho" e o cliente lia o
+ * faturamento do trimestre como se fosse de um mês.
+ */
+export function rotuloPeriodo(from: string, to: string): string {
+  const [fy, fm, fd] = from.split('-').map(Number);
+  const [ty, tm, td] = to.split('-').map(Number);
+  if (!fy || !ty) return from;
+  const n = mesesCheios(from, to);
+  if (n === 1) return `${REPORT_MONTHS[fm - 1]}/${fy}`;
+  if (n > 1) {
+    return fy === ty
+      ? `${REPORT_MONTHS[fm - 1]} a ${REPORT_MONTHS[tm - 1]}/${ty}`
+      : `${REPORT_MONTHS[fm - 1]} de ${fy} a ${REPORT_MONTHS[tm - 1]}/${ty}`;
+  }
+  const curto = (m: number) => REPORT_MONTHS[m - 1].slice(0, 3).toLowerCase();
+  return fy === ty
+    ? `${fd} de ${curto(fm)} a ${td} de ${curto(tm)}/${ty}`
+    : `${fd} de ${curto(fm)} de ${fy} a ${td} de ${curto(tm)}/${ty}`;
 }
 
 export type ParsedData = {
@@ -1216,13 +1283,34 @@ const GOOGLE_CHANNEL_LABEL: Record<string, string> = {
   MULTI_CHANNEL: 'Multicanal', APP: 'App', HOTEL: 'Hotel',
 };
 
-function categorizeGoogleCampaign(channelType: string | undefined, conversions: number, conversionsValue: number): GoogleCampaignKind {
-  const t = (channelType ?? '').toUpperCase();
+// ⚠️ "Vendas" só com COMPRA DE VERDADE (ou campanha de Shopping). A régua antiga era
+// `valorConversoes > 0` — e o Google atribui R$ 1,00 de valor PADRÃO a toda conversão,
+// então qualquer campanha de lead com conversão virava "Vendas / Shopping": a Cinfel
+// (que só capta lead) saiu com "50 compras · valor de venda R$ 50,00 · ROAS 0,06".
+// Valor de conversão não diz o que a conversão É; a categoria da ação de conversão diz.
+/**
+ * Compras que contam como VENDA no relatório. Categoria "Compra" sozinha não basta:
+ * medido na Londrigifts (set/2026), uma ação de conversão cadastrada como Compra
+ * somava 87 "compras" e R$ 16,34 — clique de contato com a categoria errada. Venda
+ * de verdade carrega o valor do pedido; por isso só vale quando o valor médio passa
+ * do R$ 1,00 que o Google atribui por padrão a qualquer conversão.
+ * Shopping é venda por definição e fica como veio.
+ */
+export function comprasReaisGoogle(tipo: string | undefined, compras: number, valor: number): { compras: number; valorCompras: number } {
+  if ((tipo ?? '').toUpperCase() === 'SHOPPING') return { compras, valorCompras: valor };
+  return compras > 0 && valor > compras ? { compras, valorCompras: valor } : { compras: 0, valorCompras: 0 };
+}
+
+export function categorizeGoogleCampaign(c: CampanhaGoogleDetalhada): GoogleCampaignKind {
+  const t = (c.tipo ?? '').toUpperCase();
   if (t === 'SHOPPING') return 'vendas';
   if (['DISPLAY', 'VIDEO', 'DEMAND_GEN', 'DISCOVERY', 'SMART'].includes(t)) return 'alcance';
-  if (conversionsValue > 0) return 'vendas';
-  if (conversions > 0) return 'leads';
-  return 'trafego'; // SEARCH, PERFORMANCE_MAX, or unrecognized without conversion data
+  if ((c.metricas.compras ?? 0) > 0) return 'vendas';
+  // ⚠️ Não existe "campanha de tráfego" no Google aqui: Pesquisa/PMax são de geração de
+  // lead mesmo no mês em que não converteram. Separar por "tem conversão ou não" criava
+  // dois objetivos diferentes para campanhas com o MESMO objetivo (print do Matheus,
+  // 05/10: "é tudo o mesmo objetivo, que doideira é essa?").
+  return 'leads';
 }
 
 const OBJECTIVE_META: Record<ObjectiveCategory, {
@@ -1703,7 +1791,15 @@ async function fetchInstagramPostInsightsBatch(
   const result = new Map<string, { reach: number; saves: number; videoViews: number }>();
   if (!mediaItems.length) return result;
 
-  const runBatch = async (items: Array<{ id: string; isVideo: boolean }>, metric: string, apply: (id: string, name: string, val: number) => void) => {
+  // ⚠️ A Graph aceita no máximo 50 chamadas por lote. Antes vinha um lote só, e com a
+  // paginação dos posts (relatório anual = centenas) o lote inteiro seria recusado.
+  const runBatch = async (todos: Array<{ id: string; isVideo: boolean }>, metric: string, apply: (id: string, name: string, val: number) => void) => {
+    const lotes: Array<Array<{ id: string; isVideo: boolean }>> = [];
+    for (let k = 0; k < todos.length; k += 50) lotes.push(todos.slice(k, k + 50));
+    // Lotes em paralelo: em série, 337 posts levavam ~90 s (7 lotes × 2 métricas).
+    await Promise.all(lotes.map(l => runLote(l, metric, apply)));
+  };
+  const runLote = async (items: Array<{ id: string; isVideo: boolean }>, metric: string, apply: (id: string, name: string, val: number) => void) => {
     const batch = items.map(m => ({ method: 'GET', relative_url: `${m.id}/insights?metric=${metric}&period=lifetime` }));
     try {
       const body = new URLSearchParams({ access_token: token, batch: JSON.stringify(batch) });
@@ -1863,7 +1959,15 @@ export async function fetchInstagramData(
     return chunks;
   }
 
-  async function fetchIgProfileMetricRange(metric: string, since: number, until: number, metricType?: 'total_value'): Promise<number> {
+  // A Meta só guarda insights de perfil dos ÚLTIMOS 2 ANOS ("since param is not valid.
+  // Metrics data is available for the last 2 years"). Pedaço antes disso nem é pedido:
+  // conta como falta, e a métrica sai marcada como parcial.
+  // A Meta valida o `since`: pedaço que COMEÇA antes do limite é recusado inteiro
+  // (mesmo terminando dentro), então nem vale a chamada. Dois dias de folga.
+  const LIMITE_META_S = Math.floor(Date.now() / 1000) - (2 * 365 - 2) * 86_400;
+  /** null = a Meta não devolveu este pedaço (fora da janela de 2 anos, erro ou timeout). */
+  async function fetchIgProfileMetricRange(metric: string, since: number, until: number, metricType?: 'total_value'): Promise<number | null> {
+    if (since < LIMITE_META_S) return null;
     const url = new URL(`https://graph.facebook.com/v21.0/${ig!.id}/insights`);
     url.searchParams.set('metric', metric);
     url.searchParams.set('period', 'day');
@@ -1875,7 +1979,7 @@ export async function fetchInstagramData(
     if (!res?.ok) {
       const body = await res?.text().catch(() => '');
       console.error(`[delivery][ig-insights] falha ao buscar "${metric}" (status ${res?.status ?? 'sem resposta'}):`, body);
-      return 0;
+      return null;
     }
     const data = await res.json() as {
       data?: Array<{ total_value?: { value: number }; values?: Array<{ value: number }> }>;
@@ -1886,40 +1990,77 @@ export async function fetchInstagramData(
     return (first?.values ?? []).reduce((sum, item) => sum + (typeof item.value === 'number' ? item.value : 0), 0);
   }
 
-  async function fetchIgProfileMetric(metric: string, chunks: Array<{ since: number; until: number }>, metricType?: 'total_value'): Promise<number> {
-    if (!chunks.length) return 0;
-    const totals = await Promise.all(
+  /** Soma dos pedaços do período + se TODOS vieram (sem isso o número é parcial). */
+  async function fetchIgProfileMetric(metric: string, chunks: Array<{ since: number; until: number }>, metricType?: 'total_value'): Promise<{ valor: number; completo: boolean }> {
+    if (!chunks.length) return { valor: 0, completo: true };
+    const somar = (lista: Array<number | null>) => ({
+      valor: lista.reduce<number>((sum, v) => sum + (v ?? 0), 0),
+      completo: lista.every(v => v !== null),
+    });
+    const totals = somar(await Promise.all(
       chunks.map((chunk) => fetchIgProfileMetricRange(metric, chunk.since, chunk.until, metricType)),
-    );
-    const total = totals.reduce((sum, value) => sum + value, 0);
-    if (total > 0 || !metricType) return total;
+    ));
+    if (totals.valor > 0 || !metricType) return totals;
 
     // Some IG accounts reject metric_type=total_value for longer windows even when the
     // per-day series exists. Fallback to summing daily values so the selected period is
     // still represented instead of showing only followers.
-    const fallbackTotals = await Promise.all(
+    return somar(await Promise.all(
       chunks.map((chunk) => fetchIgProfileMetricRange(metric, chunk.since, chunk.until)),
-    );
-    return fallbackTotals.reduce((sum, value) => sum + value, 0);
+    ));
   }
 
-  async function fetchIgPeriodMetrics(periodFrom: string, periodTo: string): Promise<InstagramPeriodMetrics> {
+  // ⚠️ Ganho de seguidores NÃO sai mais de uma chamada por período: a Meta só
+  // entrega `follower_count` dos últimos 30 dias e recusava o bloco inteiro quando
+  // o período começava antes (relatório de setembro gerado em 05/10 somava 2 dias e
+  // chamava de "no período"). Agora: lê o que a API ainda tem, GRAVA dia a dia e
+  // soma o período a partir do banco + API — com a cobertura junto, para o card
+  // dizer "desde DD/MM" quando faltar dia em vez de afirmar o que não mediu.
+  const serieApi = await buscarSerieSeguidores(ig.id, pageToken);
+  const seguidoresDe = await (async () => {
+    const poolSeg = makeServerPool();
+    try {
+      await registrarSerieSeguidores(poolSeg, ig.id, serieApi);
+      const ler = (a: string, b: string) => lerSerieSeguidores(poolSeg, ig.id, a, b);
+      const [atual, anterior] = await Promise.all([
+        ler(from, to),
+        compareFrom && compareTo ? ler(compareFrom, compareTo) : Promise.resolve([]),
+      ]);
+      return { atual, anterior };
+    } catch {
+      return { atual: [], anterior: [] };
+    } finally { await poolSeg.end().catch(() => {}); }
+  })();
+  const ganhoSeguidores = (periodFrom: string, periodTo: string, doBanco: Array<{ dia: string; ganho: number }>) =>
+    ganhoNoPeriodo(periodFrom, periodTo, [doBanco, serieApi ?? []]);
+
+  async function fetchIgPeriodMetrics(periodFrom: string, periodTo: string, doBanco: Array<{ dia: string; ganho: number }>): Promise<InstagramPeriodMetrics> {
     const chunks = makePeriodChunks(periodFrom, periodTo);
-    const [followers_period, reach, views, profile_views, website_clicks, accounts_engaged] = await Promise.all([
-      fetchIgProfileMetric('follower_count', chunks),
+    const followers_cobertura = ganhoSeguidores(periodFrom, periodTo, doBanco);
+    const followers_period = followers_cobertura.ganho;
+    const nomes = ['reach', 'impressions', 'profile_views', 'website_clicks', 'accounts_engaged'] as const;
+    const [reach, views, profile_views, website_clicks, accounts_engaged] = await Promise.all([
       fetchIgProfileMetric('reach', chunks),
       fetchIgProfileMetric('views', chunks, 'total_value'),
       fetchIgProfileMetric('profile_views', chunks, 'total_value'),
       fetchIgProfileMetric('website_clicks', chunks, 'total_value'),
       fetchIgProfileMetric('accounts_engaged', chunks, 'total_value'),
     ]);
-    return { followers_period, reach, impressions: views, profile_views, website_clicks, accounts_engaged };
+    const incompletas = [reach, views, profile_views, website_clicks, accounts_engaged]
+      .map((m, k) => (m.completo ? null : nomes[k]))
+      .filter((n): n is typeof nomes[number] => n !== null);
+    return {
+      followers_period, followers_cobertura,
+      reach: reach.valor, impressions: views.valor, profile_views: profile_views.valor,
+      website_clicks: website_clicks.valor, accounts_engaged: accounts_engaged.valor,
+      ...(incompletas.length ? { incompletas } : {}),
+    };
   }
 
   const [currentMetrics, previousMetrics] = await Promise.all([
-    fetchIgPeriodMetrics(from, to),
+    fetchIgPeriodMetrics(from, to, seguidoresDe.atual),
     compareFrom && compareTo
-      ? fetchIgPeriodMetrics(compareFrom, compareTo)
+      ? fetchIgPeriodMetrics(compareFrom, compareTo, seguidoresDe.anterior)
       : Promise.resolve<InstagramPeriodMetrics | undefined>(undefined),
   ]);
   const { reach, impressions, profile_views, website_clicks, accounts_engaged } = currentMetrics;
@@ -1930,36 +2071,46 @@ export async function fetchInstagramData(
     username: ig.username ?? ig.id,
     followers: ig.followers_count ?? 0,
     followers_period: currentMetrics.followers_period,
+    followers_cobertura: currentMetrics.followers_cobertura,
     reach,
     impressions,
     profile_views,
     website_clicks,
     accounts_engaged,
+    ...(currentMetrics.incompletas ? { incompletas: currentMetrics.incompletas } : {}),
     previous: previousMetrics,
   };
 
-  // Last posts published within the report period (newest first, capped at 12)
+  // Posts publicados no período (a Graph devolve do mais novo para o mais antigo).
   let posts: InstagramPost[] = [];
   try {
     const since = Math.floor(new Date(from + 'T00:00:00Z').getTime() / 1000);
     const until = Math.floor(new Date(to + 'T23:59:59Z').getTime() / 1000);
-    // limit=50 covers virtually any monthly posting cadence — the old limit=12 silently
-    // undercounted "Total de publicações" and the calendar for clients posting more often.
+    // ⚠️ PAGINA até cobrir o período. Antes era uma página só de 50: num relatório de
+    // 13 meses da Romanza vieram os 50 posts de setembro e os outros 12 calendários
+    // saíram VAZIOS. O teto evita que um perfil que posta 10×/dia derrube a geração.
+    type MediaCru = {
+      id: string; caption?: string; media_type?: string; media_product_type?: string;
+      media_url?: string; thumbnail_url?: string; permalink?: string; timestamp?: string;
+      like_count?: number; comments_count?: number;
+    };
+    const media: MediaCru[] = [];
     const mediaUrl = new URL(`https://graph.facebook.com/v21.0/${ig.id}/media`);
     mediaUrl.searchParams.set('fields', 'id,caption,media_type,media_product_type,media_url,thumbnail_url,permalink,timestamp,like_count,comments_count');
     mediaUrl.searchParams.set('limit', '50');
     mediaUrl.searchParams.set('since', String(since));
     mediaUrl.searchParams.set('until', String(until));
     mediaUrl.searchParams.set('access_token', pageToken);
-    const mediaRes = await fetch(mediaUrl.toString(), { signal: AbortSignal.timeout(15000) }).catch(() => null);
+    let proxima: string | null = mediaUrl.toString();
+    while (proxima && media.length < IG_POSTS_MAX) {
+      const mediaRes: Response | null = await fetch(proxima, { signal: AbortSignal.timeout(15000) }).catch(() => null);
+      if (!mediaRes?.ok) break;
+      const mediaData = await mediaRes.json() as { data?: MediaCru[]; paging?: { next?: string } };
+      media.push(...(mediaData.data ?? []));
+      proxima = mediaData.paging?.next ?? null;
+    }
 
-    if (mediaRes?.ok) {
-      const mediaData = await mediaRes.json() as { data?: Record<string, unknown>[] };
-      const media = (mediaData.data ?? []) as Array<{
-        id: string; caption?: string; media_type?: string; media_product_type?: string;
-        media_url?: string; thumbnail_url?: string; permalink?: string; timestamp?: string;
-        like_count?: number; comments_count?: number;
-      }>;
+    if (media.length) {
 
       const mediaForInsights = media.map(m => ({
         id: m.id,
@@ -1989,6 +2140,9 @@ export async function fetchInstagramData(
 
   return { insights, posts };
 }
+
+/** Teto de posts lidos por relatório (12 páginas de 50 da Graph). */
+export const IG_POSTS_MAX = 600;
 
 // ── Slide audit (dev-only warnings) ───────────────────────────────────────────
 
@@ -2209,7 +2363,12 @@ export function sCapa(
 export function sVisaoGeral(
   d: ParsedData, prevD: ParsedData | null, idx: number, total: number,
   periodo: string, prevPeriodo: string,
+  // O relatório de performance fala de VENDAS de um funil comercial, não de pedidos
+  // de delivery: troca o rótulo e a leitura final (que citava "frequência de compra"
+  // e "clientes inativos" para um cliente B2B).
+  opts: { rotuloVendas?: string; leituraSemComparativo?: string; leituraFinal?: string; /** "mês" (padrão) ou "período" — muda o título da página. */ unidade?: 'mês' | 'período' } = {},
 ): string {
+  const rotuloVendas = opts.rotuloVendas ?? 'Pedidos';
   const dFat    = deltaInfo(d.faturamento,    prevD?.faturamento    ?? 0);
   const dPed    = deltaInfo(d.pedidos_ativos, prevD?.pedidos_ativos ?? 0);
   const dTicket = deltaInfo(d.ticket,         prevD?.ticket         ?? 0);
@@ -2241,28 +2400,30 @@ export function sVisaoGeral(
     `<div style="width:${size}px;height:${size}px;border-radius:50%;background:${bg};display:flex;align-items:center;justify-content:center;flex-shrink:0">${icon(name, color)}</div>`;
 
   const metricCard = (label: string, value: string, name: 'money'|'cart'|'tag', color: string, bg: string) =>
-    `<div style="background:${CARD};border:1px solid #E7ECF3;border-radius:18px;box-shadow:0 14px 34px rgba(15,23,42,.07);padding:22px 24px;display:flex;align-items:center;gap:22px;min-width:0">
-      ${circle(name, color, bg, 80)}
+    // ⚠️ O valor encolhe conforme o tamanho: "R$ 137.587,69" a 34px passava da borda
+    // do card (a 5 dígitos já encostava).
+    `<div style="background:${CARD};border:1px solid #E7ECF3;border-radius:18px;box-shadow:0 14px 34px rgba(15,23,42,.07);padding:22px 24px;display:flex;align-items:center;gap:18px;min-width:0">
+      ${circle(name, color, bg, 68)}
       <div style="min-width:0">
         <p style="font-family:${INTER};font-size:18px;font-weight:500;color:#163461;margin:0 0 10px">${label}</p>
-        <p style="font-family:${INTER};font-size:34px;font-weight:900;letter-spacing:-0.035em;color:${FG};line-height:1;margin:0;white-space:nowrap">${value}</p>
+        <p style="font-family:${INTER};font-size:${value.length > 14 ? 26 : value.length > 12 ? 30 : 34}px;font-weight:900;letter-spacing:-0.035em;color:${FG};line-height:1;margin:0;white-space:nowrap">${value}</p>
       </div>
     </div>`;
 
   const periodLabel = (label: { month: string; year: string }, color: string, bg: string, borderColor: string) =>
-    `<div style="width:185px;display:flex;align-items:center;gap:16px;padding-left:22px;border-left:3px solid ${borderColor};box-sizing:border-box;flex-shrink:0">
-      ${circle('calendar', color, bg, 72)}
+    `<div style="width:214px;display:flex;align-items:center;gap:12px;padding-left:20px;border-left:3px solid ${borderColor};box-sizing:border-box;flex-shrink:0">
+      ${circle('calendar', color, bg, 56)}
       <div>
-        <p style="font-family:${INTER};font-size:25px;font-weight:900;color:${FG};line-height:1;margin:0 0 8px">${label.month}</p>
-        ${label.year ? `<p style="font-family:${INTER};font-size:20px;font-weight:500;color:#163461;line-height:1;margin:0">${label.year}</p>` : ''}
+        <p style="font-family:${INTER};font-size:${label.month.length > 24 ? 12 : label.month.length > 16 ? 14 : label.month.length > 9 ? 18 : 22}px;font-weight:900;color:${FG};line-height:1.1;margin:0 0 ${label.month.length > 16 ? 4 : 8}px">${label.month}</p>
+        ${label.year ? `<p style="font-family:${INTER};font-size:18px;font-weight:500;color:#163461;line-height:1;margin:0">${label.year}</p>` : ''}
       </div>
     </div>`;
 
   const metricRow = (label: { month: string; year: string }, source: ParsedData, color: string, bg: string, borderColor: string) =>
-    `<div style="display:grid;grid-template-columns:185px repeat(3,1fr);gap:18px;align-items:stretch">
+    `<div style="display:grid;grid-template-columns:214px repeat(3,1fr);gap:18px;align-items:stretch">
       ${periodLabel(label, color, bg, borderColor)}
       ${metricCard('Faturamento', brl2(source.faturamento), 'money', color, bg)}
-      ${metricCard('Pedidos', numOrDash(source.pedidos_ativos), 'cart', color, bg)}
+      ${metricCard(rotuloVendas, numOrDash(source.pedidos_ativos), 'cart', color, bg)}
       ${metricCard('Ticket médio', brl2(source.ticket), 'tag', color, bg)}
     </div>`;
 
@@ -2281,16 +2442,16 @@ export function sVisaoGeral(
   };
 
   const insightPara1 = hasCompare && dFat.hasData
-    ? `${curPeriod.month} ficou ${dFat.up ? 'acima' : 'abaixo'} de ${cmpPeriod.month} em faturamento (${dFat.label}). Pedidos ${dPed.up ? 'subiram' : 'caíram'} ${dPed.hasData ? dPed.label : '—'} e o ticket médio ${dTicket.up ? 'avançou' : 'recuou'} ${dTicket.hasData ? dTicket.label : '—'}.`
-    : `Base ativa de ${numOrDash(d.ativos)} clientes gerou ${brlOrDash(d.faturamento)} com ticket médio de ${brlOrDash(d.ticket)}.`;
-  const insightPara2 = `O foco para o próximo ciclo deve ser aumentar a frequência de compra, recuperar clientes inativos e converter melhor quem já demonstrou interesse.`;
+    ? `${curPeriod.month} ficou ${dFat.up ? 'acima' : 'abaixo'} de ${cmpPeriod.month} em faturamento (${dFat.label}). ${rotuloVendas} ${dPed.up ? 'subiram' : 'caíram'} ${dPed.hasData ? dPed.label : '—'} e o ticket médio ${dTicket.up ? 'avançou' : 'recuou'} ${dTicket.hasData ? dTicket.label : '—'}.`
+    : (opts.leituraSemComparativo ?? `Base ativa de ${numOrDash(d.ativos)} clientes gerou ${brlOrDash(d.faturamento)} com ticket médio de ${brlOrDash(d.ticket)}.`);
+  const insightPara2 = opts.leituraFinal ?? `O foco para o próximo ciclo deve ser aumentar a frequência de compra, recuperar clientes inativos e converter melhor quem já demonstrou interesse.`;
 
   const body = `<div style="width:1440px;min-height:810px;background:${BG};border:1px solid ${BORDER};margin:0 auto 20px;overflow:hidden;box-sizing:border-box;page-break-after:always;display:flex;flex-direction:column;position:relative">
   <div style="position:absolute;right:60px;top:-100px;width:560px;height:480px;border-radius:50%;background:linear-gradient(135deg,rgba(219,234,254,.55),rgba(255,255,255,.15));opacity:.7;pointer-events:none"></div>
 
   <div style="position:relative;z-index:1;flex:1;padding:56px 48px 0;display:flex;flex-direction:column">
     <div style="margin-bottom:26px">
-      <h1 style="font-family:${INTER};font-size:52px;font-weight:900;letter-spacing:-0.045em;color:${FG};line-height:1.04;margin:0 0 10px">${reportTitle('Visão geral do mês')}</h1>
+      <h1 style="font-family:${INTER};font-size:52px;font-weight:900;letter-spacing:-0.045em;color:${FG};line-height:1.04;margin:0 0 10px">${reportTitle(opts.unidade === 'período' ? 'Visão geral do período' : 'Visão geral do mês')}</h1>
       <p style="font-family:${INTER};font-size:22px;font-weight:500;color:#163461;line-height:1.35;margin:0">
         ${hasCompare ? `Comparativo de ${curPeriod.month} com ${cmpPeriod.month}${curPeriod.year ? ` de ${curPeriod.year}` : ''}` : `Resultado de ${periodo}`}
       </p>
@@ -2303,11 +2464,11 @@ export function sVisaoGeral(
       ${hasCompare ? `<div style="background:${CARD};border:1px solid #E7ECF3;border-radius:18px;box-shadow:0 14px 34px rgba(15,23,42,.06);min-height:118px;display:flex;align-items:center;overflow:hidden">
         <div style="width:210px;padding:0 34px;box-sizing:border-box">
           <p style="font-family:${INTER};font-size:22px;font-weight:900;color:${FG};line-height:1.1;margin:0 0 10px">Comparativo</p>
-          <p style="font-family:${INTER};font-size:18px;font-weight:500;color:#163461;line-height:1;margin:0">${curPeriod.month} vs. ${cmpPeriod.month}</p>
+          <p style="font-family:${INTER};font-size:${curPeriod.month.length + cmpPeriod.month.length > 24 ? 13 : 18}px;font-weight:500;color:#163461;line-height:1.15;margin:0">${curPeriod.month.length + cmpPeriod.month.length > 40 ? 'período vs. anterior' : `${curPeriod.month} vs. ${cmpPeriod.month}`}</p>
         </div>
         ${deltaCell('Faturamento', dFat, 'chart')}
         <div style="width:1px;height:78px;background:${BORDER}"></div>
-        ${deltaCell('Pedidos', dPed, 'cart')}
+        ${deltaCell(rotuloVendas, dPed, 'cart')}
         <div style="width:1px;height:78px;background:${BORDER}"></div>
         ${deltaCell('Ticket médio', dTicket, 'tag')}
       </div>` : ''}
@@ -2325,6 +2486,480 @@ export function sVisaoGeral(
   <div style="height:32px;flex-shrink:0"></div>
 </div>`;
   return auditSlide(body, 'sVisaoGeral');
+}
+
+// ── Gráfico de barras + linha (SVG) ───────────────────────────────────────────
+// Barras numa escala, linha em outra: volume (investimento, sessões) × resultado
+// (conversões, contatos). SVG puro para sair igual no navegador e no PDF.
+
+export type PontoGrafico = { rotulo: string; barra: number; linha: number };
+
+/**
+ * Agrupa uma série diária para caber no gráfico: até 31 dias fica por DIA, até
+ * ~3 meses por SEMANA, acima disso por MÊS. Relatório de 1 ano com 365 barras de
+ * 3px não se lê.
+ */
+export function agruparSerieDiaria(dias: Array<{ date: string; barra: number; linha: number }>): PontoGrafico[] {
+  const ord = [...dias].filter(d => /^\d{4}-\d{2}-\d{2}/.test(d.date)).sort((a, b) => a.date.localeCompare(b.date));
+  const dm = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}`;
+  if (ord.length <= 31) return ord.map(d => ({ rotulo: dm(d.date), barra: d.barra, linha: d.linha }));
+  const MES = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
+  const porMes = ord.length > 93;
+  const grupos = new Map<string, PontoGrafico>();
+  for (const d of ord) {
+    let chave: string, rotulo: string;
+    if (porMes) {
+      chave = d.date.slice(0, 7);
+      rotulo = `${MES[Number(d.date.slice(5, 7)) - 1]}/${d.date.slice(2, 4)}`;
+    } else {
+      // Semana começando na segunda (UTC — a data é só um rótulo de calendário).
+      const t = new Date(d.date.slice(0, 10) + 'T00:00:00Z');
+      t.setUTCDate(t.getUTCDate() - ((t.getUTCDay() + 6) % 7));
+      chave = t.toISOString().slice(0, 10);
+      rotulo = dm(chave);
+    }
+    const g = grupos.get(chave) ?? { rotulo, barra: 0, linha: 0 };
+    g.barra += d.barra; g.linha += d.linha;
+    grupos.set(chave, g);
+  }
+  return [...grupos.values()];
+}
+
+function graficoBarrasLinha(pontos: PontoGrafico[], o: {
+  w: number; h: number; corBarra: string; corLinha: string;
+  fmtBarra: (n: number) => string; fmtLinha: (n: number) => string;
+}): string {
+  const n = pontos.length;
+  if (n === 0) return '';
+  const pl = 62, pr = 40, pt = 14, pb = 26;
+  const iw = o.w - pl - pr, ih = o.h - pt - pb;
+  const maxB = Math.max(...pontos.map(p => p.barra), 0) || 1;
+  const maxL = Math.max(...pontos.map(p => p.linha), 0) || 1;
+  const passo = iw / n;
+  const lb = Math.max(3, Math.min(34, passo * 0.62));
+  const xc = (i: number) => pl + passo * i + passo / 2;
+  const yB = (v: number) => pt + ih - (v / maxB) * ih;
+  const yL = (v: number) => pt + ih - (v / maxL) * ih;
+  const grade = [0, 0.5, 1].map(f => {
+    const y = pt + ih - f * ih;
+    return `<line x1="${pl}" y1="${y.toFixed(1)}" x2="${o.w - pr}" y2="${y.toFixed(1)}" stroke="#E7ECF3" stroke-width="1"></line>
+      <text x="${pl - 8}" y="${(y + 4).toFixed(1)}" text-anchor="end" font-family="Inter, Arial, sans-serif" font-size="11" font-weight="600" fill="${MUTED}">${o.fmtBarra(maxB * f)}</text>
+      <text x="${o.w - pr + 8}" y="${(y + 4).toFixed(1)}" text-anchor="start" font-family="Inter, Arial, sans-serif" font-size="11" font-weight="700" fill="${o.corLinha}">${o.fmtLinha(maxL * f)}</text>`;
+  }).join('');
+  const barras = pontos.map((p, i) => {
+    const y = yB(p.barra);
+    return `<rect x="${(xc(i) - lb / 2).toFixed(1)}" y="${y.toFixed(1)}" width="${lb.toFixed(1)}" height="${Math.max(0, pt + ih - y).toFixed(1)}" rx="2" fill="${o.corBarra}" opacity="0.32"></rect>`;
+  }).join('');
+  const linha = pontos.map((p, i) => `${xc(i).toFixed(1)},${yL(p.linha).toFixed(1)}`).join(' ');
+  const marcas = pontos.map((p, i) => `<circle cx="${xc(i).toFixed(1)}" cy="${yL(p.linha).toFixed(1)}" r="${n > 45 ? 1.6 : 3}" fill="${o.corLinha}"></circle>`).join('');
+  // ~8 rótulos no eixo, sempre com o primeiro e o último.
+  const cada = Math.max(1, Math.ceil(n / 8));
+  const rotulos = pontos.map((p, i) => (i % cada === 0 || i === n - 1) && !(i !== n - 1 && n - 1 - i < cada / 2)
+    ? `<text x="${xc(i).toFixed(1)}" y="${o.h - 7}" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="11" font-weight="600" fill="${MUTED}">${p.rotulo}</text>` : '').join('');
+  return `<svg width="${o.w}" height="${o.h}" viewBox="0 0 ${o.w} ${o.h}">${grade}${barras}<polyline points="${linha}" fill="none" stroke="${o.corLinha}" stroke-width="2.6" stroke-linejoin="round" stroke-linecap="round"></polyline>${marcas}${rotulos}</svg>`;
+}
+
+const legendaGrafico = (cor: string, nome: string, valor: string, linha = false) =>
+  `<span style="display:inline-flex;align-items:center;gap:8px;font-family:${INTER};font-size:13px;font-weight:600;color:#163461;white-space:nowrap"><i style="display:block;width:${linha ? 18 : 12}px;height:${linha ? 3 : 12}px;border-radius:${linha ? 2 : 3}px;background:${cor};opacity:${linha ? 1 : 0.4}"></i>${nome} <b style="color:${FG};font-weight:900">${valor}</b></span>`;
+
+// ── Funil comercial e canais (CRM) ────────────────────────────────────────────
+// Páginas do relatório de performance que espelham dois painéis da dashboard:
+// o Funil de Performance e os donuts de Leads/Faturamento por canal. Os NÚMEROS
+// chegam prontos de `report-crm-dados.ts` (mesmas rotas da dashboard) — aqui só
+// se desenha.
+
+export type DegrauRelatorio = { label: string; cor: string; valor: number };
+
+function pctBR(n: number, casas = 1): string {
+  return `${n.toLocaleString('pt-BR', { minimumFractionDigits: casas, maximumFractionDigits: casas })}%`;
+}
+
+function luminancia(hex: string): number {
+  const h = hex.replace('#', '');
+  const canal = (i: number) => {
+    const v = parseInt(h.slice(i, i + 2), 16) / 255;
+    return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+  };
+  return 0.2126 * canal(0) + 0.7152 * canal(2) + 0.0722 * canal(4);
+}
+
+/** Texto escuro ou branco — o que tiver MAIS contraste sobre a cor do degrau. */
+function textoSobre(hex: string): string {
+  const l = luminancia(hex);
+  const comBranco = 1.05 / (l + 0.05);
+  const comEscuro = (l + 0.05) / (luminancia(FG) + 0.05);
+  return comEscuro >= comBranco ? FG : '#FFFFFF';
+}
+
+function molduraCrm(titulo: string, subtitulo: string, corpo: string, id: string): string {
+  const body = `<div style="width:1440px;min-height:810px;background:${BG};border:1px solid ${BORDER};margin:0 auto 20px;overflow:hidden;box-sizing:border-box;page-break-after:always;display:flex;flex-direction:column;position:relative">
+  <div style="position:absolute;right:60px;top:-100px;width:560px;height:480px;border-radius:50%;background:linear-gradient(135deg,rgba(219,234,254,.55),rgba(255,255,255,.15));opacity:.7;pointer-events:none"></div>
+  <div style="position:relative;z-index:1;flex:1;padding:50px 48px 0;display:flex;flex-direction:column">
+    <div style="margin-bottom:22px">
+      <h1 style="font-family:${INTER};font-size:52px;font-weight:900;letter-spacing:-0.045em;color:${FG};line-height:1.04;margin:0 0 10px">${reportTitle(titulo)}</h1>
+      <p style="font-family:${INTER};font-size:22px;font-weight:500;color:#163461;line-height:1.35;margin:0">${subtitulo}</p>
+    </div>
+    ${corpo}
+  </div>
+  <div style="height:30px;flex-shrink:0"></div>
+</div>`;
+  return auditSlide(body, id);
+}
+
+function leituraCrm(paragrafos: string[]): string {
+  const ps = paragrafos.filter(Boolean)
+    .map((t, i, arr) => `<p style="font-family:${INTER};font-size:16px;font-weight:500;color:#163461;line-height:1.5;margin:0 0 ${i === arr.length - 1 ? 0 : 7}px">${t}</p>`)
+    .join('');
+  return `<div data-conclusion="1" style="background:${CARD};border:1px solid #E7ECF3;border-radius:18px;box-shadow:0 14px 34px rgba(15,23,42,.06);display:grid;grid-template-columns:92px 1fr;align-items:center;padding:18px 28px;margin-top:16px">
+    <div style="width:60px;height:60px;border-radius:50%;background:${PRIMARY}16;display:flex;align-items:center;justify-content:center"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="${PRIMARY_TEXT}" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6"></path><path d="M10 22h4"></path><path d="M12 2a7 7 0 0 0-4 12.74V17h8v-2.26A7 7 0 0 0 12 2z"></path></svg></div>
+    <div style="border-left:2px solid ${PRIMARY};padding-left:24px">
+      <p style="font-family:${INTER};font-size:20px;font-weight:900;color:${FG};line-height:1;margin:0 0 10px">Leitura principal</p>
+      ${ps}
+    </div>
+  </div>`;
+}
+
+export function sFunilComercial(
+  degraus: DegrauRelatorio[],
+  extra: { vendasDoMes: number; vendasDeLeadsAnteriores: number; periodo: string; /** false = período de vários meses/quebrado: o texto deixa de dizer "no mês". */ mesCheio?: boolean },
+  idx: number, total: number,
+): string {
+  void idx; void total;
+  const n = degraus.length;
+  const topo = degraus[0]?.valor ?? 0;
+  const fundo = degraus[n - 1]?.valor ?? 0;
+  const conversaoGeral = topo > 0 ? (fundo / topo) * 100 : 0;
+
+  // Funil em trapézios: a largura cai em passos IGUAIS (é o desenho de um funil,
+  // não um gráfico de barras — a proporção real está nos percentuais ao lado).
+  const W = 500, AREA = 388, GAP = 6;
+  const h = Math.min(84, Math.floor((AREA - GAP * (n - 1)) / n));
+  const altura = h * n + GAP * (n - 1);
+  const passo = (W * 0.56) / n;
+  const trapezios = degraus.map((d, i) => {
+    const wTop = W - i * passo, wBot = W - (i + 1) * passo;
+    const y = i * (h + GAP), cx = W / 2;
+    const txt = textoSobre(d.cor);
+    // Maiúsculas ANTES de escapar: depois, "&amp;" viraria "&AMP;".
+    const rotulo = escapeHtmlAttr((d.label.length > 26 ? `${d.label.slice(0, 25)}…` : d.label).toLocaleUpperCase('pt-BR'));
+    return `<polygon points="${(cx - wTop / 2).toFixed(1)},${y} ${(cx + wTop / 2).toFixed(1)},${y} ${(cx + wBot / 2).toFixed(1)},${y + h} ${(cx - wBot / 2).toFixed(1)},${y + h}" fill="${d.cor}"></polygon>
+      <text x="${cx}" y="${y + h / 2 - 3}" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="${h >= 70 ? 30 : 25}" font-weight="900" fill="${txt}">${num(d.valor)}</text>
+      <text x="${cx}" y="${y + h / 2 + (h >= 70 ? 19 : 16)}" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="11.5" font-weight="800" letter-spacing="1" fill="${txt}">${rotulo}</text>`;
+  }).join('');
+
+  const kpi = (rotulo: string, valor: string, cor = FG) =>
+    `<div style="background:${CARD};border:1px solid #E7ECF3;border-radius:16px;box-shadow:0 10px 26px rgba(15,23,42,.06);padding:16px 20px;min-width:0">
+      <p style="font-family:${INTER};font-size:14px;font-weight:500;color:#163461;margin:0 0 8px;white-space:nowrap">${rotulo}</p>
+      <p style="font-family:${INTER};font-size:30px;font-weight:900;letter-spacing:-0.03em;color:${cor};line-height:1;margin:0;white-space:nowrap">${valor}</p>
+    </div>`;
+
+  // Conversão de cada degrau em relação ao ANTERIOR — a mesma conta da dashboard.
+  const passagens = degraus.slice(1).map((d, i) => {
+    const ant = degraus[i];
+    const taxa = ant.valor > 0 ? (d.valor / ant.valor) * 100 : null;
+    return { de: ant, para: d, taxa };
+  });
+  const linhas = passagens.map((p, i) => `<div style="display:grid;grid-template-columns:14px 118px 1fr auto;align-items:center;gap:14px;padding:${n > 5 ? 9 : 12}px 0;${i ? `border-top:1px solid ${ROW}` : ''}">
+      <span style="width:12px;height:12px;border-radius:50%;background:${p.para.cor};display:inline-block"></span>
+      <span style="font-family:${INTER};font-size:26px;font-weight:900;letter-spacing:-0.03em;color:${PRIMARY_TEXT};line-height:1;white-space:nowrap">${p.taxa === null ? '—' : pctBR(p.taxa)}</span>
+      <span style="font-family:${INTER};font-size:15px;font-weight:500;color:#163461;line-height:1.3">de ${escapeHtmlAttr(p.de.label.toLocaleLowerCase('pt-BR'))} para ${escapeHtmlAttr(p.para.label.toLocaleLowerCase('pt-BR'))}</span>
+      <span style="font-family:${INTER};font-size:14px;font-weight:700;color:${MUTED};white-space:nowrap">${num(p.de.valor)} → ${num(p.para.valor)}</span>
+    </div>`).join('');
+
+  // Maior gargalo = a passagem que MENOS converte (entre as que têm base).
+  const comBase = passagens.filter(p => p.taxa !== null && p.de.valor >= 5);
+  const gargalo = comBase.length ? comBase.reduce((a, b) => (b.taxa! < a.taxa! ? b : a)) : null;
+  const leitura1 = `De ${num(topo)} leads que entraram em ${extra.periodo}, ${num(fundo)} chegaram a ${escapeHtmlAttr((degraus[n - 1]?.label ?? 'fechamento').toLocaleLowerCase('pt-BR'))} — conversão geral de ${pctBR(conversaoGeral)}.${gargalo ? ` A maior perda está de ${escapeHtmlAttr(gargalo.de.label.toLocaleLowerCase('pt-BR'))} para ${escapeHtmlAttr(gargalo.para.label.toLocaleLowerCase('pt-BR'))}: ${pctBR(gargalo.taxa!)} avançam.` : ''}`;
+  // ⚠️ O funil acompanha quem ENTROU no período; as vendas do mês (página de visão
+  // geral) contam pelo dia do fechamento. Sem dizer isso, o cliente vê dois números
+  // de venda diferentes e conclui que um está errado.
+  const leitura2 = extra.vendasDoMes > fundo && extra.vendasDeLeadsAnteriores > 0
+    ? `As ${num(extra.vendasDoMes)} vendas fechadas ${extra.mesCheio === false ? 'no período' : 'no mês'} incluem ${num(extra.vendasDeLeadsAnteriores)} de leads que entraram ${extra.mesCheio === false ? 'antes dele' : 'em meses anteriores'} — o funil acompanha só quem chegou neste período.`
+    : '';
+
+  const corpo = `<div style="display:grid;grid-template-columns:580px 1fr;gap:18px;align-items:stretch">
+      <div style="background:${CARD};border:1px solid #E7ECF3;border-radius:18px;box-shadow:0 14px 34px rgba(15,23,42,.07);padding:18px 0;display:flex;align-items:center;justify-content:center">
+        <svg width="${W}" height="${altura}" viewBox="0 0 ${W} ${altura}">${trapezios}</svg>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:16px;min-width:0">
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px">
+          ${kpi('Leads no período', num(topo))}
+          ${kpi(escapeHtmlAttr(degraus[n - 1]?.label ?? 'Fechamentos'), num(fundo))}
+          ${kpi('Conversão geral', pctBR(conversaoGeral, 2), PRIMARY_TEXT)}
+        </div>
+        <div style="background:${CARD};border:1px solid #E7ECF3;border-radius:18px;box-shadow:0 14px 34px rgba(15,23,42,.07);padding:14px 24px;flex:1;display:flex;flex-direction:column;justify-content:center">
+          <p style="font-family:${INTER};font-size:13px;font-weight:800;color:${MUTED};text-transform:uppercase;letter-spacing:.08em;margin:0 0 4px">Conversão entre etapas</p>
+          ${linhas}
+        </div>
+      </div>
+    </div>
+    ${leituraCrm([leitura1, leitura2])}`;
+
+  return molduraCrm('Funil comercial', `Do lead à venda — leads que entraram em ${extra.periodo}`, corpo, 'sFunilComercial');
+}
+
+export type CanalRelatorio = { label: string; valor: number };
+
+const CORES_CANAL = ['#0B84FF', '#1a8a00', '#8b5cf6', '#f59e0b', '#ec4899', '#0ea5e9', '#ef4444', '#14b8a6'];
+const CINZA_CANAL = '#94A3B8';
+const ehCanalSemNome = (label: string) => /^(outros|canal não informado)/i.test(label);
+
+export function sCanais(
+  dados: {
+    leads: CanalRelatorio[]; leadsTotal: number;
+    receita: Array<CanalRelatorio & { vendas: number }>; receitaTotal: number;
+    semAtribuicao: number; periodo: string;
+  },
+  idx: number, total: number,
+): string {
+  void idx; void total;
+  const brl2 = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  // Mesma cor para o mesmo canal nos DOIS cards: atribuída pela ordem alfabética
+  // da união dos rótulos, não pelo ranking de cada lista.
+  const nomes = [...new Set([...dados.leads, ...dados.receita].map(c => c.label))]
+    .filter(l => !ehCanalSemNome(l)).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  const corDe = (label: string) => ehCanalSemNome(label) ? CINZA_CANAL : CORES_CANAL[nomes.indexOf(label) % CORES_CANAL.length];
+
+  // Top 6 + "Outros (N)" com o RESTO exato, para a lista fechar com o total do card.
+  const compactar = (lista: CanalRelatorio[], totalCard: number): CanalRelatorio[] => {
+    const ord = lista.filter(c => c.valor > 0).sort((a, b) => b.valor - a.valor);
+    const topo = ord.slice(0, 6);
+    const resto = totalCard - topo.reduce((s, c) => s + c.valor, 0);
+    const n = ord.length - topo.length;
+    // Sobrou UM canal: mostra o próprio (um "Outros (1)" esconderia o nome à toa).
+    if (n === 1 && Math.abs(resto - ord[6].valor) < 0.005) return ord;
+    return resto > 0.004 ? [...topo, { label: n > 0 ? `Outros (${n})` : 'Outros', valor: resto }] : topo;
+  };
+
+  const card = (titulo: string, totalTxt: string, lista: CanalRelatorio[], totalCard: number, fmt: (v: number) => string, detalhe?: (label: string) => string) => {
+    const maior = Math.max(...lista.map(c => c.valor), 1);
+    const linhas = lista.map(c => {
+      const pct = totalCard > 0 ? (c.valor / totalCard) * 100 : 0;
+      const cor = corDe(c.label);
+      return `<div style="padding:8px 0">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:6px">
+          <span style="display:flex;align-items:center;gap:9px;min-width:0"><span style="width:11px;height:11px;border-radius:50%;background:${cor};flex-shrink:0"></span><span style="font-family:${INTER};font-size:15px;font-weight:700;color:${FG};white-space:nowrap">${escapeHtmlAttr(c.label.length > 30 ? `${c.label.slice(0, 29)}…` : c.label)}</span></span>
+          <span style="font-family:${INTER};font-size:15px;font-weight:800;color:${FG};white-space:nowrap">${fmt(c.valor)} <span style="font-weight:600;color:${MUTED}">· ${pctBR(pct)}</span></span>
+        </div>
+        <div style="height:7px;background:${ROW};border-radius:4px"><div style="height:7px;border-radius:4px;background:${cor};width:${Math.max(1.5, (c.valor / maior) * 100).toFixed(1)}%"></div></div>
+        ${detalhe && detalhe(c.label) ? `<p style="font-family:${INTER};font-size:12.5px;font-weight:500;color:${MUTED};margin:6px 0 0;white-space:nowrap">${detalhe(c.label)}</p>` : ''}
+      </div>`;
+    }).join('');
+    return `<div style="background:${CARD};border:1px solid #E7ECF3;border-radius:18px;box-shadow:0 14px 34px rgba(15,23,42,.07);padding:20px 26px;min-width:0">
+      <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:12px;margin-bottom:8px;padding-bottom:12px;border-bottom:1px solid ${ROW}">
+        <p style="font-family:${INTER};font-size:20px;font-weight:900;color:${FG};margin:0;line-height:1.1">${titulo}</p>
+        <p style="font-family:${INTER};font-size:28px;font-weight:900;letter-spacing:-0.03em;color:${FG};margin:0;line-height:1;white-space:nowrap">${totalTxt}</p>
+      </div>
+      ${linhas || `<p style="font-family:${INTER};font-size:15px;color:${MUTED};margin:18px 0">Sem registro no período.</p>`}
+    </div>`;
+  };
+
+  const leadsLista = compactar(dados.leads, dados.leadsTotal);
+  const receitaLista = compactar(dados.receita, dados.receitaTotal);
+
+  // Leitura: o canal que mais fatura, e o que traz volume sem vender.
+  const comNome = (l: CanalRelatorio[]) => l.filter(c => !ehCanalSemNome(c.label) && c.valor > 0).sort((a, b) => b.valor - a.valor);
+  const topReceita = comNome(dados.receita)[0];
+  const leadsDe = (label: string) => dados.leads.find(c => c.label === label)?.valor ?? 0;
+  const p1 = topReceita && dados.receitaTotal > 0
+    ? `${escapeHtmlAttr(topReceita.label)} respondeu por ${pctBR((topReceita.valor / dados.receitaTotal) * 100)} do faturamento (${brl2(topReceita.valor)})${dados.leadsTotal > 0 && leadsDe(topReceita.label) > 0 ? ` com ${pctBR((leadsDe(topReceita.label) / dados.leadsTotal) * 100)} dos leads` : ''}.`
+    : (comNome(dados.leads)[0] ? `${escapeHtmlAttr(comNome(dados.leads)[0].label)} foi o canal que mais trouxe leads em ${dados.periodo} (${num(comNome(dados.leads)[0].valor)}).` : '');
+  const semVenda = comNome(dados.leads).find(c => !dados.receita.some(r => r.label === c.label && r.valor > 0));
+  const p2 = semVenda && dados.receitaTotal > 0 && semVenda.valor >= Math.max(5, dados.leadsTotal * 0.1)
+    ? `${escapeHtmlAttr(semVenda.label)} trouxe ${num(semVenda.valor)} leads e ainda não registrou venda no período — vale acompanhar o atendimento desse canal.`
+    : '';
+  const p3 = dados.receitaTotal > 0 && dados.semAtribuicao / dados.receitaTotal > 0.2
+    ? `${pctBR((dados.semAtribuicao / dados.receitaTotal) * 100)} do faturamento está sem canal registrado no CRM — é lacuna de cadastro, não um canal.`
+    : '';
+
+  const corpo = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:start">
+      ${card('Leads por canal', num(dados.leadsTotal), leadsLista, dados.leadsTotal, num)}
+      ${card('Faturamento por canal', brl2(dados.receitaTotal), receitaLista, dados.receitaTotal, brl2, (label) => {
+        const r = dados.receita.find(c => c.label === label);
+        return r && r.vendas > 0 ? `${num(r.vendas)} ${r.vendas === 1 ? 'venda' : 'vendas'} · ticket médio ${brl2(r.valor / r.vendas)}` : '';
+      })}
+    </div>
+    ${leituraCrm([p1, p2, p3])}`;
+
+  return molduraCrm('Canais', `De onde vieram os leads e o faturamento de ${dados.periodo}`, corpo, 'sCanais');
+}
+
+// ── Site / landing page (GA4) ─────────────────────────────────────────────────
+// Duas páginas com o melhor do painel "Landing page" da dashboard. Os dados chegam
+// prontos da MESMA rota (/api/clients/[id]/ga4) — aqui só se desenha.
+
+const DIAS_SEMANA_GA4 = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+const DIAS_SEMANA_LONGO = ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado'];
+
+function tempoMedio(segundos: number): string {
+  const s = Math.max(0, Math.round(segundos));
+  return s >= 60 ? `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s` : `${s}s`;
+}
+
+function cardSite(titulo: string, corpo: string, sub = ''): string {
+  return `<div style="background:${CARD};border:1px solid #E7ECF3;border-radius:18px;box-shadow:0 12px 30px rgba(15,23,42,.06);padding:16px 22px;min-width:0;display:flex;flex-direction:column">
+    <div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:8px">
+      <p style="font-family:${INTER};font-size:17px;font-weight:900;color:${FG};margin:0;white-space:nowrap">${titulo}</p>
+      ${sub ? `<p style="font-family:${INTER};font-size:12px;font-weight:600;color:${MUTED};margin:0;white-space:nowrap">${sub}</p>` : ''}
+    </div>
+    ${corpo}
+  </div>`;
+}
+
+/** Linha de ranking: nome · valor · % com barra, e uma sublinha de contatos. */
+function linhaSite(nome: string, valor: string, pct: number, largura: number, cor: string, sub = ''): string {
+  return `<div style="padding:4px 0">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:4px">
+      <span style="font-family:${INTER};font-size:14px;font-weight:700;color:${FG};white-space:nowrap">${nome}</span>
+      <span style="font-family:${INTER};font-size:14px;font-weight:800;color:${FG};white-space:nowrap">${valor} <span style="font-weight:600;color:${MUTED}">· ${pctBR(pct)}</span></span>
+    </div>
+    <div style="height:6px;background:${ROW};border-radius:3px"><div style="height:6px;border-radius:3px;background:${cor};width:${Math.max(1.5, Math.min(100, largura)).toFixed(1)}%"></div></div>
+    ${sub ? `<p style="font-family:${INTER};font-size:11.5px;font-weight:500;color:${MUTED};margin:3px 0 0;white-space:nowrap">${sub}</p>` : ''}
+  </div>`;
+}
+
+const cortaTexto = (t: string, max: number) => (Array.from(t).length > max ? `${Array.from(t).slice(0, max - 1).join('')}…` : t);
+
+export function sSiteResumo(
+  g: Ga4Consolidado,
+  o: { periodo: string; prevPeriodo: string; comparar: boolean },
+  idx: number, total: number,
+): string {
+  void idx; void total;
+  const a = g.atual, p = g.anterior;
+  const taxaEng = a.sessoes > 0 ? (a.engajadas / a.sessoes) * 100 : 0;
+  const taxaEngAnt = p.sessoes > 0 ? (p.engajadas / p.sessoes) * 100 : 0;
+  const taxaContato = a.sessoes > 0 ? (a.contatos / a.sessoes) * 100 : 0;
+  const taxaContatoAnt = p.sessoes > 0 ? (p.contatos / p.sessoes) * 100 : 0;
+  const tAtual = a.sessoes > 0 ? a.tempo / a.sessoes : 0;
+  const tAnt = p.sessoes > 0 ? p.tempo / p.sessoes : 0;
+  const mesAnt = o.prevPeriodo.split('/')[0];
+  // "vs Abril a Junho" não cabe na linha de 12px do KPI.
+  const vsAnt = mesAnt.length > 10 ? 'anterior' : mesAnt;
+
+  const kpi = (rotulo: string, valor: string, atual: number, anterior: number) => {
+    const d = o.comparar ? deltaInfo(atual, anterior) : { label: '', up: true, hasData: false };
+    return `<div style="background:${CARD};border:1px solid #E7ECF3;border-radius:16px;box-shadow:0 10px 26px rgba(15,23,42,.06);padding:12px 16px;min-width:0">
+      <p style="font-family:${INTER};font-size:13px;font-weight:600;color:#163461;margin:0 0 7px;white-space:nowrap">${rotulo}</p>
+      <p style="font-family:${INTER};font-size:28px;font-weight:900;letter-spacing:-0.03em;color:${FG};line-height:1;margin:0 0 7px;white-space:nowrap">${valor}</p>
+      <p style="font-family:${INTER};font-size:12px;font-weight:700;color:${d.hasData ? (d.up ? PRIMARY_TEXT : BLUE) : MUTED};margin:0;white-space:nowrap">${d.hasData ? `${d.label} ${d.up ? '↑' : '↓'} vs ${vsAnt || 'anterior'}` : '&nbsp;'}</p>
+    </div>`;
+  };
+
+  const serie = agruparSerieDiaria(g.diario.map(d => ({ date: d.date, barra: d.sessoes, linha: d.contatos })));
+  const escala = g.diario.length <= 31 ? 'por dia' : g.diario.length > 93 ? 'por mês' : 'por semana';
+  const dec1 = (v: number) => (Number.isInteger(v) ? num(v) : v.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 }));
+  const grafico = serie.length >= 2
+    ? cardSite(`Visitas e contatos ${escala}`, `<div style="display:flex;gap:22px;margin:-2px 0 4px">
+        ${legendaGrafico(BLUE, 'Visitas', num(a.sessoes))}${legendaGrafico(PRIMARY_TEXT, 'Contatos', num(a.contatos), true)}
+      </div>${graficoBarrasLinha(serie, { w: 1296, h: 254, corBarra: BLUE, corLinha: PRIMARY_TEXT, fmtBarra: (v) => num(Math.round(v)), fmtLinha: dec1 })}`)
+    : '';
+
+  const contar = seletorContatos(g.pago.canais);
+  const canais = g.pago.canais.filter(c => c.sessoes > 0).slice(0, 5);
+  const maior = Math.max(...canais.map(c => c.sessoes), 1);
+  // O card "De onde vieram as visitas" SAIU da página (pedido do Matheus, 08/10/2026):
+  // o gráfico ocupa a largura inteira. A leitura ainda aponta a melhor origem.
+
+  const partes = [a.whatsapp > 0 ? `${num(a.whatsapp)} pelo WhatsApp` : '', a.leadForm > 0 ? `${num(a.leadForm)} por formulário` : '', a.telefone > 0 ? `${num(a.telefone)} por telefone` : ''].filter(Boolean);
+  const dSess = o.comparar ? deltaInfo(a.sessoes, p.sessoes) : null;
+  const p1 = `O site recebeu ${num(a.sessoes)} visitas de ${num(a.usuarios)} pessoas${dSess?.hasData ? ` (${dSess.label} vs ${mesAnt})` : ''} e gerou ${num(a.contatos)} ${a.contatos === 1 ? 'contato' : 'contatos'}${partes.length ? ` — ${partes.join(', ')}` : ''}. ${pctBR(taxaContato)} das visitas viraram contato.`;
+  const melhorCanal = [...canais].filter(c => contar(c) > 0).sort((x, y) => contar(y) - contar(x))[0];
+  const p2 = melhorCanal
+    ? `${escapeHtmlAttr(ROTULOS_CANAL_GA4[melhorCanal.valor] ?? melhorCanal.valor)} foi a origem que mais gerou contato: ${num(contar(melhorCanal))} em ${num(melhorCanal.sessoes)} visitas (${pctBR((contar(melhorCanal) / melhorCanal.sessoes) * 100)}).`
+    : '';
+
+  const corpo = `<div style="display:grid;grid-template-columns:repeat(6,1fr);gap:14px;margin-bottom:14px">
+      ${kpi('Visitas (sessões)', num(a.sessoes), a.sessoes, p.sessoes)}
+      ${kpi('Pessoas', num(a.usuarios), a.usuarios, p.usuarios)}
+      ${kpi('Taxa de engajamento', pctBR(taxaEng), taxaEng, taxaEngAnt)}
+      ${kpi('Tempo médio', tempoMedio(tAtual), tAtual, tAnt)}
+      ${kpi('Contatos', num(a.contatos), a.contatos, p.contatos)}
+      ${kpi('Taxa de contato', pctBR(taxaContato), taxaContato, taxaContatoAnt)}
+    </div>
+    <div style="display:grid;grid-template-columns:1fr;gap:16px;align-items:stretch">
+      ${grafico}
+    </div>
+    ${leituraCrm([p1, p2])}`;
+  return molduraCrm('Site e landing pages', `O que aconteceu no site em ${o.periodo} — Google Analytics`, corpo, 'sSiteResumo');
+}
+
+export function sSiteAudiencia(g: Ga4Consolidado, o: { periodo: string }, idx: number, total: number): string {
+  void idx; void total;
+  const a = g.atual;
+  const aud = g.audiencia;
+
+  // Cortes de audiência: participação nas visitas + taxa de contato de cada um.
+  const blocoCorte = (linhas: Ga4Seg[], rotulos: Record<string, string>, cor: string) => {
+    const contar = seletorContatos(linhas);
+    const tot = linhas.reduce((s, l) => s + l.sessoes, 0) || 1;
+    const maior = Math.max(...linhas.map(l => l.sessoes), 1);
+    return linhas.filter(l => l.sessoes > 0).slice(0, 4).map(l => linhaSite(
+      escapeHtmlAttr(rotulos[l.valor] ?? l.valor), num(l.sessoes), (l.sessoes / tot) * 100, (l.sessoes / maior) * 100, cor,
+      `${num(contar(l))} ${contar(l) === 1 ? 'contato' : 'contatos'} · ${pctBR((contar(l) / l.sessoes) * 100)} das visitas`,
+    )).join('');
+  };
+  const dispositivos = aud.dispositivos.filter(d => d.sessoes > 0);
+  const novos = aud.novosRecorrentes.filter(d => d.sessoes > 0);
+
+  const tabela = (linhas: Ga4Seg[], max: number, larguraNome: number) => {
+    const contar = seletorContatos(linhas);
+    const cab = `<div style="display:grid;grid-template-columns:1fr 76px 76px 70px;gap:8px;padding:0 0 6px;border-bottom:1px solid ${ROW}">
+      ${['', 'Visitas', 'Contatos', 'Taxa'].map((c, i) => `<span style="font-family:${INTER};font-size:11px;font-weight:800;color:${MUTED};text-transform:uppercase;letter-spacing:.06em;text-align:${i ? 'right' : 'left'}">${c}</span>`).join('')}
+    </div>`;
+    return cab + linhas.filter(l => l.sessoes > 0).slice(0, max).map(l => `<div style="display:grid;grid-template-columns:1fr 76px 76px 70px;gap:8px;padding:5px 0;border-bottom:1px solid ${ROW};align-items:center">
+        <span style="font-family:${INTER};font-size:14px;font-weight:700;color:${FG};white-space:nowrap;overflow:hidden">${escapeHtmlAttr(cortaTexto(l.valor, larguraNome))}</span>
+        <span style="font-family:${INTER};font-size:14px;font-weight:800;color:${FG};text-align:right">${num(l.sessoes)}</span>
+        <span style="font-family:${INTER};font-size:14px;font-weight:800;color:${contar(l) > 0 ? PRIMARY_TEXT : MUTED};text-align:right">${num(contar(l))}</span>
+        <span style="font-family:${INTER};font-size:13px;font-weight:700;color:${MUTED};text-align:right">${l.sessoes > 0 ? pctBR((contar(l) / l.sessoes) * 100) : '—'}</span>
+      </div>`).join('');
+  };
+
+  // Mapa dia × hora: cor = volume de visitas (fuso da propriedade GA4).
+  const celulas = aud.semanaHora;
+  const maxCel = Math.max(...celulas.map(c => c.sessoes), 1);
+  const cel = (dia: number, hora: number) => celulas.find(c => c.dia === dia && c.hora === hora)?.sessoes ?? 0;
+  const ordemDias = [1, 2, 3, 4, 5, 6, 0];
+  const mapa = celulas.length
+    ? `<div style="display:grid;grid-template-columns:34px repeat(24,1fr);gap:2px;align-items:center">
+        ${ordemDias.map(d => `<span style="font-family:${INTER};font-size:11px;font-weight:700;color:${MUTED}">${DIAS_SEMANA_GA4[d]}</span>${Array.from({ length: 24 }, (_, h) => {
+          const v = cel(d, h);
+          return `<i style="display:block;height:15px;border-radius:3px;background:${v > 0 ? BLUE : ROW};opacity:${v > 0 ? (0.14 + 0.86 * (v / maxCel)).toFixed(2) : 1}"></i>`;
+        }).join('')}`).join('')}
+        <span></span>${Array.from({ length: 24 }, (_, h) => `<span style="font-family:${INTER};font-size:10px;font-weight:600;color:${MUTED};text-align:center">${h % 3 === 0 ? `${h}h` : ''}</span>`).join('')}
+      </div>`
+    : '';
+  const pico = celulas.length ? celulas.reduce((x, y) => (y.sessoes > x.sessoes ? y : x)) : null;
+
+  const cartoes = [
+    dispositivos.length ? cardSite('Dispositivos', blocoCorte(dispositivos, ROTULOS_DISPOSITIVO_GA4, BLUE)) : '',
+    novos.length ? cardSite('Novos × recorrentes', blocoCorte(novos, { new: 'Novos visitantes', returning: 'Recorrentes' }, '#8b5cf6')) : '',
+    aud.cidades.some(c => c.sessoes > 0) ? cardSite('Principais cidades', tabela(aud.cidades.filter(c => c.valor && c.valor !== '(not set)'), 5, 22)) : '',
+  ].filter(Boolean);
+  const linha2 = [
+    g.comportamento.paginasEntrada.some(c => c.sessoes > 0) ? cardSite('Páginas de entrada', tabela(g.comportamento.paginasEntrada, 5, 40), 'por onde a visita começou') : '',
+    mapa ? cardSite('Horários de maior movimento', mapa, pico ? `pico: ${DIAS_SEMANA_LONGO[pico.dia]}, ${pico.hora}h` : '') : '',
+  ].filter(Boolean);
+
+  // Leitura: o corte que MAIS converte (com base mínima), não o de maior volume.
+  const contarDisp = seletorContatos(dispositivos);
+  const taxa = (l: Ga4Seg, c: (s: Ga4Seg) => number) => (l.sessoes > 0 ? (c(l) / l.sessoes) * 100 : 0);
+  const dispOrd = dispositivos.filter(d => d.sessoes >= 30).sort((x, y) => taxa(y, contarDisp) - taxa(x, contarDisp));
+  const p1 = dispOrd.length >= 2 && taxa(dispOrd[0], contarDisp) > 0
+    ? `${escapeHtmlAttr(ROTULOS_DISPOSITIVO_GA4[dispOrd[0].valor] ?? dispOrd[0].valor)} converte melhor: ${pctBR(taxa(dispOrd[0], contarDisp))} das visitas viram contato, contra ${pctBR(taxa(dispOrd[dispOrd.length - 1], contarDisp))} no ${escapeHtmlAttr((ROTULOS_DISPOSITIVO_GA4[dispOrd[dispOrd.length - 1].valor] ?? dispOrd[dispOrd.length - 1].valor).toLocaleLowerCase('pt-BR'))}.`
+    : '';
+  const cidades = aud.cidades.filter(c => c.valor && c.valor !== '(not set)');
+  const contarCid = seletorContatos(cidades);
+  const cidadeTop = [...cidades].sort((x, y) => contarCid(y) - contarCid(x))[0];
+  const p2 = cidadeTop && contarCid(cidadeTop) > 0
+    ? `${escapeHtmlAttr(cidadeTop.valor)} foi a cidade que mais gerou contato (${num(contarCid(cidadeTop))})${pico ? `; o maior movimento no site é ${DIAS_SEMANA_LONGO[pico.dia]} por volta das ${pico.hora}h` : ''}.`
+    : (pico ? `O maior movimento no site é ${DIAS_SEMANA_LONGO[pico.dia]} por volta das ${pico.hora}h.` : '');
+
+  const corpo = `${cartoes.length ? `<div style="display:grid;grid-template-columns:repeat(${cartoes.length},1fr);gap:16px;margin-bottom:14px;align-items:stretch">${cartoes.join('')}</div>` : ''}
+    ${linha2.length ? `<div style="display:grid;grid-template-columns:repeat(${linha2.length},1fr);gap:16px;align-items:stretch">${linha2.join('')}</div>` : ''}
+    ${leituraCrm([p1, p2].filter(Boolean).length ? [p1, p2] : [`${num(a.sessoes)} visitas no período.`])}`;
+  return molduraCrm('Comportamento da audiência', `Quem visitou o site em ${o.periodo} e como navegou`, corpo, 'sSiteAudiencia');
 }
 
 function sPorDia(d: ParsedData, idx: number, total: number, periodo = 'Maio/2026'): string {
@@ -2844,7 +3479,7 @@ function cleanCampaignHighlightTitle(raw: string): string {
   return tags.join(' ') || raw;
 }
 
-export function sMetaAdsResumo(meta: MetaAdsFull, idx: number, total: number): string {
+export function sMetaAdsResumo(meta: MetaAdsFull, idx: number, total: number, comercial?: ComercialDaPlataforma | null): string {
   void idx;
   void total;
   const ctr = meta.impressoes > 0 ? (meta.cliques / meta.impressoes) * 100 : 0;
@@ -2940,7 +3575,15 @@ export function sMetaAdsResumo(meta: MetaAdsFull, idx: number, total: number): s
     bigKpi('CPM', brlC(cpm), ICO_CHART),
     bigKpi('CPC', brlC(cpc), ICO_CURSOR),
     ...(totalResultados > 0 ? [bigKpi('CPL', brlC(cplGeral), ICO_TARGET)] : []),
+    // Faturamento do CRM nos canais da Meta (Instagram/Facebook/Meta Ads) e o ROAS
+    // sobre o investimento da conta — pedido do Matheus (08/10/2026). Só entram
+    // quando há venda atribuída; sem isso o layout fica como era.
+    ...(comercial ? [
+      bigKpi('Faturamento (CRM)', brlC(comercial.faturamento), ICO_MONEY),
+      bigKpi('ROAS', comercial.roas !== null ? `${comercial.roas.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}x` : '—', ICO_CHART),
+    ] : []),
   ];
+  const kpiCols = generalMetrics.length > 8 ? 5 : 4;
 
   const segmentLine = (label: string, value: string) =>
     `<div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px;border-top:1px solid rgba(148,163,184,.18);padding-top:8px">
@@ -3030,7 +3673,7 @@ export function sMetaAdsResumo(meta: MetaAdsFull, idx: number, total: number): s
       <p style="font-size:16px;font-weight:500;color:#163461;font-family:${INTER};margin:0">Métricas Meta Ads e resultados separados por objetivo de ${meta.nivel === 'adset' ? 'conjunto de anúncios' : 'campanha'}</p>
     </div>
 
-    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;flex-shrink:0">
+    <div style="display:grid;grid-template-columns:repeat(${kpiCols},1fr);gap:14px;flex-shrink:0">
       ${generalMetrics.join('')}
     </div>
 
@@ -3084,7 +3727,8 @@ export function sPaidTrafficResumo(meta: MetaAdsFull | null, google: GoogleAdsFu
   const googleImpressions = google?.impressoes ?? 0;
   const googleClicks = google?.cliques ?? 0;
   const googleConversions = google?.conversoes ?? 0;
-  const googleRevenue = google?.valorConversoes ?? 0;
+  // Só valor de COMPRA: o valor padrão de R$ 1 por lead não é receita.
+  const googleRevenue = google?.valorCompras ?? 0;
 
   const totalSpend = metaSpend + googleSpend;
   const totalImpressions = metaImpressions + googleImpressions;
@@ -3242,7 +3886,16 @@ export function sInstagram(ig: InstagramData, idx: number, total: number, period
       <rect x="2" y="2" width="20" height="20" rx="6"/><circle cx="12" cy="12" r="4.5"/><circle cx="17.2" cy="6.8" r="1.1" fill="${color}" stroke="none"/>
     </svg>`;
 
-  const compareLine = (current: number, previous: number | undefined, baseLabel = 'vs período anterior') => {
+  const compareLine = (current: number, previous: number | undefined, baseLabel = 'vs período anterior', chave?: string) => {
+    // Métrica parcial (a Meta só guarda 2 anos de insights) não vira comparativo nem
+    // percentual: a Romanza saiu com "+3022% de visualizações" porque o período anterior
+    // de um relatório anual caía fora da janela e somava só os pedaços que vieram.
+    if (chave && ig.incompletas?.includes(chave)) {
+      return { text: 'valor parcial — a Meta só guarda 2 anos de dados', color: MUTED, mark: BORDER };
+    }
+    if (chave && ig.previous?.incompletas?.includes(chave)) {
+      return { text: 'sem comparativo: período anterior fora dos 2 anos que a Meta guarda', color: MUTED, mark: BORDER };
+    }
     if (!previous) {
       return { text: 'sem comparativo anterior', color: MUTED, mark: PRIMARY };
     }
@@ -3271,7 +3924,7 @@ export function sInstagram(ig: InstagramData, idx: number, total: number, period
     compareLabel = 'vs período anterior',
     customCompare?: { text: string; color: string; mark: string },
   ) => {
-    const compare = customCompare ?? compareLine(currentCompare, previousCompare, compareLabel);
+    const compare = customCompare ?? compareLine(currentCompare, previousCompare, compareLabel, enLabel === 'views' ? 'impressions' : enLabel);
     return (
     `<div style="background:${CARD};border:1px solid #E7ECF3;border-radius:16px;box-shadow:0 10px 26px rgba(15,23,42,.06);padding:20px 22px;display:flex;flex-direction:column;gap:14px">
       <div style="display:flex;align-items:center;gap:14px">
@@ -3295,12 +3948,26 @@ export function sInstagram(ig: InstagramData, idx: number, total: number, period
   // em vez de colapsar para "sem comparativo anterior" quando o período anterior é 0.
   const followersGain = ig.followers_period ?? 0;
   const prevFollowersGain = ig.previous?.followers_period;
+  // Cobertura do ganho: a Meta só guarda 30 dias. Sem todos os dias do período,
+  // o número NÃO é "do período" — vira "desde DD/MM"; sem dia nenhum, não se afirma
+  // "sem novos seguidores" (seria inventar um zero). Dado antigo sem o campo cai no
+  // comportamento de antes.
+  const cob = ig.followers_cobertura;
+  const prevCompleto = ig.previous?.followers_cobertura ? ig.previous.followers_cobertura.completo : true;
+  const sinal = (n: number) => `${n > 0 ? '+' : ''}${num(n)}`;
   const followersLine = (() => {
+    if (cob && cob.dias === 0) {
+      return { text: 'ganho do período indisponível', color: MUTED, mark: BORDER };
+    }
+    if (cob && !cob.completo && cob.desde) {
+      const [, mm, dd] = cob.desde.split('-');
+      return { text: `${sinal(followersGain)} desde ${dd}/${mm}`, color: followersGain > 0 ? PRIMARY_TEXT : MUTED, mark: followersGain > 0 ? PRIMARY : BORDER };
+    }
     if (followersGain <= 0) {
-      return { text: 'sem novos seguidores no período', color: MUTED, mark: BORDER };
+      return { text: followersGain < 0 ? `${num(followersGain)} no período` : 'sem novos seguidores no período', color: MUTED, mark: BORDER };
     }
     let text = `+${num(followersGain)} no período`;
-    if (prevFollowersGain && prevFollowersGain > 0) {
+    if (prevCompleto && prevFollowersGain && prevFollowersGain > 0) {
       const diff = followersGain - prevFollowersGain;
       const pct = (diff / prevFollowersGain) * 100;
       const sign = diff >= 0 ? '+' : '';
@@ -3566,13 +4233,25 @@ export function sInstagramCalendar(posts: InstagramPost[], idx: number, total: n
       </div>
     </div>`;
 
+  // Aviso no topo: o Instagram só devolve o que está no perfil HOJE — post arquivado ou
+  // excluído depois some do calendário e do total. Sem ele, o cliente conta 10 posts que
+  // fez no mês, vê 8 aqui e conclui que o relatório errou.
   const body = `<div data-slide-index="${idx}" data-slide-total="${total}" style="width:1440px;min-height:810px;background:${BG};border:1px solid ${BORDER};margin:0 auto 20px;overflow:hidden;box-sizing:border-box;page-break-after:always;display:flex;flex-direction:column;position:relative">
   <div style="position:absolute;right:-100px;top:-170px;width:610px;height:540px;border-radius:50%;background:linear-gradient(135deg,rgba(226,232,240,.7),rgba(255,255,255,.12));opacity:.8;pointer-events:none"></div>
 
   <div style="position:relative;z-index:1;flex:1;padding:42px 46px 34px;box-sizing:border-box;display:flex;flex-direction:column">
-    <div style="flex-shrink:0;margin:0 0 21px">
-      <h1 style="font-family:${INTER};font-size:52px;font-weight:950;color:#050816;line-height:.95;margin:0 0 15px;letter-spacing:-0.055em">${reportTitle('Calendário de postagens')}</h1>
-      <div style="width:38px;height:3px;border-radius:999px;background:${PRIMARY}"></div>
+    <div style="flex-shrink:0;margin:0 0 21px;display:flex;align-items:center;justify-content:space-between;gap:24px">
+      <div>
+        <h1 style="font-family:${INTER};font-size:52px;font-weight:950;color:#050816;line-height:.95;margin:0 0 15px;letter-spacing:-0.055em">${reportTitle('Calendário de postagens')}</h1>
+        <div style="width:38px;height:3px;border-radius:999px;background:${PRIMARY}"></div>
+      </div>
+      <div style="display:flex;align-items:center;gap:13px;background:#FFF8E6;border:1px solid #F5D37A;border-left:4px solid #F59E0B;border-radius:12px;padding:8px 18px 8px 14px;max-width:470px;flex-shrink:0">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#B45309" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        <div>
+          <p style="font-family:${INTER};font-size:15px;font-weight:900;color:#7C2D12;line-height:1.25;margin:0 0 3px">Publicações arquivadas somem da contagem</p>
+          <p style="font-family:${INTER};font-size:12px;font-weight:600;color:#92400E;line-height:1.35;margin:0">O Instagram só informa o que está no perfil hoje — post arquivado ou excluído não aparece aqui.</p>
+        </div>
+      </div>
     </div>
 
     <div style="display:grid;grid-template-columns:minmax(0,1fr) 292px;gap:24px;flex:1;min-height:0">
@@ -3625,7 +4304,7 @@ export function monthsBetweenInclusive(fromDate: Date, toDate: Date): Date[] {
   return months.length ? months : [start];
 }
 
-export function sInstagramPosts(posts: InstagramPost[], idx: number, total: number): string {
+export function sInstagramPosts(posts: InstagramPost[], idx: number, total: number, periodoEhMes = true): string {
   const score = (p: InstagramPost) => (p.reach > 0 ? p.reach : 0) + (p.likes + p.comments + p.saves) * 12 + p.videoViews * 0.2;
   const featuredPosts = [...posts].sort((a, b) => score(b) - score(a)).slice(0, 4);
 
@@ -3686,8 +4365,8 @@ export function sInstagramPosts(posts: InstagramPost[], idx: number, total: numb
 
   <div style="position:relative;z-index:1;flex:1;padding:42px 44px 30px;box-sizing:border-box;display:flex;flex-direction:column">
     <div style="flex-shrink:0;margin:0 0 18px">
-      <h1 style="font-family:${INTER};font-size:52px;font-weight:950;color:#050816;line-height:.95;margin:0 0 13px;letter-spacing:-0.055em">${reportTitle('Top conteúdos do mês')}</h1>
-      <p style="font-size:18px;font-weight:500;color:#6B7280;font-family:${INTER};margin:0;letter-spacing:-0.015em">Entregas dos principais posts do último mês</p>
+      <h1 style="font-family:${INTER};font-size:52px;font-weight:950;color:#050816;line-height:.95;margin:0 0 13px;letter-spacing:-0.055em">${reportTitle(periodoEhMes ? 'Top conteúdos do mês' : 'Top conteúdos do período')}</h1>
+      <p style="font-size:18px;font-weight:500;color:#6B7280;font-family:${INTER};margin:0;letter-spacing:-0.015em">Entregas dos principais posts ${periodoEhMes ? 'do último mês' : 'do período'}</p>
       <div style="width:36px;height:3px;border-radius:999px;background:${PRIMARY};margin-top:13px"></div>
     </div>
 
@@ -3705,12 +4384,22 @@ export function sInstagramPosts(posts: InstagramPost[], idx: number, total: numb
 // Paginado pelo builder em fatias de TODOS_CONTEUDOS_POR_PAGINA.
 
 export const TODOS_CONTEUDOS_POR_PAGINA = 6;
+/**
+ * Teto de páginas de "Todos os conteúdos" — relatório anual com 300 posts viraria 50
+ * páginas iguais. Acima do teto entram só as publicações MAIS RECENTES, e a página diz.
+ */
+export const TODOS_CONTEUDOS_MAX_PAGINAS = 8;
+export function postsParaListar(ordenados: InstagramPost[]): { lista: InstagramPost[]; totalPosts: number; paginas: number } {
+  const max = TODOS_CONTEUDOS_POR_PAGINA * TODOS_CONTEUDOS_MAX_PAGINAS;
+  const lista = ordenados.length > max ? ordenados.slice(-max) : ordenados;
+  return { lista, totalPosts: ordenados.length, paginas: Math.ceil(lista.length / TODOS_CONTEUDOS_POR_PAGINA) };
+}
 
 export function ordenarPostsPorData(posts: InstagramPost[]): InstagramPost[] {
   return [...posts].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
 }
 
-export function sInstagramTodosConteudos(pagePosts: InstagramPost[], idx: number, total: number, pageNum: number, pageCount: number): string {
+export function sInstagramTodosConteudos(pagePosts: InstagramPost[], idx: number, total: number, pageNum: number, pageCount: number, totalPosts?: number): string {
   const truncateCaption = truncateCaptionText;
 
   // white-space:nowrap nos wrappers com overflow:hidden é PROPOSITAL: casa com o passe
@@ -3764,7 +4453,9 @@ export function sInstagramTodosConteudos(pagePosts: InstagramPost[], idx: number
     </div>`;
   };
 
-  const pageLabel = pageCount > 1 ? ` · página ${pageNum} de ${pageCount}` : '';
+  const listados = pageCount * TODOS_CONTEUDOS_POR_PAGINA;
+  const recorte = totalPosts && totalPosts > listados ? ` · as ${TODOS_CONTEUDOS_POR_PAGINA * TODOS_CONTEUDOS_MAX_PAGINAS} publicações mais recentes de ${totalPosts}` : '';
+  const pageLabel = (pageCount > 1 ? ` · página ${pageNum} de ${pageCount}` : '') + recorte;
 
   const body = `<div data-slide-index="${idx}" data-slide-total="${total}" style="width:1440px;min-height:810px;background:${BG};border:1px solid ${BORDER};margin:0 auto 20px;overflow:hidden;box-sizing:border-box;page-break-after:always;display:flex;flex-direction:column;position:relative">
   <div style="position:absolute;right:-90px;top:-180px;width:620px;height:560px;border-radius:50%;background:linear-gradient(135deg,rgba(241,245,249,.72),rgba(255,255,255,.1));opacity:.78;pointer-events:none"></div>
@@ -3786,7 +4477,7 @@ export function sInstagramTodosConteudos(pagePosts: InstagramPost[], idx: number
 
 // ── Instagram — spotlight on the best-performing post ─────────────────────────
 
-export function sInstagramSpotlight(posts: InstagramPost[], idx: number, total: number): string {
+export function sInstagramSpotlight(posts: InstagramPost[], idx: number, total: number, periodoEhMes = true): string {
   const best = bestInstagramPost(posts);
   if (!best) return '';
 
@@ -3834,7 +4525,7 @@ export function sInstagramSpotlight(posts: InstagramPost[], idx: number, total: 
 
   <div style="position:relative;z-index:1;flex:1;padding:44px 48px 0;display:flex;flex-direction:column">
     <div style="flex-shrink:0;margin-bottom:16px">
-      <h1 style="font-family:${INTER};font-size:44px;font-weight:900;color:${FG};line-height:1.05;margin:0 0 6px;letter-spacing:-0.03em">${reportTitle('Melhor conteúdo do mês')}</h1>
+      <h1 style="font-family:${INTER};font-size:44px;font-weight:900;color:${FG};line-height:1.05;margin:0 0 6px;letter-spacing:-0.03em">${reportTitle(periodoEhMes ? 'Melhor conteúdo do mês' : 'Melhor conteúdo do período')}</h1>
       <p style="font-size:16px;font-weight:500;color:#163461;font-family:${INTER};margin:0">O post com melhor desempenho entre os publicados no período</p>
     </div>
 
@@ -4278,48 +4969,27 @@ export function sMetaAdsCampanhas(meta: MetaAdsFull, diag: DiagJson, idx: number
 
 // ── Google Ads — Resumo ───────────────────────────────────────────────────────
 
-export function sGoogleAdsResumo(google: GoogleAdsFull, idx: number, total: number): string {
+export function sGoogleAdsResumo(google: GoogleAdsFull, idx: number, total: number, comercial?: ComercialDaPlataforma | null): string {
   void idx;
   void total;
   const ctr = google.impressoes > 0 ? (google.cliques / google.impressoes) * 100 : 0;
   const cpc = google.cliques > 0 ? google.investimento / google.cliques : 0;
   const custoConversao = google.conversoes > 0 ? google.investimento / google.conversoes : 0;
-  const roasGeral = google.investimento > 0 ? google.valorConversoes / google.investimento : 0;
 
-  const campaignsBy = (kinds: GoogleCampaignKind[]) => google.campanhas.filter(c => kinds.includes(categorizeGoogleCampaign(c.tipo, c.metricas.conversoes, c.metricas.valorConversoes)));
+  const campaignsBy = (kinds: GoogleCampaignKind[]) => google.campanhas.filter(c => kinds.includes(categorizeGoogleCampaign(c)));
   const sum = (campaigns: CampanhaGoogleDetalhada[], selector: (c: CampanhaGoogleDetalhada) => number) =>
     campaigns.reduce((totalValue, campaign) => totalValue + selector(campaign), 0);
 
-  const awarenessCampaigns = campaignsBy(['alcance']);
-  const trafficCampaigns = campaignsBy(['trafego']);
-  const leadCampaigns = campaignsBy(['leads']);
   const salesCampaigns = campaignsBy(['vendas']);
 
-  const awarenessInvestment = sum(awarenessCampaigns, c => c.metricas.investimento);
-  const awarenessImpressions = sum(awarenessCampaigns, c => c.metricas.impressoes);
-  const awarenessCliques = sum(awarenessCampaigns, c => c.metricas.cliques);
-  const awarenessCpm = awarenessImpressions > 0 ? awarenessInvestment / (awarenessImpressions / 1000) : 0;
-
-  const trafficInvestment = sum(trafficCampaigns, c => c.metricas.investimento);
-  const trafficClicks = sum(trafficCampaigns, c => c.metricas.cliques);
-  const trafficImpressions = sum(trafficCampaigns, c => c.metricas.impressoes);
-  const trafficCpc = trafficClicks > 0 ? trafficInvestment / trafficClicks : 0;
-  const trafficCtr = trafficImpressions > 0 ? (trafficClicks / trafficImpressions) * 100 : 0;
-
-  const leadInvestment = sum(leadCampaigns, c => c.metricas.investimento);
-  const totalLeadConversoes = sum(leadCampaigns, c => c.metricas.conversoes);
-  const custoLead = totalLeadConversoes > 0 ? leadInvestment / totalLeadConversoes : 0;
-
   const salesInvestment = sum(salesCampaigns, c => c.metricas.investimento);
-  const totalCompras = sum(salesCampaigns, c => c.metricas.conversoes);
-  const valorCompras = sum(salesCampaigns, c => c.metricas.valorConversoes);
-  const cpa = totalCompras > 0 ? salesInvestment / totalCompras : 0;
+  const totalCompras = sum(salesCampaigns, c => c.metricas.compras ?? 0);
+  const valorCompras = sum(salesCampaigns, c => c.metricas.valorCompras ?? 0);
   const roas = salesInvestment > 0 ? valorCompras / salesInvestment : 0;
 
   const brlC = (n: number) => n > 0 ? n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : '—';
   const pctC = (n: number) => n > 0 ? `${n.toFixed(2).replace('.', ',')}%` : '—';
   const decC = (n: number) => n > 0 ? n.toFixed(2).replace('.', ',') : '—';
-  const countLabel = (count: number) => count === 1 ? '1 campanha' : `${count} campanhas`;
 
   const bigKpi = (label: string, value: string, ico: string) =>
     `<div style="background:${CARD};border:1px solid #E7ECF3;border-radius:16px;box-shadow:0 10px 26px rgba(15,23,42,.06);padding:14px 16px;display:flex;align-items:center;gap:12px;min-width:0">
@@ -4335,7 +5005,6 @@ export function sGoogleAdsResumo(google: GoogleAdsFull, idx: number, total: numb
   const ICO_MONEY  = '<line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>';
   const ICO_EYE    = '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>';
   const ICO_CURSOR = '<path d="m3 3 7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/><path d="m13 13 6 6"/>';
-  const ICO_CART   = '<circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/>';
   const ICO_TARGET = '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>';
   const ICO_PERCENT = '<path d="M19 5 5 19"/><circle cx="6.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="17.5" r="2.5"/>';
 
@@ -4347,67 +5016,48 @@ export function sGoogleAdsResumo(google: GoogleAdsFull, idx: number, total: numb
     bigKpi('CPC', brlC(cpc), ICO_CURSOR),
     bigKpi('Conversões', numOrDash(google.conversoes), ICO_TARGET),
     bigKpi('Custo/conversão', brlC(custoConversao), ICO_MONEY),
+    // Faturamento do CRM nos canais do Google (Google Ads e WhatsApp sem marca de
+    // rede social — regra do Matheus, 08/10/2026) e o ROAS sobre o investimento.
+    ...(comercial ? [
+      bigKpi('Faturamento (CRM)', brlC(comercial.faturamento), ICO_MONEY),
+      bigKpi('ROAS', comercial.roas !== null ? `${comercial.roas.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}x` : '—', ICO_PERCENT),
+    ] : []),
   ];
+  const kpiCols = generalMetrics.length > 8 ? 5 : 4;
 
-  const segmentLine = (label: string, value: string) =>
-    `<div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px;border-top:1px solid rgba(148,163,184,.18);padding-top:8px">
-      <span style="font-family:${INTER};font-size:11px;font-weight:700;color:${MUTED};line-height:1.15">${label}</span>
-      <span style="font-family:${INTER};font-size:16px;font-weight:900;color:${FG};line-height:1;text-align:right;white-space:nowrap">${value}</span>
-    </div>`;
 
-  const segmentCard = (
-    title: string, subtitle: string, icon: string, tint: string, accent: string, lines: Array<[string, string]>,
-  ) =>
-    `<div style="background:${tint};border:1px solid ${accent}33;border-radius:18px;box-shadow:0 10px 24px rgba(15,23,42,.05);padding:18px;min-width:0;display:flex;flex-direction:column;gap:12px">
-      <div style="display:flex;gap:12px;align-items:flex-start;min-height:52px">
-        <div style="width:42px;height:42px;border-radius:50%;background:#FFFFFFB8;display:flex;align-items:center;justify-content:center;flex-shrink:0">
-          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="${accent}" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${icon}</svg>
+  // ⚠️ A divisão em cards por "objetivo" (Pesquisa/tráfego × Geração de leads × Vendas)
+  // SAIU do resumo do Google: ela era deduzida do RESULTADO da campanha, não do objetivo
+  // — a mesma campanha de Pesquisa virava "tráfego" no mês sem conversão e "leads" no
+  // mês com. No lugar entra a evolução do período, que o resumo não mostrava.
+  const brl0 = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 0, maximumFractionDigits: 0 });
+  const dec1 = (v: number) => (Number.isInteger(v) ? num(v) : v.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 }));
+  const diasSerie = google.diario?.length ?? 0;
+  const serie = agruparSerieDiaria((google.diario ?? []).map(d => ({ date: d.date, barra: d.investimento, linha: d.conversoes })));
+  const escala = diasSerie <= 31 ? 'por dia' : diasSerie > 93 ? 'por mês' : 'por semana';
+  const melhor = serie.length ? serie.reduce((a, b) => (b.linha > a.linha ? b : a)) : null;
+  const chartCard = serie.length >= 2
+    ? `<div style="background:${CARD};border:1px solid #E7ECF3;border-radius:18px;box-shadow:0 10px 26px rgba(15,23,42,.06);padding:16px 22px 10px;flex-shrink:0">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:6px">
+          <p style="font-family:${INTER};font-size:17px;font-weight:900;color:${FG};margin:0">Investimento e conversões ${escala}</p>
+          <div style="display:flex;align-items:center;gap:22px">
+            ${legendaGrafico(GOOGLE_BLUE, 'Investimento', brlC(google.investimento))}
+            ${legendaGrafico(PRIMARY_TEXT, 'Conversões', numOrDash(google.conversoes), true)}
+          </div>
         </div>
-        <div style="min-width:0">
-          <p style="font-family:${INTER};font-size:15px;font-weight:900;color:${FG};margin:0 0 4px;line-height:1.1">${title}</p>
-          <p style="font-family:${INTER};font-size:11px;font-weight:700;color:#475569;margin:0;line-height:1.3">${subtitle}</p>
-        </div>
-      </div>
-      <div style="display:flex;flex-direction:column;gap:8px">
-        ${lines.map(([label, value]) => segmentLine(label, value)).join('')}
-      </div>
-    </div>`;
+        ${graficoBarrasLinha(serie, { w: 1296, h: 232, corBarra: GOOGLE_BLUE, corLinha: PRIMARY_TEXT, fmtBarra: brl0, fmtLinha: dec1 })}
+      </div>`
+    : '';
+  // Só a leitura de vendas ainda depende da classificação por campanha.
+  void valorCompras;
 
-  const hasSegmentData = (campaigns: CampanhaGoogleDetalhada[], values: number[]) =>
-    campaigns.length > 0 || values.some(value => value > 0);
-
-  const segmentCards = [
-    hasSegmentData(awarenessCampaigns, [awarenessInvestment, awarenessImpressions, awarenessCliques]) ? segmentCard('Display e vídeo', countLabel(awarenessCampaigns.length), ICO_TARGET, '#FFFDF2', '#B45309', [
-      ['Investimento', brlC(awarenessInvestment)],
-      ['Impressões', numOrDash(awarenessImpressions)],
-      ['CPM', brlC(awarenessCpm)],
-    ]) : '',
-    hasSegmentData(trafficCampaigns, [trafficInvestment, trafficClicks, trafficImpressions]) ? segmentCard('Pesquisa / tráfego', countLabel(trafficCampaigns.length), ICO_CURSOR, '#F4F8FF', GOOGLE_BLUE, [
-      ['Investimento', brlC(trafficInvestment)],
-      ['Cliques', numOrDash(trafficClicks)],
-      ['CPC / CTR', `${brlC(trafficCpc)} / ${pctC(trafficCtr)}`],
-    ]) : '',
-    hasSegmentData(leadCampaigns, [leadInvestment, totalLeadConversoes]) ? segmentCard('Geração de leads', countLabel(leadCampaigns.length), ICO_TARGET, '#F2FFFB', '#0F766E', [
-      ['Investimento', brlC(leadInvestment)],
-      ['Conversões', numOrDash(totalLeadConversoes)],
-      ['Custo por lead', brlC(custoLead)],
-    ]) : '',
-    hasSegmentData(salesCampaigns, [salesInvestment, totalCompras, valorCompras]) ? segmentCard('Vendas / Shopping', countLabel(salesCampaigns.length), ICO_CART, '#F7FFF4', PRIMARY_TEXT, [
-      ['Investimento', brlC(salesInvestment)],
-      ['Compras / CPA', `${numOrDash(totalCompras)} / ${brlC(cpa)}`],
-      ['Valor de venda', brlC(valorCompras)],
-      ['ROAS', decC(roas)],
-    ]) : '',
-  ].filter(Boolean);
-  const segmentGridColumns = Math.max(1, Math.min(segmentCards.length, 4));
-
-  const recommendation = roas >= 3
-    ? `As campanhas de Shopping/vendas apresentaram retorno positivo, com ROAS de ${decC(roas)}. Acompanhar escala mantendo controle de CPC e custo por conversão.`
+  const recommendation = totalCompras > 0 && roas >= 3
+    ? `As campanhas de vendas apresentaram retorno positivo, com ROAS de ${decC(roas)}. Acompanhar escala mantendo controle de CPC e custo por conversão.`
     : totalCompras > 0
-    ? `As campanhas de vendas geraram conversões, mas o ROAS de ${decC(roas)} pede atenção: acompanhar custo por conversão e valor médio antes de ampliar investimento.`
-    : totalLeadConversoes > 0
-    ? `As campanhas de geração de leads converteram no período. O próximo foco é qualificar esses contatos, acompanhando custo por lead e evolução para venda.`
-    : `${brlOrDash(google.investimento)} investidos com ${numOrDash(google.cliques)} cliques e ${numOrDash(google.conversoes)} conversões no período. Avaliar CTR, CPC e volume de conversões (ROAS geral ${decC(roasGeral)}) para orientar o próximo ciclo.`;
+    ? `As campanhas de vendas geraram ${numOrDash(totalCompras)} compras, mas o ROAS de ${decC(roas)} pede atenção: acompanhar custo por conversão e valor médio antes de ampliar investimento.`
+    : google.conversoes > 0
+    ? `O Google Ads gerou ${numOrDash(google.conversoes)} conversões no período, a ${brlC(custoConversao)} cada${melhor && melhor.linha > 0 ? ` — o melhor ${escala === 'por dia' ? 'dia' : escala === 'por mês' ? 'mês' : 'período'} foi ${melhor.rotulo}, com ${dec1(melhor.linha)}` : ''}. O próximo foco é qualificar esses contatos e acompanhar a evolução deles para venda.`
+    : `${brlOrDash(google.investimento)} investidos com ${numOrDash(google.cliques)} cliques e nenhuma conversão registrada no período. Avaliar CTR, CPC e a medição de conversões antes do próximo ciclo.`;
 
   const body = `<div style="width:1440px;min-height:810px;background:${BG};border:1px solid ${BORDER};margin:0 auto 20px;overflow:hidden;box-sizing:border-box;page-break-after:always;display:flex;flex-direction:column;position:relative">
   <div style="position:absolute;right:60px;top:-100px;width:560px;height:480px;border-radius:50%;background:linear-gradient(135deg,rgba(219,234,254,.55),rgba(255,255,255,.15));opacity:.7;pointer-events:none"></div>
@@ -4416,16 +5066,14 @@ export function sGoogleAdsResumo(google: GoogleAdsFull, idx: number, total: numb
 
     <div style="flex-shrink:0">
       <h1 style="font-family:${INTER};font-size:52px;font-weight:900;color:${FG};line-height:1.05;margin:0 0 8px;letter-spacing:-0.03em">${reportTitle('Resumo Google Ads')}</h1>
-      <p style="font-size:16px;font-weight:500;color:#163461;font-family:${INTER};margin:0">Métricas gerais e resultados separados por tipo de campanha</p>
+      <p style="font-size:16px;font-weight:500;color:#163461;font-family:${INTER};margin:0">Métricas gerais e evolução do período</p>
     </div>
 
-    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;flex-shrink:0">
+    <div style="display:grid;grid-template-columns:repeat(${kpiCols},1fr);gap:14px;flex-shrink:0">
       ${generalMetrics.join('')}
     </div>
 
-    <div style="display:grid;grid-template-columns:repeat(${segmentGridColumns},1fr);gap:14px;flex-shrink:0">
-      ${segmentCards.join('')}
-    </div>
+    ${chartCard}
 
     <div data-conclusion="1" style="background:${CARD};border:1px solid #E7ECF3;border-radius:18px;box-shadow:0 10px 26px rgba(15,23,42,.06);display:flex;align-items:flex-start;gap:16px;padding:20px 26px">
       <div style="width:40px;height:40px;border-radius:50%;background:${GOOGLE_BLUE}16;display:flex;align-items:center;justify-content:center;flex-shrink:0">
@@ -4446,7 +5094,7 @@ export function sGoogleAdsResumo(google: GoogleAdsFull, idx: number, total: numb
 // ── Google Ads — Campanhas ────────────────────────────────────────────────────
 
 export function sGoogleAdsCampanhas(google: GoogleAdsFull, idx: number, total: number, periodo = 'Maio/2026', campanhas = google.campanhas): string {
-  const kindFor = (c: CampanhaGoogleDetalhada) => categorizeGoogleCampaign(c.tipo, c.metricas.conversoes, c.metricas.valorConversoes);
+  const kindFor = (c: CampanhaGoogleDetalhada) => categorizeGoogleCampaign(c);
 
   const styleFor = (kind: GoogleCampaignKind) => {
     if (kind === 'vendas') return { bg: '#F7FFF4', border: '#D7F8D0', accent: PRIMARY_TEXT, iconBg: '#ECFCE8' };
@@ -4483,15 +5131,17 @@ export function sGoogleAdsCampanhas(google: GoogleAdsFull, idx: number, total: n
 
     let row1: string, row2: string;
     if (kind === 'vendas') {
-      const cpa = m.conversoes > 0 && m.investimento > 0 ? brlPrecise(m.investimento / m.conversoes) : '—';
-      const roas = m.investimento > 0 && m.valorConversoes > 0 ? m.valorConversoes / m.investimento : 0;
+      const compras = m.compras ?? 0;
+      const valorCompras = m.valorCompras ?? 0;
+      const cpa = compras > 0 && m.investimento > 0 ? brlPrecise(m.investimento / compras) : '—';
+      const roas = m.investimento > 0 && valorCompras > 0 ? valorCompras / m.investimento : 0;
       row1 = [
         metricItem(ICO_MONEY, 'Investimento', brlOrDash(m.investimento), style.accent, style.iconBg),
-        metricItem(ICO_CART, 'Conversões', numOrDash(m.conversoes), style.accent, style.iconBg),
-        metricItem(ICO_MONEY, 'Custo/conversão', cpa, style.accent, style.iconBg),
+        metricItem(ICO_CART, 'Compras', numOrDash(compras), style.accent, style.iconBg),
+        metricItem(ICO_MONEY, 'Custo/compra', cpa, style.accent, style.iconBg),
       ].join('');
       row2 = [
-        metricItem(ICO_MONEY, 'Valor de conversão', brlOrDash(m.valorConversoes), style.accent, style.iconBg),
+        metricItem(ICO_MONEY, 'Valor de venda', brlOrDash(valorCompras), style.accent, style.iconBg),
         metricItem(ICO_TREND, 'ROAS', roas > 0 ? roas.toFixed(2) : '—', style.accent, style.iconBg),
       ].join('');
     } else if (kind === 'leads') {
@@ -4757,8 +5407,8 @@ export async function buildDeliveryReport(opts: {
 
   const fromDate = new Date(from + 'T12:00:00');
   const toDate   = new Date(to   + 'T12:00:00');
-  const MONTHS   = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
-  const periodo  = `${MONTHS[fromDate.getMonth()]}/${fromDate.getFullYear()}`;
+  const MONTHS   = REPORT_MONTHS;
+  const periodo  = rotuloPeriodo(from, to);
   const instagramPeriodLabel = fromDate.getMonth() === toDate.getMonth() && fromDate.getFullYear() === toDate.getFullYear()
     ? periodo
     : `${periodo} a ${MONTHS[toDate.getMonth()]}/${toDate.getFullYear()}`;
@@ -4817,7 +5467,8 @@ export async function buildDeliveryReport(opts: {
   const hasDestaques         = meta !== null && meta.campanhas.length > 0 && en('meta_campanhas');
   const hasCriativos         = creatives.length > 0 && en('criativos');
   const destaquePages        = hasDestaques ? Math.ceil(meta!.campanhas.length / 4) : 0;
-  const todosConteudosPages  = hasTodosConteudos ? Math.ceil(igPosts.length / TODOS_CONTEUDOS_POR_PAGINA) : 0;
+  const todosListar          = postsParaListar(ordenarPostsPorData(igPosts));
+  const todosConteudosPages  = hasTodosConteudos ? todosListar.paginas : 0;
 
   const total = 1
     + (hasVisao      ? 1 : 0)
@@ -4866,13 +5517,13 @@ export async function buildDeliveryReport(opts: {
     }
   }
   if (hasTodosConteudos) {
-    const ordered = ordenarPostsPorData(igPosts);
+    const ordered = todosListar.lista;
     for (let start = 0, page = 1; start < ordered.length; start += TODOS_CONTEUDOS_POR_PAGINA, page++) {
-      slides.push(sInstagramTodosConteudos(ordered.slice(start, start + TODOS_CONTEUDOS_POR_PAGINA), ++i, total, page, todosConteudosPages));
+      slides.push(sInstagramTodosConteudos(ordered.slice(start, start + TODOS_CONTEUDOS_POR_PAGINA), ++i, total, page, todosConteudosPages, todosListar.totalPosts));
     }
   }
-  if (hasTopConteudos)       slides.push(sInstagramPosts(igPosts, ++i, total));
-  if (hasInstagramSpotlight) slides.push(sInstagramSpotlight(igPosts, ++i, total));
+  if (hasTopConteudos)       slides.push(sInstagramPosts(igPosts, ++i, total, mesesCheios(from, to) === 1));
+  if (hasInstagramSpotlight) slides.push(sInstagramSpotlight(igPosts, ++i, total, mesesCheios(from, to) === 1));
 
   return {
     html: `${FONT_LINK}<div class="onmid-report" style="background:${CANVAS};padding:28px;font-family:${INTER}">${slides.join('')}</div>`,

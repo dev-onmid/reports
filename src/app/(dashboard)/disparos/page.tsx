@@ -7,8 +7,8 @@ import {
   Users, BarChart2, ChevronDown, Copy, Server,
   Send, AlertTriangle, Monitor, Calendar, Zap,
   Eye, ChevronRight, Info, BookOpen, UserCog,
-  Search, Pencil, ChevronLeft, FileText, Smile, Sparkles,
-  Download, Filter, Hash, ArrowRight, QrCode,
+  Search, Pencil, Tag, ChevronLeft, FileText, Smile, Sparkles,
+  Download, Filter, Hash, ArrowRight, QrCode, History,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -22,8 +22,12 @@ import { SeletorCliente } from '@/components/disparos/seletor-cliente';
 import { ConfirmarClienteModal } from '@/components/disparos/confirmar-cliente-modal';
 import type { DestinoCliente, InstanciaOrfa } from '@/lib/disparos-destinos';
 import { lerImagens, gravarImagens, combinacoesRodizio } from '@/lib/disparos-rodizio';
-import { faixaDaTaxa, type RespostasDaCampanha } from '@/lib/disparos-respostas';
+import { faixaDaTaxa } from '@/lib/disparos-respostas';
+import { ROTULO_CLASSE, type ResumoDisparo, type ContatoResultado, type ClasseResposta } from '@/lib/disparos-resultado';
 import { useAbaPersistida } from '@/lib/aba-persistida';
+import { lerArquivoContatos } from '@/lib/contatos-arquivo';
+import { parsePhoneList, deduplicarContatos, formatPhone } from '@/lib/phone-formatter';
+import { montarMensagem, formatarNome, usaNome, VARIAVEIS_DISPARO } from '@/lib/disparos-mensagem';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -41,6 +45,7 @@ type Campaign = {
   status: 'pending' | 'running' | 'paused' | 'done' | 'cancelled';
   starts_at: string; ends_at: string | null;
   interval_min: number; interval_max: number; daily_limit?: number | null;
+  label_id?: string | null; label_nome?: string | null;
   total: number; sent: number; failed: number;
   created_at: string; active_from: string | null; active_until: string | null;
   active_days: string | null;
@@ -213,8 +218,15 @@ function formatWAText(text: string): React.ReactNode[] {
 
 // ─── WhatsApp Preview ─────────────────────────────────────────────────────────
 
-function WhatsAppPreview({ image, message }: { image: string | null; message: string }) {
-  const preview = message.replace(/\{nome\}/g, 'João Silva').replace(/\{telefone\}/g, '43 9 9999-1111');
+function WhatsAppPreview({ image, message, contatoExemplo }: {
+  image: string | null; message: string;
+  /** 1º contato COM nome da lista — a prévia mostra gente real, não "João Silva". */
+  contatoExemplo?: { phone: string; name: string } | null;
+}) {
+  // Mesma função do envio (worker/tick): prévia que monta diferente é ilustração.
+  const exemplo = contatoExemplo ?? { phone: '5543999991111', name: 'João Silva' };
+  const preview = montarMensagem(message, exemplo);
+  const semNome = usaNome(message) ? montarMensagem(message, { phone: exemplo.phone, name: '' }) : null;
   const now = new Date();
   const time = `${now.getHours()}:${String(now.getMinutes()).padStart(2, '0')}`;
   const hasContent = !!image || preview.trim();
@@ -269,6 +281,12 @@ function WhatsAppPreview({ image, message }: { image: string | null; message: st
         </div>
       </div>
       <p className="text-center text-[10px] text-muted-foreground/40 shrink-0 mt-1">Simulação — layout pode variar</p>
+      {semNome !== null && semNome.trim() && (
+        <div className="rounded-lg border border-border bg-muted/20 px-3 py-2">
+          <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Contato sem nome na planilha recebe</p>
+          <div className="mt-1 text-[12px] leading-snug text-foreground/80 break-words">{formatWAText(semNome.split('\n').slice(0, 3).join('\n'))}{semNome.split('\n').length > 3 ? '…' : ''}</div>
+        </div>
+      )}
     </div>
   );
 }
@@ -280,11 +298,327 @@ type TickResult = {
   total?: number; sent?: number; failed?: number; lastPhone?: string; lastError?: string | null;
 };
 
+// ── Respostas e resultado da campanha ───────────────────────────────────────
+// Quem respondeu, COMO (interesse, conversa, parar, robô) e o que virou pedido.
+const COR_CLASSE: Record<ClasseResposta, string> = {
+  interesse: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400',
+  humana: 'border-blue-500/30 bg-blue-500/10 text-blue-400',
+  parar: 'border-red-500/30 bg-red-500/10 text-red-400',
+  automatica: 'border-border bg-muted/30 text-muted-foreground',
+  sem_resposta: 'border-border bg-transparent text-muted-foreground/60',
+};
+const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+function tempoAte(de: string, ate: string): string {
+  const min = Math.max(0, Math.round((Date.parse(ate) - Date.parse(de)) / 60_000));
+  if (min < 1) return 'na hora';
+  if (min < 60) return `em ${min} min`;
+  const h = Math.round(min / 60);
+  return h < 48 ? `em ${h} h` : `em ${Math.round(h / 24)} dias`;
+}
+function fmtFoneBR(p: string): string {
+  const d = p.replace(/\D/g, '').replace(/^55(?=\d{10,11}$)/, '');
+  if (d.length === 11) return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7)}`;
+  if (d.length === 10) return `(${d.slice(0, 2)}) ${d.slice(2, 6)}-${d.slice(6)}`;
+  return p;
+}
+type FiltroResp = 'responderam' | 'compraram' | ClasseResposta | 'todos';
+type ResultadoApi = { ok?: boolean; error?: string; resumo: ResumoDisparo | null; contatos: ContatoResultado[]; onmidClientId: string | null; janelaDias: number };
+
+function RespostasModal({ campaignId, titulo, onClose }: { campaignId: string; titulo: string; onClose: () => void }) {
+  const [res, setRes] = useState<{ id: string; dados?: ResultadoApi; erro?: string } | null>(null);
+  const [filtro, setFiltro] = useState<FiltroResp>('responderam');
+  useEffect(() => {
+    let vivo = true;
+    fetch(`/api/disparos/campaigns/${campaignId}/resultado`, { headers: callerHeaders() })
+      .then(r => r.json() as Promise<ResultadoApi>)
+      .then(d => { if (vivo) setRes(d.ok ? { id: campaignId, dados: d } : { id: campaignId, erro: d.error ?? 'Falha ao carregar' }); })
+      .catch(() => { if (vivo) setRes({ id: campaignId, erro: 'Falha de rede' }); });
+    return () => { vivo = false; };
+  }, [campaignId]);
+  const atual = res?.id === campaignId ? res : null;
+  const dados = atual?.dados ?? null;
+  const r = dados?.resumo ?? null;
+  const contatos = dados?.contatos ?? [];
+  const conta = (f: FiltroResp) => contatos.filter(c => passa(c, f)).length;
+  function passa(c: ContatoResultado, f: FiltroResp): boolean {
+    if (f === 'todos') return true;
+    if (f === 'responderam') return c.classe === 'interesse' || c.classe === 'humana' || c.classe === 'parar' || c.classe === 'automatica';
+    if (f === 'compraram') return !!(c.compra || c.vendaCrm);
+    return c.classe === f;
+  }
+  const visiveis = contatos.filter(c => passa(c, filtro)).slice(0, 400);
+  const kpis = r ? [
+    { rotulo: 'Enviados', valor: r.enviados.toLocaleString('pt-BR') },
+    { rotulo: 'Responderam', valor: `${r.responderam}${r.taxa !== null ? ` (${r.taxa.toFixed(1).replace('.', ',')}%)` : ''}`, dica: 'Pessoas. Resposta só de robô de autoatendimento não conta.' },
+    { rotulo: 'Interesse / pedido', valor: String(r.interesse) },
+    ...(r.fonteVenda === 'delivery' ? [
+      { rotulo: 'Compraram', valor: `${r.compradores} (${r.pedidos} pedido${r.pedidos !== 1 ? 's' : ''})` },
+      { rotulo: 'Receita gerada', valor: brl(r.receita), destaque: true },
+      { rotulo: 'Ticket médio', valor: r.pedidos > 0 ? brl(r.receita / r.pedidos) : '—' },
+    ] : r.fonteVenda === 'crm' ? [
+      { rotulo: 'Vendas no CRM', valor: String(r.vendasCrm) },
+      { rotulo: 'Receita gerada', valor: brl(r.receitaCrm), destaque: true },
+    ] : [
+      { rotulo: 'Receita gerada', valor: '—', dica: 'Este cliente não tem Anota AI/Cardápio Web nem venda marcada no CRM para cruzar.' },
+    ]),
+  ] : [];
+  const filtros: { k: FiltroResp; rotulo: string }[] = [
+    { k: 'responderam', rotulo: 'Responderam' },
+    { k: 'interesse', rotulo: ROTULO_CLASSE.interesse },
+    { k: 'humana', rotulo: ROTULO_CLASSE.humana },
+    { k: 'parar', rotulo: ROTULO_CLASSE.parar },
+    { k: 'automatica', rotulo: ROTULO_CLASSE.automatica },
+    { k: 'compraram', rotulo: 'Compraram' },
+    { k: 'sem_resposta', rotulo: ROTULO_CLASSE.sem_resposta },
+  ];
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm" onClick={onClose}>
+      <div className="w-full max-w-5xl max-h-[88vh] flex flex-col overflow-hidden rounded-[var(--radius)] border border-border bg-card shadow-2xl" onClick={e => e.stopPropagation()}>
+        <div className="relative flex items-start justify-between gap-3 border-b border-border px-5 py-4">
+          <div className="absolute inset-x-0 top-0 h-[3px] bg-primary" />
+          <div className="min-w-0">
+            <h3 className="font-heading text-2xl uppercase leading-none tracking-wide">Respostas e resultado</h3>
+            <p className="mt-1 truncate text-[11px] text-muted-foreground">{titulo}</p>
+          </div>
+          <button type="button" onClick={onClose} className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted/40 hover:text-foreground"><X className="h-4 w-4" /></button>
+        </div>
+        <div className="overflow-y-auto px-5 py-4 space-y-4">
+          {atual?.erro && <p className="py-8 text-center text-sm text-red-400">{atual.erro}</p>}
+          {!atual && <p className="py-8 text-center text-sm text-muted-foreground">Cruzando envios, conversas e pedidos…</p>}
+          {r && !r.mensuravel && (
+            <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">Esta instância não está vinculada a um cliente no CRM, então as respostas não chegam até aqui.</p>
+          )}
+          {r && r.mensuravel && (
+            <>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+                {kpis.map(k => (
+                  <div key={k.rotulo} title={'dica' in k ? k.dica : undefined} className={cn('rounded-lg border px-3 py-2', 'destaque' in k && k.destaque ? 'border-primary/40 bg-primary/10' : 'border-border bg-muted/20')}>
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{k.rotulo}</p>
+                    <p className={cn('mt-0.5 font-heading text-xl leading-tight', 'destaque' in k && k.destaque ? 'text-primary' : 'text-foreground')}>{k.valor}</p>
+                  </div>
+                ))}
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                {r.fonteVenda === 'delivery'
+                  ? `Compra = pedido no Anota AI/Cardápio Web do mesmo telefone até ${dados?.janelaDias ?? 7} dias depois do disparo. Cada pedido conta uma vez só, para o disparo mais recente entre todas as campanhas do cliente.`
+                  : r.fonteVenda === 'crm'
+                    ? 'Venda = lead do mesmo telefone marcado como fechado no CRM até 30 dias depois do disparo.'
+                    : 'Sem fonte de vendas para este cliente: aparecem só as respostas.'}
+                {r.automaticas > 0 && ` ${r.automaticas} contato${r.automaticas !== 1 ? 's' : ''} só teve resposta de robô (autoatendimento) e fica fora da taxa.`}
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {filtros.map(f => (
+                  <button key={f.k} type="button" onClick={() => setFiltro(f.k)}
+                    className={cn('rounded-lg border px-2.5 py-1 text-[11px] font-semibold transition-colors',
+                      filtro === f.k ? 'border-primary/50 bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:text-foreground')}>
+                    {f.rotulo} <span className="opacity-60">{conta(f.k)}</span>
+                  </button>
+                ))}
+              </div>
+              {visiveis.length === 0 ? (
+                <p className="py-6 text-center text-sm text-muted-foreground">Ninguém nesta categoria.</p>
+              ) : (
+                <div className="overflow-x-auto rounded-lg border border-border">
+                  <table className="w-full text-xs">
+                    <thead className="bg-muted/20 text-left text-[10px] uppercase tracking-wider text-muted-foreground">
+                      <tr>
+                        <th className="px-3 py-2 font-semibold">Contato</th>
+                        <th className="px-3 py-2 font-semibold">Resposta</th>
+                        <th className="px-3 py-2 font-semibold">Tipo</th>
+                        <th className="px-3 py-2 font-semibold">Compra</th>
+                        <th className="px-3 py-2" />
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border">
+                      {visiveis.map(c => (
+                        <tr key={c.envioId} className="align-top">
+                          <td className="px-3 py-2 whitespace-nowrap">
+                            <p className="font-semibold">{c.nome || '—'}</p>
+                            <p className="font-mono text-[11px] text-muted-foreground">{fmtFoneBR(c.telefone)}</p>
+                            <p className="text-[10px] text-muted-foreground/70">enviado {fmtQuandoLog(c.enviadoEm)}</p>
+                          </td>
+                          <td className="px-3 py-2 min-w-[260px]">
+                            {c.resposta ? (
+                              <>
+                                <p className="whitespace-pre-line break-words text-foreground/90 line-clamp-3" title={c.resposta.texto}>{c.resposta.texto}</p>
+                                <p className="mt-0.5 text-[10px] text-muted-foreground">{tempoAte(c.enviadoEm, c.resposta.em)}{c.recebidas > 1 ? ` · ${c.recebidas} mensagens` : ''}</p>
+                              </>
+                            ) : <span className="text-muted-foreground/60">—</span>}
+                          </td>
+                          <td className="px-3 py-2 whitespace-nowrap">
+                            <span className={cn('inline-block rounded border px-1.5 py-0.5 text-[10px] font-semibold', COR_CLASSE[c.classe])}>{ROTULO_CLASSE[c.classe]}</span>
+                          </td>
+                          <td className="px-3 py-2 whitespace-nowrap">
+                            {c.compra ? (
+                              <>
+                                <p className="font-semibold text-emerald-400">{brl(c.compra.receita)}</p>
+                                <p className="text-[10px] text-muted-foreground">{c.compra.pedidos} pedido{c.compra.pedidos !== 1 ? 's' : ''} · 1º {fmtQuandoLog(c.compra.primeiroPedidoEm)}</p>
+                              </>
+                            ) : c.vendaCrm ? (
+                              <>
+                                <p className="font-semibold text-emerald-400">{brl(c.vendaCrm.valor)}</p>
+                                <p className="text-[10px] text-muted-foreground">venda no CRM{c.vendaCrm.em ? ` · ${c.vendaCrm.em.split('-').reverse().join('/')}` : ''}</p>
+                              </>
+                            ) : <span className="text-muted-foreground/60">—</span>}
+                          </td>
+                          <td className="px-3 py-2 whitespace-nowrap text-right">
+                            {c.leadId && dados?.onmidClientId && (
+                              <a href={`/crm?clientId=${dados.onmidClientId}&lead=${c.leadId}`} target="_blank" rel="noreferrer"
+                                className="inline-flex items-center gap-1 rounded-lg border border-border px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground hover:border-primary/40">
+                                <MessageSquare className="h-3 w-3" />Conversa
+                              </a>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {contatos.filter(c => passa(c, filtro)).length > 400 && <p className="px-3 py-2 text-[11px] text-muted-foreground">Mostrando 400 de {conta(filtro)}.</p>}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Histórico de ajustes (auditoria) ────────────────────────────────────────
+// Quem fez, quando e o que mudou — lido de /api/disparos/log. Por campanha
+// (campaignId) ou geral (sem id, com a coluna da campanha).
+type RegistroLogUi = {
+  id: string; campaign_id: string; campaign_name: string | null; user_name: string | null;
+  acao: string; mudancas: { campo: string; rotulo: string; de: unknown; para: unknown }[] | null;
+  detalhes: Record<string, unknown> | null; created_at: string;
+};
+const ROTULO_ACAO_UI: Record<string, string> = {
+  criou: 'criou a campanha', editou: 'editou', iniciou: 'iniciou o envio', pausou: 'pausou',
+  retomou: 'retomou', cancelou: 'cancelou', excluiu: 'excluiu a campanha', etiquetou: 'etiquetou quem já recebeu',
+};
+const COR_ACAO_UI: Record<string, string> = {
+  criou: 'text-emerald-400', editou: 'text-blue-400', iniciou: 'text-emerald-400', pausou: 'text-orange-400',
+  retomou: 'text-emerald-400', cancelou: 'text-red-400', excluiu: 'text-red-400', etiquetou: 'text-violet-300',
+};
+function fmtValorLog(v: unknown): string {
+  if (v === null || v === undefined || v === '') return '(vazio)';
+  if (Array.isArray(v)) return `${v.length} variação(ões)`;
+  if (typeof v === 'object') return JSON.stringify(v);
+  const t = String(v);
+  return t.length > 140 ? t.slice(0, 137) + '...' : t;
+}
+function fmtQuandoLog(iso: string): string {
+  const d = new Date(iso);
+  return d.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' });
+}
+function LogAjustesModal({ campaignId, titulo, onClose }: { campaignId?: string; titulo: string; onClose: () => void }) {
+  const [dias, setDias] = useState(10);
+  // O resultado carrega a CHAVE da consulta: trocar o período invalida sozinho
+  // (sem setState síncrono no efeito só para "zerar" a tela).
+  const chave = `${campaignId ?? 'todas'}:${dias}`;
+  const [res, setRes] = useState<{ chave: string; registros?: RegistroLogUi[]; erro?: string } | null>(null);
+  useEffect(() => {
+    let vivo = true;
+    const q = new URLSearchParams({ dias: String(dias) });
+    if (campaignId) q.set('campaignId', campaignId);
+    fetch(`/api/disparos/log?${q}`, { headers: callerHeaders() })
+      .then(r => r.json())
+      .then((d: { ok?: boolean; registros?: RegistroLogUi[]; error?: string }) => { if (vivo) setRes(d.ok ? { chave, registros: d.registros ?? [] } : { chave, erro: d.error ?? 'Falha ao carregar' }); })
+      .catch(() => { if (vivo) setRes({ chave, erro: 'Falha de rede' }); });
+    return () => { vivo = false; };
+  }, [campaignId, dias, chave]);
+  const atual = res?.chave === chave ? res : null;
+  const registros = atual?.registros ?? null;
+  const erro = atual?.erro ?? '';
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm" onClick={onClose}>
+      <div className="w-full max-w-3xl max-h-[85vh] flex flex-col overflow-hidden rounded-[var(--radius)] border border-border bg-card shadow-2xl" onClick={e => e.stopPropagation()}>
+        <div className="relative flex items-start justify-between gap-3 border-b border-border px-5 py-4">
+          <div className="absolute inset-x-0 top-0 h-[3px] bg-primary" />
+          <div className="min-w-0">
+            <h3 className="font-heading text-2xl uppercase leading-none tracking-wide">Histórico de ajustes</h3>
+            <p className="mt-1 truncate text-[11px] text-muted-foreground">{titulo} · quem fez, quando e o que mudou</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <select value={dias} onChange={e => setDias(Number(e.target.value))} className="h-8 rounded-lg border border-border bg-background px-2 text-xs">
+              {[7, 10, 30, 90].map(d => <option key={d} value={d}>{d} dias</option>)}
+            </select>
+            <button type="button" onClick={onClose} className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted/40 hover:text-foreground"><X className="h-4 w-4" /></button>
+          </div>
+        </div>
+        <div className="overflow-y-auto px-5 py-3">
+          {erro && <p className="py-8 text-center text-sm text-red-400">{erro}</p>}
+          {!erro && registros === null && <p className="py-8 text-center text-sm text-muted-foreground">Carregando…</p>}
+          {!erro && registros && registros.length === 0 && (
+            <p className="py-8 text-center text-sm text-muted-foreground">Nenhum ajuste registrado nos últimos {dias} dias. O registro começou em 02/10/2026 — ajustes anteriores não foram gravados.</p>
+          )}
+          {!erro && registros && registros.length > 0 && (
+            <ul className="divide-y divide-border">
+              {registros.map(r => (
+                <li key={r.id} className="py-3">
+                  <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-sm">
+                    <span className="font-mono text-[11px] text-muted-foreground">{fmtQuandoLog(r.created_at)}</span>
+                    <span className="font-semibold">{r.user_name ?? 'sistema'}</span>
+                    <span className={COR_ACAO_UI[r.acao] ?? 'text-muted-foreground'}>{ROTULO_ACAO_UI[r.acao] ?? r.acao}</span>
+                    {!campaignId && r.campaign_name && <span className="truncate text-xs text-muted-foreground">· {r.campaign_name}</span>}
+                  </div>
+                  {r.mudancas && r.mudancas.length > 0 && (
+                    <ul className="mt-1.5 space-y-1 pl-3 border-l-2 border-border">
+                      {r.mudancas.map(m => (
+                        <li key={m.campo} className="text-xs text-muted-foreground">
+                          <span className="font-semibold text-foreground/80">{m.rotulo}:</span>{' '}
+                          <span className="line-through decoration-red-400/60">{fmtValorLog(m.de)}</span>
+                          <span className="mx-1">→</span>
+                          <span className="text-foreground">{fmtValorLog(m.para)}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {r.detalhes && Object.keys(r.detalhes).length > 0 && (
+                    <p className="mt-1 text-[11px] text-muted-foreground/80">
+                      {Object.entries(r.detalhes).filter(([, v]) => v !== null && v !== undefined).map(([k, v]) => `${k.replace(/_/g, ' ')}: ${fmtValorLog(v)}`).join(' · ')}
+                    </p>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function CampaignCard({ campaign, onAction, onRefresh, onEdit, respostas }: {
   campaign: Campaign; onAction: (id: string, action: string) => void; onRefresh: () => void; onEdit: (c: Campaign) => void;
-  respostas?: RespostasDaCampanha;
+  respostas?: ResumoDisparo;
 }) {
   const [live, setLive] = useState<Progress | null>(null);
+  // Etiqueta retroativa: a sessão do WhatsApp perde a sincronia de etiquetas
+  // sozinha (ver CLAUDE.md 2026-10-02); depois de re-parear, este botão passa
+  // pelos que já receberam sem etiqueta. A resposta fica no card, não em alert.
+  const [etiquetando, setEtiquetando] = useState(false);
+  const [etiquetaMsg, setEtiquetaMsg] = useState<{ tom: 'ok' | 'erro'; texto: string } | null>(null);
+  const [showLog, setShowLog] = useState(false);
+  const [showRespostas, setShowRespostas] = useState(false);
+  async function etiquetarRetroativo() {
+    setEtiquetando(true); setEtiquetaMsg(null);
+    try {
+      const res = await fetch(`/api/disparos/campaigns/${campaign.id}/etiquetar`, { method: 'POST', headers: callerHeaders() });
+      const data = await res.json().catch(() => ({})) as { error?: string; aplicadas?: number; pendentes?: number; semLid?: number; falharam?: number; restantes?: number; motivos?: Record<string, number> };
+      if (!res.ok) { setEtiquetaMsg({ tom: 'erro', texto: data.error ?? `Erro ${res.status}` }); return; }
+      const partes = [`${data.aplicadas ?? 0} de ${data.pendentes ?? 0} etiquetados`];
+      if (data.semLid) partes.push(`${data.semLid} sem LID (não dá para etiquetar depois)`);
+      if (data.falharam) partes.push(`${data.falharam} falharam: ${Object.keys(data.motivos ?? {}).join('; ') || 'ver contatos'}`);
+      if (data.restantes) partes.push(`${data.restantes} restantes — clique de novo`);
+      setEtiquetaMsg({ tom: data.falharam ? 'erro' : 'ok', texto: partes.join(' · ') });
+      onRefresh();
+    } catch (e) {
+      setEtiquetaMsg({ tom: 'erro', texto: `Falha de rede: ${String(e).slice(0, 120)}` });
+    } finally {
+      setEtiquetando(false);
+    }
+  }
   const [tickError, setTickError] = useState('');
   const [lastSendError, setLastSendError] = useState<string | null>(null);
   const [sleeping, setSleeping] = useState(false);
@@ -356,27 +690,51 @@ function CampaignCard({ campaign, onAction, onRefresh, onEdit, respostas }: {
       {respostas && (respostas.enviados > 0 || !respostas.mensuravel) && (() => {
         // ⚠️ Instância sem CRM mostra traço, NUNCA 0% — zero diria "ninguém
         // respondeu" quando a verdade é "não dá para saber daqui".
+        // A taxa conta PESSOAS: resposta só de robô de autoatendimento fica fora.
         const faixa = faixaDaTaxa(respostas.taxa);
         const cor = faixa === 'boa' ? 'text-emerald-400' : faixa === 'atencao' ? 'text-amber-400'
           : faixa === 'ruim' ? 'text-red-400' : 'text-muted-foreground';
         return (
-          <div className="flex items-center justify-between gap-2 rounded-lg border border-border bg-muted/20 px-3 py-1.5 text-[11px]">
-            <span className="flex items-center gap-1.5 text-muted-foreground">
-              <MessageSquare className="h-3 w-3" />Responderam
-            </span>
-            {respostas.mensuravel ? (
-              <span className={cn('font-semibold', cor)}>
-                {respostas.responderam} de {respostas.enviados}
-                {respostas.taxa !== null && <span className="ml-1">({respostas.taxa.toFixed(1).replace('.', ',')}%)</span>}
+          <button type="button" onClick={() => setShowRespostas(true)} disabled={!respostas.mensuravel}
+            title={respostas.mensuravel ? 'Ver quem respondeu, o que respondeu e o que comprou' : undefined}
+            className="w-full space-y-1 rounded-lg border border-border bg-muted/20 px-3 py-1.5 text-left text-[11px] transition-colors enabled:hover:border-primary/40 enabled:hover:bg-muted/40">
+            <div className="flex items-center justify-between gap-2">
+              <span className="flex items-center gap-1.5 text-muted-foreground">
+                <MessageSquare className="h-3 w-3" />Responderam
               </span>
-            ) : (
-              <span className="text-muted-foreground" title="Esta instância não está vinculada a um cliente no CRM, então as respostas não chegam até aqui.">
-                — sem leitura do CRM
-              </span>
+              {respostas.mensuravel ? (
+                <span className={cn('font-semibold', cor)}>
+                  {respostas.responderam} de {respostas.enviados}
+                  {respostas.taxa !== null && <span className="ml-1">({respostas.taxa.toFixed(1).replace('.', ',')}%)</span>}
+                </span>
+              ) : (
+                <span className="text-muted-foreground" title="Esta instância não está vinculada a um cliente no CRM, então as respostas não chegam até aqui.">
+                  — sem leitura do CRM
+                </span>
+              )}
+            </div>
+            {respostas.mensuravel && (respostas.interesse > 0 || respostas.automaticas > 0) && (
+              <p className="text-[10px] text-muted-foreground">
+                {respostas.interesse > 0 && <span className="text-emerald-400">{respostas.interesse} com interesse</span>}
+                {respostas.interesse > 0 && respostas.automaticas > 0 && ' · '}
+                {respostas.automaticas > 0 && <span>+{respostas.automaticas} só robô (fora da taxa)</span>}
+              </p>
             )}
-          </div>
+            {respostas.mensuravel && respostas.fonteVenda && (
+              <div className="flex items-center justify-between gap-2 border-t border-border/60 pt-1">
+                <span className="text-muted-foreground">{respostas.fonteVenda === 'delivery' ? 'Pedidos gerados' : 'Vendas no CRM'}</span>
+                <span className="font-semibold text-foreground">
+                  {respostas.fonteVenda === 'delivery'
+                    ? <>{respostas.pedidos} · <span className="text-emerald-400">{brl(respostas.receita)}</span></>
+                    : <>{respostas.vendasCrm} · <span className="text-emerald-400">{brl(respostas.receitaCrm)}</span></>}
+                </span>
+              </div>
+            )}
+            {respostas.mensuravel && <p className="text-[10px] text-primary/80">Ver respostas →</p>}
+          </button>
         );
       })()}
+      {showRespostas && <RespostasModal campaignId={campaign.id} titulo={campaign.name} onClose={() => setShowRespostas(false)} />}
       {sleeping && status === 'running' && (
         <div className="rounded-lg bg-yellow-500/10 border border-yellow-500/20 px-3 py-2 text-[11px] text-yellow-400 flex items-center gap-1.5">
           <Clock className="h-3 w-3" />Fora do horário de envio — aguardando janela...
@@ -384,7 +742,32 @@ function CampaignCard({ campaign, onAction, onRefresh, onEdit, respostas }: {
       )}
       {tickError && <div className="rounded-lg bg-red-500/10 border border-red-500/20 px-3 py-2 text-[11px] text-red-400">{tickError}</div>}
       {lastSendError && !tickError && <div className="rounded-lg bg-orange-500/10 border border-orange-500/20 px-3 py-2 text-[11px] text-orange-400">Último erro Z-API: {lastSendError}</div>}
+      {etiquetaMsg && (
+        <div className={`rounded-lg border px-3 py-2 text-[11px] ${etiquetaMsg.tom === 'ok' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : 'bg-red-500/10 border-red-500/20 text-red-400'}`}>
+          {etiquetaMsg.texto}
+        </div>
+      )}
+      {showLog && <LogAjustesModal campaignId={campaign.id} titulo={campaign.name} onClose={() => setShowLog(false)} />}
       <div className="flex gap-2 pt-1 border-t border-border flex-wrap">
+        <button
+          type="button"
+          onClick={() => setShowLog(true)}
+          title="Quem fez, quando e o que mudou nesta campanha"
+          className="flex items-center gap-1 rounded-lg border border-border bg-muted/20 px-3 py-1.5 text-[11px] font-semibold text-muted-foreground hover:bg-muted/40 hover:text-foreground"
+        >
+          <History className="h-3 w-3" />Histórico
+        </button>
+        {campaign.label_id && (
+          <button
+            type="button"
+            onClick={() => void etiquetarRetroativo()}
+            disabled={etiquetando}
+            title={`Aplica a etiqueta "${campaign.label_nome ?? campaign.label_id}" em quem já recebeu e ainda está sem ela. Use depois de re-parear o WhatsApp.`}
+            className="flex items-center gap-1 rounded-lg border border-violet-500/30 bg-violet-500/10 px-3 py-1.5 text-[11px] font-semibold text-violet-300 hover:bg-violet-500/20 disabled:opacity-50"
+          >
+            <Tag className="h-3 w-3" />{etiquetando ? 'Etiquetando…' : 'Etiquetar quem já recebeu'}
+          </button>
+        )}
         {status === 'running' && (
           <button type="button" onClick={() => onAction(campaign.id, 'pause')} className="flex items-center gap-1 rounded-lg border border-orange-500/30 bg-orange-500/10 px-3 py-1.5 text-[11px] font-semibold text-orange-400 hover:bg-orange-500/20">
             <Pause className="h-3 w-3" />Pausar
@@ -1114,6 +1497,9 @@ function NovaCampanhaTab({ onCreated, prefill, editCampaign }: { onCreated: () =
   const [variationsError, setVariationsError] = useState('');
   const [previewVariationIdx, setPreviewVariationIdx] = useState<number | null>(null);
   const [previewImgIdx, setPreviewImgIdx] = useState(0);
+  const [etiquetas, setEtiquetas] = useState<{ id: string; name: string; color: string }[]>([]);
+  const [etiquetaErro, setEtiquetaErro] = useState('');
+  const [labelId, setLabelId] = useState('');
   const lastGeneratedMsgRef = useRef('');
   const fileRef   = useRef<HTMLInputElement>(null);
   const csvRef    = useRef<HTMLInputElement>(null);
@@ -1138,6 +1524,22 @@ function NovaCampanhaTab({ onCreated, prefill, editCampaign }: { onCreated: () =
       })
       .catch(() => { /* tela degrada: seletor vazio, criacao bloqueada pelo servidor */ });
   }, []);
+
+  // As etiquetas são da INSTÂNCIA, não do cliente: trocar o número troca a
+  // lista inteira, e um id da instância anterior não existe na nova.
+  useEffect(() => {
+    // ⚠️ Na EDIÇÃO a escolha gravada é o ponto de partida — zerar aqui apagaria
+    // a etiqueta da campanha só por ter aberto a tela.
+    setLabelId(editCampaign?.label_id ?? '');
+    setEtiquetaErro('');
+    if (!form.instanceId) { setEtiquetas([]); return; }
+    let vivo = true;
+    void fetch(`/api/disparos/etiquetas?instanceId=${encodeURIComponent(form.instanceId)}`, { headers: callerHeaders() })
+      .then(r => r.json() as Promise<{ etiquetas?: { id: string; name: string; color: string }[]; erro?: string }>)
+      .then(d => { if (!vivo) return; setEtiquetas(d.etiquetas ?? []); setEtiquetaErro(d.erro ?? ''); })
+      .catch(() => { if (vivo) setEtiquetaErro('Não foi possível ler as etiquetas desta instância.'); });
+    return () => { vivo = false; };
+  }, [form.instanceId, editCampaign?.label_id]);
 
   useEffect(() => {
     if (!prefill) return;
@@ -1207,15 +1609,35 @@ function NovaCampanhaTab({ onCreated, prefill, editCampaign }: { onCreated: () =
     });
   }
 
-  function importCSV(file: File) {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const text = (e.target?.result as string) ?? '';
-      const lines = text.split(/\r?\n/).filter(l => l.trim());
-      setForm(p => ({ ...p, numbers: lines.join('\n') }));
-    };
-    reader.readAsText(file);
+  // Planilha COMPLETA do cliente (Excel ou CSV, com ou sem cabeçalho, colunas em
+  // qualquer ordem): o leitor da Fidelidade acha a coluna de telefone e a de nome
+  // sozinho. Vírgula/ponto e vírgula dentro do nome viram espaço — senão o
+  // `telefone,nome` do campo de texto partiria o nome ao meio.
+  const [importMsg, setImportMsg] = useState<{ tom: 'ok' | 'erro'; texto: string } | null>(null);
+  async function importCSV(file: File) {
+    setImportMsg(null);
+    try {
+      const contatos = await lerArquivoContatos(file);
+      if (contatos.length === 0) {
+        setImportMsg({ tom: 'erro', texto: 'Nenhum telefone encontrado na planilha. Confira se há uma coluna com DDD + número.' });
+        return;
+      }
+      const lidos = contatos
+        .map(c => ({ phone: formatPhone(c.telefone) ?? '', name: (c.nome ?? '').replace(/[,;\t]/g, ' ').replace(/\s+/g, ' ').trim() }))
+        .filter(c => c.phone);
+      // Relatório "uma linha por orçamento/pedido" repete a pessoa: entra uma vez só.
+      const { unicos, repetidos } = deduplicarContatos(lidos);
+      setForm(p => ({ ...p, numbers: unicos.map(c => (c.name ? `${c.phone},${c.name}` : c.phone)).join('\n') }));
+      const semNome = unicos.filter(c => !c.name).length;
+      setImportMsg({ tom: 'ok', texto: `${unicos.length} contatos de "${file.name}"${repetidos ? ` · ${repetidos} linhas repetidas juntadas (mesmo número)` : ''}${semNome ? ` · ${semNome} sem nome` : ''}` });
+    } catch (e) {
+      setImportMsg({ tom: 'erro', texto: `Não consegui ler o arquivo: ${String(e).slice(0, 120)}` });
+    }
   }
+  // Nome ↔ número exatamente como o motor vai ler (parsePhoneList é o parser do POST).
+  const listaDedup = useMemo(() => deduplicarContatos(parsePhoneList(form.numbers)), [form.numbers]);
+  const contatosLista = listaDedup.unicos;
+  const contatoExemplo = useMemo(() => contatosLista.find(c => c.name) ?? null, [contatosLista]);
 
   function insertVariable(v: string) {
     setForm(p => ({ ...p, message: p.message + v }));
@@ -1240,6 +1662,36 @@ function NovaCampanhaTab({ onCreated, prefill, editCampaign }: { onCreated: () =
         setVariationsError('error' in data ? data.error : 'Erro ao gerar variações.');
       } else {
         setVariations((data as { text: string; label: string }[]).map(v => ({ ...v, editing: false })));
+      }
+    } catch {
+      setVariationsError('Erro de conexão ao gerar variações.');
+    } finally {
+      setLoadingVariations(false);
+    }
+  }
+
+  // Acrescenta versões SEM apagar as existentes (inclusive as editadas à mão),
+  // até 10 mensagens no rodízio contando a original. A IA recebe as atuais para
+  // não repetir nenhuma.
+  const MAX_MENSAGENS = 10;
+  async function gerarMaisVariacoes() {
+    if (!form.message.trim()) return;
+    const faltam = Math.min(5, MAX_MENSAGENS - 1 - variations.length);
+    if (faltam <= 0) return;
+    setLoadingVariations(true);
+    setVariationsError('');
+    try {
+      const res = await fetch('/api/ai/whatsapp-variations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: form.message, quantidade: faltam, existentes: [form.message, ...variations.map(v => v.text)] }),
+      });
+      const data = await res.json() as { text: string; label: string }[] | { error: string };
+      if (!res.ok || 'error' in data) {
+        setVariationsError('error' in data ? data.error : 'Erro ao gerar variações.');
+      } else {
+        const novas = (data as { text: string; label: string }[]).slice(0, faltam).map(v => ({ ...v, editing: false }));
+        setVariations(prev => [...prev, ...novas].slice(0, MAX_MENSAGENS - 1));
       }
     } catch {
       setVariationsError('Erro de conexão ao gerar variações.');
@@ -1294,6 +1746,8 @@ function NovaCampanhaTab({ onCreated, prefill, editCampaign }: { onCreated: () =
           interval_min: form.intervalMin,
           interval_max: form.intervalMax,
           daily_limit: form.dailyLimit,
+          label_id: labelId || null,
+          label_nome: etiquetas.find(e => e.id === labelId)?.name ?? null,
         };
         const res = await fetch(`/api/disparos/campaigns/${editCampaign.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', ...callerHeaders() }, body: JSON.stringify(body) });
         const data = await res.json() as { error?: string };
@@ -1317,7 +1771,7 @@ function NovaCampanhaTab({ onCreated, prefill, editCampaign }: { onCreated: () =
       const allMessages = variations.length > 0 ? [form.message, ...variations.map(v => v.text)] : undefined;
       const startsAt = form.isNow ? new Date().toISOString() : toISO(form.startsAt);
 
-      const res = await fetch('/api/disparos/campaigns', { method: 'POST', headers: { 'Content-Type': 'application/json', ...callerHeaders() }, body: JSON.stringify({ onmidClientId: form.onmidClientId, instanceId: form.instanceId, confirmClientName, name: form.name, message: form.message, messages: allMessages, numbers: form.numbers, startsAt, endsAt, activeFrom, activeUntil, activeDays, intervalMin: form.intervalMin, intervalMax: form.intervalMax, dailyLimit: form.dailyLimit, imageUrls: imageUrls.length > 0 ? imageUrls : undefined }) });
+      const res = await fetch('/api/disparos/campaigns', { method: 'POST', headers: { 'Content-Type': 'application/json', ...callerHeaders() }, body: JSON.stringify({ onmidClientId: form.onmidClientId, instanceId: form.instanceId, confirmClientName, name: form.name, message: form.message, messages: allMessages, numbers: form.numbers, startsAt, endsAt, activeFrom, activeUntil, activeDays, intervalMin: form.intervalMin, intervalMax: form.intervalMax, dailyLimit: form.dailyLimit, imageUrls: imageUrls.length > 0 ? imageUrls : undefined, labelId: labelId || null, labelNome: etiquetas.find(e => e.id === labelId)?.name ?? null }) });
       const data = await res.json() as { error?: string; invalid_count?: number };
       if (!res.ok) { setError(data.error ?? 'Erro ao criar campanha.'); return; }
       if (data.invalid_count && data.invalid_count > 0) {
@@ -1394,6 +1848,32 @@ function NovaCampanhaTab({ onCreated, prefill, editCampaign }: { onCreated: () =
                   )}
                 </div>
               </div>
+              {form.instanceId && (
+                <div className="space-y-1.5 mt-3">
+                  <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
+                    Etiqueta no WhatsApp (opcional)
+                  </label>
+                  <div className="relative">
+                    <select value={labelId} onChange={e => setLabelId(e.target.value)}
+                      disabled={etiquetas.length === 0 && !labelId}
+                      className="w-full h-9 rounded-lg border border-border bg-background pl-3 pr-8 text-sm outline-none focus:ring-1 focus:ring-primary appearance-none disabled:opacity-50">
+                      <option value="">Não etiquetar</option>
+                      {etiquetas.map(et => <option key={et.id} value={et.id}>{et.name}</option>)}
+                      {labelId && !etiquetas.some(et => et.id === labelId) && (
+                        <option value={labelId}>{editCampaign?.label_nome ?? `Etiqueta ${labelId}`} (atual)</option>
+                      )}
+                    </select>
+                    <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+                  </div>
+                  <p className="text-[11px] text-muted-foreground/70">
+                    {etiquetaErro
+                      ? etiquetaErro
+                      : etiquetas.length === 0
+                        ? 'Nenhuma etiqueta criada neste WhatsApp. Crie em: WhatsApp Business → Etiquetas.'
+                        : 'Quem receber a mensagem entra nessa etiqueta, no WhatsApp do cliente.'}
+                  </p>
+                </div>
+              )}
             </div>
 
             {/* Section 2: Mensagem */}
@@ -1406,11 +1886,11 @@ function NovaCampanhaTab({ onCreated, prefill, editCampaign }: { onCreated: () =
               </div>
               <div className="space-y-1.5">
                 <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
-                  Mensagem * — use {'{nome}'} e {'{telefone}'} para personalizar
+                  Mensagem * — use {'{nome}'} (primeiro nome), {'{nome_completo}'} e {'{telefone}'} para personalizar
                 </label>
                 <div className="relative">
                   <textarea value={form.message} onChange={e => setForm(p => ({ ...p, message: e.target.value }))} onBlur={handleMessageBlur}
-                    placeholder="Olá {nome}, temos uma novidade para você!" rows={5}
+                    placeholder="Oi {nome}, temos uma novidade para você!" rows={5}
                     className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm outline-none focus:ring-1 focus:ring-primary resize-none pr-10" />
                   <DictateButton className="absolute top-2 right-2" onTranscript={(text) => setForm(p => ({ ...p, message: p.message ? `${p.message} ${text}` : text }))} />
                   <button type="button" className="absolute bottom-3 right-3 text-muted-foreground hover:text-foreground transition-colors">
@@ -1421,7 +1901,7 @@ function NovaCampanhaTab({ onCreated, prefill, editCampaign }: { onCreated: () =
               </div>
               <div className="mt-3 flex items-center gap-2 flex-wrap">
                 <span className="text-[11px] text-muted-foreground">Variáveis disponíveis:</span>
-                {['{nome}','{telefone}'].map(v => (
+                {VARIAVEIS_DISPARO.map(v => (
                   <button key={v} type="button" onClick={() => insertVariable(v)}
                     className="rounded-lg border border-border bg-background px-2.5 py-1 text-xs font-mono text-muted-foreground hover:text-foreground hover:border-primary/40 transition-colors">
                     {v}
@@ -1461,6 +1941,17 @@ function NovaCampanhaTab({ onCreated, prefill, editCampaign }: { onCreated: () =
                     <Sparkles className="h-3.5 w-3.5 text-violet-400" />
                     <p className="text-[11px] font-bold uppercase tracking-widest text-violet-400">Variações geradas pela IA</p>
                     <span className="rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] font-bold text-emerald-400">✓ {variations.length + 1} mensagens prontas para envio aleatório</span>
+                    {variations.length + 1 < MAX_MENSAGENS && (
+                      <button
+                        type="button"
+                        onClick={() => void gerarMaisVariacoes()}
+                        disabled={loadingVariations}
+                        title={`Acrescenta versões novas sem apagar as atuais (máximo ${MAX_MENSAGENS} mensagens no rodízio)`}
+                        className="flex items-center gap-1 rounded-lg border border-violet-500/40 px-2 py-0.5 text-[10px] font-bold text-violet-400 hover:bg-violet-500/10 disabled:opacity-50"
+                      >
+                        <Plus className="h-3 w-3" />Gerar mais {Math.min(5, MAX_MENSAGENS - 1 - variations.length)}
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => { setVariations([]); setPreviewVariationIdx(null); }}
@@ -1652,17 +2143,50 @@ function NovaCampanhaTab({ onCreated, prefill, editCampaign }: { onCreated: () =
                         className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-xs text-muted-foreground hover:text-foreground hover:border-primary/40 transition-colors">
                         <Upload className="h-3.5 w-3.5" />Importar arquivo
                       </button>
-                      <span className="text-[11px] text-muted-foreground/50">CSV ou TXT (máx. 5MB)</span>
+                      <span className="text-[11px] text-muted-foreground/50">Excel, CSV ou TXT — a planilha completa, colunas em qualquer ordem</span>
                     </div>
-                    <input ref={csvRef} type="file" accept=".csv,.txt" className="hidden"
-                      onChange={e => { if (e.target.files?.[0]) { importCSV(e.target.files[0]); e.target.value = ''; } }} />
+                    <input ref={csvRef} type="file" accept=".xlsx,.xls,.csv,.txt" className="hidden"
+                      onChange={e => { if (e.target.files?.[0]) { void importCSV(e.target.files[0]); e.target.value = ''; } }} />
+                    {importMsg && (
+                      <p className={cn('text-[11px]', importMsg.tom === 'ok' ? 'text-emerald-400' : 'text-red-400')}>{importMsg.texto}</p>
+                    )}
                   </div>
-                  {contactCount > 0 && (
-                    <div className="mt-3 flex items-center gap-2 rounded-lg border border-emerald-500/25 bg-emerald-500/10 px-3 py-2">
-                      <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
-                      <span className="text-xs font-semibold text-emerald-400">{contactCount} contato{contactCount !== 1 ? 's' : ''} carregado{contactCount !== 1 ? 's' : ''}</span>
-                    </div>
-                  )}
+                  {contactCount > 0 && (() => {
+                    const semNome = contatosLista.filter(c => !c.name).length;
+                    const descartadas = contactCount - contatosLista.length - listaDedup.repetidos;
+                    return (
+                      <div className="mt-3 overflow-hidden rounded-lg border border-border">
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border bg-emerald-500/10 px-3 py-2">
+                          <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
+                          <span className="text-xs font-semibold text-emerald-400">{contatosLista.length} contato{contatosLista.length !== 1 ? 's' : ''} válido{contatosLista.length !== 1 ? 's' : ''}</span>
+                          {semNome > 0 && <span className="text-[11px] text-orange-400">{semNome} sem nome</span>}
+                          {listaDedup.repetidos > 0 && <span className="text-[11px] text-muted-foreground">{listaDedup.repetidos} repetido{listaDedup.repetidos !== 1 ? 's' : ''} (entram uma vez só)</span>}
+                          {descartadas > 0 && <span className="text-[11px] text-red-400">{descartadas} linha{descartadas !== 1 ? 's' : ''} sem telefone válido (ficam de fora)</span>}
+                        </div>
+                        <div className="max-h-64 overflow-y-auto">
+                          <table className="w-full text-xs">
+                            <thead className="sticky top-0 bg-card">
+                              <tr className="text-left text-[10px] uppercase tracking-wider text-muted-foreground">
+                                <th className="px-3 py-1.5 font-semibold">Nome</th>
+                                <th className="px-3 py-1.5 font-semibold">Número</th>
+                                <th className="px-3 py-1.5 font-semibold">Vai ser chamado de</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-border">
+                              {contatosLista.slice(0, 500).map((c, i) => (
+                                <tr key={`${c.phone}-${i}`}>
+                                  <td className="px-3 py-1.5">{c.name ? formatarNome(c.name) : <span className="italic text-orange-400/80">sem nome</span>}</td>
+                                  <td className="px-3 py-1.5 font-mono text-muted-foreground">{c.phone}</td>
+                                  <td className="px-3 py-1.5 text-muted-foreground">{formatarNome(c.name).split(' ')[0] || '—'}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                          {contatosLista.length > 500 && <p className="px-3 py-2 text-[11px] text-muted-foreground">Mostrando 500 de {contatosLista.length}. Todos entram na campanha.</p>}
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </>
               )}
             </div>
@@ -1805,7 +2329,7 @@ function NovaCampanhaTab({ onCreated, prefill, editCampaign }: { onCreated: () =
               </div>
               <p className="text-xs text-muted-foreground mt-1">Veja como sua mensagem aparecerá para os contatos.</p>
             </div>
-            <WhatsAppPreview image={imageUrls.length > 0 ? imageUrls[previewImgIdx % imageUrls.length] : null} message={previewVariationIdx !== null && variations[previewVariationIdx] ? variations[previewVariationIdx].text : form.message} />
+            <WhatsAppPreview image={imageUrls.length > 0 ? imageUrls[previewImgIdx % imageUrls.length] : null} message={previewVariationIdx !== null && variations[previewVariationIdx] ? variations[previewVariationIdx].text : form.message} contatoExemplo={contatoExemplo} />
             {previewVariationIdx !== null && variations[previewVariationIdx] && (
               <p className="mt-1.5 text-center text-[10px] text-violet-400 font-medium">
                 Prévia: {variations[previewVariationIdx].label || `Variação ${previewVariationIdx + 1}`}
@@ -1961,7 +2485,7 @@ function DashboardTab({ onReuse, onNewCampaign, onManageInstances, onEdit }: {
   const deliveryRate = useMemo(() => { const t = totalSent + totalFailed; return t > 0 ? (totalSent / t) * 100 : 0; }, [totalSent, totalFailed]);
 
   const activeCampaigns = useMemo(() => campaigns.filter(c => ['running', 'paused', 'pending'].includes(c.status)), [campaigns]);
-  const [respostas, setRespostas] = useState<Record<string, RespostasDaCampanha>>({});
+  const [respostas, setRespostas] = useState<Record<string, ResumoDisparo>>({});
   const idsParaTaxa = campaigns.map(c => c.id).join(',');
   useEffect(() => {
     if (!idsParaTaxa) { setRespostas({}); return; }
@@ -1969,7 +2493,7 @@ function DashboardTab({ onReuse, onNewCampaign, onManageInstances, onEdit }: {
     // array novo a cada render e refaria o fetch sem parar (lição de 2026-07-29).
     let vivo = true;
     void fetch(`/api/disparos/respostas?ids=${idsParaTaxa}`, { headers: callerHeaders() })
-      .then(r => r.json() as Promise<Record<string, RespostasDaCampanha>>)
+      .then(r => r.json() as Promise<Record<string, ResumoDisparo>>)
       .then(d => { if (vivo) setRespostas(d ?? {}); })
       .catch(() => { /* taxa é informativa: falha não derruba a tela */ });
     return () => { vivo = false; };
@@ -2783,6 +3307,7 @@ export default function DisparosPage() {
   const [prefill, setPrefill] = useState<CampaignPrefill | null>(null);
   const [editCampaign, setEditCampaign] = useState<Campaign | null>(null);
 
+  const [showLogGeral, setShowLogGeral] = useState(false);
   function handleReuse(p: CampaignPrefill) { setPrefill(p); setEditCampaign(null); setTab('nova'); }
   function handleEdit(c: Campaign) { setEditCampaign(c); setPrefill(null); setTab('nova'); }
 
@@ -2821,6 +3346,11 @@ export default function DisparosPage() {
                 tab === 'extrator' ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400' : 'border-border bg-card text-muted-foreground hover:bg-muted/50')}>
               <Hash className="h-3.5 w-3.5" />Extrator
             </button>
+            <button type="button" onClick={() => setShowLogGeral(true)}
+              title="Histórico de ajustes de todas as campanhas"
+              className="flex items-center gap-1.5 rounded-lg border border-border bg-card px-4 py-2 text-xs font-bold uppercase tracking-wider text-muted-foreground hover:bg-muted/50 transition-colors">
+              <History className="h-3.5 w-3.5" />Histórico
+            </button>
             <button type="button" onClick={() => { setPrefill(null); setTab('nova'); }}
               className="flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-xs font-bold uppercase tracking-wider text-black hover:bg-primary/90 transition-colors">
               <Plus className="h-3.5 w-3.5" />Nova campanha
@@ -2828,6 +3358,7 @@ export default function DisparosPage() {
           </div>
         </div>
       </div>
+      {showLogGeral && <LogAjustesModal titulo="Todas as campanhas" onClose={() => setShowLogGeral(false)} />}
 
       {tab === 'dashboard' && <DashboardTab onReuse={handleReuse} onNewCampaign={() => { setPrefill(null); setEditCampaign(null); setTab('nova'); }} onManageInstances={() => setTab('clientes')} onEdit={handleEdit} />}
       {tab === 'clientes' && <ClientesTab />}

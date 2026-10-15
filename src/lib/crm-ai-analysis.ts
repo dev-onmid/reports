@@ -67,7 +67,12 @@ export async function ensureCrmAiSchema(pool: Pool) {
       ADD COLUMN IF NOT EXISTS temperatura_atualizada_em TIMESTAMPTZ,
       ADD COLUMN IF NOT EXISTS ia_ultimo_analise TIMESTAMPTZ,
       ADD COLUMN IF NOT EXISTS ia_confianca_ultimo INTEGER,
-      ADD COLUMN IF NOT EXISTS time_interno BOOLEAN NOT NULL DEFAULT false;
+      ADD COLUMN IF NOT EXISTS time_interno BOOLEAN NOT NULL DEFAULT false,
+      -- Por que o lead não virou venda. Ver src/lib/motivo-perda.ts: exigido no
+      -- ATO de mover para uma etapa de perda e LIMPO ao reativar o lead.
+      ADD COLUMN IF NOT EXISTS motivo_perda TEXT,
+      ADD COLUMN IF NOT EXISTS motivo_perda_detalhe TEXT,
+      ADD COLUMN IF NOT EXISTS perdido_em DATE;
 
     CREATE TABLE IF NOT EXISTS public.crm_temperatura_criterios (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -323,7 +328,56 @@ async function registerAiError(pool: Pool, leadId: string, clientId: string, err
   ).catch(() => null);
 }
 
-export async function analisarConversa(pool: Pool, leadId: string): Promise<void> {
+/**
+ * Como a análise deve se comportar nesta chamada.
+ *
+ * O caminho normal (webhook/mensagem nova) não passa nada: os interruptores
+ * valem e os efeitos externos acontecem, porque a conversa ACABOU de mudar.
+ */
+/** O que a análise fez — o lote precisa disso para relatar progresso real. */
+export type ResultadoAnalise = {
+  analisou: boolean;
+  /** Por que não analisou (quando `analisou` é false). */
+  motivo?: 'sem_lead' | 'time_interno' | 'desligada_global' | 'desligada_cliente' | 'sem_mensagem' | 'erro';
+  moveuStatus: boolean;
+  moveuTemperatura: boolean;
+  statusAnterior?: string | null;
+  statusNovo?: string | null;
+};
+
+export type OpcoesAnalise = {
+  /**
+   * Ignora o interruptor geral e o do cliente.
+   *
+   * ⚠️ Só para análise pedida por um humano na tela. O interruptor existe para
+   * não gastar IA sozinho; um clique explícito é a decisão oposta, e é
+   * justamente o retroativo que se perde enquanto a automação está desligada.
+   */
+  forcarMesmoDesligada?: boolean;
+  /**
+   * Não dispara conversão (Meta/Google) nem follow-up ao mover o status.
+   *
+   * ⚠️⚠️ OBRIGATÓRIO em lote retroativo, e não é precaução teórica. Medido em
+   * 2026-10-02: `queueFollowupIfExists` com `delay_minutos = 0` ENVIA a
+   * mensagem na hora (o Atmos.mov tem duas regras assim), então reprocessar
+   * conversa antiga mandaria WhatsApp para quem falou com a loja semanas
+   * atrás — no chip do cliente. E a conversão repete a lição do backfill do
+   * Agendor: evento velho reenviado polui a otimização da campanha.
+   *
+   * O que CONTINUA acontecendo: mover status/temperatura, gravar
+   * `crm_status_historico`, `crm_ia_historico` e o uso de IA. O board fica
+   * certo; só o mundo de fora não é avisado de novo.
+   */
+  semEfeitosExternos?: boolean;
+};
+
+export async function analisarConversa(
+  pool: Pool,
+  leadId: string,
+  opcoes: OpcoesAnalise = {},
+): Promise<ResultadoAnalise> {
+  const nada = (motivo: ResultadoAnalise['motivo']): ResultadoAnalise =>
+    ({ analisou: false, motivo, moveuStatus: false, moveuTemperatura: false });
   try {
     await ensureCrmAiSchema(pool);
 
@@ -333,8 +387,8 @@ export async function analisarConversa(pool: Pool, leadId: string): Promise<void
         WHERE id = $1`,
       [leadId],
     );
-    if (!lead) return;
-    if (lead.time_interno === true) return;
+    if (!lead) return nada('sem_lead');
+    if (lead.time_interno === true) return nada('time_interno');
 
     const clientId = String(lead.client_id);
 
@@ -343,7 +397,7 @@ export async function analisarConversa(pool: Pool, leadId: string): Promise<void
     const { rows: globalRows } = await pool.query<{ value: string | null }>(
       `SELECT value FROM public.system_settings WHERE key = 'crm_ai_enabled'`,
     ).catch(() => ({ rows: [] as { value: string | null }[] }));
-    if (globalRows[0]?.value === 'false') return;
+    if (globalRows[0]?.value === 'false' && !opcoes.forcarMesmoDesligada) return nada('desligada_global');
 
     const { rows: [config] } = await pool.query(
       `SELECT COALESCE(ia_limite_chamadas_dia, 500)::int AS limite,
@@ -356,7 +410,7 @@ export async function analisarConversa(pool: Pool, leadId: string): Promise<void
     // 2026-08-19: sem movimentação automática ainda). ⚠️ Opt-in explícito:
     // cliente SEM linha de config também fica fora — antes "sem config"
     // significava ligado, e era exatamente o buraco que religaria todo mundo.
-    if (config?.ativa !== true) return;
+    if (config?.ativa !== true && !opcoes.forcarMesmoDesligada) return nada('desligada_cliente');
     const dailyLimit = Number(config?.limite ?? 500);
     const { rows: [usageToday] } = await pool.query(
       `SELECT COUNT(*)::int AS total
@@ -383,7 +437,7 @@ export async function analisarConversa(pool: Pool, leadId: string): Promise<void
       [leadId],
     );
     const orderedMessages = messages.reverse();
-    if (orderedMessages.length === 0) return;
+    if (orderedMessages.length === 0) return nada('sem_mensagem');
 
     const criteria = await loadCriteria(pool, clientId);
     const statusOptions = await loadStatusOptions(pool, lead);
@@ -488,12 +542,14 @@ Retorne exatamente este JSON:
          VALUES ($1, $2, $3, $4, 'ia_conversa')`,
         [leadId, clientId, lead.status ?? null, nextStatus],
       ).catch(() => null);
-      await queueFollowupIfExists(pool, leadId, clientId, nextStatus).catch(() => null);
+      if (!opcoes.semEfeitosExternos) {
+        await queueFollowupIfExists(pool, leadId, clientId, nextStatus).catch(() => null);
+      }
       // Mudança de status pela IA também dispara os eventos de conversão custom
       // (Meta CAPI / Google) — antes só o PUT manual disparava, então lead avançado
       // automaticamente no funil não gerava evento (gap de atribuição). O dedup em
       // dispararEventosPorStatus (hasSuccessfulConversion) evita envio duplicado.
-      if (lead.numero) {
+      if (lead.numero && !opcoes.semEfeitosExternos) {
         const { rows: [convData] } = await pool.query<{ ctwa_clid: string | null; valor_rs: number | null }>(
           `SELECT ctwa_clid, valor_rs FROM public.crm_leads WHERE id = $1`,
           [leadId],
@@ -559,6 +615,14 @@ Retorne exatamente este JSON:
          custo_estimado_usd = ia_uso_mensal.custo_estimado_usd + EXCLUDED.custo_estimado_usd`,
       [clientId, monthKey(), tokens, estimateCostUsd(tokens)],
     );
+
+    return {
+      analisou: true,
+      moveuStatus: appliedStatus !== (lead.status ?? null),
+      moveuTemperatura: appliedTemp !== (lead.temperatura ?? null),
+      statusAnterior: lead.status ?? null,
+      statusNovo: appliedStatus,
+    };
   } catch (err) {
     const clientId = await pool.query(
       `SELECT client_id FROM public.crm_leads WHERE id = $1`,
@@ -566,5 +630,6 @@ Retorne exatamente este JSON:
     ).then(res => String(res.rows[0]?.client_id ?? '')).catch(() => '');
     if (clientId) await registerAiError(pool, leadId, clientId, err);
     console.error('[analisarConversa]', err);
+    return nada('erro');
   }
 }

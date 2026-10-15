@@ -45,30 +45,52 @@ export type LeadParaPlanilha = {
   cpf: string | null;
   utmSource: string | null;
   utmMedium: string | null;
+  campanha?: string | null;
+  pageUrl?: string | null;
 };
 
+const MESES = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
+
+/** "outubro 6, 2026" — o formato que as linhas antigas da planilha já usam. */
+export function dataNoFormatoDaPlanilha(agora: Date): string {
+  const [a, m, d] = agora.toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' }).split('-').map(Number);
+  return `${MESES[m - 1]} ${d}, ${a}`;
+}
+
+const sem = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+
 /**
- * Ordem das colunas — a mesma que o cenário do Make escrevia, para as fórmulas
- * e filtros que já existem na planilha continuarem valendo.
+ * Valor de cada coluna a partir do NOME no cabeçalho da aba.
  *
- * As colunas F, G e J vinham com valor fixo lá ("SEARCH | …" e "GOOGLE"), e
- * ficam fixas aqui também. É herança, não escolha: mudar agora quebraria a
- * leitura de quem usa a planilha. Se um dia for revisado, o lugar é aqui.
+ * ⚠️ Antes a ordem era fixa no código (10 colunas copiadas de outro cenário do
+ * Make) e a aba da Romanza tem 7: Data, Nome, Telefone, Link, CPF, E-mail,
+ * Cidade. Resultado: e-mail na coluna Link, "google" no CPF e, da segunda linha
+ * em diante, tudo empurrado para a coluna I. Lendo o cabeçalho, a planilha manda
+ * na ordem — quem reorganizar as colunas lá não quebra a gravação aqui.
+ * Coluna que não reconhecemos fica vazia (nunca recebe valor de outra).
  */
-function montarLinha(d: LeadParaPlanilha): string[] {
-  const quando = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
-  return [
-    quando,
-    d.nome ?? '',
-    d.telefone ?? '',
-    d.email ?? '',
-    d.utmSource ?? '',
-    '',
-    `SEARCH | ${d.utmMedium ?? ''}`,
-    d.cpf ?? '',
-    d.cidade ?? '',
-    'GOOGLE',
-  ];
+export function montarLinhaPorCabecalho(cabecalho: string[], d: LeadParaPlanilha, agora = new Date()): string[] {
+  const valor = (titulo: string): string => {
+    const t = sem(titulo);
+    if (!t) return '';
+    if (/^(data|dia|quando|recebido)/.test(t)) return dataNoFormatoDaPlanilha(agora);
+    if (/e-?mail/.test(t)) return d.email ?? '';
+    if (/cpf/.test(t)) return d.cpf ?? '';
+    if (/telefone|celular|whats|fone/.test(t)) return d.telefone ?? '';
+    if (/nome/.test(t)) return d.nome ?? '';
+    if (/cidade|municipio/.test(t)) return d.cidade ?? '';
+    if (/link|url|pagina/.test(t)) return d.pageUrl ?? '';
+    if (/campanha|utm_campaign/.test(t)) return d.campanha ?? '';
+    if (/utm_medium|meio/.test(t)) return d.utmMedium ?? '';
+    if (/utm_source|fonte|origem/.test(t)) return d.utmSource ?? '';
+    return '';
+  };
+  const linha = cabecalho.map(valor);
+  // Sem cabeçalho na aba: a ordem que a planilha da Romanza sempre teve.
+  if (!cabecalho.some(c => sem(c))) {
+    return montarLinhaPorCabecalho(['Data', 'Nome', 'Telefone', 'Link', 'CPF', 'E-mail', 'Cidade'], d, agora);
+  }
+  return linha;
 }
 
 /**
@@ -100,16 +122,31 @@ export async function gravarLeadNaPlanilha(
     auth.setCredentials({ access_token: accessToken });
     const sheets = google.sheets({ version: 'v4', auth });
 
-    // A aba entra entre aspas simples: nomes como "FORMS | GOOGLE" têm espaço e
-    // pipe, e sem as aspas o Sheets lê como intervalo inválido.
-    const aba = destino.sheetTab ? `'${destino.sheetTab.replace(/'/g, "''")}'!A:J` : 'A:J';
-
-    await sheets.spreadsheets.values.append({
+    // Aba pelo nome; sem nome configurado, a primeira da planilha.
+    const meta = await sheets.spreadsheets.get({ spreadsheetId: destino.sheetId, fields: 'sheets.properties(sheetId,title)' });
+    const abas = meta.data.sheets ?? [];
+    const aba = destino.sheetTab ? abas.find(a => a.properties?.title === destino.sheetTab) : abas[0];
+    if (!aba?.properties || aba.properties.sheetId == null) {
+      return { ok: false, motivo: `aba "${destino.sheetTab ?? '(primeira)'}" não encontrada na planilha` };
+    }
+    const titulo = aba.properties.title ?? '';
+    const cab = await sheets.spreadsheets.values.get({
       spreadsheetId: destino.sheetId,
-      range: aba,
-      valueInputOption: 'USER_ENTERED',
-      insertDataOption: 'INSERT_ROWS',
-      requestBody: { values: [montarLinha(dados)] },
+      range: `'${titulo.replace(/'/g, "''")}'!1:1`,
+    });
+    const linha = montarLinhaPorCabecalho((cab.data.values?.[0] ?? []).map(String), dados);
+
+    // ⚠️ appendCells, NÃO values.append: o append "procura a tabela" e, com uma
+    // linha mais larga que o cabeçalho, passou a escrever a partir da coluna I.
+    // appendCells grava sempre na primeira linha vazia depois da última com
+    // dado, começando na coluna A — e é atômico, dois leads juntos não colidem.
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId: destino.sheetId,
+      requestBody: { requests: [{ appendCells: {
+        sheetId: aba.properties.sheetId,
+        fields: 'userEnteredValue',
+        rows: [{ values: linha.map(v => ({ userEnteredValue: { stringValue: v } })) }],
+      } }] },
     });
     return { ok: true };
   } catch (err) {

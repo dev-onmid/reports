@@ -2,7 +2,7 @@ import type { NextRequest } from 'next/server';
 import { createHash } from 'node:crypto';
 import { makeServerPool } from '@/lib/server-db';
 
-import { origemIntegravel, resumirOrigens, dedupLote, dedupPorTelefone, idExterno, decidirFechou, parseFechou, colunaEhBooleana, sinaisDoStatus, indexarOcorrencias } from '@/lib/importacao-origem';
+import { origemIntegravel, resumirOrigens, dedupLote, dedupPorTelefone, idExterno, decidirFechou, parseFechou, colunaEhBooleana, sinaisDoStatus, indexarOcorrencias, parseDate } from '@/lib/importacao-origem';
 import { chavesTelefone } from '@/lib/lead-identity';
 
 /** Tipo da planilha, escolhido na importação. Ver comentário em LeadParaFunil. */
@@ -174,24 +174,6 @@ export type SpreadsheetMapping = {
   clientName: string;
 };
 
-function parseDate(val: unknown): string | null {
-  if (!val) return null;
-  if (val instanceof Date && Number.isFinite(val.getTime())) return val.toISOString().split('T')[0];
-  if (typeof val === 'number') {
-    const d = new Date((val - 25569) * 86400 * 1000);
-    return d.toISOString().split('T')[0];
-  }
-  const s = String(val);
-  const parts = s.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
-  if (parts) {
-    const [, d, m, y] = parts;
-    const year = y.length === 2 ? `20${y}` : y;
-    return `${year}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
-  }
-  const iso = s.match(/(\d{4})-(\d{2})-(\d{2})/);
-  if (iso) return iso[0];
-  return null;
-}
 
 function parseRevenue(val: unknown): number {
   if (val === null || val === undefined || val === '') return 0;
@@ -1089,7 +1071,14 @@ export async function POST(req: NextRequest) {
     const neighborhoodCol = neighborhoodColumnOverride || null;
     const notesCol = notesColumnOverride || null;
     const scheduledDateCol = scheduledDateColumnOverride || null;
-    const statusCol = statusColumnOverride || null;
+    // ⚠️⚠️ `stage` vira `status` quando não há coluna de status própria. O
+    // Kanban, o funil e `sinaisDoStatus` leem `status`; `stage` só é gravado no
+    // caminho com ID de negócio, que quase nenhuma planilha tem. Medido na
+    // Romanza: a coluna STATUS estava mapeada em `stage`, `stage` ficou 100%
+    // VAZIO nos 6.858 leads e 6.095 entraram sem status nenhum — o board tinha
+    // 284 leads com Engajados, Aprovações, Agendamentos e Cadastros zerados.
+    // Quando a planilha tem as DUAS colunas, nada muda: o status próprio vence.
+    const statusCol = statusColumnOverride || stageColumnOverride || null;
     const dealIdCol = dealIdColumnOverride || null;
     const stageCol = stageColumnOverride || null;
     const updatedDateCol = updatedDateColumnOverride || null;

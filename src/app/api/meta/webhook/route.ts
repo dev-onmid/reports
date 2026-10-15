@@ -1,5 +1,6 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
+import { createHmac, timingSafeEqual } from 'node:crypto';
 import { getFreshMetaToken } from '@/lib/meta-token';
 import { processLeadgenEvent, type LeadgenChangeValue } from '@/lib/meta-leadgen';
 
@@ -326,7 +327,9 @@ export async function GET(request: NextRequest) {
     const token     = request.nextUrl.searchParams.get('hub.verify_token');
     const challenge = request.nextUrl.searchParams.get('hub.challenge');
 
-    if (mode === 'subscribe' && token === verifyToken && challenge) {
+    const tokenOk = !!token && !!verifyToken && token.length === verifyToken.length
+      && timingSafeEqual(Buffer.from(token), Buffer.from(verifyToken));
+    if (mode === 'subscribe' && tokenOk && challenge) {
       return new Response(challenge, { status: 200 });
     }
     return new Response('Forbidden', { status: 403 });
@@ -337,8 +340,21 @@ export async function GET(request: NextRequest) {
 
 // POST: Incoming Meta events
 export async function POST(request: NextRequest) {
+  // ⚠️ Assinatura da Meta (auditoria 2026-10-10): sem conferir o
+  // X-Hub-Signature-256, qualquer um forjava comentário/DM e fazia a Página
+  // do cliente responder quem quisesse com o token real dela. Falha FECHADA
+  // sem META_APP_SECRET.
+  const cru = await request.text();
+  const appSecret = process.env.META_APP_SECRET ?? '';
+  const assinatura = request.headers.get('x-hub-signature-256') ?? '';
+  if (!appSecret) return new Response('META_APP_SECRET ausente', { status: 503 });
+  const esperada = 'sha256=' + createHmac('sha256', appSecret).update(cru).digest('hex');
+  if (assinatura.length !== esperada.length || !timingSafeEqual(Buffer.from(assinatura), Buffer.from(esperada))) {
+    return new Response('Assinatura inválida', { status: 403 });
+  }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const body = await request.json() as any;
+  let body: any;
+  try { body = JSON.parse(cru); } catch { return new Response('JSON inválido', { status: 400 }); }
   console.log('[webhook] POST recebido object=', body.object, 'keys=', Object.keys(body));
   const pool = makeServerPool();
 

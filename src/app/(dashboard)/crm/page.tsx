@@ -10,15 +10,21 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { useSortable, SortableContext, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable';
 import {
-  Plus, Search, MoreVertical, Settings2, RefreshCw,
+  Plus, Search, MoreVertical, RefreshCw,
   Users, CalendarDays, HeartHandshake, CircleDollarSign,
   ChevronLeft, ChevronRight, ChevronDown, SlidersHorizontal,
-  AlignJustify, Trash2, Pencil, Sparkles, Clock3, LayoutGrid, List, ArrowUpDown,
+  Trash2, Pencil, Sparkles, Clock3, LayoutGrid, List, ArrowUpDown,
   BarChart3, UserRound, MessageCircle, X, Send, GripVertical, Layers, WifiOff, Link2,
-  Globe2, Clapperboard, Info, MapPin, ClipboardList, BadgeCheck, BookmarkPlus, Check } from 'lucide-react';
+  Clapperboard, Info, MapPin, ClipboardList, BadgeCheck, BookmarkPlus, Check, Star, Tag } from 'lucide-react';
 import { ChatView } from './chat-view';
+import { ConectarWhatsappModal } from './conectar-whatsapp';
 import { LeadChatPanel } from './lead-chat-panel';
-import { PortalLinkModal } from './portal-link-modal';
+import { CamposAtendimento, HistoricoLead, NovoLeadModal, opcoesDeOrigem } from './lead-operacao';
+import { ModoClienteContext, useEhGestorCliente, useEhUsuarioCliente, useMeuNome, useModoCliente } from '@/lib/modo-cliente';
+import { EquipeCliente } from './cliente-gestor';
+import { DICAS_ATENDIMENTO, InfoDica } from './info-dica';
+import { BotaoTags, FiltroTag, TagChips, TagsConfigModal, salvarTagsDoLead, useTagsDoCliente, type CrmTag } from './tags';
+import { AcessosClienteModal } from './acessos-cliente-modal';
 import { SeletorModeloFunil } from '@/components/crm/seletor-modelo-funil';
 import { AplicarModeloFunil } from '@/components/crm/aplicar-modelo-funil';
 import { FollowupTab, useActiveFollowups, FollowupBadge } from './followup-tab';
@@ -29,11 +35,45 @@ import { ClientAvatar, fetchClientPicture } from '@/components/client-avatar';
 import { DictateButton } from '@/components/ui/dictate-button';
 import { notificar } from '@/components/ui/toast';
 import { cn, formatCurrencyBRL } from '@/lib/utils';
+import AnaliseIaModal from './analise-ia-modal';
+import MotivoPerdaModal from './motivo-perda-modal';
+import { rotuloMotivo, type MotivoPerdaId } from '@/lib/motivo-perda';
 import { localDoLead, type RespostaFormulario } from '@/lib/lead-formulario';
 import type { Client } from '@/lib/mock-data';
-import type { AttendanceAudit } from '@/lib/crm-attendance-audit';
+import type { AttendanceAudit, ItemHistoricoAuditoria } from '@/lib/crm-attendance-audit';
+import type { MesAtendimento, TentativasContato } from '@/lib/crm-atendimento-evolucao';
 import { classificarEtapa, corDaEtapa, MODELO_PADRAO, OPCOES_EDITOR, opcaoDoValor, ROTULOS_ETAPA, valorOpcaoEditor, type EtapaFunil, type SituacaoStage } from '@/lib/funil-etapas';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+
+// ── Busca de lead ────────────────────────────────────────────────────────────
+// Sem acento e sem formatação: "joao" acha "João" e "(43) 99975-3604" acha
+// "554399753604". Número também casa com e sem o nono dígito, porque o WhatsApp
+// grava muitos números SEM ele e o gestor digita COM.
+const semAcento = (t: string) => t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+type Busca = { texto: string; numeros: string[] };
+function prepararBusca(q: string): Busca | null {
+  const texto = semAcento(q.trim());
+  if (!texto) return null;
+  const d = q.replace(/\D/g, '');
+  const numeros: string[] = [];
+  if (d.length >= 4) {
+    numeros.push(d);
+    const local = d.startsWith('55') && d.length >= 12 ? d.slice(2) : d;   // tira o 55
+    if (local !== d) numeros.push(local);
+    if (local.length === 11 && local[2] === '9') numeros.push(local.slice(0, 2) + local.slice(3)); // sem o nono dígito
+    if (local.length === 10) numeros.push(local.slice(0, 2) + '9' + local.slice(2));               // com o nono dígito
+  }
+  return { texto, numeros };
+}
+function leadCasaBusca(l: { nome: string | null; numero: string | null; canal: string | null; bairro: string | null; observacao: string | null; email?: string | null }, b: Busca) {
+  if (b.numeros.length) {
+    const n = (l.numero ?? '').replace(/\D/g, '');
+    if (n && b.numeros.some(x => n.includes(x))) return true;
+  }
+  return [l.nome, l.canal, l.bairro, l.observacao, l.email].some(v => v && semAcento(v).includes(b.texto));
+}
+
+/** Mensagens copiadas da conversa que provam a nota (o "print"). */
+type TrechoAtendimento = { d: 'in' | 'out'; em: string; t: string | null; autor?: string | null };
 
 type CrmLead = {
   id: string; client_id: string; mes: string | null; data: string | null;
@@ -43,6 +83,8 @@ type CrmLead = {
   status: string | null; data_agendada: string | null;
   video_dra: boolean; compareceu: boolean; observacao: string | null;
   orcamento: number | string | null; fechou: boolean; valor_rs: number | string | null;
+  /** Estimativa do negócio em ABERTO. Nunca é receita — ver `valorDoLead`. */
+  valor_negocio?: number | string | null;
   pagamento: string | null; analise_credito: boolean;
   data_nasc: string | null; bairro: string | null;
   motivacoes: string | null; dores: string | null;
@@ -50,8 +92,16 @@ type CrmLead = {
   engajado?: boolean;
   temperatura?: 'quente' | 'morno' | 'frio' | null;
   temperatura_atualizada_em?: string | null;
+  /** Tags de qualificação (catálogo do cliente), montadas no SQL da listagem. */
+  tags?: CrmTag[];
   ia_ultimo_analise?: string | null;
   ia_confianca_ultimo?: number | null;
+  /** Nota 0–5 do ATENDIMENTO deste lead (rotina diária). null = ainda sem nota ou não é lead. */
+  nota_atendimento?: number | null;
+  nota_atendimento_motivo?: string | null;
+  nota_atendimento_ajuste?: string | null;
+  nota_atendimento_trecho?: TrechoAtendimento[] | null;
+  nota_atendimento_em?: string | null;
   time_interno?: boolean;
   ctwa_clid?: string | null;
   source_id?: string | null;
@@ -77,6 +127,13 @@ type CrmLead = {
   whatsapp_last_message_text?: string | null;
   whatsapp_last_direction?: 'in' | 'out' | null;
   updated_at?: string | null;
+  /** Quem cuida do lead. Definido à mão (`responsavel_manual`) vence a integração. */
+  responsavel?: string | null;
+  responsavel_manual?: boolean;
+  /** 'HH:MM' — separado de `data_agendada` (DATE) de propósito; ver crm-eventos.ts. */
+  hora_agendada?: string | null;
+  proxima_acao?: string | null;
+  proxima_acao_em?: string | null;
   created_at: string | null;
 };
 
@@ -85,12 +142,11 @@ type Draft = Partial<Omit<CrmLead, 'id' | 'client_id' | 'created_at'>>;
 type CrmFunnel = { id: string; name: string; created_at: string };
 type CrmStage  = { id: string; label: string; color: string; position: number; etapa_funil?: EtapaFunil | null; situacao?: SituacaoStage | null };
 type LocalStage = CrmStage & { _isNew?: boolean };
-type CrmTab = 'leads' | 'chat' | 'followup' | 'attendance' | 'disparos' | 'ads';
+type CrmTab = 'leads' | 'chat' | 'followup' | 'attendance' | 'disparos' | 'ads' | 'resultados' | 'equipe';
 // ⚠️ 'capture' saiu daqui: Fontes de Captura virou sub-aba de Integrações do
 // cliente (`?tab=rastreio&sub=captura`), junto das demais integrações. Quem
 // tiver 'capture' salvo no localStorage cai no fallback 'leads'.
-const ABAS_CRM = ['leads', 'chat', 'followup', 'attendance', 'disparos', 'ads'] as const;
-const VISOES_CRM = ['list', 'kanban'] as const;
+const ABAS_CRM = ['leads', 'chat', 'followup', 'attendance', 'disparos', 'ads', 'resultados', 'equipe'] as const;
 type DatePreset = 'all' | 'today' | 'yesterday' | 'last7' | 'last15' | 'last14' | 'last30' | 'last90' | 'thisMonth' | 'lastMonth' | 'thisYear' | 'custom';
 
 type AttendanceMetrics = {
@@ -108,6 +164,29 @@ type AttendanceMetrics = {
     under_60: number;
     over_60: number;
   };
+  /** Mesmo recorte, janela anterior de igual duração. Null em "todo o período". */
+  previous?: AttendanceMetrics['summary'] | null;
+  previousPeriod?: { from: string; to: string } | null;
+  /** Estado de cada conversa — partição, soma = total de leads. */
+  classification?: {
+    encerrado: number; sem_conversa: number; sem_resposta: number;
+    aguardando_retorno: number; em_atendimento: number;
+  };
+  /** Últimos 7 dias, medidos de `crm_messages` em BRT. */
+  daily?: Array<{ dia: string; avg_response_seconds: number | null; respostas: number; sem_resposta: number }>;
+  /** Só quem enviou PELA TELA tem autoria; follow-up/disparo/webhook ficam fora. */
+  atendentes?: Array<{
+    autor_nome: string; enviadas: number; leads_atendidos: number; respostas: number;
+    avg_response_seconds: number | null; ate_5min: number; mais_1h: number;
+  }>;
+  motivosPerda?: Array<{ motivo: string | null; total: number; detalhes: string[] }>;
+  perdidosSemMotivo?: number;
+  /** Mensagem nossa após ≥48h de silêncio, e quantas trouxeram resposta. */
+  retomada?: { enviadas: number; responderam: number };
+  /** Últimos 6 meses, pelo mês da MENSAGEM (não do lead). */
+  mensal?: MesAtendimento[];
+  /** Quem tentamos alcançar no período e quantas tentativas (dias) fizemos. */
+  tentativas?: TentativasContato | null;
   sources: Array<{ canal: string | null; total: number }>;
   waiting: Array<{
     id: string;
@@ -123,34 +202,8 @@ type AttendanceMetrics = {
 
 // "Comprou" saiu (fundido em "Fechado" — um ganho só; ver crm-saneamento.ts).
 const STATUS_OPTIONS = ['Em Atendimento', 'Agendado', 'Reagendado', 'Fechado', 'Paciente', 'Não Retorna', 'Distante', 'Sem Interesse', 'Desqualificado'];
-const CANAL_OPTIONS  = ['Whatsapp', 'Facebook', 'Instagram', 'Google', 'WHATS PRINCIPAL', 'FACHADA', 'Indicação', 'Site', 'TikTok', 'YouTube', 'Outro'];
-const PAGAMENTO_OPTIONS = ['Boleto', 'Cartão', 'PIX', 'Dinheiro', 'Financiamento'];
 
-const STATUS_BADGE: Record<string, string> = {
-  'Em Atendimento': 'bg-sky-100 text-sky-900',
-  'Agendado':       'bg-blue-700 text-white',
-  'Reagendado':     'bg-sky-200 text-blue-800',
-  'Fechado':         'bg-emerald-700 text-white',
-  'Comprou':         'bg-emerald-700 text-white',
-  'Paciente':        'bg-zinc-200 text-zinc-800',
-  'Não Retorna':    'bg-zinc-700 text-white',
-  'Distante':       'bg-orange-500 text-black',
-  'Sem Interesse':  'bg-red-700 text-white',
-  'Desqualificado': 'bg-red-700 text-white',
-};
 
-const STATUS_COLOR: Record<string, string> = {
-  'Em Atendimento': 'text-sky-300',
-  'Agendado':       'text-blue-400',
-  'Reagendado':     'text-sky-300',
-  'Fechado':         'text-emerald-400',
-  'Comprou':         'text-emerald-400',
-  'Paciente':        'text-zinc-300',
-  'Não Retorna':    'text-zinc-300',
-  'Distante':       'text-orange-400',
-  'Sem Interesse':  'text-red-400',
-  'Desqualificado': 'text-red-400',
-};
 
 const STATUS_KANBAN_COLOR: Record<string, string> = {
   'Em Atendimento': '#0ea5e9',
@@ -231,14 +284,6 @@ const CHANNEL_MATCHES: ChannelMatch[] = [
   { id: 'youtube',   label: 'YouTube',   bg: 'bg-red-600',   icon: <IconText value="yt" />, keywords: ['youtube', 'you tube'] },
 ];
 
-function freshDraft(): Draft {
-  return {
-    data: new Date().toISOString().split('T')[0],
-    status: 'Em Atendimento',
-    dia1: false, dia2: false, dia3: false, dia4: false,
-    video_dra: false, compareceu: false, fechou: false, analise_credito: false,
-  };
-}
 
 function toD(v: string | null | undefined) { return v ? String(v).split('T')[0] : ''; }
 function monthFromDate(v: string | null | undefined) { return toD(v).slice(0, 7); }
@@ -332,7 +377,6 @@ function fmtN(v: number | string | null) {
   const value = toMoneyNumber(v);
   return value ? formatCurrencyBRL(value) : '';
 }
-function plain(v: unknown) { return String(v ?? '').toLowerCase(); }
 function normalizeChannelText(v: string) {
   return v
     .toLowerCase()
@@ -417,6 +461,25 @@ function trackingRows(lead: CrmLead) {
     ['Primeira captura', lead.first_origin_at ? fmtD(lead.first_origin_at) : null],
   ] as const;
 }
+/**
+ * O valor que o Kanban mostra para um lead.
+ *
+ * ⚠️ São DOIS campos de propósito, e misturá-los no banco já inflou a dashboard
+ * da Incorpast em agosto: `valor_rs` é receita de venda FECHADA (o sistema todo
+ * lê "tem valor_rs = vendeu") e `valor_negocio` é a estimativa do negócio em
+ * ABERTO. Aqui eles só se encontram na EXIBIÇÃO: quem fechou mostra a receita,
+ * quem não fechou mostra a negociação. Como cada coluna do board é de um estado
+ * só, o total do cabeçalho nunca soma as duas coisas na mesma caixa — e é a
+ * própria coluna que diz qual dos dois é, sem precisar de símbolo no número.
+ * ⚠️ Nada de prefixo ("~", "≈"): num valor em reais isso é lido como desconto
+ * ou débito, e oportunidade não é dívida.
+ */
+function valorDoLead(lead: CrmLead): { valor: number; emAberto: boolean } {
+  const receita = toMoneyNumber(lead.valor_rs);
+  if (lead.fechou || receita > 0) return { valor: receita, emAberto: false };
+  return { valor: toMoneyNumber(lead.valor_negocio), emAberto: true };
+}
+
 function inferLeadAiTag(lead: CrmLead) {
   const value = toMoneyNumber(lead.valor_rs);
   const text = normalizeChannelText([
@@ -436,14 +499,6 @@ function inferLeadAiTag(lead: CrmLead) {
   if (lead.analise_credito) return 'Análise de crédito';
   return 'IA: qualificar';
 }
-function dateText(v: string | null) {
-  const shortDate = fmtD(v);
-  const rawDate = toD(v);
-  return `${shortDate} ${rawDate}`.toLowerCase();
-}
-function moneyText(v: number | string | null) {
-  return `${v ?? ''} ${fmtN(v)}`.toLowerCase();
-}
 function temperatureBadgeClass(value: string | null | undefined) {
   return value ? TEMPERATURE_BADGE[value] ?? 'border-border bg-muted text-muted-foreground' : 'border-border bg-muted text-muted-foreground';
 }
@@ -459,63 +514,14 @@ function relativeAnalysisTime(iso: string | null | undefined) {
   return `Última análise há ${Math.floor(hours / 24)}d`;
 }
 
-function columnValueText(lead: CrmLead, key: ColumnKey) {
-  switch (key) {
-    case 'select':
-    case 'actions':
-      return '';
-    case 'data':
-    case 'last_contact_at':
-    case 'data_agendada':
-      return dateText(lead[key] ?? null);
-    case 'valor_rs':
-    case 'orcamento':
-      return moneyText(lead[key]);
-    case 'dia1':
-    case 'dia2':
-    case 'dia3':
-    case 'dia4':
-    case 'fechou':
-      return lead[key] ? 'sim true fechado marcado' : 'nao não false';
-    default:
-      return plain(lead[key]);
-  }
-}
-
-function passesColumnFilter(lead: CrmLead, key: ColumnKey, value: string) {
-  if (!value) return true;
-  if (key === 'temperatura') {
-    return value === 'sem' ? !lead.temperatura : lead.temperatura === value;
-  }
-  if (['dia1', 'dia2', 'dia3', 'dia4', 'fechou'].includes(key)) {
-    return value === 'yes' ? Boolean(lead[key as 'fechou']) : !lead[key as 'fechou'];
-  }
-  return columnValueText(lead, key).includes(value.toLowerCase());
-}
-
-function sortValue(lead: CrmLead, key: SortableColumnKey): string | number | boolean | null {
-  if (key === 'data' || key === 'data_agendada' || key === 'last_contact_at') {
-    const raw = lead[key];
-    if (!raw) return null;
-    const time = new Date(raw).getTime();
-    return Number.isFinite(time) ? time : null;
-  }
-  if (key === 'valor_rs' || key === 'orcamento') return toMoneyNumber(lead[key]);
-  if (key === 'dia1' || key === 'dia2' || key === 'dia3' || key === 'dia4' || key === 'fechou') return Boolean(lead[key]);
-  if (key === 'temperatura') {
-    const order: Record<string, number> = { quente: 0, morno: 1, frio: 2 };
-    return lead.temperatura ? order[lead.temperatura] ?? 3 : 4;
-  }
-  return columnValueText(lead, key);
-}
-
-function compareSortValues(a: string | number | boolean | null, b: string | number | boolean | null) {
-  if (a === null && b === null) return 0;
-  if (a === null) return 1;
-  if (b === null) return -1;
-  if (typeof a === 'number' && typeof b === 'number') return a - b;
-  if (typeof a === 'boolean' && typeof b === 'boolean') return Number(a) - Number(b);
-  return String(a).localeCompare(String(b), 'pt-BR', { numeric: true, sensitivity: 'base' });
+/** Mais recente primeiro (lead sem data no topo, como sempre foi). */
+function ordemPorData(a: CrmLead, b: CrmLead): number {
+  const t = (l: CrmLead) => { const x = l.data ? new Date(l.data).getTime() : NaN; return Number.isFinite(x) ? x : null; };
+  const ta = t(a), tb = t(b);
+  if (ta === null && tb === null) return 0;
+  if (ta === null) return -1;
+  if (tb === null) return 1;
+  return tb - ta;
 }
 
 /**
@@ -561,6 +567,64 @@ function RespostasFormulario({ leadId }: { leadId: string }) {
           ))}
         </div>
       ))}
+    </div>
+  );
+}
+
+// Nota 0–5 do atendimento do lead, dada pela rotina diária lendo a conversa.
+// Vermelho até 1, laranja 2, âmbar 3, verde 4–5: os ruins saltam no board.
+function notaClasse(n: number) {
+  return n <= 1 ? 'bg-red-500/15 text-red-400 ring-red-500/30'
+    : n === 2 ? 'bg-orange-500/15 text-orange-400 ring-orange-500/30'
+    : n === 3 ? 'bg-amber-500/15 text-amber-300 ring-amber-500/30'
+    : 'bg-emerald-500/15 text-emerald-400 ring-emerald-500/30';
+}
+
+function temNota(lead: CrmLead): lead is CrmLead & { nota_atendimento: number } {
+  return typeof lead.nota_atendimento === 'number' && lead.nota_atendimento >= 0 && lead.nota_atendimento <= 5;
+}
+
+function NotaAtendimentoBadge({ lead }: { lead: CrmLead }) {
+  if (!temNota(lead)) return null;
+  const n = lead.nota_atendimento;
+  return (
+    <span
+      title={`Atendimento ${n}/5${lead.nota_atendimento_motivo ? ` — ${lead.nota_atendimento_motivo}` : ''}`}
+      className={cn('inline-flex shrink-0 items-center gap-0.5 rounded px-1 py-px text-[10px] font-bold leading-tight ring-1 ring-inset', notaClasse(n))}
+    >
+      <Star className="h-2.5 w-2.5 fill-current" />{n}/5
+    </span>
+  );
+}
+
+function NotaAtendimentoPanel({ lead }: { lead: CrmLead }) {
+  if (!temNota(lead)) return null;
+  const n = lead.nota_atendimento;
+  return (
+    <div className="rounded-lg border border-border bg-background/50 p-3">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Nota do atendimento</p>
+        <span className={cn('inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs font-bold ring-1 ring-inset', notaClasse(n))}>
+          <Star className="h-3 w-3 fill-current" />{n} de 5
+        </span>
+      </div>
+      {lead.nota_atendimento_motivo && <p className="mt-2 text-xs text-foreground/85"><span className="font-semibold">Por quê:</span> {lead.nota_atendimento_motivo}</p>}
+      {lead.nota_atendimento_ajuste && <p className="mt-1 text-xs text-foreground/85"><span className="font-semibold text-primary">Ajuste:</span> {lead.nota_atendimento_ajuste}</p>}
+      {!!lead.nota_atendimento_trecho?.length && (
+        <div className="mt-2 space-y-1 rounded border border-border/60 bg-card p-2">
+          {lead.nota_atendimento_trecho.map((m, i) => (
+            <div key={i} className={cn('flex', m.d === 'out' ? 'justify-end' : 'justify-start')}>
+              <div className={cn('max-w-[85%] rounded-md px-2 py-1 text-[11px] leading-snug', m.d === 'out' ? 'bg-primary/15 text-foreground' : 'bg-muted text-foreground')}>
+                <span className="whitespace-pre-wrap break-words">{m.t || '[sem texto]'}</span>
+                <span className="ml-1.5 text-[9px] text-muted-foreground">{new Date(m.em).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      {lead.nota_atendimento_em && (
+        <p className="mt-1 text-[10px] text-muted-foreground">Avaliado em {new Date(lead.nota_atendimento_em).toLocaleDateString('pt-BR')} pela rotina diária</p>
+      )}
     </div>
   );
 }
@@ -617,44 +681,6 @@ function TrackingSourcePanel({ lead }: { lead: CrmLead }) {
   );
 }
 
-const cell    = 'px-2 py-0 h-9 text-xs focus:outline-none focus:bg-primary/10 bg-transparent border-0 w-full text-foreground placeholder:text-muted-foreground/30';
-const cellSel = cn(cell, 'cursor-pointer appearance-none');
-const cellNew = 'px-2 py-0 h-9 text-xs focus:outline-none focus:bg-primary/10 bg-transparent border-0 w-full text-foreground placeholder:text-muted-foreground/50';
-
-const COLS = [
-  { key: 'select', label: '', width: 44, min: 40, filter: 'none' },
-  { key: 'data', label: 'Data', width: 110, min: 96, filter: 'text' },
-  { key: 'nome', label: 'Nome', width: 170, min: 120, filter: 'text' },
-  { key: 'numero', label: 'Número', width: 120, min: 96, filter: 'text' },
-  { key: 'last_contact_at', label: 'Últ. contato', width: 125, min: 110, filter: 'text' },
-  { key: 'canal', label: 'Canal', width: 120, min: 90, filter: 'text' },
-  { key: 'status', label: 'Status', width: 150, min: 120, filter: 'select' },
-  { key: 'qualificado', label: 'MQL', width: 60, min: 52, filter: 'boolean' },
-  { key: 'temperatura', label: 'Temp.', width: 115, min: 94, filter: 'select' },
-  { key: 'dia1', label: '1D', width: 46, min: 40, filter: 'boolean' },
-  { key: 'dia2', label: '2D', width: 46, min: 40, filter: 'boolean' },
-  { key: 'dia3', label: '3D', width: 46, min: 40, filter: 'boolean' },
-  { key: 'dia4', label: '4D', width: 46, min: 40, filter: 'boolean' },
-  { key: 'data_agendada', label: 'Data Ag.', width: 110, min: 96, filter: 'text' },
-  { key: 'fechou', label: 'Fechou', width: 70, min: 56, filter: 'boolean' },
-  { key: 'valor_rs', label: 'Valor R$', width: 130, min: 110, filter: 'text' },
-  { key: 'pagamento', label: 'Pagamento', width: 120, min: 100, filter: 'select' },
-  { key: 'orcamento', label: 'Orçamento', width: 130, min: 110, filter: 'text' },
-  { key: 'observacao', label: 'Observação', width: 240, min: 150, filter: 'text' },
-  { key: 'bairro', label: 'Bairro', width: 130, min: 100, filter: 'text' },
-  { key: 'actions', label: '', width: 48, min: 44, filter: 'none' },
-] as const;
-type ColumnKey = typeof COLS[number]['key'];
-type ColumnFilterKind = typeof COLS[number]['filter'];
-type SortableColumnKey = Exclude<ColumnKey, 'select' | 'actions'>;
-type SortDirection = 'asc' | 'desc';
-
-const DEFAULT_COL_WIDTHS = COLS.reduce<Record<ColumnKey, number>>((acc, col) => {
-  acc[col.key] = col.width;
-  return acc;
-}, {} as Record<ColumnKey, number>);
-const LOCKED_COLUMNS: ColumnKey[] = ['select', 'data', 'nome', 'numero', 'last_contact_at', 'actions'];
-const DEFAULT_VISIBLE_COLUMNS = COLS.map(col => col.key);
 
 // ── Styled select with icon ──────────────────────────────────────────────
 function IconSelect({ icon: Icon, value, onChange, placeholder, children, className }: {
@@ -749,7 +775,7 @@ function ChatPreviewPanel({ leadId, onOpenChat }: { leadId: string; onOpenChat: 
 }
 
 function QuickEditModal({
-  lead, onSave, onClose, onDelete, statusOptions, onOpenChat, clientId,
+  lead, onSave, onClose, onDelete, statusOptions, onOpenChat, clientId, tags = [], onSetTags, onConfigurarTags,
 }: {
   lead: CrmLead;
   onSave: (data: Draft) => Promise<void>;
@@ -758,6 +784,10 @@ function QuickEditModal({
   statusOptions: string[];
   onOpenChat: (leadId: string) => void;
   clientId?: string;
+  tags?: CrmTag[];
+  /** Tag grava na hora (não espera o Salvar): é marcação, não edição de cadastro. */
+  onSetTags?: (lead: CrmLead, tagIds: string[]) => void;
+  onConfigurarTags?: () => void;
 }) {
   // Conversa ao lado do formulário — some em telas estreitas (aí vale o preview
   // + "ver conversa completa", que continua levando pro inbox).
@@ -768,11 +798,13 @@ function QuickEditModal({
   const [, setNowTick] = useState(0);
   const [dealCheck, setDealCheck] = useState<'idle' | 'checking' | 'found' | 'empty'>('idle');
   const [dealSuggestion, setDealSuggestion] = useState<{ valor: number; trecho: string | null } | null>(null);
+  const modoCliente = useModoCliente();
   function set<K extends keyof Draft>(k: K, v: Draft[K]) { setDraft(prev => ({ ...prev, [k]: v })); }
 
   function toggleFechou(checked: boolean) {
     set('fechou', checked);
-    if (checked && !lead.fechou) {
+    // A sugestão de valor lê a conversa com IA (custo) — fica com a agência.
+    if (checked && !lead.fechou && !modoCliente) {
       setDealCheck('checking');
       setDealSuggestion(null);
       fetch(`/api/crm/${lead.id}/extract-value`, { method: 'POST' })
@@ -789,6 +821,7 @@ function QuickEditModal({
   }
 
   useEffect(() => {
+    if (modoCliente) return;
     fetch(`/api/crm/ai/lead/${lead.id}`)
       .then(r => r.ok ? r.json() : null)
       .then((data: { last?: { motivo_ia?: string; created_at?: string; confianca?: number } } | null) => {
@@ -799,7 +832,7 @@ function QuickEditModal({
         });
       })
       .catch(() => {});
-  }, [lead.id]);
+  }, [lead.id, modoCliente]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNowTick(v => v + 1), 60_000);
@@ -854,11 +887,12 @@ function QuickEditModal({
           </div>
           <div className="grid grid-cols-2 gap-3">
             <label className="space-y-1">
-              <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Canal</span>
+              <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Origem</span>
+              {/* Valor fora da lista (vindo de integração) aparece como opção em vez de "—". */}
               <select value={draft.canal ?? ''} onChange={e => set('canal', e.target.value || null)}
                 className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary">
                 <option value="">—</option>
-                {CANAL_OPTIONS.map(o => <option key={o}>{o}</option>)}
+                {opcoesDeOrigem(draft.canal).map(o => <option key={o}>{o}</option>)}
               </select>
             </label>
             <label className="space-y-1">
@@ -869,7 +903,29 @@ function QuickEditModal({
               </select>
             </label>
           </div>
-          <TrackingSourcePanel lead={lead} />
+          {onSetTags && (
+            <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-background/50 px-3 py-2">
+              <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Tags</span>
+              <TagChips tags={draft.tags} max={8} tamanho="sm" />
+              {!(draft.tags ?? []).length && <span className="text-xs text-muted-foreground">Nenhuma</span>}
+              <BotaoTags
+                compacto={false}
+                alinhar="left"
+                className="ml-auto"
+                tags={tags}
+                selecionadas={(draft.tags ?? []).map(t => t.id)}
+                onChange={ids => { set('tags', tags.filter(t => ids.includes(t.id))); onSetTags(lead, ids); }}
+                onConfigurar={onConfigurarTags}
+              />
+            </div>
+          )}
+          <CamposAtendimento
+            draft={draft}
+            set={(k, v) => set(k as keyof Draft, v as never)}
+            clientId={clientId}
+          />
+          {!modoCliente && <NotaAtendimentoPanel lead={lead} />}
+          {!modoCliente && <TrackingSourcePanel lead={lead} />}
           <RespostasFormulario leadId={lead.id} />
           <div className={cn(showChat && 'lg:hidden')}>
             <ChatPreviewPanel leadId={lead.id} onOpenChat={() => { onOpenChat(lead.id); onClose(); }} />
@@ -881,11 +937,20 @@ function QuickEditModal({
                 onChange={e => set('valor_rs', e.target.value ? parseFloat(e.target.value) : null)}
                 className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary" />
             </label>
+            {/* Data de ENTRADA do lead: mexer nela desloca o lead entre meses nos
+                relatórios. Para quem atende, só leitura. */}
+            {modoCliente ? (
+              <div className="space-y-1">
+                <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Entrou em</span>
+                <p className="px-1 py-2 text-sm text-muted-foreground">{fmtD(draft.data ?? lead.created_at)}</p>
+              </div>
+            ) : (
             <label className="space-y-1">
               <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Data</span>
               <input type="date" value={toD(draft.data)} onChange={e => set('data', e.target.value || null)}
                 className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary" />
             </label>
+            )}
           </div>
           <label className="flex items-center gap-3 cursor-pointer py-1">
             <input type="checkbox" checked={!!draft.fechou} onChange={e => toggleFechou(e.target.checked)} className="h-4 w-4 accent-primary" />
@@ -925,6 +990,7 @@ function QuickEditModal({
               IA não conseguiu identificar um valor na conversa — preencha manualmente.
             </div>
           )}
+          {!modoCliente && (
           <div className="rounded-lg border border-border bg-background/50 p-3 space-y-3">
             <div className="flex items-center justify-between gap-3">
               <div>
@@ -967,6 +1033,7 @@ function QuickEditModal({
               </span>
             </label>
           </div>
+          )}
           <label className="space-y-1">
             <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Observação</span>
             <div className="relative">
@@ -975,6 +1042,7 @@ function QuickEditModal({
               <DictateButton className="absolute bottom-2 right-2" onTranscript={(text) => set('observacao', draft.observacao ? `${draft.observacao} ${text}` : text)} />
             </div>
           </label>
+          <HistoricoLead leadId={lead.id} />
         </div>
         {showChat && (
           <div className="hidden lg:flex flex-1 min-w-0">
@@ -1007,7 +1075,7 @@ function QuickEditModal({
 
 // ── Kanban Card (draggable) ──────────────────────────────────────────────────
 function KanbanCard({
-  lead, onEdit, onDelete, onToggleInternal, onToggleQualificado, isDragOverlay, hasActiveFollowup,
+  lead, onEdit, onDelete, onToggleInternal, onToggleQualificado, isDragOverlay, hasActiveFollowup, tags = [], onSetTags, onConfigurarTags,
 }: {
   lead: CrmLead;
   onEdit: (lead: CrmLead) => void;
@@ -1016,6 +1084,9 @@ function KanbanCard({
   onToggleQualificado: (lead: CrmLead) => void;
   isDragOverlay?: boolean;
   hasActiveFollowup?: boolean;
+  tags?: CrmTag[];
+  onSetTags?: (lead: CrmLead, tagIds: string[]) => void;
+  onConfigurarTags?: () => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: lead.id });
   const [menuOpen, setMenuOpen] = useState(false);
@@ -1024,7 +1095,10 @@ function KanbanCard({
   const origin = leadOriginPreview(lead);
   const aiTag = inferLeadAiTag(lead);
   const trackingStatus = leadTrackingStatus(lead);
-  const value = toMoneyNumber(lead.valor_rs);
+  const { valor: value, emAberto: valorEmAberto } = valorDoLead(lead);
+  const modoCliente = useModoCliente();
+  const agenda = rotuloAgenda(lead);
+  const acao = rotuloProximaAcao(lead);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -1059,10 +1133,11 @@ function KanbanCard({
       )}
     >
       {/* Ações (aparecem no hover, sobrepostas — não gastam altura) */}
-      <div className="absolute right-1 top-1 z-10 flex items-center gap-0.5 rounded-md bg-card/95 opacity-0 group-hover:opacity-100 transition-opacity">
+      {/* max-md: no celular não existe hover — as ações ficam sempre visíveis. */}
+      <div className="absolute right-1 top-1 z-10 flex items-center gap-0.5 rounded-md bg-card/95 opacity-0 group-hover:opacity-100 max-md:opacity-100 transition-opacity">
         <button
           type="button"
-          title={lead.qualificado ? 'Desmarcar como qualificado' : 'Marcar como QUALIFICADO (vai para o Meta otimizar)'}
+          title={lead.qualificado ? 'Desmarcar como qualificado' : modoCliente ? 'Marcar como qualificado' : 'Marcar como QUALIFICADO (vai para o Meta otimizar)'}
           onPointerDown={e => e.stopPropagation()}
           onClick={e => { e.stopPropagation(); onToggleQualificado(lead); }}
           className={cn(
@@ -1074,6 +1149,7 @@ function KanbanCard({
         >
           <BadgeCheck className="h-3 w-3" />
         </button>
+        {!modoCliente && (
         <button
           type="button"
           title={lead.time_interno ? 'Remover de time interno' : 'Marcar como time interno'}
@@ -1086,6 +1162,15 @@ function KanbanCard({
         >
           <UserRound className="h-3 w-3" />
         </button>
+        )}
+        {onSetTags && (
+          <BotaoTags
+            tags={tags}
+            selecionadas={(lead.tags ?? []).map(t => t.id)}
+            onChange={ids => onSetTags(lead, ids)}
+            onConfigurar={onConfigurarTags}
+          />
+        )}
         <div className="relative" ref={menuRef}>
           <button
             onPointerDown={e => e.stopPropagation()}
@@ -1112,8 +1197,19 @@ function KanbanCard({
       {/* Linha 1: nome + valor */}
       <div className="flex items-center gap-1.5">
         <p className="min-w-0 flex-1 truncate text-[13px] font-semibold text-foreground">{lead.nome ?? lead.numero ?? '—'}</p>
-        {value > 0 && <span className="shrink-0 text-[10px] font-bold text-primary">{fmtN(lead.valor_rs)}</span>}
+        {!modoCliente && <NotaAtendimentoBadge lead={lead} />}
+        {value > 0 && (
+          <span
+            title={valorEmAberto ? 'Em negociação (ainda não fechado)' : 'Venda fechada'}
+            className={cn('shrink-0 text-[10px] font-bold', valorEmAberto ? 'text-foreground/55' : 'text-primary')}
+          >
+            {fmtN(value)}
+          </span>
+        )}
       </div>
+
+      {/* Tags de qualificação, coladas no nome (pedido: "bem perto do nome") */}
+      <TagChips tags={lead.tags} className="mt-0.5" />
 
       {/* Linha 2: número + data */}
       <div className="mt-0.5 flex items-center justify-between gap-2">
@@ -1128,16 +1224,25 @@ function KanbanCard({
             {ch.icon}
           </span>
         ))}
+        {/* Rastreio de anúncio e o rótulo "IA" são leitura da agência; para quem
+            atende, o card mostra agenda, próxima ação e responsável. */}
+        {!modoCliente && (
         <span
           className={cn('inline-flex shrink-0 rounded px-1 py-px text-[9px] font-bold leading-tight opacity-80', trackingStatus.className)}
           title={`${trackingStatus.label}: ${trackingStatus.detail}`}
         >
           {trackingShort}
         </span>
+        )}
+        {!modoCliente && (
         <span className="inline-flex min-w-0 items-center gap-0.5 truncate rounded bg-primary/5 px-1 py-px text-[9px] font-semibold leading-tight text-primary/75" title={aiTag}>
           <Sparkles className="h-2 w-2 shrink-0" />
           <span className="truncate">{aiTag}</span>
         </span>
+        )}
+        {modoCliente && lead.canal && (
+          <span className="min-w-0 truncate text-[9px] text-muted-foreground">{lead.canal}</span>
+        )}
         <div className="ml-auto flex shrink-0 items-center gap-1">
           {lead.time_interno && (
             <span className="rounded bg-zinc-500/15 px-1 py-px text-[9px] font-bold leading-tight text-zinc-300/80">Interno</span>
@@ -1148,13 +1253,85 @@ function KanbanCard({
           )}
         </div>
       </div>
+
+      {/* Linha 4 (só quando há): agenda, próxima ação e responsável */}
+      {(agenda || acao || lead.responsavel) && (
+        <div className="mt-1 flex items-center gap-1 overflow-hidden">
+          {agenda && (
+            <span className={cn('inline-flex shrink-0 items-center gap-0.5 rounded px-1 py-px text-[9px] font-bold leading-tight', agenda.classe)} title={agenda.titulo}>
+              <CalendarDays className="h-2.5 w-2.5" />{agenda.texto}
+            </span>
+          )}
+          {acao && (
+            <span className={cn('inline-flex min-w-0 items-center gap-0.5 truncate rounded px-1 py-px text-[9px] font-semibold leading-tight', acao.classe)} title={acao.titulo}>
+              <Clock3 className="h-2.5 w-2.5 shrink-0" /><span className="truncate">{acao.texto}</span>
+            </span>
+          )}
+          {lead.responsavel && (
+            <span className="ml-auto flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-sky-500/20 px-1 text-[8px] font-bold text-sky-200" title={`Responsável: ${lead.responsavel}`}>
+              {iniciais(lead.responsavel)}
+            </span>
+          )}
+        </div>
+      )}
     </div>
   );
 }
 
+const semAcentoMin = (t: string) => t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+
+/** Atalhos da barra: "Meus leads", "Agenda de hoje" e "Ações atrasadas". */
+function passaAtalho(l: CrmLead, atalho: 'meus' | 'hoje' | 'atrasados', meuNome: string): boolean {
+  if (atalho === 'meus') return !!meuNome && !!l.responsavel && semAcentoMin(l.responsavel) === semAcentoMin(meuNome);
+  if (atalho === 'hoje') return !!l.data_agendada && String(l.data_agendada).slice(0, 10) === diaLocal(new Date());
+  return !!l.proxima_acao_em && new Date(l.proxima_acao_em).getTime() < Date.now();
+}
+
+function iniciais(nome: string): string {
+  const partes = nome.trim().split(/\s+/).filter(Boolean);
+  return ((partes[0]?.[0] ?? '') + (partes.length > 1 ? partes[partes.length - 1][0] : '')).toUpperCase() || '?';
+}
+
+function diaLocal(d: Date): string {
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+/** Agendamento no card: hoje/amanhã por extenso, passado sem "compareceu" em âmbar. */
+function rotuloAgenda(lead: CrmLead): { texto: string; titulo: string; classe: string } | null {
+  if (!lead.data_agendada) return null;
+  const dia = String(lead.data_agendada).slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dia)) return null;
+  const hoje = diaLocal(new Date());
+  const amanha = diaLocal(new Date(Date.now() + 86_400_000));
+  const hora = lead.hora_agendada ? ` ${lead.hora_agendada}` : '';
+  const texto = dia === hoje ? `Hoje${hora}` : dia === amanha ? `Amanhã${hora}` : `${dia.slice(8, 10)}/${dia.slice(5, 7)}${hora}`;
+  const passou = dia < hoje;
+  const classe = lead.compareceu ? 'bg-emerald-500/15 text-emerald-300'
+    : passou ? 'bg-amber-500/15 text-amber-300'
+    : dia === hoje ? 'bg-sky-500/25 text-sky-200'
+    : 'bg-sky-500/10 text-sky-300';
+  const titulo = lead.compareceu ? 'Compareceu' : passou ? 'Agendamento passou sem registro de comparecimento' : 'Agendado';
+  return { texto, titulo, classe };
+}
+
+function rotuloProximaAcao(lead: CrmLead): { texto: string; titulo: string; classe: string } | null {
+  if (!lead.proxima_acao && !lead.proxima_acao_em) return null;
+  const quando = lead.proxima_acao_em ? new Date(lead.proxima_acao_em) : null;
+  const atrasada = !!quando && quando.getTime() < Date.now();
+  const data = quando ? quando.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
+  return {
+    texto: atrasada ? `Atrasada · ${lead.proxima_acao ?? data}` : (lead.proxima_acao ?? data),
+    titulo: [lead.proxima_acao, data].filter(Boolean).join(' — '),
+    classe: atrasada ? 'bg-red-500/15 text-red-300' : 'bg-muted text-muted-foreground',
+  };
+}
+
 // ── Kanban Column (droppable) ────────────────────────────────────────────────
+const CARDS_POR_COLUNA = 50;
+
 function KanbanColumn({
-  status, color, leads, onEdit, onDelete, onToggleInternal, onToggleQualificado, activeLead, activeFollowupIds,
+  status, color, leads, onEdit, onDelete, onToggleInternal, onToggleQualificado, activeLead, activeFollowupIds, tags, onSetTags, onConfigurarTags,
 }: {
   status: string;
   color: string;
@@ -1165,14 +1342,24 @@ function KanbanColumn({
   onToggleQualificado: (lead: CrmLead) => void;
   activeLead: CrmLead | null;
   activeFollowupIds: Set<string>;
+  tags: CrmTag[];
+  onSetTags: (lead: CrmLead, tagIds: string[]) => void;
+  onConfigurarTags?: () => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: status });
-  const total = leads.reduce((s, l) => s + toMoneyNumber(l.valor_rs), 0);
+  // Receita quando a coluna é de ganho; negociação em aberto nas demais.
+  const total = leads.reduce((s, l) => s + valorDoLead(l).valor, 0);
+  const totalEmAberto = leads.every(l => valorDoLead(l).emAberto);
   // Etapa sem lead no período vira uma faixa de 44px: num funil de 10+ colunas
   // as vazias comiam a largura do board e empurravam pra fora da tela justo as
   // que têm lead. Clicar abre de novo — a coluna não some, só encolhe.
   const [expandida, setExpandida] = useState(false);
   const recolhida = leads.length === 0 && !expandida;
+  // ⚠️ Coluna com milhares de leads (Entrada da Atmos: 3.446) desenhava todos os
+  // cards, cada um arrastável — pegar um card fazia o dnd-kit mexer em milhares.
+  // Mostra 50 por vez; o número da coluna continua sendo o total.
+  const [limite, setLimite] = useState(CARDS_POR_COLUNA);
+  const visiveis = leads.length > limite ? leads.slice(0, limite) : leads;
 
   if (recolhida) {
     return (
@@ -1223,7 +1410,12 @@ function KanbanColumn({
               <ChevronLeft className="h-3.5 w-3.5" />
             </button>
           )}
-          <span className="ml-auto shrink-0 text-[10px] font-semibold text-muted-foreground">{total > 0 ? formatCurrencyBRL(total) : ''}</span>
+          <span
+            title={totalEmAberto ? 'Soma das negociações em aberto nesta etapa' : 'Soma das vendas fechadas nesta etapa'}
+            className="ml-auto shrink-0 text-[10px] font-semibold text-muted-foreground"
+          >
+            {total > 0 ? formatCurrencyBRL(total) : ''}
+          </span>
         </div>
       </div>
       <div
@@ -1233,7 +1425,7 @@ function KanbanColumn({
           isOver && "bg-primary/5 border-primary/30",
         )}
       >
-        {leads.map(lead => (
+        {visiveis.map(lead => (
           <KanbanCard
             key={lead.id}
             lead={lead}
@@ -1242,8 +1434,20 @@ function KanbanColumn({
             onToggleInternal={onToggleInternal}
             onToggleQualificado={onToggleQualificado}
             hasActiveFollowup={activeFollowupIds.has(lead.id)}
+            tags={tags}
+            onSetTags={onSetTags}
+            onConfigurarTags={onConfigurarTags}
           />
         ))}
+        {leads.length > visiveis.length && (
+          <button
+            type="button"
+            onClick={() => setLimite(v => v + CARDS_POR_COLUNA)}
+            className="shrink-0 rounded-md border border-dashed border-border px-2 py-1.5 text-[11px] font-semibold text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
+          >
+            Mostrar mais {Math.min(CARDS_POR_COLUNA, leads.length - visiveis.length)} · faltam {(leads.length - visiveis.length).toLocaleString('pt-BR')}
+          </button>
+        )}
         {leads.length === 0 && (
           <div className="flex items-center justify-center py-6">
             <p className="text-[10px] text-muted-foreground/40 italic">
@@ -1258,16 +1462,20 @@ function KanbanColumn({
 
 // ── Kanban View ──────────────────────────────────────────────────────────────
 function KanbanView({
-  leads, stages, onEdit, onDelete, onStatusChange, onToggleInternal, onToggleQualificado, activeFollowupIds,
+  leads, stages, onEdit, onDelete, onStatusChange, onToggleInternal, onToggleQualificado, activeFollowupIds, onArrasteMudou, tags, onSetTags, onConfigurarTags,
 }: {
   leads: CrmLead[];
   stages: CrmStage[];
+  onArrasteMudou?: (arrastando: boolean) => void;
   onEdit: (lead: CrmLead) => void;
   onDelete: (id: string) => void;
   onStatusChange: (id: string, status: string) => void;
   onToggleInternal: (lead: CrmLead) => void;
   onToggleQualificado: (lead: CrmLead) => void;
   activeFollowupIds: Set<string>;
+  tags: CrmTag[];
+  onSetTags: (lead: CrmLead, tagIds: string[]) => void;
+  onConfigurarTags?: () => void;
 }) {
   const [activeLead, setActiveLead] = useState<CrmLead | null>(null);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
@@ -1287,10 +1495,12 @@ function KanbanView({
   function handleDragStart(event: DragStartEvent) {
     const lead = leads.find(l => l.id === event.active.id);
     setActiveLead(lead ?? null);
+    onArrasteMudou?.(true);
   }
 
   function handleDragEnd(event: DragEndEvent) {
     setActiveLead(null);
+    onArrasteMudou?.(false);
     const { active, over } = event;
     if (!over || active.id === over.id) return;
     const targetStatus = String(over.id);
@@ -1300,7 +1510,8 @@ function KanbanView({
   }
 
   return (
-    <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+    <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}
+      onDragCancel={() => { setActiveLead(null); onArrasteMudou?.(false); }}>
       <div className="flex h-full min-h-0 flex-1 items-stretch gap-2.5 overflow-x-auto pb-1">
         {stages.map(stage => (
           <KanbanColumn
@@ -1314,6 +1525,9 @@ function KanbanView({
             onToggleQualificado={onToggleQualificado}
             activeLead={activeLead}
             activeFollowupIds={activeFollowupIds}
+            tags={tags}
+            onSetTags={onSetTags}
+            onConfigurarTags={onConfigurarTags}
           />
         ))}
       </div>
@@ -1361,7 +1575,11 @@ function AttendanceView({
   const [auditLoading, setAuditLoading] = useState(true);
   const [auditGenerating, setAuditGenerating] = useState(false);
   const [auditError, setAuditError] = useState<string | null>(null);
-  const [showAuditModal, setShowAuditModal] = useState(false);
+  const [historico, setHistorico] = useState<ItemHistoricoAuditoria[]>([]);
+  const [leadNomes, setLeadNomes] = useState<Record<string, string>>({});
+  // Gestor do CLIENTE vê a nota, a auditoria e exporta o PDF; gerar auditoria
+  // nova gasta IA e fica com a rotina da agência (a rota POST nem é liberada).
+  const somenteLeitura = useEhUsuarioCliente();
 
   useEffect(() => {
     const params = new URLSearchParams({ clientId });
@@ -1381,10 +1599,18 @@ function AttendanceView({
     setAuditLoading(true);
     fetch(`/api/crm/attendance/audit?${new URLSearchParams({ clientId })}`)
       .then(r => r.ok ? r.json() : { audit: null })
-      .then(json => setAudit(json.audit ?? null))
+      .then(json => {
+        setAudit(json.audit ?? null);
+        setHistorico(json.historico ?? []);
+        setLeadNomes(json.leadNomes ?? {});
+      })
       .catch(() => setAudit(null))
       .finally(() => setAuditLoading(false));
   }, [clientId]);
+
+  function irParaAuditoria() {
+    requestAnimationFrame(() => document.getElementById('auditoria-completa')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+  }
 
   async function generateAudit() {
     setAuditGenerating(true);
@@ -1402,7 +1628,9 @@ function AttendanceView({
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json.error ?? 'Erro ao gerar auditoria.');
       setAudit(json.audit);
-      setShowAuditModal(true);
+      setHistorico(json.historico ?? []);
+      setLeadNomes(json.leadNomes ?? {});
+      irParaAuditoria();
     } catch (err) {
       setAuditError(err instanceof Error ? err.message : 'Erro ao gerar auditoria.');
     } finally {
@@ -1418,7 +1646,12 @@ function AttendanceView({
     : 0;
   const slaRate = responseTotal > 0 ? Math.round((answeredUnderOneHour / responseTotal) * 100) : 0;
   const avgHours = summary?.avg_response_seconds ? Math.max(0.2, summary.avg_response_seconds / 3600) : 0;
-  const unanswered = summary?.unanswered_chats ?? 0;
+  // ⚠️ O card e o donut têm de mostrar o MESMO número. `unanswered_chats` conta
+  // toda conversa cuja última mensagem é do cliente — inclusive de quem já
+  // comprou ou já foi perdido, que não é pendência de ninguém. A classificação
+  // tira esses, e é ela que manda aqui. A TAXA de resposta segue usando o bruto:
+  // ali o que se mede é o atendimento, não a pendência em aberto.
+  const unanswered = data?.classification?.sem_resposta ?? summary?.unanswered_chats ?? 0;
   const totalLeads = summary?.total_leads ?? 0;
   const activeConversations = summary?.active_conversations ?? 0;
   // Real score comes from the AI audit (crm_attendance_audit) — no audit generated
@@ -1432,22 +1665,49 @@ function AttendanceView({
     { label: 'Até 1h', value: summary?.under_60 ?? 0, color: '#FACC15' },
     { label: '+1h', value: summary?.over_60 ?? 0, color: '#EF4444' },
   ];
-  const responseTrend = [0.65, 0.32, 0.44, 0.82, 0.9, 0.62, 0.52].map((factor, index) => ({
-    label: `${12 + index} Mai`,
-    value: Math.max(0.5, avgHours * (0.65 + factor)),
-  }));
-  const riskTrend = [0.78, 0.7, 1.08, 1.02, 0.82, 1.05, 0.92].map((factor, index) => ({
-    label: `${12 + index} Mai`,
-    value: Math.max(0, Math.round(unanswered * factor)),
-  }));
-  const followupRate = Math.max(0, Math.min(100, Math.round(responseRate * 0.72 + slaRate * 0.28)));
-  const classificationRows = [
-    { label: 'Novos', value: Math.max(0, totalLeads - activeConversations - unanswered), color: '#32E843' },
-    { label: 'Em atendimento', value: activeConversations, color: '#3B82F6' },
-    { label: 'Aguardando retorno', value: Math.max(0, Math.round(unanswered * 0.6)), color: '#FACC15' },
-    { label: 'Sem resposta', value: unanswered, color: '#EF4444' },
-    { label: 'Encerrados', value: Math.max(0, Math.round(totalLeads * 0.04)), color: '#8B5CF6' },
-  ];
+  // ⚠️ Estas séries e a classificação JÁ FORAM NÚMEROS INVENTADOS: fatores fixos
+  // multiplicando a média, datas "12 Mai" escritas no código e "Encerrados" como
+  // 4% do total. Agora vêm medidos de `crm_messages`; sem dado, a seção some em
+  // vez de desenhar uma linha bonita que ninguém pode conferir.
+  const diaCurto = (iso: string) => {
+    const [, m, d] = iso.split('-');
+    const meses = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
+    return `${d} ${meses[Number(m) - 1] ?? ''}`;
+  };
+  const daily = data?.daily ?? [];
+  const responseTrend = daily
+    .filter(d => d.avg_response_seconds !== null)
+    .map(d => ({ label: diaCurto(d.dia), value: (d.avg_response_seconds ?? 0) / 3600 }));
+  const riskTrend = daily.map(d => ({ label: diaCurto(d.dia), value: d.sem_resposta }));
+  const retomada = data?.retomada;
+  const followupRate = retomada && retomada.enviadas > 0
+    ? Math.round((retomada.responderam / retomada.enviadas) * 100)
+    : null;
+  // Variação REAL contra a janela anterior. Antes estes selos eram literais
+  // escritos no código ("+18% vs. período anterior"), independentes do dado.
+  const prev = data?.previous ?? null;
+  const variacao = (atual: number | null | undefined, anterior: number | null | undefined, menorEhMelhor = false) => {
+    if (atual == null || anterior == null || anterior <= 0) return null;
+    const pct = Math.round(((atual - anterior) / anterior) * 100);
+    if (pct === 0) return { texto: 'igual ao período anterior', bom: true };
+    const bom = menorEhMelhor ? pct < 0 : pct > 0;
+    return { texto: `${pct > 0 ? '+' : ''}${pct}% vs. período anterior`, bom };
+  };
+  const prevRespTotal = prev ? prev.under_5 + prev.under_15 + prev.under_60 + prev.over_60 : 0;
+  const prevResponseRate = prev && prevRespTotal + prev.unanswered_chats > 0
+    ? Math.round((prevRespTotal / (prevRespTotal + prev.unanswered_chats)) * 100) : null;
+  const varLeads = variacao(totalLeads, prev?.total_leads);
+  const varResposta = variacao(summary?.avg_response_seconds ?? null, prev?.avg_response_seconds ?? null, true);
+  const varTaxa = variacao(responseRate, prevResponseRate);
+  const varAtivas = variacao(activeConversations, prev?.active_conversations);
+  const cls = data?.classification;
+  const classificationRows = cls ? [
+    { label: 'Em atendimento', value: cls.em_atendimento, color: '#3B82F6', dica: DICAS_ATENDIMENTO.classEmAtendimento },
+    { label: 'Sem resposta', value: cls.sem_resposta, color: '#EF4444', dica: DICAS_ATENDIMENTO.classSemResposta },
+    { label: 'Aguardando retorno', value: cls.aguardando_retorno, color: '#FACC15', dica: DICAS_ATENDIMENTO.classAguardando },
+    { label: 'Encerrados', value: cls.encerrado, color: '#8B5CF6', dica: DICAS_ATENDIMENTO.classEncerrados },
+    { label: 'Sem conversa', value: cls.sem_conversa, color: '#52525B', dica: DICAS_ATENDIMENTO.classSemConversa },
+  ].filter(r => r.value > 0) : [];
   const classificationTotal = Math.max(1, classificationRows.reduce((sum, row) => sum + row.value, 0));
 
   function sparkPath(points: number[], width = 260, height = 70) {
@@ -1477,7 +1737,7 @@ function AttendanceView({
             <section className="relative overflow-hidden rounded-2xl border border-purple-500/35 bg-[radial-gradient(circle_at_70%_100%,rgba(139,92,246,0.28),transparent_45%),linear-gradient(135deg,rgba(139,92,246,0.24),rgba(13,21,25,0.96))] p-4 shadow-[0_0_38px_rgba(139,92,246,0.16)]">
               <div className="flex items-center justify-between">
                 <span className="flex items-center gap-2 text-sm font-semibold text-purple-200"><Sparkles className="h-4 w-4" /> Nota IA Atendimento</span>
-                <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] text-purple-100">i</span>
+                <InfoDica texto={DICAS_ATENDIMENTO.notaIa} className="text-purple-200 hover:text-white" />
               </div>
               <div className="mt-6 flex items-end gap-2">
                 <span className="font-heading text-5xl leading-none text-purple-400">{auditLoading ? '…' : aiScore ?? '—'}</span>
@@ -1485,55 +1745,80 @@ function AttendanceView({
                 <span className={cn('mb-2 rounded-lg px-2 py-1 text-xs font-bold', aiStatusTone)}>{aiStatus}</span>
               </div>
               <p className="mt-3 max-w-[210px] text-xs leading-relaxed text-zinc-300">
-                {audit ? `Última auditoria: ${new Date(audit.createdAt).toLocaleDateString('pt-BR')}` : 'Nenhuma auditoria gerada ainda para este período.'}
+                {audit
+                  ? `Última auditoria: ${new Date(audit.createdAt).toLocaleDateString('pt-BR')} · conversas de ${dataBR(audit.periodFrom)} a ${dataBR(audit.periodTo)}`
+                  : 'Nenhuma auditoria gerada ainda para este cliente.'}
               </p>
               <div className="relative z-10 mt-3 flex flex-wrap gap-2">
-                <button
+                {!somenteLeitura && <button
                   onClick={generateAudit}
                   disabled={auditGenerating}
                   className="rounded-lg border border-purple-400/40 bg-purple-500/20 px-2.5 py-1.5 text-[11px] font-semibold text-purple-100 transition-colors hover:bg-purple-500/30 disabled:opacity-60"
                 >
                   {auditGenerating ? 'Gerando…' : audit ? 'Gerar nova auditoria' : 'Gerar auditoria'}
-                </button>
+                </button>}
+                <a
+                  href={`/relatorio-atendimento?${new URLSearchParams({ clientId, ...(month ? { month } : {}), ...(!month && from ? { from } : {}), ...(!month && to ? { to } : {}) })}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title="Piores, intermediários e melhores atendimentos do período, com o trecho da conversa, o porquê e o ajuste — pronto para salvar em PDF"
+                  className="rounded-lg border border-emerald-400/40 bg-emerald-500/15 px-2.5 py-1.5 text-[11px] font-semibold text-emerald-100 transition-colors hover:bg-emerald-500/25"
+                >
+                  Relatório com prints (PDF)
+                </a>
                 {audit && (
                   <button
-                    onClick={() => setShowAuditModal(true)}
+                    onClick={irParaAuditoria}
                     className="rounded-lg border border-white/15 bg-white/5 px-2.5 py-1.5 text-[11px] font-semibold text-zinc-200 transition-colors hover:bg-white/10"
                   >
-                    Ver relatório completo
+                    Ver auditoria completa ↓
                   </button>
                 )}
               </div>
               {auditError && <p className="relative z-10 mt-2 max-w-[220px] text-[11px] text-red-300">{auditError}</p>}
-              <svg className="absolute bottom-0 left-0 h-16 w-full opacity-80" viewBox="0 0 260 70" preserveAspectRatio="none">
-                <path d={`${sparkPath([32, 40, 36, 48, 42, 54, 47], 260, 70)} L 260 70 L 0 70 Z`} fill="rgba(139,92,246,0.28)" />
-                <path d={sparkPath([32, 40, 36, 48, 42, 54, 47], 260, 70)} fill="none" stroke="#8B5CF6" strokeWidth="2.4" />
-              </svg>
+              {/* ⚠️ Esta linha era um desenho fixo no código ([32, 40, 36…]). Agora é a
+                  nota de cada auditoria do cliente; com menos de duas, não há linha. */}
+              {historico.length >= 2 && (
+                <svg className="absolute bottom-0 left-0 h-16 w-full opacity-80" viewBox="0 0 260 70" preserveAspectRatio="none">
+                  <path d={`${sparkPath(historico.map(h => h.nota), 260, 70)} L 260 70 L 0 70 Z`} fill="rgba(139,92,246,0.28)" />
+                  <path d={sparkPath(historico.map(h => h.nota), 260, 70)} fill="none" stroke="#8B5CF6" strokeWidth="2.4" />
+                </svg>
+              )}
             </section>
-            <AttendanceAuditModal open={showAuditModal} onOpenChange={setShowAuditModal} audit={audit} />
 
             {[
-              { label: 'Leads no período', value: totalLeads.toLocaleString('pt-BR'), sub: 'leads captados', badge: '+18% vs. período anterior', Icon: Users, tone: 'border-blue-500/20 bg-[#0D1519]', color: '#A78BFA', badgeTone: 'bg-blue-500/15 text-blue-300' },
-              { label: 'Sem resposta', value: unanswered.toLocaleString('pt-BR'), sub: 'leads aguardando retorno', badge: 'Risco alto de perda', Icon: Clock3, tone: 'border-red-500/25 bg-red-500/10', color: '#EF4444', badgeTone: 'bg-red-500/15 text-red-300' },
-              { label: 'Resposta média', value: formatDuration(summary.avg_response_seconds), sub: 'tempo médio', badge: '-18% vs. período anterior', Icon: Sparkles, tone: 'border-emerald-500/20 bg-emerald-500/10', color: '#32E843', badgeTone: 'bg-emerald-500/15 text-emerald-300' },
-              { label: 'Taxa de resposta', value: `${responseRate}%`, sub: 'das conversas', badge: '+12% vs. período anterior', Icon: BarChart3, tone: 'border-emerald-500/20 bg-[#0B1B15]', color: '#32E843', badgeTone: 'bg-emerald-500/15 text-emerald-300' },
-              { label: 'Conversas ativas', value: activeConversations.toLocaleString('pt-BR'), sub: 'ativas agora', badge: '+7% vs. agora há 24h', Icon: MessageCircle, tone: 'border-blue-500/20 bg-blue-500/10', color: '#3B82F6', badgeTone: 'bg-blue-500/15 text-blue-300' },
+              { label: 'Leads no período', dica: DICAS_ATENDIMENTO.leads, value: totalLeads.toLocaleString('pt-BR'), sub: 'leads captados', badge: varLeads?.texto ?? null, badgeBom: varLeads?.bom, Icon: Users, tone: 'border-blue-500/20 bg-[#0D1519]', color: '#A78BFA', badgeTone: 'bg-blue-500/15 text-blue-300' },
+              { label: 'Sem resposta', dica: DICAS_ATENDIMENTO.semResposta, value: unanswered.toLocaleString('pt-BR'), sub: 'leads aguardando retorno', badge: unanswered > 0 ? 'Risco alto de perda' : null, badgeBom: false, Icon: Clock3, tone: 'border-red-500/25 bg-red-500/10', color: '#EF4444', badgeTone: 'bg-red-500/15 text-red-300' },
+              { label: 'Resposta média', dica: DICAS_ATENDIMENTO.respostaMedia, value: formatDuration(summary.avg_response_seconds), sub: summary.avg_first_response_seconds ? `1ª resposta ao lead: ${formatDuration(summary.avg_first_response_seconds)}` : 'tempo médio', badge: varResposta?.texto ?? null, badgeBom: varResposta?.bom, Icon: Sparkles, tone: 'border-emerald-500/20 bg-emerald-500/10', color: '#32E843', badgeTone: 'bg-emerald-500/15 text-emerald-300' },
+              { label: 'Taxa de resposta', dica: DICAS_ATENDIMENTO.taxaResposta, value: `${responseRate}%`, sub: 'das conversas', badge: varTaxa?.texto ?? null, badgeBom: varTaxa?.bom, Icon: BarChart3, tone: 'border-emerald-500/20 bg-[#0B1B15]', color: '#32E843', badgeTone: 'bg-emerald-500/15 text-emerald-300' },
+              { label: 'Conversas ativas', dica: DICAS_ATENDIMENTO.conversasAtivas, value: activeConversations.toLocaleString('pt-BR'), sub: 'ativas agora', badge: varAtivas?.texto ?? null, badgeBom: varAtivas?.bom, Icon: MessageCircle, tone: 'border-blue-500/20 bg-blue-500/10', color: '#3B82F6', badgeTone: 'bg-blue-500/15 text-blue-300' },
             ].map(card => (
               <section key={card.label} className={cn('min-h-[178px] rounded-2xl border p-4 shadow-[0_18px_60px_rgba(0,0,0,0.22)]', card.tone)}>
                 <card.Icon className="mb-5 h-5 w-5" style={{ color: card.color }} />
-                <p className="text-sm font-semibold" style={{ color: card.color }}>{card.label}</p>
+                <p className="flex items-center gap-1.5 text-sm font-semibold" style={{ color: card.color }}>{card.label} <InfoDica texto={`${card.dica}\n\n${DICAS_ATENDIMENTO.variacao}`} /></p>
                 <p className="mt-5 font-heading text-4xl leading-none text-zinc-100">{card.value}</p>
                 <p className="mt-2 text-sm text-zinc-400">{card.sub}</p>
-                <span className={cn('mt-5 inline-flex rounded-lg px-2.5 py-1 text-xs font-semibold', card.badgeTone)}>{card.badge}</span>
+                {card.badge && (
+                  <span className={cn(
+                    'mt-5 inline-flex rounded-lg px-2.5 py-1 text-xs font-semibold',
+                    card.badgeBom === undefined ? card.badgeTone
+                      : card.badgeBom ? 'bg-emerald-500/15 text-emerald-300' : 'bg-red-500/15 text-red-300',
+                  )}>{card.badge}</span>
+                )}
               </section>
             ))}
+          </div>
+
+          <div className="grid min-w-0 gap-4 xl:grid-cols-[1.6fr_1fr]">
+            <EvolucaoMensal meses={data.mensal ?? []} />
+            <TentativasContatoCard t={data.tentativas ?? null} />
           </div>
 
           <div className="grid gap-4 xl:grid-cols-[1.5fr_0.78fr_0.98fr]">
             <section className="rounded-2xl border border-white/[0.08] bg-[#0D1519] p-5 shadow-[0_24px_70px_rgba(0,0,0,0.26)]">
               <div className="mb-5 flex items-start justify-between gap-3">
                 <div>
-                  <h3 className="text-base font-bold">Desempenho de resposta ao longo do tempo</h3>
+                  <h3 className="flex items-center gap-1.5 text-base font-bold">Desempenho de resposta ao longo do tempo <InfoDica texto={DICAS_ATENDIMENTO.desempenho} /></h3>
                   <div className="mt-4 flex items-center gap-5 text-xs text-zinc-400">
                     <span className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-sm bg-primary" /> Tempo médio de resposta</span>
                     <span className="flex items-center gap-2"><span className="h-px w-7 border-t border-dashed border-zinc-500" /> Meta</span>
@@ -1541,15 +1826,20 @@ function AttendanceView({
                 </div>
                 <span className="rounded-lg border border-white/[0.08] bg-white/5 px-3 py-2 text-xs font-semibold text-zinc-300">Últimos 7 dias</span>
               </div>
+              {responseTrend.length === 0 ? (
+                <div className="flex h-[250px] items-center justify-center text-center text-sm text-zinc-500">
+                  Nenhuma resposta registrada nos últimos 7 dias.
+                </div>
+              ) : (
               <svg viewBox="0 0 620 240" className="h-[250px] w-full">
                 {[0, 1, 2, 3].map(i => <line key={i} x1="42" x2="600" y1={35 + i * 52} y2={35 + i * 52} stroke="rgba(255,255,255,0.06)" />)}
                 {[0, 1, 2, 3, 4, 5, 6].map(i => <line key={i} x1={70 + i * 83} x2={70 + i * 83} y1="35" y2="192" stroke="rgba(255,255,255,0.04)" />)}
                 <line x1="42" x2="600" y1="116" y2="116" stroke="rgba(154,164,170,0.55)" strokeDasharray="6 7" />
                 {['12h', '8h', '4h', '0h'].map((label, i) => <text key={label} x="0" y={40 + i * 52} fill="#7b8790" fontSize="12">{label}</text>)}
-                {responseTrend.map((point, index) => <text key={point.label} x={52 + index * 83} y="224" fill="#7b8790" fontSize="12">{point.label}</text>)}
+                {responseTrend.map((point, index) => <text key={point.label} x={52 + index * (530 / Math.max(responseTrend.length - 1, 1))} y="224" fill="#7b8790" fontSize="12">{point.label}</text>)}
                 <path
                   d={responseTrend.map((point, index) => {
-                    const x = 70 + index * 83;
+                    const x = 70 + index * (530 / Math.max(responseTrend.length - 1, 1));
                     const y = 192 - Math.min(12, point.value) / 12 * 156;
                     return `${index === 0 ? 'M' : 'L'} ${x} ${y}`;
                   }).join(' ')}
@@ -1560,15 +1850,16 @@ function AttendanceView({
                   strokeLinejoin="round"
                 />
                 {responseTrend.map((point, index) => {
-                  const x = 70 + index * 83;
+                  const x = 70 + index * (530 / Math.max(responseTrend.length - 1, 1));
                   const y = 192 - Math.min(12, point.value) / 12 * 156;
                   return <circle key={point.label} cx={x} cy={y} r="5" fill="#32E843" stroke="#0D1519" strokeWidth="2" />;
                 })}
               </svg>
+              )}
             </section>
 
             <section className="rounded-2xl border border-white/[0.08] bg-[#0D1519] p-5 shadow-[0_24px_70px_rgba(0,0,0,0.26)]">
-              <h3 className="text-base font-bold">SLA de resposta</h3>
+              <h3 className="flex items-center gap-1.5 text-base font-bold">SLA de resposta <InfoDica texto={DICAS_ATENDIMENTO.sla} /></h3>
               <div className="mt-7 space-y-5">
                 {slaRows.map(row => {
                   const percent = responseTotal > 0 ? Math.round((row.value / responseTotal) * 100) : 0;
@@ -1587,7 +1878,7 @@ function AttendanceView({
             </section>
 
             <section className="rounded-2xl border border-white/[0.08] bg-[#0D1519] p-5 shadow-[0_24px_70px_rgba(0,0,0,0.26)]">
-              <h3 className="text-base font-bold">Classificação dos atendimentos</h3>
+              <h3 className="flex items-center gap-1.5 text-base font-bold">Classificação dos atendimentos <InfoDica texto={DICAS_ATENDIMENTO.classificacao} /></h3>
               <div className="mt-7 grid grid-cols-1 items-center gap-5 sm:grid-cols-[150px_1fr]">
                 <div className="relative h-[150px] w-[150px]">
                   <svg viewBox="0 0 120 120" className="h-full w-full -rotate-90">
@@ -1621,7 +1912,7 @@ function AttendanceView({
                     const percent = Math.round((row.value / Math.max(totalLeads, 1)) * 100);
                     return (
                       <div key={row.label} className="grid grid-cols-[1fr_auto] gap-3 text-xs">
-                        <span className="flex items-center gap-2 text-zinc-300"><span className="h-2.5 w-2.5 rounded-full" style={{ background: row.color }} />{row.label}</span>
+                        <span className="flex items-center gap-2 text-zinc-300"><span className="h-2.5 w-2.5 rounded-full" style={{ background: row.color }} />{row.label} <InfoDica texto={row.dica} /></span>
                         <span className="text-zinc-400">{percent}% ({row.value})</span>
                       </div>
                     );
@@ -1633,13 +1924,17 @@ function AttendanceView({
 
           <div className="grid gap-4 xl:grid-cols-[1.45fr_0.82fr]">
             <section className="rounded-2xl border border-white/[0.08] bg-[#0D1519] p-5 shadow-[0_24px_70px_rgba(0,0,0,0.26)]">
-              <h3 className="text-base font-bold">Risco de perda (leads sem resposta)</h3>
+              <h3 className="flex items-center gap-1.5 text-base font-bold">Risco de perda (leads sem resposta) <InfoDica texto={DICAS_ATENDIMENTO.risco} /></h3>
               <div className="mt-5 grid grid-cols-1 gap-5 md:grid-cols-[180px_1fr]">
                 <div>
                   <p className="flex items-center gap-2 text-sm text-zinc-400"><span className="h-2.5 w-2.5 rounded-sm bg-red-400" /> Leads em risco</p>
                   <p className="mt-10 font-heading text-5xl leading-none">{unanswered.toLocaleString('pt-BR')}</p>
                   <p className="mt-2 text-sm text-zinc-400">leads em risco</p>
-                  <span className="mt-5 inline-flex rounded-lg bg-red-500/15 px-3 py-1.5 text-sm font-semibold text-red-300">↑ 23% vs. semana anterior</span>
+                  {riskTrend.length > 0 && (
+                    <span className="mt-5 inline-flex rounded-lg bg-red-500/15 px-3 py-1.5 text-sm font-semibold text-red-300">
+                      {riskTrend.reduce((t, p) => t + p.value, 0)} nos últimos 7 dias
+                    </span>
+                  )}
                 </div>
                 <svg viewBox="0 0 520 180" className="h-[190px] w-full">
                   {[0, 1, 2].map(i => <line key={i} x1="35" x2="500" y1={28 + i * 58} y2={28 + i * 58} stroke="rgba(255,255,255,0.06)" />)}
@@ -1675,16 +1970,116 @@ function AttendanceView({
             </section>
 
             <section className="relative overflow-hidden rounded-2xl border border-white/[0.08] bg-[#0D1519] p-5 shadow-[0_24px_70px_rgba(0,0,0,0.26)]">
-              <h3 className="text-base font-bold">Follow-up em dia</h3>
-              <p className="mt-8 font-heading text-5xl leading-none">{followupRate}%</p>
-              <p className="mt-2 max-w-[170px] text-sm text-zinc-400">dos leads com follow-up em dia</p>
-              <span className="mt-6 inline-flex rounded-lg bg-primary/15 px-3 py-1.5 text-sm font-semibold text-primary">+9% vs. semana anterior</span>
-              <svg className="absolute bottom-5 right-4 h-24 w-44 opacity-90" viewBox="0 0 180 90">
-                <path d={`${sparkPath([20, 30, 26, 54, 68, 41, 50], 180, 80)} L 180 90 L 0 90 Z`} fill="rgba(50,232,67,0.18)" />
-                <path d={sparkPath([20, 30, 26, 54, 68, 41, 50], 180, 80)} fill="none" stroke="#32E843" strokeWidth="3" />
-              </svg>
+              <h3 className="flex items-center gap-1.5 text-base font-bold">Retomada de conversas paradas <InfoDica texto={DICAS_ATENDIMENTO.retomada} /></h3>
+              {followupRate === null ? (
+                <>
+                  <p className="mt-8 font-heading text-5xl leading-none text-zinc-500">—</p>
+                  <p className="mt-2 max-w-[200px] text-sm text-zinc-400">
+                    nenhuma mensagem foi enviada depois de 48h de silêncio neste período
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p className="mt-8 font-heading text-5xl leading-none">{followupRate}%</p>
+                  <p className="mt-2 max-w-[200px] text-sm text-zinc-400">
+                    das {retomada?.enviadas} retomadas trouxeram resposta do cliente
+                    {retomada ? ` (${retomada.responderam})` : ''}
+                  </p>
+                </>
+              )}
             </section>
           </div>
+
+          <div className="grid gap-4 xl:grid-cols-2">
+            <section className="rounded-2xl border border-white/[0.08] bg-[#0D1519] p-5 shadow-[0_24px_70px_rgba(0,0,0,0.26)]">
+              <h3 className="flex items-center gap-1.5 text-base font-bold">Por atendente <InfoDica texto={DICAS_ATENDIMENTO.porAtendente} /></h3>
+              {(data?.atendentes ?? []).length === 0 ? (
+                <p className="mt-6 text-sm text-zinc-500">
+                  Ainda não há mensagem com autor registrado. A partir de agora, toda resposta
+                  enviada pela tela guarda quem respondeu — e este painel passa a comparar a
+                  equipe. Mensagem de follow-up, disparo ou que chega pelo WhatsApp fora do
+                  sistema continua sem autor, de propósito.
+                </p>
+              ) : (
+                <div className="mt-5 space-y-3">
+                  {(data?.atendentes ?? []).map(a => {
+                    const pctRapido = a.respostas > 0 ? Math.round((a.ate_5min / a.respostas) * 100) : 0;
+                    return (
+                      <div key={a.autor_nome} className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="truncate text-sm font-semibold text-zinc-100">{a.autor_nome}</span>
+                          <span className="shrink-0 text-xs text-zinc-400">{formatDuration(a.avg_response_seconds)} em média</span>
+                        </div>
+                        <div className="mt-2 grid grid-cols-4 gap-2 text-center">
+                          {[
+                            ['Leads', a.leads_atendidos.toLocaleString('pt-BR')],
+                            ['Respostas', a.respostas.toLocaleString('pt-BR')],
+                            ['Até 5 min', `${pctRapido}%`],
+                            ['+1h', a.mais_1h.toLocaleString('pt-BR')],
+                          ].map(([k, v]) => (
+                            <div key={k}>
+                              <p className="text-[9px] font-bold uppercase tracking-widest text-zinc-500">{k}</p>
+                              <p className="mt-0.5 text-sm font-semibold text-zinc-200">{v}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+
+            <section className="rounded-2xl border border-white/[0.08] bg-[#0D1519] p-5 shadow-[0_24px_70px_rgba(0,0,0,0.26)]">
+              <h3 className="flex items-center gap-1.5 text-base font-bold">Por que perdemos <InfoDica texto={DICAS_ATENDIMENTO.porQuePerdemos} /></h3>
+              {(data?.motivosPerda ?? []).length === 0 ? (
+                <p className="mt-6 text-sm text-zinc-500">
+                  Nenhum motivo registrado ainda. A partir de agora, mover um lead para uma etapa
+                  de perda pede o motivo — e em um mês este painel mostra o que ajustar na compra
+                  e no preço.
+                  {(data?.perdidosSemMotivo ?? 0) > 0 && (
+                    <> Há {data?.perdidosSemMotivo} lead(s) perdido(s) antes disso, sem motivo.</>
+                  )}
+                </p>
+              ) : (
+                <>
+                  <div className="mt-5 space-y-3">
+                    {(data?.motivosPerda ?? []).map(m => {
+                      const totalMotivos = (data?.motivosPerda ?? []).reduce((t, x) => t + x.total, 0) || 1;
+                      const pct = Math.round((m.total / totalMotivos) * 100);
+                      return (
+                        <div key={m.motivo ?? 'sem'}>
+                          <div className="flex items-center justify-between gap-3 text-sm">
+                            <span className="font-semibold text-zinc-300">{rotuloMotivo(m.motivo) ?? 'Sem motivo'}</span>
+                            <span className="text-xs text-zinc-400">{pct}% ({m.total})</span>
+                          </div>
+                          <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-white/[0.07]">
+                            <div className="h-full rounded-full bg-red-400/70" style={{ width: `${pct}%` }} />
+                          </div>
+                          {m.detalhes.slice(0, 2).map((d, i) => (
+                            <p key={i} className="mt-1 truncate text-[11px] text-zinc-500" title={d}>“{d}”</p>
+                          ))}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {(data?.perdidosSemMotivo ?? 0) > 0 && (
+                    <p className="mt-4 text-[11px] text-zinc-500">
+                      {data?.perdidosSemMotivo} perdido(s) sem motivo (de antes deste registro).
+                    </p>
+                  )}
+                </>
+              )}
+            </section>
+          </div>
+
+          <AttendanceAuditReport
+            audit={audit}
+            loading={auditLoading}
+            clientId={clientId}
+            leadNomes={leadNomes}
+            historico={historico}
+          />
         </div>
 
       </div>
@@ -1692,159 +2087,338 @@ function AttendanceView({
   );
 }
 
-function AuditSection({ title, children }: { title: string; children: React.ReactNode }) {
+/** 'YYYY-MM-DD' (ou ISO) → dd/mm/aaaa sem passar por fuso. */
+function dataBR(iso: string | null | undefined) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso ?? '');
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : '—';
+}
+
+const MESES_CURTOS = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
+function mesCurto(ym: string) {
+  const [y, m] = ym.split('-');
+  return `${MESES_CURTOS[Number(m) - 1] ?? m}/${y.slice(2)}`;
+}
+const pctDe = (parte: number, total: number) => (total > 0 ? Math.round((parte / total) * 100) : null);
+
+/**
+ * Comparação mês a mês do atendimento. ⚠️ O mês é o da MENSAGEM: é quando o
+ * atendimento acontece. Os cards do topo seguem o filtro da tela (que recorta
+ * pela criação do lead) — por isso os números não precisam bater com eles.
+ */
+function EvolucaoMensal({ meses }: { meses: MesAtendimento[] }) {
+  // Esconde os meses antes de existir histórico: zero ali é ausência de dado,
+  // não atendimento ruim.
+  const primeiro = meses.findIndex(m => m.turnos > 0 || m.tentados > 0);
+  const linhas = primeiro < 0 ? [] : meses.slice(primeiro);
+  const mesAtual = meses[meses.length - 1]?.mes;
+
+  type Col = {
+    k: string; titulo: string; dica: string; menorMelhor?: boolean;
+    valor: (m: MesAtendimento) => number | null; fmt: (v: number) => string;
+  };
+  const cols: Col[] = [
+    { k: 'conv', titulo: 'Conversas', dica: 'Pessoas que mandaram mensagem no mês', valor: m => m.conversas, fmt: v => v.toLocaleString('pt-BR') },
+    { k: 'med', titulo: 'Tempo de resposta', dica: 'Mediana do tempo entre o cliente falar e a nossa resposta (cada vez que ele fala, não só a primeira)', menorMelhor: true, valor: m => m.mediana_resposta_seg, fmt: v => formatDuration(v) },
+    { k: 'r5', titulo: 'Até 5 min', dica: '% das respostas dadas em até 5 minutos', valor: m => pctDe(m.ate_5min, m.respondidos), fmt: v => `${v}%` },
+    { k: 'r60', titulo: 'Mais de 1h', dica: '% das respostas que passaram de 1 hora', menorMelhor: true, valor: m => pctDe(m.mais_1h, m.respondidos), fmt: v => `${v}%` },
+    { k: 'sr', titulo: 'Sem resposta', dica: '% das vezes em que o cliente falou e ninguém respondeu', menorMelhor: true, valor: m => pctDe(m.sem_resposta, m.turnos), fmt: v => `${v}%` },
+    { k: 'ret', titulo: 'Retomadas', dica: 'Mensagens nossas depois de 48h de silêncio (entre parênteses, quantas tiveram resposta)', valor: m => m.retomadas, fmt: v => v.toLocaleString('pt-BR') },
+    { k: 'si', titulo: 'Sem interação', dica: '% de quem tentamos contato no mês e nunca respondeu', menorMelhor: true, valor: m => pctDe(m.sem_interacao, m.tentados), fmt: v => `${v}%` },
+  ];
+
   return (
-    <div className="space-y-2">
-      <h4 className="text-sm font-bold text-zinc-100">{title}</h4>
-      {children}
-    </div>
+    <section className="min-w-0 rounded-2xl border border-white/[0.08] bg-[#0D1519] p-5 shadow-[0_24px_70px_rgba(0,0,0,0.26)]">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <h3 className="flex items-center gap-1.5 text-base font-bold">Evolução mês a mês <InfoDica texto={DICAS_ATENDIMENTO.evolucao} /></h3>
+          <p className="mt-1 text-xs text-zinc-500">Pelo mês da mensagem · setas comparam com o mês anterior · não segue o filtro de período</p>
+        </div>
+      </div>
+      {linhas.length === 0 ? (
+        <p className="mt-6 text-sm text-zinc-500">Ainda não há conversas registradas no sistema para este cliente.</p>
+      ) : (
+        <>
+          <div className="mt-4 overflow-x-auto">
+            <table className="w-full min-w-[640px] text-sm">
+              <thead>
+                <tr className="text-left text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+                  <th className="pb-2 pr-3">Mês</th>
+                  {cols.map(c => <th key={c.k} className="pb-2 pr-3"><span className="inline-flex items-center gap-1">{c.titulo} <InfoDica texto={c.dica} /></span></th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {linhas.map((m, i) => {
+                  const ant = i > 0 ? linhas[i - 1] : null;
+                  return (
+                    <tr key={m.mes} className="border-t border-white/[0.06]">
+                      <td className="py-2.5 pr-3 font-semibold text-zinc-200">
+                        {mesCurto(m.mes)}
+                        {m.mes === mesAtual && <span className="ml-1.5 text-[10px] font-normal text-zinc-500">parcial</span>}
+                      </td>
+                      {cols.map(c => {
+                        const v = c.valor(m);
+                        const va = ant ? c.valor(ant) : null;
+                        let seta: { s: string; bom: boolean } | null = null;
+                        if (v != null && va != null && v !== va && c.k !== 'conv' && c.k !== 'ret') {
+                          const subiu = v > va;
+                          seta = { s: subiu ? '▲' : '▼', bom: c.menorMelhor ? !subiu : subiu };
+                        }
+                        return (
+                          <td key={c.k} className="py-2.5 pr-3 text-zinc-300">
+                            {v == null ? <span className="text-zinc-600">—</span> : c.fmt(v)}
+                            {c.k === 'ret' && m.retomadas > 0 && (
+                              <span className="ml-1 text-[11px] text-zinc-500">({m.retomadas_responderam})</span>
+                            )}
+                            {seta && <span className={cn('ml-1 text-[10px]', seta.bom ? 'text-emerald-400' : 'text-red-400')}>{seta.s}</span>}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          {linhas.length < 2 && (
+            <p className="mt-3 text-xs text-zinc-500">A comparação aparece quando houver o segundo mês com conversas.</p>
+          )}
+        </>
+      )}
+    </section>
   );
 }
 
-function AttendanceAuditModal({
-  open, onOpenChange, audit,
+/**
+ * Quem a loja tentou alcançar e não respondeu. ⚠️ Tentativa = um DIA com
+ * mensagem nossa: cinco mensagens na mesma manhã são uma tentativa só.
+ */
+function TentativasContatoCard({ t }: { t: TentativasContato | null }) {
+  const n1 = (v: number | null) => (v == null ? '—' : v.toLocaleString('pt-BR', { maximumFractionDigits: 1 }));
+  return (
+    <section className="min-w-0 rounded-2xl border border-white/[0.08] bg-[#0D1519] p-5 shadow-[0_24px_70px_rgba(0,0,0,0.26)]">
+      <h3 className="flex items-center gap-1.5 text-base font-bold">Tentativas de contato <InfoDica texto={DICAS_ATENDIMENTO.tentativas} /></h3>
+      <p className="mt-1 text-xs text-zinc-500">Pessoas que receberam a 1ª mensagem nossa no período selecionado</p>
+      {!t || t.tentados === 0 ? (
+        <p className="mt-6 text-sm text-zinc-500">Nenhuma tentativa de contato registrada neste período.</p>
+      ) : (
+        <>
+          <div className="mt-5 grid grid-cols-2 gap-4">
+            <div>
+              <p className="font-heading text-4xl leading-none text-red-300">{t.sem_interacao.toLocaleString('pt-BR')}</p>
+              <p className="mt-1.5 text-xs text-zinc-400">sem nenhuma interação, de {t.tentados.toLocaleString('pt-BR')} que tentamos ({pctDe(t.sem_interacao, t.tentados)}%)</p>
+            </div>
+            <div>
+              <p className="font-heading text-4xl leading-none text-zinc-100">{n1(t.media_tentativas_sem_interacao)}</p>
+              <p className="mt-1.5 text-xs text-zinc-400">tentativas em média antes de parar ({n1(t.media_mensagens_sem_interacao)} mensagens)</p>
+            </div>
+          </div>
+
+          <div className="mt-5 space-y-1.5 text-xs text-zinc-400">
+            <p><span className="font-semibold text-zinc-200">{t.nunca_escreveram.toLocaleString('pt-BR')}</span> nunca escreveram nada (contato ativo nosso)</p>
+            <p><span className="font-semibold text-zinc-200">{t.sumiram_apos_primeira.toLocaleString('pt-BR')}</span> mandaram a 1ª mensagem e sumiram depois da nossa resposta</p>
+            <p><span className="font-semibold text-emerald-300">{t.responderam.toLocaleString('pt-BR')}</span> responderam, depois de {n1(t.media_tentativas_ate_responder)} tentativa(s) em média</p>
+          </div>
+
+          {t.sem_interacao > 0 && (
+            <div className="mt-5">
+              <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-zinc-500">Quem não respondeu, por nº de tentativas</p>
+              <div className="grid grid-cols-4 gap-2">
+                {([['1', t.dist.t1], ['2', t.dist.t2], ['3', t.dist.t3], ['4+', t.dist.t4mais]] as const).map(([k, v]) => (
+                  <div key={k} className="rounded-lg border border-white/[0.06] bg-white/[0.02] p-2 text-center">
+                    <p className="text-[10px] text-zinc-500">{k} tentativa{k === '1' ? '' : 's'}</p>
+                    <p className="font-heading text-xl text-zinc-100">{v.toLocaleString('pt-BR')}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          <p className="mt-4 text-[11px] text-zinc-500">Tentativa = um dia em que mandamos mensagem. Várias mensagens no mesmo dia contam como uma.</p>
+        </>
+      )}
+    </section>
+  );
+}
+
+const PESOS_CRITERIO = [
+  ['velocidade_sla', 'Velocidade e SLA', 25],
+  ['qualidade_conversa', 'Qualidade da conversa', 30],
+  ['conducao_comercial', 'Condução comercial', 30],
+  ['followup_recuperacao', 'Follow-up e recuperação', 10],
+  ['organizacao_crm', 'Organização no CRM', 5],
+] as const;
+
+/** O relatório inteiro da auditoria, aberto na aba (antes ficava num modal). */
+function AttendanceAuditReport({
+  audit, loading, clientId, leadNomes, historico,
 }: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
   audit: { result: AttendanceAudit; periodFrom: string; periodTo: string; createdAt: string } | null;
+  loading: boolean;
+  clientId: string;
+  leadNomes: Record<string, string>;
+  historico: ItemHistoricoAuditoria[];
 }) {
-  if (!audit) return null;
+  const card = 'rounded-2xl border border-white/[0.08] bg-[#0D1519] p-5 shadow-[0_24px_70px_rgba(0,0,0,0.26)]';
+  if (loading) return null;
+  if (!audit) {
+    return (
+      <section id="auditoria-completa" className={card}>
+        <h3 className="flex items-center gap-2 text-base font-bold"><Sparkles className="h-4 w-4 text-purple-300" /> Auditoria de atendimento</h3>
+        <p className="mt-4 text-sm text-zinc-500">Nenhuma auditoria gerada ainda para este cliente.</p>
+      </section>
+    );
+  }
   const r = audit.result;
   const gravidadeTone: Record<string, string> = {
     alta: 'bg-red-500/15 text-red-300 border-red-400/30',
     média: 'bg-amber-500/15 text-amber-300 border-amber-400/30',
     baixa: 'bg-zinc-500/15 text-zinc-300 border-zinc-400/30',
   };
+  const nomeLead = (id: string) => leadNomes[id] ?? 'Lead';
+  const linkLead = (id: string) => `/crm?${new URLSearchParams({ clientId, lead: id })}`;
+  const anterior = historico.length >= 2 ? historico[historico.length - 2] : null;
+  const delta = anterior ? r.nota_geral - anterior.nota : null;
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto bg-[#0A0F12] text-zinc-100 border-white/10">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2"><Sparkles className="h-4 w-4 text-purple-300" /> Auditoria de Atendimento (IA)</DialogTitle>
-          <DialogDescription className="text-zinc-400">
-            Período: {new Date(audit.periodFrom + 'T12:00:00').toLocaleDateString('pt-BR')} a {new Date(audit.periodTo + 'T12:00:00').toLocaleDateString('pt-BR')} · Gerado em {new Date(audit.createdAt).toLocaleString('pt-BR')}
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="space-y-6 pt-2">
-          <div className="flex items-center gap-4 rounded-xl border border-purple-500/30 bg-purple-500/10 p-4">
-            <span className="font-heading text-4xl text-purple-300">{r.nota_geral}/100</span>
-            <span className="rounded-lg bg-purple-500/20 px-2 py-1 text-xs font-bold text-purple-100">{r.classificacao}</span>
-            <p className="flex-1 text-sm text-zinc-300">{r.resumo_semana}</p>
+    <section id="auditoria-completa" className="min-w-0 scroll-mt-4 space-y-4">
+      <div className={cn(card, 'border-purple-500/30 bg-[linear-gradient(135deg,rgba(139,92,246,0.14),rgba(13,21,25,0.96))]')}>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h3 className="flex items-center gap-2 text-base font-bold"><Sparkles className="h-4 w-4 text-purple-300" /> Auditoria de atendimento</h3>
+            <p className="mt-1 text-xs text-zinc-400">
+              Conversas de {dataBR(audit.periodFrom)} a {dataBR(audit.periodTo)} · gerada em {new Date(audit.createdAt).toLocaleString('pt-BR')}
+            </p>
           </div>
-
-          <AuditSection title="Notas por critério">
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
-              {[
-                ['Velocidade/SLA', r.notas_criterios.velocidade_sla, 25],
-                ['Qualidade conversa', r.notas_criterios.qualidade_conversa, 30],
-                ['Condução comercial', r.notas_criterios.conducao_comercial, 30],
-                ['Follow-up', r.notas_criterios.followup_recuperacao, 10],
-                ['CRM organizado', r.notas_criterios.organizacao_crm, 5],
-              ].map(([label, value, max]) => (
-                <div key={label as string} className="rounded-lg border border-white/10 bg-white/5 p-2.5 text-center">
-                  <p className="text-[10px] text-zinc-400">{label}</p>
-                  <p className="font-heading text-lg text-zinc-100">{value}/{max}</p>
-                </div>
-              ))}
-            </div>
-          </AuditSection>
-
-          {r.principais_problemas?.length > 0 && (
-            <AuditSection title="Principais problemas">
-              <ul className="list-disc space-y-1 pl-4 text-sm text-zinc-300">
-                {r.principais_problemas.map((p, i) => <li key={i}>{p}</li>)}
-              </ul>
-            </AuditSection>
-          )}
-
-          {r.oportunidades_perdidas?.length > 0 && (
-            <AuditSection title="Oportunidades perdidas">
-              <div className="space-y-2">
-                {r.oportunidades_perdidas.map((o, i) => (
-                  <div key={i} className="rounded-lg border border-white/10 bg-white/5 p-3 text-sm">
-                    <div className="mb-1 flex items-center justify-between gap-2">
-                      <span className="font-mono text-[11px] text-zinc-500">{o.lead_id} · {o.canal}</span>
-                      <span className={cn('rounded border px-1.5 py-0.5 text-[10px] font-bold', gravidadeTone[o.gravidade] ?? gravidadeTone.baixa)}>{o.gravidade}</span>
-                    </div>
-                    <p className="text-zinc-300"><strong className="text-zinc-100">Queria:</strong> {o.o_que_queria}</p>
-                    <p className="text-zinc-300"><strong className="text-zinc-100">Falha:</strong> {o.onde_falhou}</p>
-                    <p className="text-zinc-300"><strong className="text-zinc-100">Ação:</strong> {o.acao_deveria}</p>
-                  </div>
-                ))}
-              </div>
-            </AuditSection>
-          )}
-
-          {r.bons_exemplos?.length > 0 && (
-            <AuditSection title="Bons exemplos">
-              <div className="space-y-2">
-                {r.bons_exemplos.map((b, i) => (
-                  <div key={i} className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-3 text-sm">
-                    <p className="font-mono text-[11px] text-zinc-500">{b.lead_id}</p>
-                    <p className="text-zinc-300"><strong className="text-zinc-100">Bem feito:</strong> {b.o_que_foi_bem}</p>
-                    <p className="text-zinc-300"><strong className="text-zinc-100">Por quê:</strong> {b.motivo_referencia}</p>
-                  </div>
-                ))}
-              </div>
-            </AuditSection>
-          )}
-
-          {r.analise_fontes?.length > 0 && (
-            <AuditSection title="Análise por fonte de captação">
-              <div className="space-y-2">
-                {r.analise_fontes.map((f, i) => (
-                  <div key={i} className="rounded-lg border border-white/10 bg-white/5 p-3 text-sm">
-                    <p className="font-semibold text-zinc-100">{f.fonte} — {f.quantidade_leads} leads</p>
-                    <p className="text-zinc-300">Qualidade: {f.qualidade_atendimento} · Taxa de avanço: {f.taxa_avanco}</p>
-                    <p className="text-zinc-400">Gargalos: {f.principais_gargalos}</p>
-                  </div>
-                ))}
-              </div>
-            </AuditSection>
-          )}
-
-          <AuditSection title="Análise por atendente">
-            {r.analise_atendentes?.length > 0 ? (
-              <div className="space-y-2">
-                {r.analise_atendentes.map((a, i) => (
-                  <div key={i} className="rounded-lg border border-white/10 bg-white/5 p-3 text-sm text-zinc-300">
-                    <p className="font-semibold text-zinc-100">{a.atendente}</p>
-                    <p>Pontos de melhoria: {a.pontos_melhoria}</p>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-sm text-zinc-400">Não informado — este CRM ainda não rastreia qual atendente enviou cada mensagem.</p>
+          <div className="flex items-center gap-3">
+            <span className="font-heading text-5xl leading-none text-purple-300">{r.nota_geral}<span className="text-2xl text-purple-300/60">/100</span></span>
+            <span className="rounded-lg bg-purple-500/20 px-2 py-1 text-xs font-bold text-purple-100">{r.classificacao}</span>
+            {delta !== null && delta !== 0 && (
+              <span className={cn('text-xs font-semibold', delta > 0 ? 'text-emerald-300' : 'text-red-300')}>
+                {delta > 0 ? '+' : ''}{delta} vs. auditoria anterior
+              </span>
             )}
-          </AuditSection>
-
-          <AuditSection title="Plano de ação para a próxima semana">
-            <div className="grid gap-3 sm:grid-cols-2">
-              {[
-                ['Ações urgentes', r.plano_acao.urgentes],
-                ['Melhorias de processo', r.plano_acao.melhorias_processo],
-                ['Treinamento do time', r.plano_acao.treinamento_time],
-                ['Ajustes de script', r.plano_acao.ajustes_script],
-                ['Ajustes no CRM/automações', r.plano_acao.ajustes_crm_automacoes],
-              ].map(([label, items]) => (
-                <div key={label as string} className="rounded-lg border border-white/10 bg-white/5 p-3">
-                  <p className="mb-1.5 text-xs font-bold text-zinc-200">{label}</p>
-                  <ul className="list-disc space-y-1 pl-4 text-xs text-zinc-300">
-                    {(items as string[]).map((item, i) => <li key={i}>{item}</li>)}
-                  </ul>
-                </div>
-              ))}
-            </div>
-          </AuditSection>
-
-          <div className="rounded-xl border border-purple-500/20 bg-purple-500/5 p-4">
-            <p className="mb-1 text-xs font-bold uppercase tracking-wide text-purple-300">Recomendação final</p>
-            <p className="text-sm text-zinc-200">{r.recomendacao_final}</p>
           </div>
         </div>
-      </DialogContent>
-    </Dialog>
+        <p className="mt-4 text-sm leading-relaxed text-zinc-300">{r.resumo_semana}</p>
+
+        <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+          {PESOS_CRITERIO.map(([k, label, max]) => {
+            const bruto = Number(r.notas_criterios?.[k] ?? 0);
+            // Auditoria antiga gravada em 0–100 por critério: converte para os pontos da régua.
+            const v = bruto > max ? Math.round((bruto * max) / 100) : bruto;
+            const pct = Math.round((v / max) * 100);
+            return (
+              <div key={k} className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-3">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">{label}</p>
+                <p className="mt-1 font-heading text-2xl text-zinc-100">{v}<span className="text-sm text-zinc-500">/{max}</span></p>
+                <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/[0.07]">
+                  <div className={cn('h-full rounded-full', pct >= 70 ? 'bg-emerald-400' : pct >= 55 ? 'bg-amber-400' : 'bg-red-400')} style={{ width: `${pct}%` }} />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-2">
+        <div className={card}>
+          <h4 className="text-sm font-bold text-zinc-100">Principais problemas</h4>
+          <ul className="mt-3 list-disc space-y-2 pl-4 text-sm text-zinc-300">
+            {(r.principais_problemas ?? []).map((p, i) => <li key={i}>{p}</li>)}
+          </ul>
+        </div>
+        <div className={card}>
+          <h4 className="text-sm font-bold text-zinc-100">Plano de ação</h4>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            {([
+              ['Ações urgentes', r.plano_acao?.urgentes],
+              ['Melhorias de processo', r.plano_acao?.melhorias_processo],
+              ['Treinamento do time', r.plano_acao?.treinamento_time],
+              ['Ajustes de script', r.plano_acao?.ajustes_script],
+              ['Ajustes no CRM/automações', r.plano_acao?.ajustes_crm_automacoes],
+            ] as const).filter(([, items]) => (items?.length ?? 0) > 0).map(([label, items]) => (
+              <div key={label} className={cn('rounded-lg border p-3', label === 'Ações urgentes' ? 'border-red-400/25 bg-red-500/5' : 'border-white/[0.08] bg-white/[0.03]')}>
+                <p className="mb-1.5 text-xs font-bold text-zinc-200">{label}</p>
+                <ul className="list-disc space-y-1 pl-4 text-xs text-zinc-300">
+                  {(items ?? []).map((item, i) => <li key={i}>{item}</li>)}
+                </ul>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-2">
+        <div className={card}>
+          <h4 className="text-sm font-bold text-zinc-100">Oportunidades perdidas</h4>
+          <div className="mt-3 space-y-2">
+            {(r.oportunidades_perdidas ?? []).map((o, i) => (
+              <div key={i} className="rounded-lg border border-white/[0.08] bg-white/[0.03] p-3 text-sm">
+                <div className="mb-1 flex items-center justify-between gap-2">
+                  <a href={linkLead(o.lead_id)} className="truncate text-xs font-semibold text-zinc-100 hover:text-primary" title="Abrir conversa no CRM">
+                    {nomeLead(o.lead_id)} <span className="font-normal text-zinc-500">· {o.canal}</span>
+                  </a>
+                  <span className={cn('shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-bold', gravidadeTone[o.gravidade] ?? gravidadeTone.baixa)}>{o.gravidade}</span>
+                </div>
+                <p className="text-zinc-300"><strong className="text-zinc-100">Queria:</strong> {o.o_que_queria}</p>
+                <p className="text-zinc-300"><strong className="text-zinc-100">Falha:</strong> {o.onde_falhou}</p>
+                <p className="text-zinc-300"><strong className="text-zinc-100">Ação:</strong> {o.acao_deveria}</p>
+              </div>
+            ))}
+            {(r.oportunidades_perdidas ?? []).length === 0 && <p className="text-sm text-zinc-500">Nenhuma registrada.</p>}
+          </div>
+        </div>
+        <div className={card}>
+          <h4 className="text-sm font-bold text-zinc-100">Bons exemplos</h4>
+          <div className="mt-3 space-y-2">
+            {(r.bons_exemplos ?? []).map((b, i) => (
+              <div key={i} className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-3 text-sm">
+                <a href={linkLead(b.lead_id)} className="text-xs font-semibold text-zinc-100 hover:text-primary" title="Abrir conversa no CRM">{nomeLead(b.lead_id)}</a>
+                <p className="mt-1 text-zinc-300"><strong className="text-zinc-100">Bem feito:</strong> {b.o_que_foi_bem}</p>
+                <p className="text-zinc-300"><strong className="text-zinc-100">Por quê:</strong> {b.motivo_referencia}</p>
+              </div>
+            ))}
+            {(r.bons_exemplos ?? []).length === 0 && <p className="text-sm text-zinc-500">Nenhum registrado.</p>}
+          </div>
+        </div>
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-2">
+        <div className={card}>
+          <h4 className="text-sm font-bold text-zinc-100">Por fonte de captação</h4>
+          <div className="mt-3 space-y-2">
+            {(r.analise_fontes ?? []).map((f, i) => (
+              <div key={i} className="rounded-lg border border-white/[0.08] bg-white/[0.03] p-3 text-sm">
+                <p className="font-semibold text-zinc-100">{f.fonte} <span className="font-normal text-zinc-500">· {f.quantidade_leads} leads · {f.qualidade_atendimento}</span></p>
+                <p className="text-zinc-400">{f.taxa_avanco}</p>
+                <p className="text-zinc-400">Gargalo: {f.principais_gargalos}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className={card}>
+          <h4 className="text-sm font-bold text-zinc-100">Por atendente</h4>
+          {(r.analise_atendentes ?? []).length > 0 ? (
+            <div className="mt-3 space-y-2">
+              {r.analise_atendentes.map((a, i) => (
+                <div key={i} className="rounded-lg border border-white/[0.08] bg-white/[0.03] p-3 text-sm text-zinc-300">
+                  <p className="font-semibold text-zinc-100">{a.atendente}</p>
+                  {a.pontos_fortes && <p>Pontos fortes: {a.pontos_fortes}</p>}
+                  {a.pontos_melhoria && <p>Pontos de melhoria: {a.pontos_melhoria}</p>}
+                  {a.tempo_medio_resposta && <p className="text-zinc-400">Tempo: {a.tempo_medio_resposta}</p>}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="mt-3 text-sm text-zinc-500">Não informado: as mensagens antigas não guardam quem respondeu.</p>
+          )}
+        </div>
+      </div>
+
+      <div className="rounded-2xl border border-purple-500/20 bg-purple-500/5 p-5">
+        <p className="mb-1 text-[10px] font-bold uppercase tracking-widest text-purple-300">Recomendação final</p>
+        <p className="text-sm text-zinc-200">{r.recomendacao_final}</p>
+      </div>
+    </section>
   );
 }
 
@@ -2502,7 +3076,7 @@ function ClientChoiceCard({
 }
 
 /** Ações de configuração do CRM que a página do cliente dispara pelo modal Configurações. */
-export type AcaoConfigCrm = 'funil' | 'portal' | 'criterios';
+export type AcaoConfigCrm = 'funil' | 'acessos' | 'criterios';
 
 type CrmPageProps = {
   lockedClientId?: string;
@@ -2519,6 +3093,14 @@ type CrmPageProps = {
 export default function CrmPage({ lockedClientId, embedded = false, acaoConfig = null, onAcaoConsumida }: CrmPageProps = {}) {
   const { clients } = useClients();
   const activeClients = useMemo(() => clients.filter(c => c.status === 'Ativo'), [clients]);
+  // Funcionário do CLIENTE (ver src/lib/modo-cliente.ts): esconde o que é da
+  // agência. O servidor já recusa as rotas fora da lista dele.
+  const modoCliente = useEhUsuarioCliente();
+  const gestorCliente = useEhGestorCliente();
+  const meuNome = useMeuNome();
+  const [showNovoLead, setShowNovoLead] = useState(false);
+  // Atalhos de operação: ignoram o período (a consulta de hoje pode ser de um lead de agosto).
+  const [atalho, setAtalho] = useState<'' | 'meus' | 'hoje' | 'atrasados'>('');
 
   // Deep-link `?clientId=&lead=` — é como o modal do Funil de Performance (e
   // qualquer outra tela) manda abrir a conversa de um lead específico. A URL
@@ -2535,6 +3117,8 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
   const [clientView, setClientView] = useState<'grid' | 'list'>('grid');
   const [recentClientIds, setRecentClientIds] = useState<string[]>([]);
   const [chatInstanceStatus, setChatInstanceStatus] = useState<'connected' | 'disconnected' | 'unknown' | 'no_instance' | null>(null);
+  const [conectandoWhatsapp, setConectandoWhatsapp] = useState(false);
+  const [statusTick, setStatusTick] = useState(0);
 
   // ── Funnels & Stages ──────────────────────────────────────────────────
   const [funnels, setFunnels] = useState<CrmFunnel[]>([]);
@@ -2542,13 +3126,34 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
   const [stages, setStages] = useState<CrmStage[]>([]);
   const [showFunnelEditor, setShowFunnelEditor] = useState(false);
   const [showNovoFunil, setShowNovoFunil] = useState(false);
-  const [showPortalModal, setShowPortalModal] = useState(false);
+  const [showAcessosModal, setShowAcessosModal] = useState(false);
   const [showAiCriteria, setShowAiCriteria] = useState(false);
 
   const [leads, setLeads]           = useState<CrmLead[]>([]);
+  // Tags de qualificação do cliente (catálogo) + filtro + modal de configurar.
+  const { tags, setTags, recarregar: recarregarTags } = useTagsDoCliente(clientId);
+  const [tagFilter, setTagFilter] = useState('');
+  const [showTagsConfig, setShowTagsConfig] = useState(false);
+  // ── Recarga leve e à prova de corrida ──────────────────────────────────────
+  // A lista completa vem ao abrir e a cada 2 min; entre uma e outra, o poll de
+  // 8 s busca só o que mudou (`since`). Com 3.500 leads (Atmos, 8,5 MB) baixar
+  // tudo a cada 8 s travava a tela.
+  const leadsRef = useRef<CrmLead[]>([]);
+  useEffect(() => { leadsRef.current = leads; }, [leads]);
+  const chaveCarregada = useRef('');
+  const chaveAtual = useRef('');
+  const ultimaCargaCompleta = useRef(0);
+  // ⚠️ Mudança feita na tela (ex.: arrastar de etapa) vence qualquer resposta de
+  // recarga que tenha COMEÇADO antes de o servidor confirmar a gravação — senão
+  // o poll que já estava no ar devolve a etapa antiga e o card "volta" sozinho.
+  const edicoesLocais = useRef(new Map<string, { campos: Partial<CrmLead>; salvoEm: number | null }>());
+  // Durante o arraste a lista não é trocada: re-renderizar o board no meio do
+  // gesto derrubava o drop.
+  const arrastandoRef = useRef(false);
   const [loading, setLoading]       = useState(false);
   const [leadsErro, setLeadsErro]   = useState(false);
   const [search, setSearch]         = useState('');
+  const [soAtendimentoRuim, setSoAtendimentoRuim] = useState(false);
   const [statusFilter, setStatusFilter] = useState('');
   const [temperatureFilter, setTemperatureFilter] = useState('');
   const [monthFilter, setMonthFilter] = useState('');
@@ -2561,26 +3166,12 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
   const [datePreset, setDatePreset] = useState<DatePreset>('thisMonth');
   const [funnelMenuOpen, setFunnelMenuOpen] = useState(false);
   const [dateMenuOpen, setDateMenuOpen] = useState(false);
-  const [columnFilters, setColumnFilters] = useState<Partial<Record<ColumnKey, string>>>({});
-  const [colWidths, setColWidths] = useState<Record<ColumnKey, number>>(DEFAULT_COL_WIDTHS);
-  const [visibleColumnKeys, setVisibleColumnKeys] = useState<ColumnKey[]>(DEFAULT_VISIBLE_COLUMNS);
-  const [columnMenuOpen, setColumnMenuOpen] = useState(false);
-  const [sortConfig, setSortConfig] = useState<{ key: SortableColumnKey; direction: SortDirection }>({ key: 'data', direction: 'desc' });
   const [saving, setSaving]         = useState(false);
-  const [saveError, setSaveError]   = useState<string | null>(null);
-  const [page, setPage]             = useState(1);
-  const [pageSize, setPageSize]     = useState(0);
-  const [selectedLeadIds, setSelectedLeadIds] = useState<Set<string>>(new Set());
-  const [menuId, setMenuId]         = useState<string | null>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
   const dateMenuRef = useRef<HTMLDivElement>(null);
   const [chatFocusLeadId, setChatFocusLeadId] = useState<string | null>(() => {
     if (typeof window === 'undefined') return null;
     return new URLSearchParams(window.location.search).get('lead');
   });
-  // Kanban é SEMPRE a visão padrão ao entrar no CRM (pedido do Matheus) —
-  // o toggle pra lista vale só durante a sessão, sem persistir.
-  const [viewMode, setViewMode] = useAbaPersistida('crm-visao', VISOES_CRM, 'kanban', { param: 'visao' });
   // Chegou por deep-link de lead → abre direto na conversa (`forcar`), senão a
   // aba salva venceria e o lead pedido não apareceria em lugar nenhum.
   const [crmView, setCrmView] = useAbaPersistida('crm', ABAS_CRM, 'leads', {
@@ -2592,31 +3183,19 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
   useEffect(() => {
     if (!acaoConfig) return;
     if (acaoConfig === 'funil') setShowFunnelEditor(true);
-    else if (acaoConfig === 'portal') setShowPortalModal(true);
+    else if (acaoConfig === 'acessos') setShowAcessosModal(true);
     else if (acaoConfig === 'criterios') setShowAiCriteria(true);
     onAcaoConsumida?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [acaoConfig]);
   const [kanbanEditLead, setKanbanEditLead] = useState<CrmLead | null>(null);
+  const [analiseIaAberta, setAnaliseIaAberta] = useState(false);
+  const [perdaPendente, setPerdaPendente] = useState<{ id: string; status: string; nome: string } | null>(null);
+  const [salvandoPerda, setSalvandoPerda] = useState(false);
 
   useEffect(() => {
     if (lockedClientId) setClientId(lockedClientId);
   }, [lockedClientId]);
-
-  // ── NEW ROW ──────────────────────────────────────────────────────────
-  const [newDraft, setNewDraft] = useState<Draft>(freshDraft());
-  const newDraftRef = useRef<Draft>(newDraft);
-  newDraftRef.current = newDraft;
-  const newRowRef   = useRef<HTMLTableRowElement | null>(null);
-  const newSavingRef = useRef(false);
-  const newPendingRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // ── EXISTING EDITING ─────────────────────────────────────────────────
-  const [editId, setEditId]     = useState<string | null>(null);
-  const [editDraft, setEditDraft] = useState<Draft>({});
-  const editDraftRef = useRef<Draft>(editDraft);
-  editDraftRef.current = editDraft;
-  const editPendingRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const clientSegments = useMemo(() => (
     Array.from(new Set(activeClients.map(client => client.segment).filter(Boolean))).sort((a, b) => a.localeCompare(b))
@@ -2660,60 +3239,32 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
     check();
     const id = setInterval(check, 30_000);
     return () => clearInterval(id);
-  }, [clientId]);
-
-  useEffect(() => {
-    try {
-      const stored = localStorage.getItem('crm:column-widths');
-      if (stored) setColWidths(prev => ({ ...prev, ...(JSON.parse(stored) as Partial<Record<ColumnKey, number>>) }));
-    } catch {
-      setColWidths(DEFAULT_COL_WIDTHS);
-    }
-  }, []);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem('crm:column-widths', JSON.stringify(colWidths));
-    } catch {
-      // Browser storage can be unavailable in private mode.
-    }
-  }, [colWidths]);
-
-  useEffect(() => {
-    if (!clientId) {
-      setVisibleColumnKeys(DEFAULT_VISIBLE_COLUMNS);
-      return;
-    }
-    try {
-      const stored = localStorage.getItem(`crm:visible-columns:${clientId}`);
-      if (!stored) {
-        setVisibleColumnKeys(DEFAULT_VISIBLE_COLUMNS);
-        return;
-      }
-      const parsed = JSON.parse(stored) as ColumnKey[];
-      const allowed = new Set(COLS.map(col => col.key));
-      const next = parsed.filter(key => allowed.has(key));
-      LOCKED_COLUMNS.forEach(key => {
-        if (!next.includes(key)) next.push(key);
-      });
-      setVisibleColumnKeys(next.length > 0 ? next : DEFAULT_VISIBLE_COLUMNS);
-    } catch {
-      setVisibleColumnKeys(DEFAULT_VISIBLE_COLUMNS);
-    }
-  }, [clientId]);
-
-  useEffect(() => {
-    if (!clientId) return;
-    try {
-      localStorage.setItem(`crm:visible-columns:${clientId}`, JSON.stringify(visibleColumnKeys));
-    } catch {
-      // Browser storage can be unavailable in private mode.
-    }
-  }, [clientId, visibleColumnKeys]);
+  }, [clientId, statusTick]);
 
   useEffect(() => {
     try { if (clientId) localStorage.setItem('crm:last-client', clientId); } catch { /* ignore */ }
   }, [clientId]);
+
+  // Modo cliente: abre direto no cliente dele (e corrige um cliente antigo
+  // lembrado no navegador que não é mais dele), só Leads e Chat, e o quadro
+  // mostra todo o trabalho em andamento — não só quem entrou no mês.
+  const modoClienteAplicado = useRef(false);
+  useEffect(() => {
+    if (!modoCliente || lockedClientId) return;
+    if (activeClients.length > 0 && !activeClients.some(c => c.id === clientId)) {
+      setClientId(activeClients[0].id);
+    }
+  }, [modoCliente, lockedClientId, activeClients, clientId]);
+  useEffect(() => {
+    if (!modoCliente) return;
+    const permitidas: CrmTab[] = gestorCliente ? ['leads', 'chat', 'attendance', 'equipe'] : ['leads', 'chat'];
+    if (!permitidas.includes(crmView)) setCrmView('leads');
+    if (!modoClienteAplicado.current) {
+      modoClienteAplicado.current = true;
+      applyDatePreset('all');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modoCliente, crmView]);
 
   function openClientCrm(id: string) {
     if (lockedClientId) return;
@@ -2726,21 +3277,70 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
     });
   }
 
-  function refreshLeads(options?: { silent?: boolean }) {
+  function aplicarEdicoesLocais(rows: CrmLead[], inicio: number) {
+    const mapa = edicoesLocais.current;
+    if (!mapa.size) return rows;
+    return rows.map(l => {
+      const e = mapa.get(l.id);
+      if (!e) return l;
+      // Ainda não confirmado, ou confirmado depois que esta recarga começou: a
+      // resposta pode estar velha — vale o que está na tela.
+      if (e.salvoEm === null || e.salvoEm >= inicio) return { ...l, ...e.campos };
+      mapa.delete(l.id);
+      return l;
+    });
+  }
+
+  function refreshLeads(options?: { silent?: boolean; incremental?: boolean }) {
     if (!clientId || !selectedFunnelId) {
       setLeads([]);
       return;
     }
+    const chave = `${clientId}:${selectedFunnelId}`;
+    const inicio = Date.now();
+    let since: string | null = null;
+    if (options?.incremental && chaveCarregada.current === chave && inicio - ultimaCargaCompleta.current < 120_000) {
+      for (const l of leadsRef.current) {
+        const u = (l as { updated_at?: string | null }).updated_at;
+        if (u && (!since || u > since)) since = u;
+      }
+    }
     if (!options?.silent) setLoading(true);
-    setLeadsErro(false);
-    fetch(`/api/crm?clientId=${clientId}&funnelId=${selectedFunnelId}`)
+    if (!since) setLeadsErro(false);
+    const qs = new URLSearchParams({ clientId, funnelId: selectedFunnelId });
+    if (since) qs.set('since', since);
+    fetch(`/api/crm?${qs}`)
       .then(async r => {
         if (!r.ok) throw new Error('falha');
         return await r.json() as CrmLead[];
       })
-      .then(data => setLeads(data))
+      .then(data => {
+        // Resposta de outro cliente/funil (trocou no meio): descarta.
+        if (chaveAtual.current !== chave) return;
+        // No meio de um arraste não troca a lista; a próxima rodada traz de novo.
+        if (arrastandoRef.current) return;
+        if (since) {
+          if (!data.length) return;
+          setLeads(prev => {
+            const porId = new Map(prev.map(l => [l.id, l]));
+            const numeros = new Set(prev.map(l => (l.numero ?? '').replace(/\D/g, '')).filter(Boolean));
+            for (const novo of data) {
+              if (porId.has(novo.id)) porId.set(novo.id, novo);
+              // Lead novo: entra, a não ser que o número já esteja na lista
+              // (a carga completa deduplica por telefone; a próxima resolve).
+              else if (!numeros.has((novo.numero ?? '').replace(/\D/g, ''))) porId.set(novo.id, novo);
+            }
+            return aplicarEdicoesLocais([...porId.values()], inicio);
+          });
+        } else {
+          chaveCarregada.current = chave;
+          ultimaCargaCompleta.current = Date.now();
+          setLeads(aplicarEdicoesLocais(data, inicio));
+        }
+      })
       // Falha de servidor não pode virar "nenhum lead" — a lista vazia mentiria.
-      .catch(() => { setLeads([]); setLeadsErro(true); })
+      // No incremental, falhar só significa tentar de novo na próxima rodada.
+      .catch(() => { if (!since) { setLeads([]); setLeadsErro(true); } })
       .finally(() => {
         if (!options?.silent) setLoading(false);
       });
@@ -2748,14 +3348,11 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
 
   useEffect(() => {
     function onDown(e: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuId(null);
       if (dateMenuRef.current && !dateMenuRef.current.contains(e.target as Node)) setDateMenuOpen(false);
     }
     document.addEventListener('mousedown', onDown);
     return () => document.removeEventListener('mousedown', onDown);
   }, []);
-
-  useEffect(() => { setPage(1); }, [statusFilter, temperatureFilter, monthFilter, dateFromFilter, dateToFilter, search, clientId, columnFilters]);
 
   useEffect(() => {
     if (!clientId) { setFunnels([]); setSelectedFunnelId(''); setStages([]); return; }
@@ -2774,6 +3371,7 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
   }, [selectedFunnelId]);
 
   useEffect(() => {
+    chaveAtual.current = `${clientId}:${selectedFunnelId}`;
     refreshLeads();
   }, [clientId, selectedFunnelId]);
 
@@ -2784,8 +3382,8 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
 
   useEffect(() => {
     if (!clientId || !selectedFunnelId) return;
-    const timer = window.setInterval(() => refreshLeads({ silent: true }), 8_000);
-    function onFocus() { refreshLeads({ silent: true }); }
+    const timer = window.setInterval(() => refreshLeads({ silent: true, incremental: true }), 8_000);
+    function onFocus() { refreshLeads({ silent: true, incremental: true }); }
     window.addEventListener('focus', onFocus);
     document.addEventListener('visibilitychange', onFocus);
     return () => {
@@ -2795,34 +3393,8 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
     };
   }, [clientId, selectedFunnelId]);
 
-  function toggleSort(key: ColumnKey) {
-    if (key === 'select' || key === 'actions') return;
-    setSortConfig(prev => (
-      prev.key === key
-        ? { key, direction: prev.direction === 'asc' ? 'desc' : 'asc' }
-        : { key, direction: 'asc' }
-    ));
-  }
 
-  function isColumnVisible(key: ColumnKey) {
-    return visibleColumnKeys.includes(key);
-  }
 
-  function toggleColumnVisibility(key: ColumnKey) {
-    if (LOCKED_COLUMNS.includes(key)) return;
-    setVisibleColumnKeys(prev => {
-      const next = prev.includes(key)
-        ? prev.filter(item => item !== key)
-        : [...prev, key].sort((a, b) => COLS.findIndex(col => col.key === a) - COLS.findIndex(col => col.key === b));
-      setColumnFilters(filters => {
-        if (next.includes(key)) return filters;
-        const copy = { ...filters };
-        delete copy[key];
-        return copy;
-      });
-      return next;
-    });
-  }
 
   function applyDatePreset(nextPreset: DatePreset) {
     setDatePreset(nextPreset);
@@ -2849,53 +3421,80 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
     setCrmView('chat');
   }
 
-  const visibleCols = useMemo(
-    () => COLS.filter(col => visibleColumnKeys.includes(col.key)),
-    [visibleColumnKeys],
-  );
+  // 1D–4D são marcações de cadência da agência; para quem atende não dizem nada.
 
+  // Busca procura em TODOS os períodos: com "Mês atual" escolhido, quem buscava
+  // um lead de setembro não achava e concluía que ele não existia.
+  const busca = useMemo(() => prepararBusca(search), [search]);
   const filtered = useMemo(() => leads.filter(l => {
-    if (monthFilter && monthFromDate(l.data) !== monthFilter) return false;
-    if ((dateFromFilter || dateToFilter) && !isDateInRange(l.data, dateFromFilter, dateToFilter)) return false;
+    const semPeriodo = !!busca || !!atalho;
+    if (!semPeriodo && monthFilter && monthFromDate(l.data) !== monthFilter) return false;
+    if (!semPeriodo && (dateFromFilter || dateToFilter) && !isDateInRange(l.data, dateFromFilter, dateToFilter)) return false;
+    if (atalho && !passaAtalho(l, atalho, meuNome)) return false;
     if (statusFilter && l.status !== statusFilter) return false;
     if (temperatureFilter) {
       if (temperatureFilter === 'sem' && l.temperatura) return false;
       if (temperatureFilter !== 'sem' && l.temperatura !== temperatureFilter) return false;
     }
-    if (search) {
-      const q = search.toLowerCase();
-      const found = l.nome?.toLowerCase().includes(q) || l.numero?.includes(q) ||
-             l.canal?.toLowerCase().includes(q) || l.bairro?.toLowerCase().includes(q) ||
-             l.observacao?.toLowerCase().includes(q) || false;
-      if (!found) return false;
-    }
-    for (const [key, value] of Object.entries(columnFilters) as [ColumnKey, string][]) {
-      if (!passesColumnFilter(l, key, value)) return false;
-    }
+    if (soAtendimentoRuim && !(temNota(l) && l.nota_atendimento <= 2)) return false;
+    if (tagFilter && !(l.tags ?? []).some(t => t.id === tagFilter)) return false;
+    if (busca && !leadCasaBusca(l, busca)) return false;
     return true;
   }).sort((a, b) => {
     if (a.time_interno !== b.time_interno) return a.time_interno ? 1 : -1;
-    const result = compareSortValues(sortValue(a, sortConfig.key), sortValue(b, sortConfig.key));
-    return sortConfig.direction === 'asc' ? result : -result;
-  }), [leads, search, statusFilter, temperatureFilter, monthFilter, dateFromFilter, dateToFilter, columnFilters, sortConfig]);
+    // Mais recente primeiro dentro de cada coluna do Kanban.
+    return ordemPorData(a, b);
+  }), [leads, busca, atalho, meuNome, soAtendimentoRuim, statusFilter, temperatureFilter, tagFilter, monthFilter, dateFromFilter, dateToFilter]);
 
-  const totalPages = pageSize === 0 ? 1 : Math.max(1, Math.ceil(filtered.length / pageSize));
-  const paginated  = pageSize === 0 ? filtered : filtered.slice((page - 1) * pageSize, page * pageSize);
-  const selectedLeads = useMemo(
-    () => leads.filter(lead => selectedLeadIds.has(lead.id)),
-    [leads, selectedLeadIds],
-  );
-  const selectedVisibleCount = paginated.filter(lead => selectedLeadIds.has(lead.id)).length;
-  const allVisibleSelected = paginated.length > 0 && selectedVisibleCount === paginated.length;
+  /**
+   * Tag grava NA HORA (otimista) — é um clique no card, sem Salvar. Em erro
+   * volta ao que era. O servidor devolve a lista confirmada (ele descarta tag
+   * de outro cliente) e ela é a que fica; o catálogo é relido para a contagem
+   * do filtro acompanhar.
+   */
+  async function definirTags(lead: CrmLead, tagIds: string[]) {
+    const antes = lead.tags ?? [];
+    const aplicar = (lista: CrmTag[]) => {
+      setLeads(prev => prev.map(l => (l.id === lead.id ? { ...l, tags: lista } : l)));
+      setKanbanEditLead(prev => (prev && prev.id === lead.id ? { ...prev, tags: lista } : prev));
+    };
+    aplicar(tags.filter(t => tagIds.includes(t.id)));
+    try {
+      aplicar(await salvarTagsDoLead(lead.id, tagIds));
+      void recarregarTags();
+    } catch (e) {
+      aplicar(antes);
+      notificar(e instanceof Error ? e.message : 'Não foi possível salvar as tags.', 'erro');
+    }
+  }
+  const podeConfigurarTags = !modoCliente || gestorCliente;
+
+  const contagemAtalho = useMemo(() => ({
+    meus: meuNome ? leads.filter(l => passaAtalho(l, 'meus', meuNome)).length : 0,
+    hoje: leads.filter(l => passaAtalho(l, 'hoje', meuNome)).length,
+    atrasados: leads.filter(l => passaAtalho(l, 'atrasados', meuNome)).length,
+  }), [leads, meuNome]);
+
+  /**
+   * Recorte da análise de IA: CLIENTE + PERÍODO, nada mais (instrução do
+   * Matheus, 2026-10-02).
+   *
+   * ⚠️ De propósito NÃO reusa `filtered`, que também aplica busca, status,
+   * temperatura e filtros de coluna. Uma busca digitada para achar um lead
+   * encolheria o lote sem ninguém perceber, e o número do modal passaria a
+   * mudar enquanto se digita. O lote é sobre o período; a busca é para achar
+   * alguém.
+   */
+  const leadsDoPeriodo = useMemo(() => leads.filter(l => {
+    if (monthFilter && monthFromDate(l.data) !== monthFilter) return false;
+    if ((dateFromFilter || dateToFilter) && !isDateInRange(l.data, dateFromFilter, dateToFilter)) return false;
+    return true;
+  }), [leads, monthFilter, dateFromFilter, dateToFilter]);
+
   const kanbanLeads = useMemo(
     () => filtered.filter(lead => lead.time_interno !== true),
     [filtered],
   );
-  const tableMinWidth = useMemo(() => visibleCols.reduce((sum, col) => sum + colWidths[col.key], 0), [colWidths, visibleCols]);
-  const filteredTotals = useMemo(() => ({
-    faturamento: filtered.reduce((sum, lead) => sum + toMoneyNumber(lead.valor_rs), 0),
-    orcamento: filtered.reduce((sum, lead) => sum + toMoneyNumber(lead.orcamento), 0),
-  }), [filtered]);
 
   const stats = useMemo(() => {
     const closedLeads = kanbanLeads.filter(l => l.status === 'Comprou' || l.status === 'Fechado' || l.fechou);
@@ -2951,175 +3550,69 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
     }
   }
 
-  async function saveNew() {
-    if (newSavingRef.current) return;
-    const data = newDraftRef.current;
-    const hasData = data.nome || data.numero || data.observacao || data.canal || data.bairro || data.valor_rs;
-    if (!hasData) { focusNew(); return; }
-    newSavingRef.current = true; setSaving(true); setSaveError(null);
-    try {
-      const res = await fetch('/api/crm', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ clientId, funnel_id: selectedFunnelId || null, ...data }),
-      });
-      if (res.ok) {
-        const saved = await res.json() as CrmLead;
-        setLeads(prev => [saved, ...prev]);
-        setNewDraft(freshDraft());
-      } else {
-        const body = await res.json().catch(() => ({})) as { error?: string };
-        setSaveError(body.error ?? `Erro ${res.status}`);
-      }
-    } catch (err) {
-      setSaveError(err instanceof Error ? err.message : 'Erro de rede');
-    } finally { newSavingRef.current = false; setSaving(false); focusNew(); }
-  }
 
-  function handleNewBlur(e: React.FocusEvent<HTMLTableRowElement>) {
-    if (newPendingRef.current) clearTimeout(newPendingRef.current);
-    newPendingRef.current = setTimeout(() => {
-      if (e.currentTarget && !e.currentTarget.contains(document.activeElement)) void saveNew();
-    }, 150);
-  }
-  function handleNewFocus() { if (newPendingRef.current) clearTimeout(newPendingRef.current); }
-  function focusNew() {
-    setTimeout(() => newRowRef.current?.querySelector<HTMLElement>('input[type="date"]')?.focus(), 30);
-  }
 
-  async function saveExisting(id: string) {
-    const data = editDraftRef.current; setSaving(true);
-    try {
-      const res = await fetch(`/api/crm/${id}`, {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
-      });
-      if (res.ok) {
-        const saved = await res.json() as CrmLead;
-        setLeads(prev => prev.map(l => l.id === id ? saved : l));
-        setEditId(null);
-      } else {
-        notificar('Não foi possível salvar o lead — tente de novo.', 'erro');
-      }
-    } catch {
-      notificar('Não foi possível salvar o lead — tente de novo.', 'erro');
-    } finally { setSaving(false); }
-  }
 
-  function startEdit(lead: CrmLead) {
-    if (editId === lead.id) return;
-    if (editId) void saveExisting(editId);
-    setEditId(lead.id);
-    setEditDraft({ ...lead } as Draft);
-  }
 
-  function handleExistingBlur(e: React.FocusEvent<HTMLTableRowElement>, id: string) {
-    if (editPendingRef.current) clearTimeout(editPendingRef.current);
-    editPendingRef.current = setTimeout(() => {
-      if (e.currentTarget && !e.currentTarget.contains(document.activeElement)) void saveExisting(id);
-    }, 150);
-  }
-  function handleExistingFocus() { if (editPendingRef.current) clearTimeout(editPendingRef.current); }
 
   async function deleteRow(id: string) {
-    setMenuId(null);
+    const alvo = leadsRef.current.find(l => l.id === id);
+    // Exclusão é definitiva (fica registrada no histórico, mas o lead some).
+    if (!window.confirm(`Excluir o lead "${alvo?.nome || alvo?.numero || 'sem nome'}"? Esta ação não pode ser desfeita.`)) return false;
     const res = await fetch(`/api/crm/${id}`, { method: 'DELETE' }).catch(() => null);
     if (res?.ok) {
       setLeads(prev => prev.filter(l => l.id !== id));
-      setSelectedLeadIds(prev => {
-        const next = new Set(prev);
-        next.delete(id);
-        return next;
+      return true;
+    }
+    notificar('Não foi possível excluir o lead — tente de novo.', 'erro');
+    return false;
+  }
+
+  // ⚠️ Mover para uma etapa de PERDA abre o modal ANTES de gravar. O servidor
+  // recusa com 422 quem tentar sem motivo (rota PUT), então a tela é só o
+  // caminho amigável — nenhum lead se perde sem registro, nem por aqui nem por
+  // fora. O lead só sai do lugar depois que o motivo é confirmado.
+  async function salvarStatus(id: string, status: string, motivo?: MotivoPerdaId, detalhe?: string | null) {
+    const previousStatus = leads.find(l => l.id === id)?.status ?? null;
+    edicoesLocais.current.set(id, { campos: { status }, salvoEm: null });
+    setLeads(prev => prev.map(l => l.id === id ? { ...l, status } : l));
+    try {
+      const res = await fetch(`/api/crm/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(motivo
+          ? { status, motivo_perda: motivo, motivo_perda_detalhe: detalhe ?? null }
+          : { status }),
       });
-      if (editId === id) setEditId(null);
-    } else {
-      notificar('Não foi possível excluir o lead — tente de novo.', 'erro');
+      if (!res.ok) throw new Error(`Erro ${res.status}`);
+      const e = edicoesLocais.current.get(id);
+      if (e && e.campos.status === status) e.salvoEm = Date.now();
+      return true;
+    } catch {
+      edicoesLocais.current.delete(id);
+      setLeads(prev => prev.map(l => l.id === id ? { ...l, status: previousStatus } : l));
+      notificar('Não foi possível mover o lead — tente de novo.', 'erro');
+      return false;
     }
   }
 
   async function changeLeadStatus(id: string, status: string) {
-    const previousStatus = leads.find(l => l.id === id)?.status ?? null;
-    setLeads(prev => prev.map(l => l.id === id ? { ...l, status } : l));
-    try {
-      const res = await fetch(`/api/crm/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) });
-      if (!res.ok) throw new Error(`Erro ${res.status}`);
-    } catch {
-      setLeads(prev => prev.map(l => l.id === id ? { ...l, status: previousStatus } : l));
-      notificar('Não foi possível mover o lead — tente de novo.', 'erro');
-    }
-  }
-
-  function toggleLeadSelection(id: string) {
-    setSelectedLeadIds(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
-    });
-  }
-
-  function toggleVisibleSelection() {
-    setSelectedLeadIds(prev => {
-      const next = new Set(prev);
-      if (allVisibleSelected) {
-        paginated.forEach(lead => next.delete(lead.id));
-      } else {
-        paginated.forEach(lead => next.add(lead.id));
+    if (classificarEtapa(status) === 'perdido') {
+      const lead = leads.find(l => l.id === id);
+      if (lead && classificarEtapa(lead.status ?? '') !== 'perdido') {
+        setPerdaPendente({ id, status, nome: lead.nome ?? lead.numero ?? 'este lead' });
+        return;
       }
-      return next;
-    });
-  }
-
-  function clearLeadSelection() {
-    setSelectedLeadIds(new Set());
-  }
-
-  async function bulkUpdateSelected(patch: Draft) {
-    const targets = selectedLeads;
-    if (targets.length === 0) return;
-    setLeads(prev => prev.map(lead => selectedLeadIds.has(lead.id) ? { ...lead, ...patch } : lead));
-
-    const results = await Promise.all(
-      targets.map(lead =>
-        fetch(`/api/crm/${lead.id}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(patch),
-        }).then(async res => (res.ok ? await res.json() as CrmLead : null)).catch(() => null),
-      ),
-    );
-
-    const savedById = new Map(results.filter(Boolean).map(lead => [lead!.id, lead!]));
-    // Falhas revertem pro lead original (o otimista acima aplicou o patch em todos)
-    const failed = targets.filter(lead => !savedById.has(lead.id));
-    const failedById = new Map(failed.map(lead => [lead.id, lead]));
-    setLeads(prev => prev.map(lead => savedById.get(lead.id) ?? failedById.get(lead.id) ?? lead));
-    if (failed.length > 0) {
-      notificar(`${failed.length} de ${targets.length} leads não foram atualizados — tente de novo.`, 'erro');
     }
+    await salvarStatus(id, status);
   }
 
-  async function bulkChangeStatus(status: string) {
-    if (!status) return;
-    await bulkUpdateSelected({ status });
-  }
 
-  async function bulkToggleInternal(nextTimeInterno: boolean) {
-    if (nextTimeInterno) {
-      const ok = window.confirm('Ao marcar como Time Interno, nenhuma automação será executada para estes contatos. Tem certeza?');
-      if (!ok) return;
-    }
-    await bulkUpdateSelected({ time_interno: nextTimeInterno });
-  }
 
-  async function bulkDeleteSelected() {
-    const ids = [...selectedLeadIds];
-    if (ids.length === 0) return;
-    const ok = window.confirm(`Excluir ${ids.length} lead${ids.length !== 1 ? 's' : ''} selecionado${ids.length !== 1 ? 's' : ''}?`);
-    if (!ok) return;
-    await Promise.all(ids.map(id => fetch(`/api/crm/${id}`, { method: 'DELETE' }).catch(() => null)));
-    setLeads(prev => prev.filter(lead => !selectedLeadIds.has(lead.id)));
-    setSelectedLeadIds(new Set());
-    if (editId && selectedLeadIds.has(editId)) setEditId(null);
-  }
+
+
+
+
 
   /**
    * ⚠️ Qualificado é decisão HUMANA e o critério muda por cliente (MQL) — por isso é um
@@ -3188,44 +3681,12 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
     } finally { setSaving(false); }
   }
 
-  function onNewBairroKey(e: React.KeyboardEvent) {
-    if (e.key === 'Enter' || (e.key === 'Tab' && !e.shiftKey)) { e.preventDefault(); void saveNew(); }
-  }
-  function onNewRowKey(e: React.KeyboardEvent) {
-    if (e.key === 'Enter' && (e.target as HTMLElement).tagName === 'INPUT') { e.preventDefault(); void saveNew(); }
-  }
 
-  function setN<K extends keyof Draft>(k: K, v: Draft[K]) { setNewDraft(prev => ({ ...prev, [k]: v })); }
-  function setE<K extends keyof Draft>(k: K, v: Draft[K]) { setEditDraft(prev => ({ ...prev, [k]: v })); }
-  function setColumnFilter(key: ColumnKey, value: string) {
-    setColumnFilters(prev => {
-      const next = { ...prev };
-      if (value) next[key] = value;
-      else delete next[key];
-      return next;
-    });
-  }
-  function clearColumnFilters() { setColumnFilters({}); }
-  function startColumnResize(key: ColumnKey, min: number, e: React.MouseEvent) {
-    e.preventDefault();
-    e.stopPropagation();
-    const startX = e.clientX;
-    const startWidth = colWidths[key];
-    const onMove = (event: MouseEvent) => {
-      const nextWidth = Math.max(min, startWidth + event.clientX - startX);
-      setColWidths(prev => ({ ...prev, [key]: nextWidth }));
-    };
-    const onUp = () => {
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
-    };
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
-  }
 
   const lockedClient = lockedClientId ? activeClients.find(c => c.id === lockedClientId) : null;
 
   return (
+    <ModoClienteContext.Provider value={modoCliente}>
     <div className={cn(
       'flex flex-col gap-5 overflow-hidden',
       // 200px: sobrou header do cliente (~90) + a linha de abas/Configurações
@@ -3254,7 +3715,6 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
           </p>
         </div>
         {saving    && <span className="ml-2 text-xs font-medium text-amber-400 animate-pulse">Salvando…</span>}
-        {saveError && <span className="ml-2 text-xs font-medium text-red-400">Erro: {saveError}</span>}
       </div>
       )}
 
@@ -3391,6 +3851,11 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
               <span>{lockedClient?.name ?? 'Cliente selecionado'}</span>
             </div>
           )
+        ) : modoCliente && activeClients.length <= 1 ? (
+          <div className="flex h-10 items-center gap-2 rounded-lg border border-border bg-card px-3 text-sm font-semibold">
+            <Users className="h-3.5 w-3.5 text-primary" />
+            <span>{activeClients[0]?.name ?? 'Carregando…'}</span>
+          </div>
         ) : (
           <IconSelect icon={Users} value={clientId} onChange={openClientCrm}
             placeholder="Selecionar cliente..." className="min-w-[180px]">
@@ -3417,7 +3882,7 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
                 sempre. Dentro do CLIENTE nem o menu fica — os 4 itens moram
                 no modal Configurações (13/09); aqui só no /crm avulso, que
                 não tem esse modal. */}
-            {!embedded && (
+            {!embedded && !modoCliente && (
             <div className="relative">
               <button
                 type="button"
@@ -3438,10 +3903,10 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
                       <Pencil className="h-3.5 w-3.5" /> Editar funil
                     </button>
                     <button type="button"
-                      onClick={() => { setFunnelMenuOpen(false); setShowPortalModal(true); }}
-                      title="Link somente-leitura pro cliente ver os resultados e o funil"
+                      onClick={() => { setFunnelMenuOpen(false); setShowAcessosModal(true); }}
+                      title="Logins do cliente no crm.onmid.app (gestor e atendentes)"
                       className="flex w-full items-center gap-2 px-3 py-2 text-xs text-muted-foreground hover:bg-muted hover:text-foreground">
-                      <Globe2 className="h-3.5 w-3.5" /> Portal do cliente
+                      <Users className="h-3.5 w-3.5" /> Acessos ao CRM
                     </button>
                     <button type="button"
                       onClick={() => { setFunnelMenuOpen(false); setShowAiCriteria(true); }}
@@ -3484,6 +3949,19 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
               <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-emerald-500 border border-card" />
             )}
           </button>
+          {gestorCliente && (<>
+          <button type="button" onClick={() => setCrmView('attendance')}
+            className={cn('flex items-center gap-1.5 h-8 px-3 rounded-md text-xs font-semibold transition-colors',
+              crmView === 'attendance' ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground')}>
+            <BarChart3 className="h-3.5 w-3.5" /> Atendimento
+          </button>
+          <button type="button" onClick={() => setCrmView('equipe')}
+            className={cn('flex items-center gap-1.5 h-8 px-3 rounded-md text-xs font-semibold transition-colors',
+              crmView === 'equipe' ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground')}>
+            <Users className="h-3.5 w-3.5" /> Equipe
+          </button>
+          </>)}
+          {!modoCliente && (<>
           <button type="button" onClick={() => setCrmView('followup')}
             className={cn('flex items-center gap-1.5 h-8 px-3 rounded-md text-xs font-semibold transition-colors',
               crmView === 'followup' ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground')}>
@@ -3505,6 +3983,7 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
               crmView === 'ads' ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground')}>
             <Clapperboard className="h-3.5 w-3.5" /> Anúncios
           </button>
+          </>)}
         </div>
 
         {clientId && (crmView === 'leads' || crmView === 'attendance') && (
@@ -3602,17 +4081,59 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
               )}
             </div>
 
+            {crmView === 'leads' && <FiltroTag tags={tags} valor={tagFilter} onChange={setTagFilter} />}
+
             {crmView === 'leads' && (
               <>
                 {/* A busca cresce e come a sobra da linha: espaço vazio numa
                     barra de ferramentas não é respiro, é desperdício. */}
                 <div className="relative min-w-[160px] flex-1">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
-                  <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar leads..."
-                    className="w-full pl-8 pr-3 py-2 rounded-lg border border-border bg-card text-sm focus:outline-none focus:ring-1 focus:ring-primary" />
+                  <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar por nome ou número..."
+                    className={cn('w-full pl-8 py-2 rounded-lg border border-border bg-card text-sm focus:outline-none focus:ring-1 focus:ring-primary', search && (monthFilter || dateFromFilter || dateToFilter) ? 'pr-36' : 'pr-3')} />
+                  {search && (monthFilter || dateFromFilter || dateToFilter) && (
+                    <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-semibold text-muted-foreground">em todos os períodos</span>
+                  )}
                 </div>
 
-                <button onClick={() => void saveNew()}
+                <div className="flex shrink-0 overflow-hidden rounded-lg border border-border bg-card p-0.5">
+                  {([
+                    ['meus', 'Meus leads', contagemAtalho.meus, 'Leads em que você é o responsável'],
+                    ['hoje', 'Agenda de hoje', contagemAtalho.hoje, 'Agendados para hoje, de qualquer período'],
+                    ['atrasados', 'Atrasados', contagemAtalho.atrasados, 'Próxima ação com prazo vencido'],
+                  ] as const).map(([id, rotulo, n, dica]) => (
+                    <button key={id} type="button" title={dica}
+                      onClick={() => setAtalho(a => a === id ? '' : id)}
+                      className={cn('flex h-8 items-center gap-1 rounded-md px-2.5 text-xs font-semibold transition-colors',
+                        atalho === id
+                          ? id === 'atrasados' ? 'bg-red-500/15 text-red-300' : 'bg-primary/15 text-primary'
+                          : 'text-muted-foreground hover:text-foreground')}>
+                      {rotulo}
+                      {n > 0 && <span className={cn('rounded px-1 text-[10px]', id === 'atrasados' ? 'bg-red-500/20 text-red-300' : 'bg-muted')}>{n}</span>}
+                    </button>
+                  ))}
+                </div>
+
+                {!modoCliente && (() => {
+                  const ruins = leads.filter(l => temNota(l) && l.nota_atendimento <= 2).length;
+                  if (!ruins && !soAtendimentoRuim) return null;
+                  return (
+                    <button
+                      type="button"
+                      onClick={() => setSoAtendimentoRuim(v => !v)}
+                      title="Mostra só os leads com nota de atendimento 0, 1 ou 2"
+                      className={cn('flex shrink-0 items-center gap-1.5 rounded-lg border px-3 py-2 text-sm font-semibold transition-colors',
+                        soAtendimentoRuim ? 'border-red-500/50 bg-red-500/15 text-red-300' : 'border-border bg-card text-muted-foreground hover:text-foreground')}
+                    >
+                      <Star className="h-3.5 w-3.5" /> Atendimento ruim <span className="rounded bg-red-500/20 px-1.5 text-[11px] text-red-300">{ruins}</span>
+                    </button>
+                  );
+                })()}
+
+                {/* Abre o modal em qualquer visão. Antes chamava saveNew(), que só
+                    gravava a linha em branco da visão LISTA — no Kanban (a visão
+                    padrão) o botão não fazia nada. */}
+                <button onClick={() => setShowNovoLead(true)}
                   className="flex shrink-0 items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors"
                 >
                   <Plus className="h-4 w-4" /> Novo Lead
@@ -3623,6 +4144,29 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
         )}
       </div>
       </>
+      )}
+
+      {/* WhatsApp caído: o aviso fica na tela de Leads também — quem atende pode
+          nem abrir o Chat e passar o dia sem receber mensagem. O próprio
+          cliente reconecta pelo QR (um WhatsApp por cliente; ver whatsapp-conexao). */}
+      {clientId && crmView === 'leads' && (chatInstanceStatus === 'disconnected' || chatInstanceStatus === 'no_instance') && (
+        <div className="flex shrink-0 flex-wrap items-center gap-3 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-2.5 text-sm text-red-200">
+          <WifiOff className="h-4 w-4 shrink-0 animate-pulse" />
+          <span className="flex-1">
+            {chatInstanceStatus === 'no_instance'
+              ? 'Nenhum WhatsApp conectado a este CRM — as conversas não chegam aqui.'
+              : 'WhatsApp desconectado — as mensagens não estão chegando nem saindo.'}
+          </span>
+          <button type="button" onClick={() => setConectandoWhatsapp(true)}
+            className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90">
+            {chatInstanceStatus === 'no_instance' ? 'Conectar WhatsApp' : 'Reconectar agora'}
+          </button>
+        </div>
+      )}
+      {conectandoWhatsapp && clientId && (
+        <ConectarWhatsappModal clientId={clientId}
+          onFechar={() => { setConectandoWhatsapp(false); setStatusTick(t => t + 1); }}
+          onConectou={() => setStatusTick(t => t + 1)} />
       )}
 
       {/* ── STATS (faixa única compacta — o espaço vertical é do funil) ── */}
@@ -3676,6 +4220,10 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
       )}
 
       {/* ── FOLLOW UP ───────────────────────────────────────────────── */}
+      {clientId && gestorCliente && crmView === 'equipe' && (
+        <div className="flex-1 min-h-0 overflow-y-auto"><EquipeCliente clientId={clientId} /></div>
+      )}
+
       {clientId && crmView === 'followup' && (
         <div className="flex-1 min-h-0 overflow-y-auto">
           <FollowupTab clientId={clientId} statusOptions={statusOptions} />
@@ -3730,124 +4278,42 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
           {/* Table toolbar */}
           <div className="flex items-center justify-between px-4 py-2.5 border-b border-border shrink-0">
             <div className="flex items-center gap-2">
-              {viewMode === 'list' ? <AlignJustify className="h-4 w-4 text-primary" /> : <LayoutGrid className="h-4 w-4 text-primary" />}
+              <LayoutGrid className="h-4 w-4 text-primary" />
               <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Leads</span>
             </div>
             <div className="flex items-center gap-2">
-              {/* View toggle */}
-              <div className="flex overflow-hidden rounded-lg border border-border bg-background/60 p-0.5">
-                <button type="button" onClick={() => setViewMode('kanban')} title="Kanban"
-                  className={cn('flex h-6 w-6 items-center justify-center rounded-md transition-colors', viewMode === 'kanban' ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground')}>
-                  <LayoutGrid className="h-3.5 w-3.5" />
+              {clientId && podeConfigurarTags && (
+                <button
+                  type="button"
+                  onClick={() => setShowTagsConfig(true)}
+                  title="Criar e editar as tags de qualificação deste cliente"
+                  className="flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs font-semibold text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                >
+                  <Tag className="h-3.5 w-3.5" />
+                  <span className="hidden sm:inline">Tags</span>
                 </button>
-                <button type="button" onClick={() => setViewMode('list')} title="Lista"
-                  className={cn('flex h-6 w-6 items-center justify-center rounded-md transition-colors', viewMode === 'list' ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground')}>
-                  <List className="h-3.5 w-3.5" />
+              )}
+              {/* Análise de IA sob demanda — recupera o retroativo que a
+                  automação desligada não fez (pedido do Matheus, 2026-10-02).
+                  Age sobre `leadsDoPeriodo`: só o cliente aberto e o período
+                  escolhido, sem herdar busca nem filtros de coluna.
+                  Fica com a agência: custa IA e a rota é recusada ao cliente. */}
+              {clientId && !modoCliente && (
+                <button
+                  type="button"
+                  onClick={() => setAnaliseIaAberta(true)}
+                  title="A IA lê as conversas do recorte atual e move os leads no Kanban"
+                  className="flex items-center gap-1.5 rounded-lg border border-primary/40 bg-primary/10 px-2.5 py-1.5 text-xs font-semibold text-primary transition-colors hover:bg-primary/20"
+                >
+                  <Sparkles className="h-3.5 w-3.5" />
+                  <span className="hidden sm:inline">Analisar com IA</span>
                 </button>
-              </div>
-              {viewMode === 'list' && (
-                <>
-                  {Object.keys(columnFilters).length > 0 && (
-                    <button type="button" onClick={clearColumnFilters}
-                      className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground">
-                      Limpar filtros
-                    </button>
-                  )}
-                  <div className="relative">
-                    <button
-                      type="button"
-                      onClick={() => setColumnMenuOpen(open => !open)}
-                      title="Editar colunas"
-                      className="flex h-7 w-7 items-center justify-center rounded-lg border border-border text-muted-foreground hover:text-foreground transition-colors"
-                    >
-                      <Settings2 className="h-3.5 w-3.5" />
-                    </button>
-                    {columnMenuOpen && (
-                      <div className="absolute right-0 top-9 z-50 w-64 rounded-xl border border-border bg-popover p-2 shadow-2xl">
-                        <div className="px-2 pb-2 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-                          Colunas da lista
-                        </div>
-                        <div className="max-h-72 overflow-y-auto pr-1">
-                          {COLS.filter(col => col.key !== 'select' && col.key !== 'actions').map(col => {
-                            const locked = LOCKED_COLUMNS.includes(col.key);
-                            return (
-                              <label key={col.key} className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-xs hover:bg-muted/60">
-                                <input
-                                  type="checkbox"
-                                  checked={visibleColumnKeys.includes(col.key)}
-                                  disabled={locked}
-                                  onChange={() => toggleColumnVisibility(col.key)}
-                                  className="h-3.5 w-3.5 accent-primary disabled:opacity-50"
-                                />
-                                <span className={cn('font-medium', locked ? 'text-muted-foreground' : 'text-foreground')}>{col.label}</span>
-                                {locked && <span className="ml-auto text-[9px] text-muted-foreground">fixa</span>}
-                              </label>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </>
               )}
             </div>
           </div>
 
-          {viewMode === 'list' && selectedLeadIds.size > 0 && (
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-primary/20 bg-primary/5 px-4 py-2 shrink-0">
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold text-primary">
-                  {selectedLeadIds.size} selecionado{selectedLeadIds.size !== 1 ? 's' : ''}
-                </span>
-                <button
-                  type="button"
-                  onClick={clearLeadSelection}
-                  className="rounded-md px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
-                >
-                  Limpar
-                </button>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <select
-                  defaultValue=""
-                  onChange={event => {
-                    const value = event.target.value;
-                    event.target.value = '';
-                    if (value) void bulkChangeStatus(value);
-                  }}
-                  className="h-8 rounded-lg border border-border bg-background px-2 text-xs font-semibold text-foreground outline-none focus:border-primary"
-                >
-                  <option value="">Mudar status</option>
-                  {statusOptions.map(status => <option key={status} value={status}>{status}</option>)}
-                </select>
-                <button
-                  type="button"
-                  onClick={() => void bulkToggleInternal(true)}
-                  className="rounded-lg border border-border px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:border-primary/40 hover:text-foreground"
-                >
-                  Time interno
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void bulkToggleInternal(false)}
-                  className="rounded-lg border border-border px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:border-primary/40 hover:text-foreground"
-                >
-                  Remover interno
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void bulkDeleteSelected()}
-                  className="rounded-lg border border-red-500/30 px-3 py-1.5 text-xs font-semibold text-red-400 hover:bg-red-500/10"
-                >
-                  Excluir
-                </button>
-              </div>
-            </div>
-          )}
-
           {/* Kanban view — as colunas ocupam toda a altura; o scroll vertical é POR coluna */}
-          {viewMode === 'kanban' && (
-            <div className="flex flex-1 min-h-0 flex-col overflow-hidden p-2.5">
+          <div className="flex flex-1 min-h-0 flex-col overflow-hidden p-2.5">
               <KanbanView
                 leads={kanbanLeads}
                 stages={stages}
@@ -3857,402 +4323,40 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
                 onToggleQualificado={lead => void toggleLeadQualificado(lead)}
                 onToggleInternal={lead => void toggleLeadInternal(lead)}
                 activeFollowupIds={activeFollowupLeadIds}
+                onArrasteMudou={v => { arrastandoRef.current = v; }}
+                tags={tags}
+                onSetTags={(lead, ids) => void definirTags(lead, ids)}
+                onConfigurarTags={podeConfigurarTags ? () => setShowTagsConfig(true) : undefined}
               />
-            </div>
-          )}
+          </div>
 
-          {/* Scrollable table */}
-          {viewMode === 'list' && <div className="overflow-auto flex-1 min-h-0">
-            <table className="w-full table-fixed border-collapse text-xs" style={{ minWidth: tableMinWidth }}>
-              <colgroup>
-                {visibleCols.map(col => (
-                  <col key={col.key} style={{ width: colWidths[col.key] }} />
-                ))}
-              </colgroup>
-              <thead className="sticky top-0 z-10 bg-card border-b border-border">
-                <tr>
-                  {visibleCols.map(col => (
-                    <th
-                      key={col.key}
-                      className="relative px-2 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"
-                      style={{ width: colWidths[col.key] }}
-                    >
-                      {col.key === 'select' ? (
-                        <input
-                          type="checkbox"
-                          checked={allVisibleSelected}
-                          disabled={paginated.length === 0}
-                          onChange={toggleVisibleSelection}
-                          className="h-3.5 w-3.5 accent-primary disabled:opacity-40"
-                          title="Selecionar visíveis"
-                        />
-                      ) : col.key === 'actions' ? null : (
-                        <button
-                          type="button"
-                          onClick={() => toggleSort(col.key)}
-                          className="inline-flex max-w-full items-center gap-1 text-left font-semibold uppercase tracking-wider hover:text-foreground"
-                        >
-                          <span className="truncate">{col.label}</span>
-                          <ArrowUpDown className={cn(
-                            'h-3 w-3 shrink-0',
-                            sortConfig.key === col.key ? 'text-primary' : 'text-muted-foreground/45',
-                          )} />
-                          {sortConfig.key === col.key && (
-                            <span className="text-[9px] text-primary">
-                              {sortConfig.direction === 'asc' ? '↑' : '↓'}
-                            </span>
-                          )}
-                        </button>
-                      )}
-                      {col.key !== 'actions' && col.key !== 'select' && (
-                        <button
-                          type="button"
-                          onMouseDown={e => startColumnResize(col.key, col.min, e)}
-                          className="absolute right-0 top-0 h-full w-2 cursor-col-resize touch-none border-r border-transparent transition-colors hover:border-primary/70"
-                          aria-label={`Redimensionar coluna ${col.label}`}
-                        />
-                      )}
-                    </th>
-                  ))}
-                </tr>
-                <tr className="border-t border-border/40 bg-card/95">
-                  {visibleCols.map(col => (
-                    <th key={`${col.key}-filter`} className="px-1.5 pb-2 text-left" style={{ width: colWidths[col.key] }}>
-                      <ColumnFilter
-                        kind={col.filter}
-                        columnKey={col.key}
-                        value={columnFilters[col.key] ?? ''}
-                        onChange={setColumnFilter}
-                        statusOptions={statusOptions}
-                      />
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-
-                {/* ── NEW ROW ── */}
-                <tr
-                  ref={newRowRef}
-                  onKeyDown={onNewRowKey}
-                  onBlur={handleNewBlur}
-                  onFocus={handleNewFocus}
-                  className="border-b border-primary/20 bg-primary/5 ring-1 ring-inset ring-primary/20"
-                >
-                  <Td center />
-                  {isColumnVisible('data') && <Td><input type="date" value={toD(newDraft.data)} onChange={e => setN('data', e.target.value || null)} className={cellNew} /></Td>}
-                  {isColumnVisible('nome') && <Td><input type="text" value={newDraft.nome ?? ''} onChange={e => setN('nome', e.target.value || null)} placeholder="Nome" className={cn(cellNew, 'text-primary placeholder:text-primary/40 font-semibold')} /></Td>}
-                  {isColumnVisible('numero') && <Td><input type="text" value={newDraft.numero ?? ''} onChange={e => setN('numero', e.target.value || null)} placeholder="Número" className={cellNew} /></Td>}
-                  {isColumnVisible('last_contact_at') && <Td><span className="px-2 text-[11px] text-muted-foreground">Automático</span></Td>}
-                  {isColumnVisible('canal') && <Td>
-                    <select value={newDraft.canal ?? ''} onChange={e => setN('canal', e.target.value || null)} className={cn(cellNew, 'cursor-pointer appearance-none')}>
-                      <option value=""></option>
-                      {CANAL_OPTIONS.map(o => <option key={o}>{o}</option>)}
-                    </select>
-                  </Td>}
-                  {isColumnVisible('status') && <Td>
-                    <select value={newDraft.status ?? ''} onChange={e => setN('status', e.target.value || null)} className={cn(cellNew, 'cursor-pointer appearance-none', STATUS_COLOR[newDraft.status ?? ''] ?? '')}>
-                      {statusOptions.map(o => <option key={o}>{o}</option>)}
-                    </select>
-                  </Td>}
-                  {isColumnVisible('temperatura') && <Td>
-                    <select value={newDraft.temperatura ?? ''} onChange={e => setN('temperatura', (e.target.value || null) as Draft['temperatura'])} className={cn(cellNew, 'cursor-pointer appearance-none')}>
-                      <option value=""></option>
-                      <option value="quente">Quente</option>
-                      <option value="morno">Morno</option>
-                      <option value="frio">Frio</option>
-                    </select>
-                  </Td>}
-                  {(['dia1','dia2','dia3','dia4'] as const).map(k => (
-                    isColumnVisible(k) && <Td key={k} center>
-                      <input type="checkbox" checked={!!newDraft[k]} onChange={e => setN(k, e.target.checked)} className="h-3.5 w-3.5 accent-primary cursor-pointer" />
-                    </Td>
-                  ))}
-                  {isColumnVisible('data_agendada') && <Td><input type="date" value={toD(newDraft.data_agendada)} onChange={e => setN('data_agendada', e.target.value || null)} className={cellNew} /></Td>}
-                  {isColumnVisible('fechou') && <Td center><input type="checkbox" checked={!!newDraft.fechou} onChange={e => setN('fechou', e.target.checked)} className="h-3.5 w-3.5 accent-primary cursor-pointer" /></Td>}
-                  {isColumnVisible('valor_rs') && <Td><input type="number" step="0.01" value={newDraft.valor_rs ?? ''} onChange={e => setN('valor_rs', e.target.value ? parseFloat(e.target.value) : null)} placeholder="0,00" className={cn(cellNew, 'text-primary font-semibold')} /></Td>}
-                  {isColumnVisible('pagamento') && <Td>
-                    <select value={newDraft.pagamento ?? ''} onChange={e => setN('pagamento', e.target.value || null)} className={cn(cellNew, 'cursor-pointer appearance-none')}>
-                      <option value=""></option>
-                      {PAGAMENTO_OPTIONS.map(o => <option key={o}>{o}</option>)}
-                    </select>
-                  </Td>}
-                  {isColumnVisible('orcamento') && <Td><input type="number" step="0.01" value={newDraft.orcamento ?? ''} onChange={e => setN('orcamento', e.target.value ? parseFloat(e.target.value) : null)} placeholder="0,00" className={cellNew} /></Td>}
-                  {isColumnVisible('observacao') && <Td><input type="text" value={newDraft.observacao ?? ''} onChange={e => setN('observacao', e.target.value || null)} placeholder="Observação" className={cellNew} /></Td>}
-                  {isColumnVisible('bairro') && <Td>
-                    <input type="text" value={newDraft.bairro ?? ''} onChange={e => setN('bairro', e.target.value || null)} placeholder="Bairro" className={cellNew} onKeyDown={onNewBairroKey} />
-                  </Td>}
-                  <Td center />
-                </tr>
-
-                {/* ── SAVED LEADS ── */}
-                {paginated.map((lead, idx) => {
-                  const isEditing = editId === lead.id;
-                  const d = isEditing ? editDraft : lead;
-                  const channels = detectChannels(lead.canal);
-                  const statusBadge = lead.status ? STATUS_BADGE[lead.status] ?? 'bg-zinc-600 text-white' : null;
-                  const isSelected = selectedLeadIds.has(lead.id);
-                  return (
-                    <tr
-                      key={lead.id}
-                      tabIndex={-1}
-                      onClick={() => !isEditing && startEdit(lead)}
-                      onBlur={isEditing ? e => handleExistingBlur(e, lead.id) : undefined}
-                      onFocus={isEditing ? handleExistingFocus : undefined}
-                      className={cn(
-                        'border-b border-border/30 transition-colors group',
-                        isEditing
-                          ? 'bg-blue-500/10 ring-1 ring-inset ring-blue-500/25'
-                          : isSelected
-                            ? 'bg-primary/10 ring-1 ring-inset ring-primary/20 hover:bg-primary/15 cursor-pointer'
-                            : idx % 2 === 0 ? 'hover:bg-muted/30 cursor-pointer' : 'bg-muted/10 hover:bg-muted/30 cursor-pointer'
-                      )}
-                    >
-                      {/* Seleção */}
-                      <Td center>
-                        <input
-                          type="checkbox"
-                          checked={isSelected}
-                          onClick={e => e.stopPropagation()}
-                          onChange={() => toggleLeadSelection(lead.id)}
-                          className="h-3.5 w-3.5 accent-primary cursor-pointer"
-                        />
-                      </Td>
-                      {/* Data + hora */}
-                      {isColumnVisible('data') && <Td>
-                        {isEditing
-                          ? <input type="date" value={toD(d.data)} onChange={e => setE('data', e.target.value || null)} className={cell} />
-                          : <div className="px-2 py-1">
-                              <div className="text-[11px] font-medium text-foreground">{fmtD(lead.data)}</div>
-                              <div className="text-[10px] text-muted-foreground">{fmtTime(lead.created_at)}</div>
-                            </div>}
-                      </Td>}
-                      {/* Nome */}
-                      {isColumnVisible('nome') && <Td>
-                        {isEditing
-                          ? <input type="text" value={d.nome ?? ''} onChange={e => setE('nome', e.target.value || null)} placeholder="Nome" className={cell} />
-                          : <span className="block truncate px-2 text-xs font-semibold text-primary" title={lead.nome ?? undefined}>{lead.nome ?? '–'}</span>}
-                      </Td>}
-                      {/* Número */}
-                      {isColumnVisible('numero') && <Td>
-                        {isEditing
-                          ? <input type="text" value={d.numero ?? ''} onChange={e => setE('numero', e.target.value || null)} placeholder="Número" className={cell} />
-                          : <span className="px-2 text-muted-foreground text-[11px]">{lead.numero ?? '–'}</span>}
-                      </Td>}
-                      {/* Último contato */}
-                      {isColumnVisible('last_contact_at') && <Td>
-                        <div className="px-2 py-1">
-                          <div className="text-[11px] font-medium text-foreground">{fmtD(lead.last_contact_at ?? lead.whatsapp_last_message_at ?? lead.updated_at ?? lead.created_at)}</div>
-                          <div className="text-[10px] text-muted-foreground">{fmtTime(lead.last_contact_at ?? lead.whatsapp_last_message_at ?? lead.updated_at ?? lead.created_at)}</div>
-                        </div>
-                      </Td>}
-                      {/* Canal */}
-                      {isColumnVisible('canal') && <Td>
-                        {isEditing
-                          ? <select value={d.canal ?? ''} onChange={e => setE('canal', e.target.value || null)} className={cellSel}>
-                              <option value=""></option>
-                              {d.canal && !CANAL_OPTIONS.includes(String(d.canal)) && <option>{d.canal}</option>}
-                              {CANAL_OPTIONS.map(o => <option key={o}>{o}</option>)}
-                            </select>
-                          : channels.length > 0
-                            ? <div className="flex items-center gap-1 px-2" title={lead.canal ?? undefined}>
-                                {channels.slice(0, 3).map(channel => (
-                                  <span
-                                    key={channel.id}
-                                    className={cn('inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-white shadow-sm ring-1 ring-white/10', channel.bg)}
-                                    title={channel.label}
-                                    aria-label={channel.label}
-                                  >
-                                    {channel.icon}
-                                  </span>
-                                ))}
-                                {channels.length > 3 && (
-                                  <span className="text-[10px] font-bold text-muted-foreground">+{channels.length - 3}</span>
-                                )}
-                              </div>
-                            : lead.canal
-                              ? <span className="block truncate px-2 text-[11px] font-semibold text-primary" title={lead.canal}>{lead.canal}</span>
-                              : <span className="px-2 text-muted-foreground text-[11px]">–</span>}
-                      </Td>}
-                      {/* Status */}
-                      {isColumnVisible('status') && <Td>
-                        {isEditing
-                          ? <select value={d.status ?? ''} onChange={e => setE('status', e.target.value || null)} className={cn(cellSel, STATUS_COLOR[d.status ?? ''] ?? '')}>
-                              {statusOptions.map(o => <option key={o}>{o}</option>)}
-                            </select>
-                          : statusBadge
-                            ? <div className="px-1">
-                                <span className={cn('inline-flex items-center rounded-lg px-2.5 py-1 text-[10px] font-bold leading-none shadow-sm whitespace-nowrap', statusBadge)}>
-                                  {lead.status}
-                                </span>
-                              </div>
-                            : null}
-                      </Td>}
-                      {/* Temperatura */}
-                      {isColumnVisible('temperatura') && <Td>
-                        {isEditing
-                          ? <select value={d.temperatura ?? ''} onChange={e => setE('temperatura', (e.target.value || null) as Draft['temperatura'])} className={cellSel}>
-                              <option value=""></option>
-                              <option value="quente">Quente</option>
-                              <option value="morno">Morno</option>
-                              <option value="frio">Frio</option>
-                            </select>
-                          : <div className="flex items-center gap-1 px-1">
-                              {lead.temperatura ? (
-                                <span className={cn('inline-flex rounded-lg border px-2 py-1 text-[10px] font-bold leading-none whitespace-nowrap', temperatureBadgeClass(lead.temperatura))}>
-                                  {TEMPERATURE_LABEL[lead.temperatura]}
-                                </span>
-                              ) : (
-                                <span className="px-1 text-[11px] text-muted-foreground">–</span>
-                              )}
-                              {lead.time_interno && (
-                                <span className="inline-flex rounded-lg border border-zinc-500/25 bg-zinc-500/10 px-1.5 py-1 text-[9px] font-bold leading-none text-zinc-300">
-                                  Interno
-                                </span>
-                              )}
-                            </div>}
-                      </Td>}
-                      {/* 1D–4D */}
-                      {(['dia1','dia2','dia3','dia4'] as const).map(k => (
-                        isColumnVisible(k) && <Td key={k} center>
-                          {isEditing
-                            ? <input type="checkbox" checked={!!d[k]} onChange={e => setE(k, e.target.checked)} className="h-3.5 w-3.5 accent-primary cursor-pointer" />
-                            : <span
-                                onClick={e => { e.stopPropagation(); startEdit(lead); }}
-                                className={cn('inline-flex h-4 w-4 items-center justify-center rounded text-[10px] cursor-pointer select-none', lead[k] ? 'bg-primary/20 text-primary font-bold' : 'text-muted-foreground/30')}
-                              >
-                                {lead[k] ? '✓' : '–'}
-                              </span>}
-                        </Td>
-                      ))}
-                      {/* Data Ag. */}
-                      {isColumnVisible('data_agendada') && <Td>
-                        {isEditing
-                          ? <input type="date" value={toD(d.data_agendada)} onChange={e => setE('data_agendada', e.target.value || null)} className={cell} />
-                          : <span className="px-2 text-muted-foreground text-[11px]">{fmtD(lead.data_agendada) || '–'}</span>}
-                      </Td>}
-                      {/* Fechou */}
-                      {isColumnVisible('fechou') && <Td center>
-                        {isEditing
-                          ? <input type="checkbox" checked={!!d.fechou} onChange={e => setE('fechou', e.target.checked)} className="h-3.5 w-3.5 accent-primary cursor-pointer" />
-                          : <span
-                              onClick={e => { e.stopPropagation(); startEdit(lead); }}
-                              className={cn('inline-flex h-5 w-5 items-center justify-center rounded-full text-[11px] cursor-pointer font-bold select-none', lead.fechou ? 'bg-green-500 text-white' : 'bg-muted/50 text-muted-foreground/40')}
-                            >
-                              {lead.fechou ? '✓' : '–'}
-                            </span>}
-                      </Td>}
-                      {/* Valor */}
-                      {isColumnVisible('valor_rs') && <Td>
-                        {isEditing
-                          ? <input type="number" step="0.01" value={d.valor_rs ?? ''} onChange={e => setE('valor_rs', e.target.value ? parseFloat(e.target.value) : null)} placeholder="0,00" className={cn(cell, 'text-primary font-semibold')} />
-                          : <span className="px-2 text-muted-foreground text-[11px]">{fmtN(lead.valor_rs) || '0,00'}</span>}
-                      </Td>}
-                      {/* Pagamento */}
-                      {isColumnVisible('pagamento') && <Td>
-                        {isEditing
-                          ? <select value={d.pagamento ?? ''} onChange={e => setE('pagamento', e.target.value || null)} className={cellSel}>
-                              <option value=""></option>
-                              {PAGAMENTO_OPTIONS.map(o => <option key={o}>{o}</option>)}
-                            </select>
-                          : <span className="block truncate px-2 text-[11px] text-muted-foreground" title={lead.pagamento ?? undefined}>{lead.pagamento ?? '–'}</span>}
-                      </Td>}
-                      {/* Orçamento */}
-                      {isColumnVisible('orcamento') && <Td>
-                        {isEditing
-                          ? <input type="number" step="0.01" value={d.orcamento ?? ''} onChange={e => setE('orcamento', e.target.value ? parseFloat(e.target.value) : null)} placeholder="0,00" className={cell} />
-                          : <span className="px-2 text-muted-foreground text-[11px]">{fmtN(lead.orcamento) || '0,00'}</span>}
-                      </Td>}
-                      {/* Observação */}
-                      {isColumnVisible('observacao') && <Td>
-                        {isEditing
-                          ? <input type="text" value={d.observacao ?? ''} onChange={e => setE('observacao', e.target.value || null)} placeholder="Observação" className={cell} />
-                          : <span className="block truncate px-2 text-[11px] text-muted-foreground" title={lead.observacao ?? undefined}>{lead.observacao || 'Observação'}</span>}
-                      </Td>}
-                      {/* Bairro */}
-                      {isColumnVisible('bairro') && <Td>
-                        {isEditing
-                          ? <input type="text" value={d.bairro ?? ''} onChange={e => setE('bairro', e.target.value || null)} placeholder="Bairro" className={cell} />
-                          : <span className="block truncate px-2 text-[11px] text-muted-foreground" title={lead.bairro ?? undefined}>{lead.bairro || 'Bairro'}</span>}
-                      </Td>}
-                      {/* ⋮ Menu */}
-                      <Td center>
-                        <div className="relative" ref={menuId === lead.id ? menuRef : undefined}>
-                          <button
-                            onClick={e => { e.stopPropagation(); setMenuId(menuId === lead.id ? null : lead.id); }}
-                            className="opacity-0 group-hover:opacity-100 flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
-                          >
-                            <MoreVertical className="h-4 w-4" />
-                          </button>
-                          {menuId === lead.id && (
-                            <div className="absolute right-0 top-7 z-50 min-w-[130px] rounded-lg border border-border bg-popover shadow-xl py-1">
-                              <button
-                                onClick={e => { e.stopPropagation(); startEdit(lead); setMenuId(null); }}
-                                className="flex w-full items-center gap-2 px-3 py-2 text-xs hover:bg-muted transition-colors"
-                              >
-                                <Pencil className="h-3.5 w-3.5" /> Editar
-                              </button>
-                              <button
-                                onClick={e => { e.stopPropagation(); void deleteRow(lead.id); }}
-                                className="flex w-full items-center gap-2 px-3 py-2 text-xs text-red-400 hover:bg-red-500/10 transition-colors"
-                              >
-                                <Trash2 className="h-3.5 w-3.5" /> Excluir
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      </Td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>}
-
-          {/* ── PAGINATION ── */}
-          {viewMode === 'list' && <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border bg-card px-4 py-2.5 shrink-0">
-            <div className="flex flex-wrap items-center gap-3">
-              <span className="text-xs text-muted-foreground">
-                {filtered.length === 0
-                  ? 'Nenhum lead'
-                  : pageSize === 0
-                    ? `Mostrando todos os ${filtered.length} lead${filtered.length !== 1 ? 's' : ''}`
-                    : `Mostrando ${(page-1)*pageSize+1} a ${Math.min(page*pageSize, filtered.length)} de ${filtered.length} lead${filtered.length !== 1 ? 's' : ''}`}
-              </span>
-              <div className="flex items-center gap-2 rounded-lg border border-border bg-background/60 px-3 py-1.5">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Total faturamento</span>
-                <span className="text-xs font-bold text-primary">{formatCurrencyBRL(filteredTotals.faturamento)}</span>
-              </div>
-              <div className="flex items-center gap-2 rounded-lg border border-border bg-background/60 px-3 py-1.5">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Total orçamento</span>
-                <span className="text-xs font-bold text-foreground">{formatCurrencyBRL(filteredTotals.orcamento)}</span>
-              </div>
-            </div>
-            <div className="flex items-center gap-1.5">
-              {pageSize !== 0 && (
-                <>
-                  <button onClick={() => setPage(p => Math.max(1, p-1))} disabled={page === 1}
-                    className="flex h-7 w-7 items-center justify-center rounded border border-border disabled:opacity-30 hover:bg-muted transition-colors">
-                    <ChevronLeft className="h-3.5 w-3.5" />
-                  </button>
-                  <span className="flex h-7 min-w-[28px] items-center justify-center rounded border border-primary bg-primary/10 px-2.5 text-xs font-bold text-primary">{page}</span>
-                  <button onClick={() => setPage(p => Math.min(totalPages, p+1))} disabled={page === totalPages}
-                    className="flex h-7 w-7 items-center justify-center rounded border border-border disabled:opacity-30 hover:bg-muted transition-colors">
-                    <ChevronRight className="h-3.5 w-3.5" />
-                  </button>
-                </>
-              )}
-              <div className="relative ml-2">
-                <select value={pageSize} onChange={e => { setPageSize(Number(e.target.value)); setPage(1); }}
-                  className="appearance-none rounded border border-border bg-card pl-2 pr-6 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-primary">
-                  <option value={0}>Todos</option>
-                  {[25, 50, 100, 250].map(n => <option key={n} value={n}>{n} / página</option>)}
-                </select>
-                <ChevronDown className="absolute right-1.5 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground pointer-events-none" />
-              </div>
-            </div>
-          </div>}
         </div>
+      )}
+
+      {perdaPendente && (
+        <MotivoPerdaModal
+          leadNome={perdaPendente.nome}
+          etapaDestino={perdaPendente.status}
+          salvando={salvandoPerda}
+          onCancelar={() => { if (!salvandoPerda) setPerdaPendente(null); }}
+          onConfirmar={async (motivo, detalhe) => {
+            setSalvandoPerda(true);
+            const ok = await salvarStatus(perdaPendente.id, perdaPendente.status, motivo, detalhe);
+            setSalvandoPerda(false);
+            if (ok) setPerdaPendente(null);
+          }}
+        />
+      )}
+
+      {analiseIaAberta && clientId && (
+        <AnaliseIaModal
+          clientId={clientId}
+          clientName={clients.find(c => c.id === clientId)?.name ?? 'este cliente'}
+          leadIds={leadsDoPeriodo.map(l => l.id)}
+          periodoLabel={periodLabel(datePreset, dateFromFilter, dateToFilter)}
+          onClose={() => setAnaliseIaAberta(false)}
+          onConcluido={() => refreshLeads({ silent: true })}
+        />
       )}
 
       {kanbanEditLead && (
@@ -4260,10 +4364,37 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
           lead={kanbanEditLead}
           onSave={saveKanbanEdit}
           onClose={() => setKanbanEditLead(null)}
-          onDelete={() => { void deleteRow(kanbanEditLead.id); setKanbanEditLead(null); }}
+          onDelete={() => { void deleteRow(kanbanEditLead.id).then(ok => { if (ok) setKanbanEditLead(null); }); }}
           statusOptions={statusOptions}
           onOpenChat={openLeadChat}
           clientId={clientId}
+          tags={tags}
+          onSetTags={(lead, ids) => void definirTags(lead, ids)}
+          onConfigurarTags={podeConfigurarTags ? () => setShowTagsConfig(true) : undefined}
+        />
+      )}
+
+      {showTagsConfig && clientId && (
+        <TagsConfigModal clientId={clientId} tags={tags} onChange={setTags} onClose={() => { setShowTagsConfig(false); void refreshLeads(); }} />
+      )}
+
+      {showNovoLead && clientId && (
+        <NovoLeadModal
+          clientId={clientId}
+          funnelId={selectedFunnelId || undefined}
+          statusOptions={statusOptions}
+          leads={leads}
+          onClose={() => setShowNovoLead(false)}
+          onCreated={lead => {
+            setShowNovoLead(false);
+            setLeads(prev => [lead as unknown as CrmLead, ...prev]);
+            notificar('Lead criado.', 'ok');
+          }}
+          onAbrirExistente={id => {
+            const existente = leads.find(l => l.id === id);
+            setShowNovoLead(false);
+            if (existente) setKanbanEditLead(existente);
+          }}
         />
       )}
 
@@ -4288,11 +4419,11 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
         />
       )}
 
-      {showPortalModal && clientId && (
-        <PortalLinkModal
+      {showAcessosModal && clientId && (
+        <AcessosClienteModal
           clientId={clientId}
           clientName={activeClients.find(c => c.id === clientId)?.name ?? 'Cliente'}
-          onClose={() => setShowPortalModal(false)}
+          onClose={() => setShowAcessosModal(false)}
         />
       )}
 
@@ -4303,83 +4434,8 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
         />
       )}
     </div>
+    </ModoClienteContext.Provider>
   );
 }
 
-function Td({ children, center }: { children?: React.ReactNode; center?: boolean }) {
-  return (
-    <td className={cn('border-r border-border/20 last:border-0 overflow-hidden', center && 'text-center')}>
-      {children}
-    </td>
-  );
-}
 
-function ColumnFilter({
-  kind,
-  columnKey,
-  value,
-  onChange,
-  statusOptions,
-}: {
-  kind: ColumnFilterKind;
-  columnKey: ColumnKey;
-  value: string;
-  onChange: (key: ColumnKey, value: string) => void;
-  statusOptions: string[];
-}) {
-  const baseClass = 'h-7 w-full rounded-md border border-border/70 bg-background/70 px-2 text-[10px] font-medium normal-case tracking-normal text-foreground outline-none transition-colors placeholder:text-muted-foreground/40 focus:border-primary';
-
-  if (kind === 'none') return <div className="h-7" />;
-  if (kind === 'boolean') {
-    return (
-      <select value={value} onChange={e => onChange(columnKey, e.target.value)} className={cn(baseClass, 'appearance-none')}>
-        <option value="">Todos</option>
-        <option value="yes">Sim</option>
-        <option value="no">Não</option>
-      </select>
-    );
-  }
-  if (columnKey === 'status') {
-    return (
-      <select value={value} onChange={e => onChange(columnKey, e.target.value)} className={cn(baseClass, 'appearance-none')}>
-        <option value="">Todos</option>
-        {statusOptions.map(option => <option key={option}>{option}</option>)}
-      </select>
-    );
-  }
-  if (columnKey === 'temperatura') {
-    return (
-      <select value={value} onChange={e => onChange(columnKey, e.target.value)} className={cn(baseClass, 'appearance-none')}>
-        <option value="">Todos</option>
-        <option value="quente">Quente</option>
-        <option value="morno">Morno</option>
-        <option value="frio">Frio</option>
-        <option value="sem">Sem IA</option>
-      </select>
-    );
-  }
-  if (columnKey === 'canal') {
-    return (
-      <select value={value} onChange={e => onChange(columnKey, e.target.value)} className={cn(baseClass, 'appearance-none')}>
-        <option value="">Todos</option>
-        {CANAL_OPTIONS.map(option => <option key={option}>{option}</option>)}
-      </select>
-    );
-  }
-  if (columnKey === 'pagamento') {
-    return (
-      <select value={value} onChange={e => onChange(columnKey, e.target.value)} className={cn(baseClass, 'appearance-none')}>
-        <option value="">Todos</option>
-        {PAGAMENTO_OPTIONS.map(option => <option key={option}>{option}</option>)}
-      </select>
-    );
-  }
-  return (
-    <input
-      value={value}
-      onChange={e => onChange(columnKey, e.target.value)}
-      placeholder="Filtrar"
-      className={baseClass}
-    />
-  );
-}

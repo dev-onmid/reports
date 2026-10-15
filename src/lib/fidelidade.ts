@@ -421,7 +421,7 @@ export function aplicarVars(
  * e ela sumiu, a primeira letra do que sobrou precisa subir, senão a mensagem
  * chega começando em minúscula.
  */
-function limparPontuacao(texto: string, comecavaComVariavel: boolean): string {
+export function limparPontuacao(texto: string, comecavaComVariavel: boolean): string {
   const limpo = texto
     .replace(/[ \t]{2,}/g, ' ')
     // Espaço antes de pontuação: "Oi, !" → "Oi,!"

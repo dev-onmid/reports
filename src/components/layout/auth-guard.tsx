@@ -96,12 +96,32 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
         if (!active) return;
         if (res.status === 401) {
           clearAuthSession();
-          router.replace(`/?expirado=1&next=${encodeURIComponent(pathname)}`);
+          // Cliente logado no endereço da equipe: vai para o crm.onmid.app.
+          void res.clone().json().then((d: { usarCrm?: string }) => {
+            if (d?.usarCrm) window.location.href = `${d.usarCrm}/`;
+            else router.replace(`/?expirado=1&next=${encodeURIComponent(pathname)}`);
+          }).catch(() => router.replace(`/?expirado=1&next=${encodeURIComponent(pathname)}`));
           return;
         }
         if (!res.ok) setIndisponivel(true);
       })
       .catch(() => { if (active) setIndisponivel(true); });
+
+    // Funcionário do CLIENTE: só o CRM. Não passa pelo mapa de permissões da
+    // agência (ele não tem linha lá, e o padrão negaria o CRM). Quem garante o
+    // que ele vê é o servidor — o proxy recusa qualquer rota fora da lista dele.
+    if (session.team === 'cliente') {
+      const gestor = session.perfil === 'gestor';
+      const ok = pathname === '/crm' || pathname.startsWith('/crm/')
+        || (gestor && (pathname === '/dashboard' || pathname.startsWith('/dashboard/')));
+      if (ok) {
+        setAllowed(true);
+      } else {
+        setAllowed(false);
+        router.replace('/crm');
+      }
+      return cleanup;
+    }
 
     const role = session.role as Role;
     const allowedRoles = getAllowedRoles(pathname);

@@ -2,16 +2,19 @@ import { makeServerPool } from '@/lib/server-db';
 import { getFreshMetaToken } from '@/lib/meta-token';
 import { RESULT_ACTIONS, NEW_CONTACT_ACTIONS, PURCHASE_ACTIONS, sumActions } from './report-runner';
 import {
-  fetchBairros, fetchMetaData, fetchInstagramData, autoPreviousPeriod, sanitizeJsonValue,
-  sCapa, sVisaoGeral, sRegioes, sPaidTrafficResumo, sMetaAdsResumo, sMetaAdsCampanhas, sCriativos,
+  fetchBairros, fetchMetaData, fetchInstagramData, autoPreviousPeriod, rotuloPeriodo, mesesCheios, sanitizeJsonValue, comprasReaisGoogle,
+  sCapa, sVisaoGeral, sFunilComercial, sCanais, sSiteResumo, sSiteAudiencia, sRegioes, sPaidTrafficResumo, sMetaAdsResumo, sMetaAdsCampanhas, sCriativos,
   sGoogleAdsResumo, sGoogleAdsCampanhas, sGoogleAdsPalavrasChave,
   sInstagram, sInstagramCalendar, sInstagramPosts, sInstagramSpotlight,
-  sInstagramTodosConteudos, ordenarPostsPorData, TODOS_CONTEUDOS_POR_PAGINA,
+  sInstagramTodosConteudos, ordenarPostsPorData, TODOS_CONTEUDOS_POR_PAGINA, postsParaListar,
   monthsBetweenInclusive, FONT_LINK, CANVAS, INTER,
   resolveReportCover, fetchReportRotationSeed,
   type ParsedData, type DiagJson, type GoogleAdsFull, type CampanhaGoogleDetalhada, type PalavraChaveGoogle, type MetaBreakdownLevel, type CompareOverride,
 } from './delivery-report-builder';
 import { sectionEnabled } from './report-sections';
+import { fetchCrmDoRelatorio, fetchSiteDoRelatorio, degrausDoFunil, ehMesCheio } from './report-crm-dados';
+import { receitaPorPlataforma, comercialDaPlataforma } from './canal-plataforma';
+import type { CrmDoPeriodo } from './crm-metricas';
 
 // ── Persist ───────────────────────────────────────────────────────────────────
 
@@ -355,6 +358,9 @@ export async function fetchGoogleAdsTotals(connectionId: string, accountIds: str
 // Campaign-level Google Ads fetch (mirrors fetchMetaData's shape) — each GAQL row
 // already aggregates a campaign's metrics over the whole date range, so no extra
 // per-campaign request is needed beyond what fetchGoogleAdsTotals already does.
+// Categorias de ação de conversão do Google Ads que são VENDA de fato.
+const CATEGORIAS_DE_COMPRA = new Set(['PURCHASE', 'STORE_SALE']);
+
 export async function fetchGoogleAdsDetailed(
   connectionId: string | null | undefined,
   accountIds: string[],
@@ -370,6 +376,8 @@ export async function fetchGoogleAdsDetailed(
 
   const devToken = GOOGLE_ADS_DEVELOPER_TOKEN;
   const campanhas: CampanhaGoogleDetalhada[] = [];
+  // Série diária (soma das contas) para o gráfico do resumo.
+  const porDia = new Map<string, { date: string; investimento: number; cliques: number; conversoes: number }>();
   // Palavras-chave agregadas por texto+correspondência (a mesma keyword pode existir
   // em vários grupos de anúncios/campanhas — somamos as métricas de todas as ocorrências).
   const keywordAgg = new Map<string, PalavraChaveGoogle>();
@@ -384,7 +392,7 @@ export async function fetchGoogleAdsDetailed(
       const loginCustomerId = loginCustomerByAccount[customerId];
       const data = await googleAdsSearchWithFallback(
         customerId,
-        `SELECT campaign.name, campaign.advertising_channel_type, campaign.status, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions, metrics.conversions_value
+        `SELECT campaign.id, campaign.name, campaign.advertising_channel_type, campaign.status, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions, metrics.conversions_value
                     FROM campaign
                     WHERE segments.date BETWEEN '${from}' AND '${to}' AND campaign.status = 'ENABLED'
                     LIMIT 50`,
@@ -394,23 +402,84 @@ export async function fetchGoogleAdsDetailed(
       );
       if (!data) return;
       pendingAccounts.delete(customerId);
+
+      // COMPRAS de verdade por campanha, pela CATEGORIA da ação de conversão.
+      // ⚠️ `conversions_value > 0` não serve de sinal: o Google dá R$ 1,00 de valor
+      // padrão a toda conversão, e campanha de lead virava "Vendas / Shopping".
+      // Query à parte porque segmentar por categoria proíbe custo/cliques na mesma.
+      const comprasData = await googleAdsSearchWithFallback(
+        customerId,
+        `SELECT campaign.id, segments.conversion_action_category, metrics.conversions, metrics.conversions_value
+                    FROM campaign
+                    WHERE segments.date BETWEEN '${from}' AND '${to}' AND campaign.status = 'ENABLED'`,
+        candidate.accessToken,
+        devToken,
+        loginCustomerId,
+      );
+      const comprasPorCampanha = new Map<string, { compras: number; valor: number }>();
+      for (const row of (comprasData?.results ?? [])) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const r = row as any;
+        if (!CATEGORIAS_DE_COMPRA.has(String(r.segments?.conversionActionCategory ?? ''))) continue;
+        const id = String(r.campaign?.id ?? '');
+        const atual = comprasPorCampanha.get(id) ?? { compras: 0, valor: 0 };
+        atual.compras += googleMetricNumber(r.metrics?.conversions);
+        atual.valor   += googleMetricNumber(r.metrics?.conversionsValue);
+        comprasPorCampanha.set(id, atual);
+      }
+
       for (const row of (data.results ?? [])) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const r = row as any;
         const m = (r.metrics ?? {}) as Record<string, number>;
+        const tipo = String(r.campaign?.advertisingChannelType ?? '');
+        const conversoes = googleMetricNumber(m.conversions);
+        const valorConversoes = googleMetricNumber(m.conversionsValue);
+        // A consulta por categoria falhou (null) numa campanha de SHOPPING: lá
+        // conversão É compra, então não zera — nas demais, sem prova não há compra.
+        const semCategoria = !comprasData && tipo.toUpperCase() === 'SHOPPING';
+        const c = comprasPorCampanha.get(String(r.campaign?.id ?? ''));
+        const reais = semCategoria
+          ? { compras: conversoes, valorCompras: valorConversoes }
+          : comprasReaisGoogle(tipo, c?.compras ?? 0, c?.valor ?? 0);
         const metricas = {
           investimento:     googleMetricNumber(m.costMicros) / 1_000_000,
           impressoes:       googleMetricNumber(m.impressions),
           cliques:          googleMetricNumber(m.clicks),
-          conversoes:       googleMetricNumber(m.conversions),
-          valorConversoes:  googleMetricNumber(m.conversionsValue),
+          conversoes,
+          valorConversoes,
+          compras:          reais.compras,
+          valorCompras:     reais.valorCompras,
         };
         if (!hasGoogleActivity(metricas)) continue;
         campanhas.push({
           nome: String(r.campaign?.name ?? 'Sem nome'),
-          tipo: String(r.campaign?.advertisingChannelType ?? ''),
+          tipo,
           metricas,
         });
+      }
+
+      // Evolução diária — mesmas campanhas (ENABLED) do total, para o gráfico fechar
+      // com os KPIs do topo da página.
+      const diaData = await googleAdsSearchWithFallback(
+        customerId,
+        `SELECT segments.date, metrics.cost_micros, metrics.clicks, metrics.conversions
+                    FROM campaign
+                    WHERE segments.date BETWEEN '${from}' AND '${to}' AND campaign.status = 'ENABLED'`,
+        candidate.accessToken,
+        devToken,
+        loginCustomerId,
+      );
+      for (const row of (diaData?.results ?? [])) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const r = row as any;
+        const date = String(r.segments?.date ?? '');
+        if (!date) continue;
+        const d = porDia.get(date) ?? { date, investimento: 0, cliques: 0, conversoes: 0 };
+        d.investimento += googleMetricNumber(r.metrics?.costMicros) / 1_000_000;
+        d.cliques      += googleMetricNumber(r.metrics?.clicks);
+        d.conversoes   += googleMetricNumber(r.metrics?.conversions);
+        porDia.set(date, d);
       }
 
       // Top palavras-chave (keyword_view) — só campanhas de Pesquisa têm keywords.
@@ -466,10 +535,13 @@ export async function fetchGoogleAdsDetailed(
     cliques:         acc.cliques         + c.metricas.cliques,
     conversoes:      acc.conversoes      + c.metricas.conversoes,
     valorConversoes: acc.valorConversoes + c.metricas.valorConversoes,
-  }), { investimento: 0, impressoes: 0, cliques: 0, conversoes: 0, valorConversoes: 0 });
+    compras:         acc.compras         + (c.metricas.compras ?? 0),
+    valorCompras:    acc.valorCompras    + (c.metricas.valorCompras ?? 0),
+  }), { investimento: 0, impressoes: 0, cliques: 0, conversoes: 0, valorConversoes: 0, compras: 0, valorCompras: 0 });
 
   return {
     ...totals,
+    diario: [...porDia.values()].sort((a, b) => a.date.localeCompare(b.date)),
     campanhas: campanhas.sort((a, b) => b.metricas.investimento - a.metricas.investimento).slice(0, 8),
     palavrasChave,
   };
@@ -541,55 +613,19 @@ export async function fetchMonthlyMeta(connectionId: string, accountIds: string[
   return Array.from(monthly.values()).sort((a, b) => a.month.localeCompare(b.month));
 }
 
-// ── Monthly CRM fetch ─────────────────────────────────────────────────────────
+// ── CRM do período ────────────────────────────────────────────────────────────
 
-type MonthlyCrm = {
-  month: string; label: string;
-  registros: number; novosClientes: number; fechados: number; faturamento: number;
-};
-
-async function fetchMonthlyCrm(clientId: string, from: string, to: string): Promise<MonthlyCrm[]> {
-  const pool = makeServerPool();
-  try {
-    const { rows } = await pool.query(
-      `SELECT
-         TO_CHAR(DATE_TRUNC('month', COALESCE(data::date, lead_date, created_at::date)), 'YYYY-MM') AS month,
-         COUNT(*) AS registros,
-         COUNT(*) FILTER (WHERE fechou = true OR COALESCE(NULLIF(valor_rs,0), 0) > 0) AS fechados,
-         COALESCE(SUM(COALESCE(NULLIF(valor_rs,0), 0)), 0) AS faturamento
-       FROM public.crm_leads
-       WHERE client_id = $1
-         AND COALESCE(data::date, lead_date, created_at::date) BETWEEN $2 AND $3
-       GROUP BY 1 ORDER BY 1`,
-      [clientId, from, to],
-    ).catch(() => ({ rows: [] as Array<{ month: string; registros: string; fechados: string; faturamento: string }> }));
-
-    return rows.map(r => ({
-      month:         r.month,
-      label:         fmtMonth(r.month + '-01'),
-      registros:     parseInt(r.registros,  10) || 0,
-      novosClientes: parseInt(r.fechados,   10) || 0,
-      fechados:      parseInt(r.fechados,   10) || 0,
-      faturamento:   parseFloat(r.faturamento)  || 0,
-    }));
-  } finally {
-    await pool.end();
-  }
-}
-
-// Aggregates CRM rows into the same shape the delivery report builds from CSVs
-// (faturamento/pedidos/ticket), so the performance report reuses the exact same
-// slide builders — "pedidos" maps to closed deals (fechados) since there's no order count.
-function toParsedData(rows: MonthlyCrm[]): ParsedData {
-  const totals = rows.reduce(
-    (acc, r) => ({ faturamento: acc.faturamento + r.faturamento, pedidos: acc.pedidos + r.fechados }),
-    { faturamento: 0, pedidos: 0 },
-  );
+// CRM do período no shape que os slides de visão geral consomem ("pedidos" = vendas
+// fechadas). Os números vêm de `consultarCrmDoPeriodo` — a MESMA conta do card de
+// Faturamento da dashboard (venda pelo mês do GANHO + lei de contagem). A query
+// própria que havia aqui contava pelo mês de criação do lead e fazia o relatório
+// divergir da tela.
+function toParsedData(crm: CrmDoPeriodo | null): ParsedData {
   return {
     ativos: 0, inativos: 0, potenciais: 0,
-    faturamento: totals.faturamento,
-    pedidos_ativos: totals.pedidos,
-    ticket: totals.pedidos > 0 ? totals.faturamento / totals.pedidos : 0,
+    faturamento: crm?.revenue ?? 0,
+    pedidos_ativos: crm?.sales ?? 0,
+    ticket: crm?.ticket ?? 0,
     uma_compra: 0, recorrentes: 0,
     produtos: [], inativos_faixas: [], por_dia: [],
   };
@@ -619,14 +655,15 @@ export async function buildOmniReport(input: {
   const prev = compare === null ? null : (compare ?? calcPrevPeriod(periodFrom, periodTo));
   const fromDate = new Date(periodFrom + 'T12:00:00');
   const toDate   = new Date(periodTo   + 'T12:00:00');
-  const MONTHS   = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
-  const periodo     = `${MONTHS[fromDate.getMonth()]}/${fromDate.getFullYear()}`;
-  const prevFromDate = prev ? new Date(prev.from + 'T12:00:00') : null;
-  const prevPeriodo  = prevFromDate ? `${MONTHS[prevFromDate.getMonth()]}/${prevFromDate.getFullYear()}` : '';
+  // Rótulo cobre o período INTEIRO ("Julho a Setembro/2026"), não só o mês inicial.
+  const periodo     = rotuloPeriodo(periodFrom, periodTo);
+  const prevPeriodo = prev ? rotuloPeriodo(prev.from, prev.to) : '';
+  // Um mês cheio é a unidade natural do relatório; fora disso as páginas dizem "período".
+  const periodoEhMes = mesesCheios(periodFrom, periodTo) === 1;
 
-  const [monthlyCrm, prevMonthlyCrm, metaDetailed, googleDetailed, instagramFull, bairros, rotationSeed] = await Promise.all([
-    fetchMonthlyCrm(clientId, periodFrom, periodTo),
-    prev ? fetchMonthlyCrm(clientId, prev.from, prev.to) : Promise.resolve([]),
+  const [crm, site, metaDetailed, googleDetailed, instagramFull, bairros, rotationSeed] = await Promise.all([
+    fetchCrmDoRelatorio(clientId, periodFrom, periodTo, prev),
+    fetchSiteDoRelatorio(clientId, periodFrom, periodTo),
     connectionId && accountIds?.length
       ? fetchMetaData(connectionId, accountIds, periodFrom, periodTo, metaLevel)
       : Promise.resolve({ meta: null, creatives: [] }),
@@ -640,9 +677,13 @@ export async function buildOmniReport(input: {
   ]);
   const cover = resolveReportCover(coverId, rotationSeed);
 
-  const data    = toParsedData(monthlyCrm);
-  const hasPrevData = prevMonthlyCrm.some(m => m.faturamento > 0 || m.fechados > 0);
-  const prevData = hasPrevData ? toParsedData(prevMonthlyCrm) : null;
+  const data    = toParsedData(crm.atual);
+  const hasPrevData = !!crm.anterior && (crm.anterior.revenue > 0 || crm.anterior.sales > 0);
+  const prevData = hasPrevData ? toParsedData(crm.anterior) : null;
+
+  const degraus = crm.funil ? degrausDoFunil(crm.funil) : [];
+  const canaisLeads   = (crm.canais?.leads ?? []).map(c => ({ label: c.label, valor: c.leads }));
+  const canaisReceita = (crm.canais?.origens ?? []).map(c => ({ label: c.label, valor: c.receita, vendas: c.vendas }));
 
   const { meta, creatives } = metaDetailed;
   const instagram = instagramFull?.insights ?? null;
@@ -658,7 +699,13 @@ export async function buildOmniReport(input: {
   const en = (key: string) => sectionEnabled(sections, key);
 
   const hasVisao              = (data.faturamento > 0 || data.pedidos_ativos > 0) && en('visao_geral');
+  // Funil só com gente no topo; canais só com algum lead ou receita no período.
+  const hasFunil              = degraus.length >= 2 && degraus[0].valor > 0 && en('funil');
+  const hasCanais             = !!crm.canais && (crm.canais.leadsTotal > 0 || crm.canais.total > 0) && en('canais');
   const hasRegiao             = bairros.length > 0 && en('regioes');
+  // Site (GA4): só com propriedade vinculada E visita no período.
+  const hasSite               = !!site && site.atual.sessoes > 0 && en('site_resumo');
+  const hasSiteAudiencia      = !!site && site.atual.sessoes > 0 && en('site_audiencia');
   const hasMeta               = meta !== null && en('meta_resumo');
   const hasGoogle             = googleDetailed !== null && en('google_resumo');
   const hasPaidTraffic        = (meta !== null || googleDetailed !== null) && en('trafego_resumo');
@@ -674,10 +721,13 @@ export async function buildOmniReport(input: {
   const hasCriativos          = creatives.length > 0 && en('criativos');
   const destaquePages         = hasDestaques ? Math.ceil(meta!.campanhas.length / 4) : 0;
   const googleDestaquePages   = hasGoogleDestaques ? Math.ceil(googleDetailed!.campanhas.length / 4) : 0;
-  const todosConteudosPages   = hasTodosConteudos ? Math.ceil(igPosts.length / TODOS_CONTEUDOS_POR_PAGINA) : 0;
+  const todosListar           = postsParaListar(ordenarPostsPorData(igPosts));
+  const todosConteudosPages   = hasTodosConteudos ? todosListar.paginas : 0;
 
   const total = 1
     + (hasVisao      ? 1 : 0)
+    + (hasFunil      ? 1 : 0)
+    + (hasCanais     ? 1 : 0)
     + (hasRegiao     ? 1 : 0)
     + (hasPaidTraffic ? 1 : 0)
     + (hasMeta       ? 1 : 0)
@@ -690,6 +740,8 @@ export async function buildOmniReport(input: {
     + destaquePages
     + googleDestaquePages
     + (hasGooglePalavras ? 1 : 0)
+    + (hasSite ? 1 : 0)
+    + (hasSiteAudiencia ? 1 : 0)
     + (hasCriativos   ? 1 : 0);
 
   const slides: string[] = [];
@@ -697,12 +749,48 @@ export async function buildOmniReport(input: {
 
   slides.push(sCapa(data, meta, clientName, periodo, prevPeriodo, diag, total, cover));
 
-  if (hasVisao)   slides.push(sVisaoGeral(data, prevData, ++i, total, periodo, prevPeriodo));
+  if (hasVisao) {
+    const brl2 = (n: number) => n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const leads = crm.atual?.leads ?? 0;
+    const leadsAnt = crm.anterior?.leads ?? 0;
+    const mesAtual = periodo.split('/')[0];
+    const mesAnt = prevPeriodo.split('/')[0];
+    const fraseLeads = leads > 0
+      ? `Entraram ${leads.toLocaleString('pt-BR')} leads em ${mesAtual}${hasPrevData && leadsAnt > 0 ? ` (${leadsAnt.toLocaleString('pt-BR')} em ${mesAnt})` : ''}.`
+      : '';
+    // A meta cadastrada é MENSAL: só vale comparar quando o período é um mês cheio.
+    const fraseMeta = crm.metaFaturamento && ehMesCheio(periodFrom, periodTo)
+      ? ` A meta de faturamento do mês era ${brl2(crm.metaFaturamento)} — o realizado chegou a ${((data.faturamento / crm.metaFaturamento) * 100).toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}% dela.`
+      : '';
+    slides.push(sVisaoGeral(data, prevData, ++i, total, periodo, prevPeriodo, {
+      unidade: periodoEhMes ? 'mês' : 'período',
+      rotuloVendas: 'Vendas',
+      leituraSemComparativo: `${periodo} fechou com ${brl2(data.faturamento)} em ${data.pedidos_ativos.toLocaleString('pt-BR')} vendas, ticket médio de ${brl2(data.ticket)}.`,
+      leituraFinal: `${fraseLeads}${fraseMeta}`.trim(),
+    }));
+  }
+  if (hasFunil) {
+    slides.push(sFunilComercial(degraus, {
+      mesCheio: periodoEhMes,
+      vendasDoMes: crm.atual?.sales ?? 0,
+      vendasDeLeadsAnteriores: crm.funil?.vendasCohort?.anteriores ?? 0,
+      periodo,
+    }, ++i, total));
+  }
+  if (hasCanais) {
+    slides.push(sCanais({
+      leads: canaisLeads, leadsTotal: crm.canais!.leadsTotal,
+      receita: canaisReceita, receitaTotal: crm.canais!.total,
+      semAtribuicao: crm.canais!.semAtribuicao, periodo,
+    }, ++i, total));
+  }
   if (hasRegiao)  slides.push(sRegioes(bairros, ++i, total));
 
   if (hasPaidTraffic) slides.push(sPaidTrafficResumo(meta, googleDetailed, ++i, total));
 
-  if (hasMeta)        slides.push(sMetaAdsResumo(meta!, ++i, total));
+  // Faturamento do CRM por plataforma (canais Meta × Google) para o ROAS dos resumos.
+  const receitaPlat = receitaPorPlataforma(crm.canais?.origens ?? []);
+  if (hasMeta)        slides.push(sMetaAdsResumo(meta!, ++i, total, comercialDaPlataforma(receitaPlat.meta, meta!.investimento)));
   if (hasDestaques) {
     for (let start = 0; start < meta!.campanhas.length; start += 4) {
       slides.push(sMetaAdsCampanhas(meta!, diag, ++i, total, periodo, meta!.campanhas.slice(start, start + 4)));
@@ -710,13 +798,19 @@ export async function buildOmniReport(input: {
   }
   if (hasCriativos)   slides.push(sCriativos(creatives, ++i, total));
 
-  if (hasGoogle)      slides.push(sGoogleAdsResumo(googleDetailed!, ++i, total));
+  if (hasGoogle)      slides.push(sGoogleAdsResumo(googleDetailed!, ++i, total, comercialDaPlataforma(receitaPlat.google, googleDetailed!.investimento)));
   if (hasGoogleDestaques) {
     for (let start = 0; start < googleDetailed!.campanhas.length; start += 4) {
       slides.push(sGoogleAdsCampanhas(googleDetailed!, ++i, total, periodo, googleDetailed!.campanhas.slice(start, start + 4)));
     }
   }
   if (hasGooglePalavras) slides.push(sGoogleAdsPalavrasChave(googleDetailed!, ++i, total, periodo));
+
+  // Site vem depois da mídia paga (é para onde ela manda a visita) e antes do orgânico.
+  // ⚠️ O comparativo do GA4 é sempre a janela anterior automática da rota; com um
+  // período de comparação escolhido à mão (ou desligado), as variações ficam de fora.
+  if (hasSite)          slides.push(sSiteResumo(site!, { periodo, prevPeriodo, comparar: compare === undefined && !!prev }, ++i, total));
+  if (hasSiteAudiencia) slides.push(sSiteAudiencia(site!, { periodo }, ++i, total));
 
   if (hasInstagram)   slides.push(sInstagram(instagram!, ++i, total, periodo));
   if (hasCalendario) {
@@ -725,13 +819,13 @@ export async function buildOmniReport(input: {
     }
   }
   if (hasTodosConteudos) {
-    const ordered = ordenarPostsPorData(igPosts);
+    const ordered = todosListar.lista;
     for (let start = 0, page = 1; start < ordered.length; start += TODOS_CONTEUDOS_POR_PAGINA, page++) {
-      slides.push(sInstagramTodosConteudos(ordered.slice(start, start + TODOS_CONTEUDOS_POR_PAGINA), ++i, total, page, todosConteudosPages));
+      slides.push(sInstagramTodosConteudos(ordered.slice(start, start + TODOS_CONTEUDOS_POR_PAGINA), ++i, total, page, todosConteudosPages, todosListar.totalPosts));
     }
   }
-  if (hasTopConteudos)       slides.push(sInstagramPosts(igPosts, ++i, total));
-  if (hasInstagramSpotlight) slides.push(sInstagramSpotlight(igPosts, ++i, total));
+  if (hasTopConteudos)       slides.push(sInstagramPosts(igPosts, ++i, total, periodoEhMes));
+  if (hasInstagramSpotlight) slides.push(sInstagramSpotlight(igPosts, ++i, total, periodoEhMes));
 
   return { html: `${FONT_LINK}<div class="onmid-report" style="background:${CANVAS};padding:28px;font-family:${INTER}">${slides.join('')}</div>` };
 }

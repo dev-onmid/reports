@@ -1,6 +1,9 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 
-export const SESSION_COOKIE = 'onmid_session';
+// `__Host-` só em produção (exige https): nenhum outro *.onmid.app consegue
+// plantar um cookie com esse nome para o nosso domínio (auditoria 2026-10-10).
+// Em http://localhost o navegador descarta cookies com esse prefixo.
+export const SESSION_COOKIE = process.env.NODE_ENV === 'production' ? '__Host-onmid_session' : 'onmid_session';
 
 /** 7 dias. Depois disso o usuário loga de novo. */
 const MAX_AGE_SECONDS = 60 * 60 * 24 * 7;

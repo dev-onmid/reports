@@ -1,3 +1,5 @@
+import type { NextRequest } from 'next/server';
+import { escopoDoCliente } from '@/lib/acesso';
 import { makeServerPool } from '@/lib/server-db';
 import { avatarDoCliente } from '@/lib/client-avatar-source';
 
@@ -12,7 +14,8 @@ import { avatarDoCliente } from '@/lib/client-avatar-source';
  * está documentado lá). Aqui é só a coleta: foto do Instagram do snapshot do
  * monitor + id da Página (vínculo de contas primeiro, snapshot como reserva).
  */
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const meus = escopoDoCliente(req.headers);
   const pool = makeServerPool();
   try {
     const { rows } = await pool.query<{
@@ -56,6 +59,7 @@ export async function GET() {
       });
       if (url) avatars[r.id] = url;
     }
+    if (meus) for (const id of Object.keys(avatars)) if (!meus.includes(id)) delete avatars[id];
     return Response.json({ avatars });
   } catch (err) {
     console.error('[clients avatars]', err);

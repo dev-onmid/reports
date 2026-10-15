@@ -1,4 +1,5 @@
 import type { Pool } from 'pg';
+import { statusFechouSql } from '@/lib/importacao-origem';
 import { parseIsoDateRange } from '@/lib/optimizer-period-range';
 
 // Biblioteca de Criativos — agrega os leads do CRM por anúncio/criativo.
@@ -137,13 +138,13 @@ export async function aggregateCreatives(
         COUNT(*)::int                                     AS leads,
         COUNT(*) FILTER (WHERE r.respondeu)::int          AS conversas,
         COUNT(*) FILTER (WHERE l.compareceu = TRUE)::int  AS comparecimentos,
-        COUNT(*) FILTER (WHERE l.fechou = TRUE)::int      AS vendas,
+        COUNT(*) FILTER (WHERE l.fechou = TRUE OR ${statusFechouSql('l')})::int AS vendas,
         -- ⚠️ O ciclo que o Matheus queria fechar (16/09): saber qual ANÚNCIO traz lead
         -- que presta, não só qual traz mais lead. qualificado é a marca humana (MQL);
         -- engajado é quem conversou de verdade. Ver src/lib/lead-qualificacao.ts.
         COUNT(*) FILTER (WHERE l.qualificado = TRUE)::int AS qualificados,
         COUNT(*) FILTER (WHERE l.engajado = TRUE)::int    AS engajados,
-        COALESCE(SUM(l.valor_rs) FILTER (WHERE l.fechou = TRUE), 0)::float AS receita,
+        COALESCE(SUM(l.valor_rs) FILTER (WHERE l.fechou = TRUE OR ${statusFechouSql('l')}), 0)::float AS receita,
         COUNT(*) FILTER (WHERE l.origin = 'instagram')::int AS ig_leads,
         COUNT(*) FILTER (WHERE l.origin = 'meta')::int      AS fb_leads,
         MIN(l.created_at) AS first_lead_at,

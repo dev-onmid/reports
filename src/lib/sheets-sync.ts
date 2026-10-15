@@ -13,9 +13,11 @@
  */
 
 import type { Pool } from 'pg';
+import { gravarFunilPlanilha } from '@/lib/funil-planilha-server';
 import { memoizarSchema } from '@/lib/schema-memo';
 import { internalHeaders } from '@/lib/session';
-import { escolherAbas, abasCompativeis, urlExportXlsx, MAX_ABAS_POR_RODADA } from '@/lib/google-sheets';
+import { escolherAbas, assinaturaDaAba, urlExportXlsx, MAX_ABAS_POR_RODADA } from '@/lib/google-sheets';
+import { casarColunasDaAba, abaUtilizavel, CAMPOS, type Mapeamento } from '@/lib/sheets-mapeamento';
 
 export type SheetsConfig = {
   clientId: string;
@@ -29,6 +31,18 @@ export type SheetsConfig = {
   abas: string[] | null;
   /** Cache das abas que a planilha tinha na última análise (só para a tela). */
   abasVistas: string[] | null;
+  /**
+   * Cabeçalho da aba analisada, guardado para a tela poder oferecer o seletor de
+   * coluna ao reabrir sem baixar a planilha de novo. A sincronização nunca lê
+   * isto — ela sempre olha o cabeçalho real de cada aba.
+   */
+  colunasVistas: string[] | null;
+  /** Campos cujo de-para foi escolhido pelo gestor — a IA não os sobrescreve. */
+  camposManuais: string[] | null;
+  /** `aba -> assinatura` do que já foi importado, para não repetir trabalho. */
+  abasImportadas: Record<string, string> | null;
+  /** Ajustes de coluna que o gestor fez para UMA aba específica. */
+  mapeamentoPorAba: Record<string, Mapeamento> | null;
   /** Somar a aba do mês atual às escolhidas. Padrão true — ver `escolherAbas`. */
   seguirMes: boolean;
   tipoPlanilha: 'lead' | 'venda' | 'hibrido';
@@ -67,7 +81,19 @@ export const ensureSheetsSchema = memoizarSchema(async (pool: Pool) => {
       -- Lista de abas vista na última análise. É CACHE para a tela poder
       -- oferecer as caixinhas ao reabrir sem rebaixar 2 MB de planilha; a
       -- rotina diária nunca lê isto, ela sempre olha a planilha de verdade.
-      ADD COLUMN IF NOT EXISTS abas_vistas JSONB
+      ADD COLUMN IF NOT EXISTS abas_vistas JSONB,
+      -- Cabeçalho visto na última análise, para o editor de colunas (2026-10-07).
+      ADD COLUMN IF NOT EXISTS colunas_vistas JSONB,
+      -- Campos que o gestor apontou à mão. A reanálise preserva estes: sem isso,
+      -- um clique em "Reanalisar colunas" desfaz o ajuste e ninguém percebe.
+      ADD COLUMN IF NOT EXISTS campos_manuais JSONB,
+      -- Assinatura do conteúdo de cada aba já importada (2026-10-07). É o que
+      -- faz o histórico entrar aos poucos e depois parar de gastar vaga.
+      ADD COLUMN IF NOT EXISTS abas_importadas JSONB,
+      -- De-para por ABA (2026-10-07): a coluna de data pode se chamar "DATA"
+      -- num mês e "Data Entrada" no anterior. Só os ajustes manuais moram aqui;
+      -- o automático é recalculado a cada rodada.
+      ADD COLUMN IF NOT EXISTS mapeamento_por_aba JSONB
   `);
 });
 
@@ -125,7 +151,27 @@ export async function sincronizarSheets(
   }
 
   const wb = XLSX.read(buf, { type: 'buffer' });
-  const escolha = escolherAbas(wb.SheetNames, { fixas: cfg.abas, seguirMes: cfg.seguirMes }, hoje);
+  // Funil contado com as regras da própria planilha (só clientes com regra em
+  // funil-planilha.ts). Antes de qualquer pulo de aba: o funil relê TODAS as
+  // abas de mês, porque ele é barato e a importação pula as que não mudaram.
+  await gravarFunilPlanilha(pool, cfg.clientId, wb, XLSX.utils as never)
+    .catch(err => console.error('[sheets] funil da planilha', err));
+  // ⚠️ Assinatura de TODAS as abas antes de escolher: é ela que diz o que mudou
+  // desde a última rodada e, portanto, o que ainda precisa de vaga.
+  // ⚠️⚠️ O de-para entra na assinatura. Sem isso, ajustar as colunas na tela não
+  // teria efeito nenhum sobre o histórico: as abas antigas continuariam
+  // "idênticas", seriam puladas para sempre e os meses anteriores ficariam com o
+  // mapeamento velho. Com o selo, mudar uma coluna reimporta tudo.
+  const selo = JSON.stringify(cfg.mapeamento ?? null);
+  const assinaturas: Record<string, string> = {};
+  for (const nome of wb.SheetNames) {
+    try { assinaturas[nome] = assinaturaDaAba(XLSX.utils.sheet_to_csv(wb.Sheets[nome]) + '\u0000' + selo); } catch { /* aba ilegível entra como pendente */ }
+  }
+  const escolha = escolherAbas(
+    wb.SheetNames,
+    { fixas: cfg.abas, seguirMes: cfg.seguirMes, jaImportadas: cfg.abasImportadas, assinaturas },
+    hoje,
+  );
   if (!escolha.abas.length) {
     return {
       ok: false, motivoAba: escolha.motivoAbaDoMes,
@@ -135,21 +181,31 @@ export async function sincronizarSheets(
     };
   }
 
-  // ⚠️ Aba cujo cabeçalho não comporta o de-para fica FORA: a rota de importação
-  // recusa o lote inteiro quando uma coluna mapeada não existe, e um mês antigo
-  // com layout diferente derrubaria também o mês corrente.
+  // ⚠️⚠️ CADA ABA RESOLVE AS PRÓPRIAS COLUNAS. O de-para salvo é só o ponto de
+  // partida: a coluna de data pode estar em A num mês e em C no outro, chamar-se
+  // `DATA` agora e `Data Entrada` em 2024. `casarColunasDaAba` acha, por campo,
+  // a coluna daquela aba — e o que ela não entregar simplesmente não é mandado,
+  // em vez de reprovar a aba inteira (era assim que a Romanza perdia um ano).
   const cabecalhos: Record<string, string[]> = {};
+  const casamentos: Record<string, ReturnType<typeof casarColunasDaAba>> = {};
   for (const aba of escolha.abas) {
     const linha = XLSX.utils.sheet_to_json<unknown[]>(wb.Sheets[aba], { header: 1, defval: '' })[0] ?? [];
-    // Cru, sem trim: quem tolera espaço sobrando é `abasCompativeis`, e o de-para
-    // guarda o nome EXATO da coluna como a rota de importação vai procurá-la.
+    // Cru, sem trim: o nome EXATO é o que a rota de importação vai procurar.
     cabecalhos[aba] = (linha as unknown[]).map(c => String(c ?? ''));
+    casamentos[aba] = casarColunasDaAba(cabecalhos[aba], cfg.mapeamento, cfg.mapeamentoPorAba?.[aba] ?? null);
   }
-  const { ok: abasOk, incompativeis } = abasCompativeis(cabecalhos, escolha.abas, cfg.mapeamento);
+  const abasOk: string[] = [];
+  const incompativeis: { aba: string; faltam: string[] }[] = [];
+  const rotuloDe = (k: string) => CAMPOS.find(c => c.chave === k)?.rotulo ?? k;
+  for (const aba of escolha.abas) {
+    const { ok, faltamEssenciais } = abaUtilizavel(casamentos[aba], cfg.fonteFaturamento);
+    if (ok) abasOk.push(aba);
+    else incompativeis.push({ aba, faltam: faltamEssenciais.map(rotuloDe) });
+  }
   if (!abasOk.length) {
     return {
       ok: false, motivoAba: escolha.motivoAbaDoMes,
-      erro: `Nenhuma aba escolhida tem as colunas do mapeamento (falta ${incompativeis[0]?.faltam.join(', ')} em "${incompativeis[0]?.aba}"). Reanalise as colunas.`,
+      erro: `Nenhuma aba escolhida tem as colunas mínimas (falta ${incompativeis[0]?.faltam.join(', ')} em "${incompativeis[0]?.aba}"). Ajuste as colunas dessa aba na tela.`,
     };
   }
 
@@ -169,15 +225,50 @@ export async function sincronizarSheets(
   }
 
   const base = (process.env.APP_URL ?? process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000').replace(/\/$/, '');
+  // ⚠️ Abas incompatíveis são AGRUPADAS pelo que falta. Uma frase por aba vira
+  // um parágrafo ilegível quando a planilha tem anos de histórico com layout
+  // antigo — a da Romanza gerava 11 frases quase idênticas e o aviso que
+  // importava (o corte de abas) sumia no meio.
+  const porFalta = new Map<string, string[]>();
+  for (const i of incompativeis) {
+    const chave = i.faltam.join(', ');
+    const lista = porFalta.get(chave) ?? [];
+    lista.push(i.aba);
+    porFalta.set(chave, lista);
+  }
+  // Aba que ENTROU mas sem algum campo do padrão: é informação, não bloqueio.
+  const parciais = abasOk
+    .map(aba => ({ aba, faltam: casamentos[aba].faltam.map(rotuloDe) }))
+    .filter(x => x.faltam.length > 0);
+
   const avisos = [
-    ...incompativeis.map(i => `A aba "${i.aba}" ficou de fora: não tem ${i.faltam.join(', ')}.`),
+    ...[...porFalta].map(([faltam, abas]) =>
+      abas.length === 1
+        ? `A aba "${abas[0]}" ficou de fora: não tem ${faltam}.`
+        : `${abas.length} abas ficaram de fora por não terem ${faltam}: ${abas.join(', ')}.`),
     ...(escolha.sumidas.length ? [`Não existem mais na planilha: ${escolha.sumidas.join(', ')}.`] : []),
-    ...(escolha.cortadas.length ? [`Só as ${MAX_ABAS_POR_RODADA} primeiras abas entram por rodada; ficaram de fora: ${escolha.cortadas.join(', ')}.`] : []),
+    ...(escolha.cortadas.length ? [`Entram até ${MAX_ABAS_POR_RODADA} abas por rodada — o mês atual sempre entra. Faltam importar, e entram nas próximas rodadas: ${escolha.cortadas.join(', ')}.`] : []),
+    // ⚠️ Separado do corte de propósito: isto NÃO é pendência, e misturar fazia
+    // a tela parecer que algo está faltando quando o histórico já está no banco.
+    ...(escolha.jaEstavam.length ? [`${escolha.jaEstavam.length} abas já importadas e sem alteração não entraram de novo.`] : []),
+    ...(parciais.length ? [`Entraram sem alguns campos (o resto do lead foi importado): ${parciais.map(p => `${p.aba} sem ${p.faltam.join('/')}`).join('; ')}.`] : []),
   ];
   let linhas = 0;
   const corpos: unknown[] = [];
+  const importadas: string[] = [];
+  // ⚠️ A defesa contra planilha fora da curva é o RELÓGIO, não o teto de abas:
+  // o teto baixo impedia o histórico de entrar e não protegia de uma aba única
+  // gigante. 240 s deixam folga dentro do `maxDuration = 300` da rota para
+  // fechar a resposta e gravar o estado.
+  const prazo = Date.now() + 240_000;
+  let faltouTempo = false;
 
   for (const [, abasDoFormato] of porFormato) {
+    if (Date.now() > prazo) {
+      faltouTempo = true;
+      avisos.push(`Faltou tempo nesta rodada; ${abasDoFormato.join(', ')} entram na próxima.`);
+      continue;
+    }
     const fd = new FormData();
     const mappings: { file: string; clientId: string }[] = [];
     for (const aba of abasDoFormato) {
@@ -199,15 +290,15 @@ export async function sincronizarSheets(
     // `revenueColumn`/`nameColumn`/…. `clinic` fica de fora: aqui a planilha é
     // de UM cliente só, e mandar a coluna de clínica faria a rota tentar o
     // de-para clínica→cliente que não existe neste caminho.
-    for (const [campo, coluna] of Object.entries(cfg.mapeamento ?? {})) {
+    // ⚠️ O de-para desta aba, com o nome EXATO das colunas daqui — a rota de
+    // importação procura a coluna pelo texto, então mandar o nome de outra aba
+    // faria ela não achar nada.
+    const mapaDoFormato = casamentos[abasDoFormato[0]]?.mapa ?? {};
+    for (const [campo, coluna] of Object.entries(mapaDoFormato)) {
       // ⚠️ `contact` é LISTA (a fileira de tentativas) e vai como CSV num campo
       // próprio; os demais são 1:1.
       if (campo === 'contact') {
-        const cols = (Array.isArray(coluna) ? coluna : [])
-          // Só as que existem NESTE formato: a fileira encolhe de um mês para
-          // outro, e mandar coluna inexistente não ajuda ninguém.
-          .filter(c => (cabecalhos[abasDoFormato[0]] ?? []).some(h => h === c || h.trim() === c.trim()));
-        if (cols.length) fd.append('contactColumns', cols.join(','));
+        if (Array.isArray(coluna) && coluna.length) fd.append('contactColumns', coluna.join(','));
         continue;
       }
       if (typeof coluna === 'string' && coluna && campo !== 'clinic') fd.append(`${campo}Column`, coluna);
@@ -225,6 +316,7 @@ export async function sincronizarSheets(
       continue;
     }
     corpos.push(body);
+    importadas.push(...abasDoFormato);
     const av = (body as { avisos_coluna?: string[] }).avisos_coluna;
     if (av?.length) avisos.push(...av);
   }
@@ -236,11 +328,28 @@ export async function sincronizarSheets(
   }
   const body = corpos.length === 1 ? corpos[0] : { formatos: corpos };
 
+  // ⚠️ Guarda o cabeçalho da aba MAIS RECENTE que importou (a lista está em ordem
+  // crescente, então é a última). É o que faz o editor de colunas da tela
+  // funcionar sem o gestor precisar reanalisar a planilha — a rodada diária já
+  // tem o arquivo em mãos, pedir uma análise só para descobrir isso seria
+  // gastar IA para responder o que acabamos de ler.
+  const cabAtual = cabecalhos[abasOk[abasOk.length - 1]] ?? [];
+  // ⚠️ Só as abas que REALMENTE entraram nesta rodada são marcadas — formato que
+  // falhou ou ficou sem tempo continua pendente e volta na próxima.
+  const memoria = { ...(cfg.abasImportadas ?? {}) };
+  for (const nome of importadas) if (assinaturas[nome]) memoria[nome] = assinaturas[nome];
+  // Aba que sumiu da planilha sai da memória, senão ela cresce para sempre.
+  for (const nome of Object.keys(memoria)) if (!(nome in assinaturas)) delete memoria[nome];
+
   await pool.query(
     `UPDATE public.client_sheets
-        SET ultima_sync = NOW(), ultimo_resultado = $2::jsonb, ultimo_erro = NULL, atualizado_em = NOW()
+        SET ultima_sync = NOW(), ultimo_resultado = $2::jsonb, ultimo_erro = NULL,
+            colunas_vistas = COALESCE($3::jsonb, colunas_vistas),
+            abas_importadas = $4::jsonb, atualizado_em = NOW()
       WHERE client_id = $1`,
-    [cfg.clientId, JSON.stringify({ aba, abas: abasOk, motivo, linhas, avisos, ...(body as object) })]
+    [cfg.clientId, JSON.stringify({ aba, abas: abasOk, motivo, linhas, avisos, faltouTempo, ...(body as object) }),
+     cabAtual.length ? JSON.stringify(cabAtual.filter(c => c.trim().length > 0)) : null,
+     JSON.stringify(memoria)]
   );
   return { ok: true, aba, abas: abasOk, motivoAba: motivo, linhas, avisos, resultado: body };
 }
@@ -262,6 +371,12 @@ export function lerConfig(row: Record<string, unknown>): SheetsConfig {
     abaExemplo: (row.aba_exemplo as string | null) ?? null,
     abas: Array.isArray(row.abas) ? (row.abas as string[]) : null,
     abasVistas: Array.isArray(row.abas_vistas) ? (row.abas_vistas as string[]) : null,
+    colunasVistas: Array.isArray(row.colunas_vistas) ? (row.colunas_vistas as string[]) : null,
+    camposManuais: Array.isArray(row.campos_manuais) ? (row.campos_manuais as string[]) : null,
+    abasImportadas: row.abas_importadas && typeof row.abas_importadas === 'object' && !Array.isArray(row.abas_importadas)
+      ? (row.abas_importadas as Record<string, string>) : null,
+    mapeamentoPorAba: row.mapeamento_por_aba && typeof row.mapeamento_por_aba === 'object' && !Array.isArray(row.mapeamento_por_aba)
+      ? (row.mapeamento_por_aba as Record<string, Mapeamento>) : null,
     seguirMes: row.seguir_mes !== false,
     tipoPlanilha: (row.tipo_planilha as SheetsConfig['tipoPlanilha']) ?? 'lead',
     fonteFaturamento: row.fonte_faturamento === true,
