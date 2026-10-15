@@ -21,7 +21,13 @@ import { EVENTOS_MENSAGEM_META, eventoMensagemMeta } from '@/lib/meta-eventos-me
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
-type WhatsAppProvider = 'zapi' | 'evolution';
+type WhatsAppProvider = 'zapi' | 'evolution' | 'meta';
+
+const PROVIDER_LABEL: Record<WhatsAppProvider, string> = {
+  zapi: 'Z-API',
+  evolution: 'Evolution API',
+  meta: 'WhatsApp Oficial',
+};
 
 type TrackingConfig = {
   pixel_id: string;
@@ -39,7 +45,12 @@ type Instance = {
   ativo: boolean;
   provider: WhatsAppProvider;
   created_at: string;
+  meta_waba_id?: string | null;
+  meta_display_phone?: string | null;
+  meta_verified_name?: string | null;
 };
+
+type MetaWebhookInfo = { callback_url: string; verify_token: string; app_secret_configurado: boolean };
 
 // Lead com atribuição rica (crm_leads via /api/tracking/leads) — substitui a
 // leitura da tabela legada whatsapp_leads (que só tinha Source ID). O status de
@@ -248,7 +259,7 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
   const [showModal, setShowModal]       = useState(false);
   const [instMode, setInstMode]         = useState<'create' | 'attach'>('create');
   const [instProvider, setInstProvider] = useState<WhatsAppProvider>('zapi');
-  const [instForm, setInstForm]         = useState({ nome: '', instance_id: '', token: '' });
+  const [instForm, setInstForm]         = useState({ nome: '', instance_id: '', token: '', waba_id: '' });
   const [instError, setInstError]       = useState('');
   const [adding, setAdding]             = useState(false);
   // Attach an existing (e.g. Disparos) instance to this client
@@ -315,7 +326,7 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
   // ── Polling ────────────────────────────────────────────────────────────
 
   const fetchStatuses = useCallback((insts: Instance[]) => {
-    insts.filter(i => i.provider === 'evolution').forEach(inst => {
+    insts.filter(i => i.provider === 'evolution' || i.provider === 'meta').forEach(inst => {
       fetch(`/api/clients/${clientId}/tracking/instances/${inst.id}/status`)
         .then(r => r.ok ? r.json() as Promise<{ state: string }> : null)
         .then(d => { if (d?.state) setStatuses(prev => ({ ...prev, [inst.id]: d.state as ConnState })); })
@@ -433,7 +444,16 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
     setConvLog(rows);
   }
 
-  function openAddModal() { setInstForm({ nome: '', instance_id: '', token: '' }); setInstProvider('zapi'); setInstError(''); setInstMode('create'); setAttachSearch(''); setShowModal(true); }
+  function openAddModal() { setInstForm({ nome: '', instance_id: '', token: '', waba_id: '' }); setInstProvider('zapi'); setInstError(''); setInstMode('create'); setAttachSearch(''); setShowModal(true); }
+
+  const [metaWebhook, setMetaWebhook] = useState<MetaWebhookInfo | null>(null);
+  useEffect(() => {
+    if (!showModal || instProvider !== 'meta' || metaWebhook) return;
+    fetch('/api/admin/whatsapp-oficial')
+      .then(r => r.ok ? r.json() as Promise<MetaWebhookInfo> : null)
+      .then(d => { if (d) setMetaWebhook(d); })
+      .catch(() => {});
+  }, [showModal, instProvider, metaWebhook]);
 
   async function loadAvailableInstances() {
     try {
@@ -462,18 +482,28 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
     if (instProvider === 'zapi' && (!instForm.instance_id || !instForm.token)) { setInstError('Instance ID e Token são obrigatórios para Z-API.'); return; }
     if (instProvider === 'evolution' && !instForm.instance_id) { setInstError('Nome da instância Evolution API é obrigatório.'); return; }
     if (instProvider === 'evolution' && /\s/.test(instForm.instance_id)) { setInstError('O nome da instância não pode ter espaços. Use hífens: ex. celular-matheus'); return; }
+    if (instProvider === 'meta' && (!/^\d{5,}$/.test(instForm.instance_id.trim()) || !/^\d{5,}$/.test(instForm.waba_id.trim()) || !instForm.token.trim())) {
+      setInstError('Preencha o ID do número, o ID da conta WhatsApp Business (só números) e o token.'); return;
+    }
     setAdding(true);
     try {
       const res = await fetch(`/api/clients/${clientId}/tracking/instances`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...instForm, provider: instProvider }) });
-      const data = await res.json() as Instance & { error?: string };
+      const data = await res.json() as Instance & { error?: string; webhook_inscrito?: boolean; webhook_erro?: string | null };
       if (!res.ok) { setInstError(data.error ?? 'Erro ao salvar instância.'); return; }
       setInstances(prev => [...prev, data]);
       setShowModal(false);
+      if (data.provider === 'meta' && data.webhook_inscrito === false) {
+        alert(`Número validado, mas a inscrição do app nos webhooks da conta falhou: ${data.webhook_erro ?? 'erro desconhecido'}.\n\nAs mensagens só vão chegar depois que a inscrição for feita (tente de novo ou faça pelo painel da Meta).`);
+      }
     } finally { setAdding(false); }
   }
 
   async function removeInstance(inst: Instance) {
-    const label = inst.provider === 'evolution' ? 'Remover instância e deletar na Evolution API? Leads não serão apagados.' : 'Remover esta instância? Leads vinculados não serão apagados.';
+    const label = inst.provider === 'evolution'
+      ? 'Remover instância e deletar na Evolution API? Leads não serão apagados.'
+      : inst.provider === 'meta'
+        ? 'Remover a conexão com a API oficial? O número continua funcionando no sistema do cliente; só o reports para de receber. Leads não serão apagados.'
+        : 'Remover esta instância? Leads vinculados não serão apagados.';
     if (!confirm(label)) return;
     await fetch(`/api/clients/${clientId}/tracking/instances/${inst.id}`, { method: 'DELETE' });
     setInstances(prev => prev.filter(i => i.id !== inst.id));
@@ -612,27 +642,32 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
             ) : (
               <div className="space-y-2">
                 {instances.map(inst => {
-                  const webhookUrl = `${BASE}/api/webhook/whatsapp/${inst.id}`;
-                  const state: ConnState = statuses[inst.id] ?? 'unknown';
                   const isEvolution = inst.provider === 'evolution';
+                  const isMeta = inst.provider === 'meta';
+                  const webhookUrl = isMeta ? `${BASE}/api/webhook/whatsapp-oficial` : `${BASE}/api/webhook/whatsapp/${inst.id}`;
+                  const state: ConnState = statuses[inst.id] ?? 'unknown';
                   return (
                     <div key={inst.id} className="flex flex-col gap-2 rounded-lg border border-border bg-background p-3 sm:flex-row sm:items-center">
                       <div className="flex-1 min-w-0 space-y-1">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="text-sm font-semibold">{inst.nome}</span>
-                          <span className={cn('rounded-full px-2 py-0.5 text-[10px] font-bold', isEvolution ? 'bg-violet-500/15 text-violet-400' : 'bg-blue-500/15 text-blue-400')}>
-                            {isEvolution ? 'Evolution API' : 'Z-API'}
+                          <span className={cn('rounded-full px-2 py-0.5 text-[10px] font-bold', isEvolution ? 'bg-violet-500/15 text-violet-400' : isMeta ? 'bg-emerald-500/15 text-emerald-400' : 'bg-blue-500/15 text-blue-400')}>
+                            {PROVIDER_LABEL[inst.provider] ?? inst.provider}
                           </span>
                           <span className={cn('rounded-full px-2 py-0.5 text-[10px] font-bold', inst.ativo ? 'bg-emerald-500/15 text-emerald-400' : 'bg-muted text-muted-foreground')}>
                             {inst.ativo ? 'Ativo' : 'Inativo'}
                           </span>
-                          {isEvolution && <StateBadge state={state} />}
+                          {(isEvolution || isMeta) && <StateBadge state={state} />}
                         </div>
                         <div className="flex items-center gap-2 flex-wrap">
                           <code className="text-[10px] text-primary font-mono truncate max-w-xs">{webhookUrl}</code>
                           <CopyBtn text={webhookUrl} label="URL" />
                         </div>
-                        <p className="text-[10px] text-muted-foreground">{isEvolution ? 'Instância Evolution' : 'ID Z-API'}: {inst.instance_id}</p>
+                        <p className="text-[10px] text-muted-foreground">
+                          {isMeta
+                            ? <>Número: {inst.meta_display_phone ?? '—'}{inst.meta_verified_name ? ` · ${inst.meta_verified_name}` : ''} · ID {inst.instance_id} · só recebe</>
+                            : <>{isEvolution ? 'Instância Evolution' : 'ID Z-API'}: {inst.instance_id}</>}
+                        </p>
                       </div>
                       <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
                         {isEvolution && state !== 'open' && (
@@ -1267,7 +1302,11 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
             <div>
               <p className="mb-2 text-xs font-semibold text-muted-foreground">Provedor</p>
               <div className="flex items-center gap-1 rounded-lg border border-border bg-background p-0.5 w-fit">
-                {([{ value: 'zapi' as WhatsAppProvider, label: 'Z-API' }, { value: 'evolution' as WhatsAppProvider, label: 'Evolution API' }]).map(({ value, label }) => (
+                {([
+                  { value: 'zapi' as WhatsAppProvider, label: 'Z-API' },
+                  { value: 'evolution' as WhatsAppProvider, label: 'Evolution API' },
+                  { value: 'meta' as WhatsAppProvider, label: 'WhatsApp Oficial (Meta)' },
+                ]).map(({ value, label }) => (
                   <button key={value} type="button" onClick={() => { setInstProvider(value); setInstError(''); }}
                     className={cn('rounded-md px-3 py-1.5 text-xs font-semibold transition-all', instProvider === value ? 'bg-primary text-black' : 'text-muted-foreground hover:text-foreground')}>
                     {label}
@@ -1276,6 +1315,15 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
               </div>
             </div>
             <div className="space-y-3">
+              {instProvider === 'meta' && (
+                <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-3 py-2 text-[11px] text-muted-foreground space-y-1">
+                  <p className="font-semibold text-foreground">Só recebe: o reports passa a ver o que chega neste número. Nada é enviado por aqui.</p>
+                  <p>Os três dados ficam na conta Meta do cliente: <span className="text-foreground">WhatsApp Manager → Configuração da API</span> (ID do número e ID da conta) e um <span className="text-foreground">token permanente de usuário do sistema</span> com acesso a essa conta.</p>
+                  {metaWebhook && (
+                    <p>No app da Meta (WhatsApp → Configuração → Webhook): URL <code className="font-mono text-primary">{metaWebhook.callback_url}</code> · token de verificação <code className="font-mono text-primary">{metaWebhook.verify_token}</code>{!metaWebhook.app_secret_configurado && <span className="text-amber-400"> · META_APP_SECRET não configurado no servidor (assinatura não validada)</span>}</p>
+                  )}
+                </div>
+              )}
               <div>
                 <label className="mb-1 block text-xs font-semibold text-muted-foreground">Apelido da instância *</label>
                 <input value={instForm.nome} onChange={e => {
@@ -1285,16 +1333,23 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
               </div>
               <div>
                 <label className="mb-1 block text-xs font-semibold text-muted-foreground">
-                  {instProvider === 'evolution' ? 'Nome da instância (Evolution API) *' : 'Instance ID (Z-API) *'}
+                  {instProvider === 'evolution' ? 'Nome da instância (Evolution API) *' : instProvider === 'meta' ? 'ID do número de telefone (Phone number ID) *' : 'Instance ID (Z-API) *'}
                 </label>
                 <input value={instForm.instance_id} onChange={e => { const val = instProvider === 'evolution' ? e.target.value.replace(/\s+/g, '-').toLowerCase() : e.target.value; setInstForm(p => ({ ...p, instance_id: val })); }}
-                  placeholder={instProvider === 'evolution' ? 'Ex: vendas-cliente' : 'Ex: 3D8A1B2C...'} className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm font-mono outline-none focus:border-primary" />
+                  placeholder={instProvider === 'evolution' ? 'Ex: vendas-cliente' : instProvider === 'meta' ? 'Ex: 123456789012345' : 'Ex: 3D8A1B2C...'} className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm font-mono outline-none focus:border-primary" />
                 {instProvider === 'evolution' && <p className="mt-1 text-[10px] text-muted-foreground">Apenas letras minúsculas, números e hífens.</p>}
               </div>
-              {instProvider === 'zapi' && (
+              {instProvider === 'meta' && (
                 <div>
-                  <label className="mb-1 block text-xs font-semibold text-muted-foreground">Token da instância *</label>
-                  <input value={instForm.token} onChange={e => setInstForm(p => ({ ...p, token: e.target.value }))} placeholder="Token Z-API" className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm font-mono outline-none focus:border-primary" />
+                  <label className="mb-1 block text-xs font-semibold text-muted-foreground">ID da conta do WhatsApp Business (WABA ID) *</label>
+                  <input value={instForm.waba_id} onChange={e => setInstForm(p => ({ ...p, waba_id: e.target.value }))} placeholder="Ex: 109876543210987" className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm font-mono outline-none focus:border-primary" />
+                </div>
+              )}
+              {(instProvider === 'zapi' || instProvider === 'meta') && (
+                <div>
+                  <label className="mb-1 block text-xs font-semibold text-muted-foreground">{instProvider === 'meta' ? 'Token de acesso permanente *' : 'Token da instância *'}</label>
+                  <input value={instForm.token} onChange={e => setInstForm(p => ({ ...p, token: e.target.value }))} placeholder={instProvider === 'meta' ? 'EAAG…' : 'Token Z-API'} className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm font-mono outline-none focus:border-primary" />
+                  {instProvider === 'meta' && <p className="mt-1 text-[10px] text-muted-foreground">Guardado cifrado no servidor; não aparece de novo na tela.</p>}
                 </div>
               )}
               {instError && <p className="rounded-lg border border-red-400/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">{instError}</p>}
@@ -1303,7 +1358,7 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
               <button onClick={() => setShowModal(false)} className="flex-1 rounded-lg border border-border py-2 text-sm font-semibold hover:bg-muted/50 transition-colors">Cancelar</button>
               <button onClick={addInstance} disabled={adding} className="flex-1 flex items-center justify-center gap-1.5 rounded-lg bg-primary py-2 text-sm font-bold text-black hover:bg-primary/90 disabled:opacity-60 transition-colors">
                 {adding && <RefreshCw className="h-3.5 w-3.5 animate-spin" />}
-                {instProvider === 'evolution' ? 'Criar na Evolution API' : 'Adicionar'}
+                {instProvider === 'evolution' ? 'Criar na Evolution API' : instProvider === 'meta' ? 'Validar e conectar' : 'Adicionar'}
               </button>
             </div>
             </>

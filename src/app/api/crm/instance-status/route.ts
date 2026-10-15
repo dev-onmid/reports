@@ -1,6 +1,7 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { getEvolutionState } from '@/lib/evolution-api';
+import { lerTokenMeta, verificarNumeroMeta } from '@/lib/meta-whatsapp';
 
 type InstanceRow = {
   id: string;
@@ -26,6 +27,16 @@ async function checkInstance(inst: InstanceRow): Promise<InstanceResult> {
         nome: inst.nome,
         provider: inst.provider,
         status: state.state === 'open' ? 'connected' : 'disconnected',
+      };
+    }
+
+    if (inst.provider === 'meta') {
+      const numero = await verificarNumeroMeta(inst.instance_id, lerTokenMeta(inst.token));
+      return {
+        id: inst.id,
+        nome: inst.nome,
+        provider: inst.provider,
+        status: numero.ok ? 'connected' : 'disconnected',
       };
     }
 
