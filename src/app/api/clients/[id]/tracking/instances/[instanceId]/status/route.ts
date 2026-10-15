@@ -2,6 +2,7 @@ import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { getEvolutionState, setEvolutionWebhook, webhookOrigin } from '@/lib/evolution-api';
 import { lerTokenMeta, verificarNumeroMeta } from '@/lib/meta-whatsapp';
+import { lerApiKeyTolki, listarConexoesTolki } from '@/lib/tolki';
 
 export async function GET(
   req: NextRequest,
@@ -11,10 +12,14 @@ export async function GET(
   const pool = makeServerPool();
   try {
     const { rows: [inst] } = await pool.query(
-      `SELECT instance_id, provider, token FROM public.client_zapi_instances
+      `SELECT instance_id, provider, token, tolki_api_key FROM public.client_zapi_instances
        WHERE id = $1 AND client_id = $2`,
       [instanceId, id],
-    );
+    ).catch(() => pool.query(
+      `SELECT instance_id, provider, token, NULL::text AS tolki_api_key FROM public.client_zapi_instances
+       WHERE id = $1 AND client_id = $2`,
+      [instanceId, id],
+    ));
     if (!inst) {
       return Response.json({ error: 'Instância não encontrada' }, { status: 404 });
     }
@@ -28,6 +33,21 @@ export async function GET(
         verified_name: numero.verifiedName,
         quality_rating: numero.qualityRating,
         error: numero.error,
+      });
+    }
+    if (inst.provider === 'tolki') {
+      // Estado real da conexão na Tolki (ela é quem fala com o WhatsApp).
+      const apiKey = lerApiKeyTolki(inst.tolki_api_key);
+      if (!apiKey) return Response.json({ state: 'unknown', error: 'sem chave da API da Tolki' });
+      const conexoes = await listarConexoesTolki(apiKey);
+      if (!conexoes.ok) return Response.json({ state: 'close', error: conexoes.error });
+      const c = conexoes.data.find(x => x.id === inst.instance_id);
+      if (!c) return Response.json({ state: 'close', error: 'conexão não existe mais na Tolki' });
+      return Response.json({
+        state: c.status === 'connected' ? 'open' : c.status === 'connecting' ? 'connecting' : 'close',
+        display_phone: c.phone,
+        verified_name: c.name,
+        tolki_status: c.status,
       });
     }
     if (inst.provider !== 'evolution') {

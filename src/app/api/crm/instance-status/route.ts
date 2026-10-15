@@ -2,6 +2,7 @@ import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { getEvolutionState } from '@/lib/evolution-api';
 import { lerTokenMeta, verificarNumeroMeta } from '@/lib/meta-whatsapp';
+import { ensureTolkiInstanceColumns, lerApiKeyTolki, listarConexoesTolki } from '@/lib/tolki';
 
 type InstanceRow = {
   id: string;
@@ -9,6 +10,7 @@ type InstanceRow = {
   instance_id: string;
   token: string;
   provider: string;
+  tolki_api_key: string | null;
 };
 
 type InstanceResult = {
@@ -40,6 +42,19 @@ async function checkInstance(inst: InstanceRow): Promise<InstanceResult> {
       };
     }
 
+    if (inst.provider === 'tolki') {
+      const apiKey = lerApiKeyTolki(inst.tolki_api_key);
+      if (!apiKey) return { id: inst.id, nome: inst.nome, provider: inst.provider, status: 'unknown' };
+      const conexoes = await listarConexoesTolki(apiKey);
+      const c = conexoes.ok ? conexoes.data.find(x => x.id === inst.instance_id) : undefined;
+      return {
+        id: inst.id,
+        nome: inst.nome,
+        provider: inst.provider,
+        status: !conexoes.ok ? 'unknown' : c?.status === 'connected' ? 'connected' : 'disconnected',
+      };
+    }
+
     // Z-API — endpoint de status
     const res = await fetch(
       `https://api.z-api.io/instances/${inst.instance_id}/token/${inst.token}/status`,
@@ -68,8 +83,9 @@ export async function GET(req: NextRequest) {
 
   const pool = makeServerPool();
   try {
+    await ensureTolkiInstanceColumns(pool);
     const { rows } = await pool.query<InstanceRow>(
-      `SELECT id, nome, instance_id, token, provider
+      `SELECT id, nome, instance_id, token, provider, tolki_api_key
        FROM public.client_zapi_instances
        WHERE client_id = $1 AND ativo = true
        ORDER BY created_at ASC`,
