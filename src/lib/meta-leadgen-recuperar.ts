@@ -228,6 +228,21 @@ export async function recuperarLeadsDoCliente(
   return res;
 }
 
+// ⚠️ Memoizado: `ALTER TABLE` pede lock ACCESS EXCLUSIVE **mesmo quando é no-op**,
+// e esta rota é chamada pelo cron de 15 em 15 minutos. Rodando a cada chamada,
+// duas execuções que se cruzam se enfileiram no lock da tabela e a requisição
+// morre sem resposta — foi exatamente o apagão do CRM em 16/09/2026, e repeti o
+// erro aqui: a varredura passou a devolver 502 depois de 70s. Mesma lição,
+// mesmo remédio.
+let colunaRodizioOk = false;
+async function garantirColunaRodizio(pool: Pool): Promise<void> {
+  if (colunaRodizioOk) return;
+  await pool.query(
+    `ALTER TABLE public.meta_leadgen_paginas ADD COLUMN IF NOT EXISTS recuperado_em TIMESTAMPTZ`,
+  ).catch(() => null);
+  colunaRodizioOk = true;
+}
+
 /** Varre a carteira: todo cliente com Página assinada em leadgen. */
 export async function recuperarLeadsDaCarteira(
   pool: Pool, opts: { dias?: number; orcamentoMs?: number; dry?: boolean } = {},
@@ -241,9 +256,7 @@ export async function recuperarLeadsDaCarteira(
   // nunca seria olhado, e a falha ficaria invisível exatamente como a da Meta.
   // Ordenar por "quem esperou mais" faz toda a carteira ser coberta ao longo
   // das rodadas.
-  await pool.query(
-    `ALTER TABLE public.meta_leadgen_paginas ADD COLUMN IF NOT EXISTS recuperado_em TIMESTAMPTZ`,
-  ).catch(() => null);
+  await garantirColunaRodizio(pool);
   const { rows } = await pool.query<{ client_id: string; name: string }>(
     `SELECT p.client_id, COALESCE(c.name, p.client_id) AS name
        FROM public.meta_leadgen_paginas p
