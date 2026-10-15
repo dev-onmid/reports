@@ -44,6 +44,8 @@ type LeadgenData = {
   campaign_name?: string;
   form_id?: string;
   is_organic?: boolean;
+  /** 'ig' | 'fb' — onde a pessoa preencheu o formulário. */
+  platform?: string;
   field_data?: Array<{ name?: string; values?: string[] }>;
 };
 
@@ -115,7 +117,7 @@ async function fetchLeadgenData(leadgenId: string, token: string): Promise<Leadg
     const url = new URL(`https://graph.facebook.com/v21.0/${leadgenId}`);
     url.searchParams.set(
       'fields',
-      'created_time,field_data,ad_id,ad_name,adset_id,adset_name,campaign_id,campaign_name,form_id,is_organic',
+      'created_time,field_data,ad_id,ad_name,adset_id,adset_name,campaign_id,campaign_name,form_id,is_organic,platform',
     );
     url.searchParams.set('access_token', token);
     const res = await fetch(url.toString(), { signal: AbortSignal.timeout(10000) });
@@ -228,7 +230,16 @@ export async function processLeadgenEvent(
     }
   }
 
-  const origin = lead.is_organic ? 'organic' : 'meta';
+  // ⚠️ A ORIGEM SAI DA PLATAFORMA REAL, não de "é Meta". Medido no CondoStore em
+  // 15/10/2026: dos 76 leads de formulário de outubro, **68 vieram do Instagram
+  // e 8 do Facebook** — tratar o formulário como "Facebook" porque a Página que
+  // o hospeda é do Facebook erraria a origem de 89% deles, e é justamente essa
+  // coluna que o cliente usa para decidir onde investir. O nó Lead traz
+  // `platform` ('ig' | 'fb'); 'instagram' já é um valor de origin que o resto do
+  // sistema entende (a Biblioteca de Criativos separa ig_leads por ele).
+  const origin = lead.is_organic
+    ? 'organic'
+    : lead.platform === 'ig' ? 'instagram' : 'meta';
   const canal = 'Formulário Meta';
 
   // Observação legível com as respostas custom do formulário
@@ -316,6 +327,7 @@ export async function processLeadgenEvent(
       adset_id: lead.adset_id ?? null,
       campaign_id: lead.campaign_id ?? null,
       is_organic: lead.is_organic ?? false,
+      platform: lead.platform ?? null,
       created_time: lead.created_time ?? null,
       field_data: lead.field_data ?? [],
     },
