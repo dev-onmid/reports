@@ -199,7 +199,7 @@ export async function resolverPaginaDoCliente(
 
 async function graph<T>(path: string, token: string, init?: RequestInit): Promise<T | null> {
   try {
-    const url = new URL(`${GRAPH}${path}`);
+    const url = new URL(path.startsWith('http') ? path : `${GRAPH}${path}`);
     if (!url.searchParams.has('access_token')) url.searchParams.set('access_token', token);
     const res = await fetch(url.toString(), { ...init, signal: AbortSignal.timeout(15000) });
     return await res.json() as T;
@@ -208,6 +208,9 @@ async function graph<T>(path: string, token: string, init?: RequestInit): Promis
 
 export async function listarFormularios(pagina: PaginaDoCliente): Promise<{ formularios: FormularioMeta[]; erro: string | null }> {
   const out: FormularioMeta[] = [];
+  // ⚠️ `paging.next` vem na versão que a META escolhe (medido: pedimos v21.0 e
+  // voltou v25.0), então remontar a partir do nosso prefixo gera URL quebrada e
+  // a listagem para na 1ª página. O next é absoluto e já assinado — usar inteiro.
   let path: string | null = `/${pagina.pageId}/leadgen_forms?fields=id,name,status,leads_count,created_time,questions{key,label,type}&limit=100`;
   type Pagina = { data?: RawForm[]; paging?: { next?: string }; error?: { message?: string } };
   for (let i = 0; i < 5 && path; i++) {
@@ -215,7 +218,7 @@ export async function listarFormularios(pagina: PaginaDoCliente): Promise<{ form
     if (!r) return { formularios: out, erro: 'Sem resposta da Meta.' };
     if (r.error) return { formularios: out, erro: r.error.message ?? 'A Meta recusou a listagem de formulários.' };
     for (const f of r.data ?? []) { const n = normalizarFormulario(f); if (n) out.push(n); }
-    path = r.paging?.next ? r.paging.next.replace(GRAPH, '') : null;
+    path = r.paging?.next ?? null;
   }
   return { formularios: ordenarFormularios(out), erro: null };
 }

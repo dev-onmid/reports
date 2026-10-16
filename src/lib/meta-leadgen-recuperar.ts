@@ -67,11 +67,18 @@ async function idsDoFormulario(
   formId: string, token: string, desdeISO: string, tetoPaginas = 20,
 ): Promise<{ ids: Array<{ id: string; adId: string | null }>; erro: string | null }> {
   const ids: Array<{ id: string; adId: string | null }> = [];
-  let path: string | null = `/${formId}/leads?fields=id,created_time,ad_id&limit=100`;
-  for (let i = 0; i < tetoPaginas && path; i++) {
+  // ⚠️ `paging.next` vem com a versão que a META escolhe, não a que pedimos —
+  // medido em 16/10/2026: pedimos v21.0 e o next veio em **v25.0**. Remontar a
+  // URL a partir do nosso prefixo (`next.replace(GRAPH,'')`) produzia
+  // `…/v21.0https://graph.facebook.com/v25.0/…`, que `new URL` aceita sem
+  // lançar e a Meta recusa — a paginação morria na PRIMEIRA página e a
+  // recuperação só enxergava 100 respostas de 280. O `next` é uma URL completa
+  // e já assinada: usar inteira, nunca reconstruir.
+  let proxima: string | null = `${GRAPH}/${formId}/leads?fields=id,created_time,ad_id&limit=100`;
+  for (let i = 0; i < tetoPaginas && proxima; i++) {
     let r: RespostaLeads | null = null;
     try {
-      const url = new URL(`${GRAPH}${path}`);
+      const url = new URL(proxima);
       if (!url.searchParams.has('access_token')) url.searchParams.set('access_token', token);
       r = await (await fetch(url.toString(), { signal: AbortSignal.timeout(20_000) })).json() as RespostaLeads;
     } catch { return { ids, erro: 'Sem resposta da Meta ao listar respostas.' }; }
@@ -84,7 +91,7 @@ async function idsDoFormulario(
       ids.push({ id: String(l.id), adId: l.ad_id ? String(l.ad_id) : null });
     }
     if (passouDoCorte) break;
-    path = r?.paging?.next ? r.paging.next.replace(GRAPH, '') : null;
+    proxima = r?.paging?.next ?? null;
   }
   return { ids, erro: null };
 }
@@ -191,10 +198,11 @@ export async function recuperarLeadsDoCliente(
     if (Date.now() - t0 > orcamento) { res.semTempo = true; break; }
     if (form.leadsTotal === 0) continue; // nunca teve resposta — nada a buscar
     const { ids, erro: erroIds } = await idsDoFormulario(form.id, pagina.pageToken, desde);
-    if (erroIds && ids.length === 0) {
-      if (!res.motivosDeFalha.includes(erroIds)) res.motivosDeFalha.push(erroIds);
-      continue;
-    }
+    // ⚠️ Erro COM ids parciais também é reportado. Antes, só o caso `ids.length
+    // === 0` virava motivo — então uma paginação que morria na 1ª página
+    // devolvia "sucesso" com 100 de 280 respostas e ninguém via nada.
+    if (erroIds && !res.motivosDeFalha.includes(erroIds)) res.motivosDeFalha.push(erroIds);
+    if (erroIds && ids.length === 0) continue;
     const vistos = new Set(await jaProcessados(pool, ids.map(i => i.id)));
     const faltantes = ids.filter(i => !vistos.has(i.id));
     const resumo: ResumoFormulario = {
