@@ -1,15 +1,16 @@
 "use client";
 
-import { type ElementType, type ReactNode, useEffect, useMemo, useState } from 'react';
+import { type ElementType, type ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
   ArrowRight, TrendingUp, Users, Target, RefreshCw,
   Eye, Calendar, ShoppingBag, CheckCircle2, ChevronRight, Info, DollarSign, Users2,
-  SlidersHorizontal, ArrowUp, ArrowDown,
+  SlidersHorizontal, ArrowUp, ArrowDown, AlertTriangle,
 } from 'lucide-react';
 import { useInvestmentPayments } from '@/lib/payment-store';
 import { clientResults, type ClientFunnel } from '@/lib/client-results-store';
 import { useClients } from '@/lib/client-store';
+import type { Client } from '@/lib/mock-data';
 import { ClientAvatar } from '@/components/client-avatar';
 import { ResultsTabs } from '@/components/results-tabs';
 import { cn, formatCurrencyBRL } from '@/lib/utils';
@@ -168,6 +169,33 @@ function pctColors(pct: number | null) {
   };
 }
 
+type EstadoMetrica = 'ok' | 'carregando' | 'erro';
+
+/** Envolve qualquer valor que dependa da busca de métrica.
+ *  ⚠️ Existe para uma regra só: enquanto não chegou, a tela NÃO escreve zero.
+ *  Zero é uma afirmação sobre a conta do cliente; ausência de resposta não é. */
+function ValorMetrica({ estado, children, onRetry }: {
+  estado: EstadoMetrica; children: ReactNode; onRetry?: () => void;
+}) {
+  if (estado === 'carregando') {
+    return <span className="inline-block h-3 w-12 animate-pulse rounded bg-muted/50 align-middle" aria-label="carregando" />;
+  }
+  if (estado === 'erro') {
+    return (
+      <button
+        type="button"
+        onClick={onRetry}
+        title="A busca das métricas deste cliente falhou. Clique para tentar de novo."
+        className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-300 hover:underline"
+      >
+        <AlertTriangle className="h-3 w-3" />
+        não carregou
+      </button>
+    );
+  }
+  return <>{children}</>;
+}
+
 function MetricCell({ value, pct, format = 'currency', loading = false }: {
   value: number; pct: number | null; format?: 'currency' | 'number'; loading?: boolean;
 }) {
@@ -194,61 +222,14 @@ function janelaDoMes() {
   };
 }
 
+/** Quantas contas buscar por vez. 6 é o teto prático de conexões simultâneas
+ *  do navegador por origem — pedir mais só enfileira do lado de cá. */
+const LOTE_METRICAS = 6;
+
 const FUNNEL_KEYS: (keyof ClientFunnel)[] = ['contatos', 'qualificados', 'agendamentos', 'comparecimentos', 'fechamentos'];
 const FUNNEL_LABELS = ['Cont.', 'Qualif.', 'Agend.', 'Comp.', 'Fecha.'];
 const FUNNEL_ICONS = [Eye, Users2, Calendar, ShoppingBag, CheckCircle2];
 const ZERO_FUNNEL: ClientFunnel = { contatos: 0, qualificados: 0, agendamentos: 0, comparecimentos: 0, fechamentos: 0 };
-
-function ResultKpiCard({
-  label,
-  value,
-  icon: Icon,
-  color,
-  sub,
-  title,
-}: {
-  label: string;
-  value: string;
-  icon: ElementType;
-  color: string;
-  sub?: ReactNode;
-  title?: string;
-}) {
-  return (
-    <div
-      className="relative min-h-[170px] overflow-hidden rounded-[var(--radius)] border border-border bg-card px-7 py-7"
-      title={title}
-      style={{
-        background: `radial-gradient(circle at 11% 36%, ${color}18, transparent 31%), linear-gradient(145deg, rgba(17,22,35,0.92), rgba(8,11,18,0.97))`,
-        boxShadow: `0 0 30px ${color}0d, inset 0 0 0 1px rgba(255,255,255,0.025)`,
-      }}
-    >
-      <div className="flex items-start gap-6">
-        <span
-          className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full border"
-          style={{
-            color,
-            borderColor: `${color}38`,
-            background: `radial-gradient(circle, ${color}30 0%, ${color}16 72%)`,
-            boxShadow: `0 0 24px ${color}22`,
-          }}
-        >
-          <Icon className="h-8 w-8" />
-        </span>
-        <div className="min-w-0 pt-1">
-          <div className="flex items-center gap-2">
-            <Icon className="h-3.5 w-3.5" style={{ color }} />
-            <p className="text-sm font-bold uppercase tracking-widest text-muted-foreground">{label}</p>
-          </div>
-          <p className="mt-3 font-heading font-normal text-xl leading-none tabular-nums" style={{ color }}>
-            {value}
-          </p>
-          {sub && <div className="mt-3 text-xs font-semibold text-muted-foreground">{sub}</div>}
-        </div>
-      </div>
-    </div>
-  );
-}
 
 export default function ResultadosPage() {
   const { clients } = useClients();
@@ -291,6 +272,10 @@ export default function ResultadosPage() {
   const [goalsByClient, setGoalsByClient] = useState<Record<string, GoalConfig | null>>({});
   const [planningByClient, setPlanningByClient] = useState<Record<string, ClientPlanningConfig>>({});
   const [loadingMetrics, setLoadingMetrics] = useState(false);
+  // Clientes cuja busca de métrica FALHOU. Separado de `apiMetricsByClient`
+  // de propósito: "não respondeu" e "respondeu zero" são coisas diferentes na
+  // tela, e tratá-las igual é o que fazia a tela mentir.
+  const [erroMetrics, setErroMetrics] = useState<Record<string, true>>({});
   // Contas de anúncio vinculadas por cliente — só para apontar quem divide
   // conta com quem (ver `compartilhamentoDeConta`). Uma chamada para todos.
   const [contasByClient, setContasByClient] = useState<Record<string, string[]>>({});
@@ -355,28 +340,58 @@ export default function ResultadosPage() {
       .catch(() => {});
   }, [clients]);
 
-  // Fetch real metrics for all clients
-  useEffect(() => {
-    if (clients.length === 0) return;
+  // Fetch real metrics for all clients.
+  // ⚠️⚠️ Falha NUNCA vira zero. A versão anterior fazia
+  // `res.ok ? json : { meta: null, google: null, crm: null }`, então conta que
+  // não respondeu entrava na tabela como "0 leads · R$ 0,00" — indistinguível
+  // de cliente que de fato não gastou. Medido em produção em 19/10: com as 39
+  // chamadas disparadas de uma vez, o Panino77 Curitiba devolveu 500 e, sozinho
+  // segundos depois, 200 com R$ 1.023,29 e 7 leads. Ou seja: o gestor olhava um
+  // cliente saudável marcado como zerado, sem nenhum aviso. Agora o id entra em
+  // `erroMetrics` e a linha mostra "não carregou" com botão de tentar de novo.
+  const carregarMetricas = useCallback(async (alvo: Client[]) => {
+    if (alvo.length === 0) return;
     setLoadingMetrics(true);
-    Promise.allSettled(
-      clients.map(async (c) => {
-        // ⚠️ `this_month`, não o default `last_30d` da rota: a meta desta tela é
-        // MENSAL, e comparar "meta de setembro" com "últimos 30 dias" mistura
-        // o mês passado no resultado — no dia 14 a janela começava em 15/08.
-        // É a mesma janela padrão da Dashboard, de propósito.
-        const res = await fetch(`/api/clients/${c.id}/metrics?period=this_month`);
-        const data: ApiMetrics = res.ok ? await res.json() : { meta: null, google: null, crm: null };
-        return [c.id, data] as const;
-      })
-    ).then((results) => {
-      const map: Record<string, ApiMetrics> = {};
-      for (const r of results) {
-        if (r.status === 'fulfilled') map[r.value[0]] = r.value[1];
-      }
-      setApiMetricsByClient(map);
-    }).finally(() => setLoadingMetrics(false));
-  }, [clients]);
+    setErroMetrics((prev) => {
+      const n = { ...prev };
+      for (const c of alvo) delete n[c.id];
+      return n;
+    });
+
+    // ⚠️ Em LOTES de 6, não as 39 de uma vez. Cada chamada vai buscar na Graph
+    // da Meta e na Google Ads ao vivo — medido: mediana de 3,7s por cliente na
+    // primeira carga do dia. Em bloco único a tabela inteira só assentava depois
+    // de ~7s; em lotes os primeiros clientes aparecem em ~1s e o resto preenche
+    // na frente de quem olha. Também tira a disputa que derrubou o Panino77.
+    for (let i = 0; i < alvo.length; i += LOTE_METRICAS) {
+      const lote = alvo.slice(i, i + LOTE_METRICAS);
+      const results = await Promise.allSettled(
+        lote.map(async (c) => {
+          // ⚠️ `this_month`, não o default `last_30d` da rota: a meta desta tela é
+          // MENSAL, e comparar "meta de setembro" com "últimos 30 dias" mistura
+          // o mês passado no resultado — no dia 14 a janela começava em 15/08.
+          // É a mesma janela padrão da Dashboard, de propósito.
+          const res = await fetch(`/api/clients/${c.id}/metrics?period=this_month`);
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const data: ApiMetrics = await res.json();
+          return [c.id, data] as const;
+        })
+      );
+      const oks: Record<string, ApiMetrics> = {};
+      const falhas: Record<string, true> = {};
+      results.forEach((r, idx) => {
+        if (r.status === 'fulfilled') oks[r.value[0]] = r.value[1];
+        else falhas[lote[idx].id] = true;
+      });
+      // Pinta o que chegou ANTES de pedir o próximo lote: a tabela preenche na
+      // frente do gestor em vez de ficar 7s inteira em branco.
+      if (Object.keys(oks).length) setApiMetricsByClient((prev) => ({ ...prev, ...oks }));
+      if (Object.keys(falhas).length) setErroMetrics((prev) => ({ ...prev, ...falhas }));
+    }
+    setLoadingMetrics(false);
+  }, []);
+
+  useEffect(() => { void carregarMetricas(clients); }, [clients, carregarMetricas]);
 
   const rows = clients.map((client) => {
     const hardcoded = clientResults.find((r) => r.clientId === client.id);
@@ -480,8 +495,13 @@ export default function ResultadosPage() {
       contas: contasByClient[client.id] ?? [],
     };
 
+    // 'carregando' = ainda não voltou; 'erro' = a busca falhou; 'ok' = o número
+    // abaixo é real (inclusive quando é zero de verdade).
+    const metricaEstado: EstadoMetrica =
+      api ? 'ok' : erroMetrics[client.id] ? 'erro' : loadingMetrics ? 'carregando' : 'ok';
+
     return {
-      client, hardcoded, api, fonte,
+      client, hardcoded, api, fonte, metricaEstado,
       leads, cpl, cac,
       resultado: resultadoFinal,
       metaTarget: metaTargetFinal,
@@ -506,6 +526,7 @@ export default function ResultadosPage() {
   // nada e ainda suja os totais. Fica atrás do atalho "ver os sem meta".
   const comMeta = rows.filter(temAlgumaMeta);
   const semMeta = rows.filter((r) => !temAlgumaMeta(r));
+  const qtdErros = Object.keys(erroMetrics).length;
   const base = verSemMeta ? semMeta : comMeta;
 
   const categorias = categoriasDisponiveis(base);
@@ -547,71 +568,84 @@ export default function ResultadosPage() {
     <div className="space-y-6 pb-8">
       <ResultsTabs />
 
-      {/* ── Header ── */}
-      <div className="flex items-start justify-between gap-4 flex-wrap">
-        <div>
-          <h1 className="font-heading font-normal text-xl uppercase leading-none tracking-wide text-foreground">Radar Geral</h1>
-          <p className="mt-4 text-lg font-medium text-muted-foreground">
-            Métricas reais das contas vinculadas no mês atual — leads, gasto e CPL somando Meta Ads e Google Ads.
-          </p>
-        </div>
-        <div
-          className={cn(
-            'mt-2 flex h-11 items-center gap-3 rounded-[var(--radius)] border border-border bg-card px-5 text-sm font-bold text-muted-foreground shadow-[0_0_22px_rgba(15,23,42,0.18)]',
-            !loadingMetrics && 'opacity-70',
-          )}
+      {/* ── Cabeçalho + resumo, numa faixa só ───────────────────────────────
+          ⚠️ Antes isto eram 3 blocos empilhados (título com subtítulo de 2
+          linhas, 4 cards de KPI de 170px e a legenda de cores) e a primeira
+          linha de cliente só começava a 790px de 928px de tela: 85% da altura
+          gasta antes do primeiro dado. Os 4 números continuam aqui porque o
+          gestor usa, mas como FAIXA — o que explicava cada um virou `title`,
+          que não ocupa altura. A legenda saiu: a cor já está no número, e a
+          régua agora é dica no cabeçalho da coluna %. */}
+      <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3 rounded-[var(--radius)] border border-border bg-card px-4 py-3">
+        <h1
+          className="font-heading font-normal text-base uppercase leading-none tracking-wide text-foreground"
+          title="Métricas reais das contas vinculadas no mês atual — leads, gasto e CPL somando Meta Ads e Google Ads."
         >
-          <span className={cn('h-2 w-2 rounded-full bg-primary', loadingMetrics && 'animate-pulse shadow-[0_0_12px_rgba(85,245,47,0.55)]')} />
-          {loadingMetrics ? 'Atualizando métricas...' : 'Métricas atualizadas'}
-          <RefreshCw className={cn('h-4 w-4', loadingMetrics && 'animate-spin')} />
+          Radar Geral
+        </h1>
+
+        <div className="flex flex-1 flex-wrap items-center gap-x-6 gap-y-2">
+          {([
+            { label: 'Meta',         value: formatCurrencyBRL(totMeta), color: '#8b5cf6', Icon: Target,
+              title: tituloMeta, extra: subMeta, carrega: false },
+            { label: 'Resultado',    value: formatCurrencyBRL(totResult),
+              color: overallPct === null && pctMedianaInt === null ? '#94a3b8' : overC.text === 'text-emerald-300' ? '#22c55e' : overC.text === 'text-orange-300' ? '#fb923c' : '#ef4444',
+              Icon: TrendingUp,
+              title: 'Mediana do % de cada cliente com meta em R$ — a soma das metas é dominada pela maior delas, então o % da soma aparece só como referência.',
+              extra: pctMedianaInt !== null ? `${pctMedianaInt}% mediana` : undefined, carrega: true },
+            { label: 'Leads',        value: fmtLeads(totLeads), color: '#2f85ff', Icon: Users,
+              title: 'Leads das plataformas no mês (Meta + conversões do Google, arredondadas). Conta de anúncio ligada a mais de um cliente entra uma vez só.',
+              extra: dedup.contasCompartilhadas > 0 ? `${dedup.contasCompartilhadas} conta(s) compartilhada(s)` : undefined, carrega: true },
+            { label: 'Investimento', value: formatCurrencyBRL(totInvest), color: '#f5d000', Icon: DollarSign,
+              title: 'Gasto em anúncio no mês (Meta + Google). Conta de anúncio ligada a mais de um cliente entra uma vez só.',
+              extra: undefined, carrega: true },
+          ] as { label: string; value: string; color: string; Icon: ElementType; title?: string; extra?: string; carrega: boolean }[])
+            .map(({ label, value, color, Icon, title, extra, carrega }) => (
+              <div key={label} className="flex items-center gap-2" title={title}>
+                <Icon className="h-4 w-4 shrink-0" style={{ color }} />
+                <div className="min-w-0 leading-tight">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{label}</p>
+                  {/* ⚠️ Soma ainda incompleta não vira número: enquanto faltam
+                      clientes, o total está errado para baixo e exibi-lo como
+                      fato é a mesma mentira das células. */}
+                  {carrega && loadingMetrics ? (
+                    <span className="mt-1 inline-block h-3.5 w-20 animate-pulse rounded bg-muted/50" aria-label="carregando" />
+                  ) : (
+                    <p className="font-heading font-normal text-base leading-none tabular-nums" style={{ color }}>{value}</p>
+                  )}
+                  {extra && !(carrega && loadingMetrics) && (
+                    <p className="mt-0.5 text-[10px] font-semibold text-muted-foreground">{extra}</p>
+                  )}
+                </div>
+              </div>
+            ))}
         </div>
-      </div>
 
-      {/* ── KPI Cards ── */}
-      <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
-        {([
-          { label: 'META TOTAL',      value: formatCurrencyBRL(totMeta),      Icon: Target,     color: '#8b5cf6',
-            sub: subMeta, title: tituloMeta },
-          { label: 'RESULTADO TOTAL', value: formatCurrencyBRL(totResult),     Icon: TrendingUp,
-            color: overallPct === null && pctMedianaInt === null ? '#94a3b8' : overC.text === 'text-emerald-300' ? '#22c55e' : overC.text === 'text-orange-300' ? '#fb923c' : '#ef4444',
-            sub: (
-              <>
-                {pctMedianaInt !== null && <p><span className="text-foreground">{pctMedianaInt}%</span> — mediana dos clientes</p>}
-                {overallPct !== null && <p className="mt-0.5 opacity-80">{overallPct}% da soma das metas</p>}
-                <p className="mt-0.5 opacity-80">{subMeta}</p>
-              </>
-            ),
-            title: 'Mediana do % de cada cliente com meta em R$ — a soma das metas é dominada pela maior delas, então o % da soma aparece só como referência.' },
-          { label: 'TOTAL DE LEADS',  value: fmtLeads(totLeads), Icon: Users,      color: '#2f85ff',
-            sub: dedup.contasCompartilhadas > 0 ? `${dedup.contasCompartilhadas} conta(s) compartilhada(s) contada(s) uma vez` : undefined,
-            title: 'Leads das plataformas no mês (Meta + conversões do Google, arredondadas). Conta de anúncio ligada a mais de um cliente entra uma vez só.' },
-          { label: 'INVESTIMENTO',    value: formatCurrencyBRL(totInvest),     Icon: DollarSign, color: '#f5d000',
-            sub: dedup.contasCompartilhadas > 0 ? `${dedup.contasCompartilhadas} conta(s) compartilhada(s) contada(s) uma vez` : undefined,
-            title: 'Gasto em anúncio no mês (Meta + Google). Conta de anúncio ligada a mais de um cliente entra uma vez só.' },
-        ] as { label: string; value: string; Icon: ElementType; color: string; sub?: ReactNode; title?: string }[]).map(({ label, value, Icon, color, sub, title }) => (
-          <ResultKpiCard key={label} label={label} value={value} icon={Icon} color={color} sub={sub} title={title} />
-        ))}
-      </div>
-
-      {/* ── Legend ── */}
-      <div className="flex items-center gap-4 flex-wrap">
-        <span className="flex items-center gap-2 text-sm font-bold uppercase tracking-widest text-muted-foreground">
-          <Info className="h-4 w-4" />
-          Legenda
-        </span>
-        {([
-          { label: '≥ 75% da meta',  bg: 'bg-emerald-500/15 border-emerald-400/30 text-emerald-300' },
-          { label: '30 – 74% da meta', bg: 'bg-orange-500/15 border-orange-400/30 text-orange-300' },
-          { label: '< 30% da meta',  bg: 'bg-red-500/15 border-red-400/30 text-red-300' },
-        ]).map(({ label, bg }) => (
-          <span key={label} className={cn('rounded-full border px-5 py-2 text-sm font-bold', bg)}>
-            {label}
-          </span>
-        ))}
-        <span className="flex items-center gap-2 text-sm font-semibold italic text-muted-foreground/70">
-          <TrendingUp className="h-4 w-4" />
-          CPL e CAC: menor = melhor
-        </span>
+        <div className="flex items-center gap-2 text-[11px] font-bold text-muted-foreground">
+          <span className={cn('h-1.5 w-1.5 rounded-full bg-primary', loadingMetrics && 'animate-pulse')} />
+          {loadingMetrics
+            ? `carregando ${Object.keys(apiMetricsByClient).length}/${clients.length}`
+            : 'atualizado'}
+          {qtdErros > 0 && (
+            <button
+              type="button"
+              onClick={() => void carregarMetricas(clients.filter((c) => erroMetrics[c.id]))}
+              className="ml-1 inline-flex items-center gap-1 text-amber-300 hover:underline"
+              title="Clientes cuja busca de métrica falhou. Clique para tentar de novo."
+            >
+              <AlertTriangle className="h-3 w-3" />
+              {qtdErros} não carregou
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => void carregarMetricas(clients)}
+            title="Buscar as métricas de novo"
+            className="hover:text-foreground transition-colors"
+          >
+            <RefreshCw className={cn('h-3.5 w-3.5', loadingMetrics && 'animate-spin')} />
+          </button>
+        </div>
       </div>
 
       {/* ── Filtros ── */}
@@ -674,29 +708,18 @@ export default function ResultadosPage() {
             Limpar
           </button>
         )}
-      </div>
-
-      {/* Cliente sem meta nenhuma sai da tela — mas fica declarado, com atalho.
-          Sumir em silêncio é como um cliente passa meses sem meta cadastrada. */}
-      {(semMeta.length > 0 || verSemMeta) && (
-        <div className={cn(
-          'flex flex-wrap items-center gap-3 rounded-[var(--radius)] border px-4 py-2.5 text-xs',
-          verSemMeta ? 'border-amber-400/30 bg-amber-500/[0.07]' : 'border-border bg-card',
-        )}>
-          <Target className={cn('h-3.5 w-3.5', verSemMeta ? 'text-amber-300' : 'text-muted-foreground')} />
-          <span className="text-muted-foreground">
-            {verSemMeta
-              ? <><strong className="text-amber-200">{semMeta.length}</strong> cliente(s) sem meta nenhuma cadastrada — configure em Cliente › Planejamento.</>
-              : <><strong className="text-foreground">{semMeta.length}</strong> cliente(s) fora do Radar por não ter meta nenhuma cadastrada.</>}
-          </span>
+              {(semMeta.length > 0 || verSemMeta) && (
           <button
+            type="button"
             onClick={() => { setVerSemMeta((v) => !v); setCategoria(''); setSituacao('todas'); }}
-            className="rounded-lg border border-border px-3 py-1 font-bold text-muted-foreground hover:text-foreground transition-colors"
+            className={cn('ml-auto inline-flex items-center gap-1.5 text-xs font-bold transition-colors', verSemMeta ? 'text-amber-300' : 'text-muted-foreground hover:text-foreground')}
+            title={verSemMeta ? 'Configure a meta em Cliente › Planejamento' : 'Clientes sem meta nenhuma cadastrada não entram no Radar'}
           >
-            {verSemMeta ? 'Voltar ao Radar' : 'Ver quem são'}
+            <Target className="h-3.5 w-3.5" />
+            {verSemMeta ? `Voltar ao Radar (${semMeta.length} sem meta)` : `${semMeta.length} sem meta`}
           </button>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* ── Table ──
           Cabeçalho fixo: um único container com overflow-auto (x+y) faz o scroll
@@ -712,7 +735,7 @@ export default function ResultadosPage() {
                   { label: 'CLIENTE', info: '', sort: 'cliente' as ColunaRadar, padrao: 'asc' as DirecaoOrdem },
                   { label: 'META', info: '', sort: 'meta' as ColunaRadar },
                   { label: 'RESULTADO', info: '', sort: 'resultado' as ColunaRadar },
-                  { label: '%', info: '', sort: 'pct' as ColunaRadar },
+                  { label: '%', info: 'Realizado ÷ meta do mês. Verde ≥ 75% · laranja 30–74% · vermelho < 30%. Em CPL e CAC, menor é melhor.', sort: 'pct' as ColunaRadar },
                   { label: 'LEADS', info: 'Leads das PLATAFORMAS no mês: resultados do Meta Ads + conversões do Google Ads. Não é o mesmo número do funil ao lado, que conta quem entrou no CRM por qualquer caminho (WhatsApp, indicação, orgânico).', sort: 'leads' as ColunaRadar },
                   { label: 'CPL', info: 'CPL — gasto em anúncio (Meta + Google) ÷ leads do período. Menor = melhor.', sort: 'cpl' as ColunaRadar, padrao: 'asc' as DirecaoOrdem },
                   { label: 'CAC', info: 'CAC — gasto em anúncio (Meta + Google) ÷ vendas fechadas no CRM. Sem venda no período aparece "—". Menor = melhor.', sort: 'cac' as ColunaRadar, padrao: 'asc' as DirecaoOrdem },
@@ -803,9 +826,11 @@ export default function ResultadosPage() {
                         'text-sm font-bold',
                         row.resultado > 0 ? (semMetaResultado ? 'text-foreground' : resultC.text) : 'text-muted-foreground/40',
                       )}>
-                        {row.resultado > 0
-                          ? (row.ehSocial ? `+${row.resultado.toLocaleString('pt-BR')}` : formatCurrencyBRL(row.resultado))
-                          : '—'}
+                        <ValorMetrica estado={row.metricaEstado} onRetry={() => void carregarMetricas([row.client])}>
+                          {row.resultado > 0
+                            ? (row.ehSocial ? `+${row.resultado.toLocaleString('pt-BR')}` : formatCurrencyBRL(row.resultado))
+                            : '—'}
+                        </ValorMetrica>
                       </p>
                       {row.ehSocial && (
                         <p className={cn('mt-0.5 text-[11px] font-semibold', pctColors(row.pctAlcance).text)}>
@@ -825,13 +850,15 @@ export default function ResultadosPage() {
                       className={cn('px-4 py-3 text-sm font-bold', row.pctLeads === null ? 'text-blue-400' : leadsC.text)}
                       title={row.metaLeads > 0 ? `Meta: ${fmtLeads(row.metaLeads)} leads` : undefined}
                     >
-                      {row.leads > 0 ? fmtLeads(row.leads) : '0'}
+                      <ValorMetrica estado={row.metricaEstado} onRetry={() => void carregarMetricas([row.client])}>
+                        {row.leads > 0 ? fmtLeads(row.leads) : '0'}
+                      </ValorMetrica>
                     </td>
                     <td className="px-4 py-3">
-                      <MetricCell value={row.cpl} pct={row.pctCpl} loading={loadingMetrics && !apiMetricsByClient[row.client.id]} />
+                      <MetricCell value={row.cpl} pct={row.pctCpl} loading={row.metricaEstado === 'carregando'} />
                     </td>
                     <td className="px-4 py-3">
-                      <MetricCell value={row.cac} pct={row.pctCac} loading={loadingMetrics && !apiMetricsByClient[row.client.id]} />
+                      <MetricCell value={row.cac} pct={row.pctCac} loading={row.metricaEstado === 'carregando'} />
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-0.5">
@@ -864,7 +891,11 @@ export default function ResultadosPage() {
                       </div>
                     </td>
                     <td className="px-4 py-3">
-                      <p className="text-sm font-bold whitespace-nowrap">{formatCurrencyBRL(row.totalInvest)}</p>
+                      <p className="text-sm font-bold whitespace-nowrap">
+                        <ValorMetrica estado={row.metricaEstado} onRetry={() => void carregarMetricas([row.client])}>
+                          {formatCurrencyBRL(row.totalInvest)}
+                        </ValorMetrica>
+                      </p>
                       {/* A composição explica o CPL ao lado: é este gasto dividido pelos leads. */}
                       {row.totalInvest > 0 && (
                         <p className="text-[11px] text-muted-foreground mt-0.5 whitespace-nowrap">
