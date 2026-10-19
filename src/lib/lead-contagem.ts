@@ -154,7 +154,34 @@ export function leadVisivelCrmSql(alias = ''): string {
  */
 export function rastreadoForaDoCrmSql(alias = ''): string {
   return `((${portaSql(alias)}) = 'chat' AND ${provaDeAnuncioSql(alias)}
-    AND ${col(alias, 'client_id')} IN ${clientesComPortaValidadaSql()})`;
+    AND ${col(alias, 'client_id')} IN ${clientesComPortaValidadaSql()}
+    AND NOT ${noCrmExternoPorPushSql(alias)})`;
+}
+
+/**
+ * O lead JÁ está no CRM do cliente porque NÓS o empurramos para lá.
+ *
+ * ⚠️ Sem isto o alerta mente em cliente com integração de IDA. A porta descreve
+ * por onde o lead ENTROU aqui (chat), não onde ele está hoje — e num cliente
+ * com SULTS a conversa do WhatsApp vira negócio no CRM dele pelo nosso worker,
+ * sem nunca deixar de ser 'chat'. Medido no CondoStore em 19/10/2026: os **140**
+ * leads que a dashboard acusava como "não estão no CRM do cliente" tinham
+ * negócio no SULTS — **todos os 140**, 120 deles criados por nós. O alerta vai
+ * para a reunião com o cliente, então um número desses destrói a conversa: diz
+ * que falta cadastro na ponta justamente onde a integração está funcionando.
+ *
+ * Agendor e Datalytics não precisam de linha aqui: lá o lead ganha `external_id`
+ * ou `origin`, e a porta já o classifica como 'crm_externo'. O SULTS é o caso
+ * que escapa porque a ida não marca o lead — ela cria o negócio do lado de lá.
+ */
+function noCrmExternoPorPushSql(alias = ''): string {
+  const id = col(alias, 'id');
+  const cli = col(alias, 'client_id');
+  return `(EXISTS (SELECT 1 FROM public.sults_negocios sn
+                    WHERE sn.client_id = ${cli} AND sn.lead_id = ${id})
+        OR EXISTS (SELECT 1 FROM public.sults_envios se
+                    WHERE se.client_id = ${cli} AND se.lead_id = ${id}
+                      AND se.status = 'enviado'))`;
 }
 
 /**
