@@ -418,7 +418,7 @@ export default function AutomacoesPage() {
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
               <input placeholder="Buscar webhooks..." className="h-11 w-full rounded-xl border border-white/10 bg-[#090e16] pl-10 pr-3 text-sm text-white outline-none placeholder:text-slate-500 focus:border-primary/50" />
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-3">
               <button className="flex h-11 items-center gap-2 rounded-xl border border-white/10 px-4 text-sm font-semibold text-slate-300"><Filter className="h-4 w-4" />Todos os status <ChevronDown className="h-4 w-4" /></button>
               <button className="flex h-11 items-center gap-2 rounded-xl border border-white/10 px-4 text-sm font-semibold text-slate-300"><ArrowUpDown className="h-4 w-4" />Ordenar: Mais recentes <ChevronDown className="h-4 w-4" /></button>
               <button className="flex h-11 w-11 items-center justify-center rounded-xl border border-white/10 text-slate-400"><Grid2X2 className="h-4 w-4" /></button>
