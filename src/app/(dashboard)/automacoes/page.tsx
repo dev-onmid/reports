@@ -426,6 +426,7 @@ export default function AutomacoesPage() {
             </div>
           </div>
 
+          <div className="overflow-x-auto"><div className="min-w-[900px]">
           <div className="grid grid-cols-[minmax(320px,1fr)_160px_130px_170px_120px] border-b border-white/8 bg-white/[0.025] px-6 py-3 text-xs text-slate-500">
             <span>Webhook</span><span>Status</span><span>Execuções</span><span>Criado em</span><span className="text-right">Ações</span>
           </div>
@@ -479,6 +480,7 @@ export default function AutomacoesPage() {
               );
             })}
           </div>
+          </div></div>
         </section>
       )}
 

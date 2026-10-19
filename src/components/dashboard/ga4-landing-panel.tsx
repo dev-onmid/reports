@@ -875,7 +875,7 @@ function CabecalhoIcone({ icone, cor = VERDE, redondo = false, titulo, sub, dire
           {sub && <p className={cx('mt-0.5', T.cardSub)}>{sub}</p>}
         </div>
       </div>
-      {direita && <div className="flex shrink-0 items-center gap-2">{direita}</div>}
+      {direita && <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2">{direita}</div>}
     </div>
   );
 }

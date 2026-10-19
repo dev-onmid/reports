@@ -632,7 +632,7 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
     <div className="space-y-5 pt-2">
 
       {/* Sub-tab navigation */}
-      <div className="flex items-center gap-0.5 rounded-xl border border-border bg-card p-1 w-fit">
+      <div className="flex flex-wrap items-center gap-0.5 rounded-xl border border-border bg-card p-1 w-fit">
         {([
           { id: 'whatsapp'  as const, label: 'WhatsApp',   icon: Wifi },
           { id: 'captura' as const, label: 'Fontes de Captura', icon: Link2 },
@@ -1205,7 +1205,7 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
               subtitle="Histórico de eventos enviados. Clique em uma linha para ver a resposta completa."
             />
             <div className="flex items-center gap-2">
-              <div className="flex items-center gap-0.5 rounded-lg border border-border bg-background p-0.5">
+              <div className="flex flex-wrap items-center gap-0.5 rounded-lg border border-border bg-background p-0.5">
                 {(['all', 'meta', 'google'] as const).map(f => (
                   <button key={f} onClick={() => { setConvLogFilter(f); setTimeout(refreshConvLog, 0); }}
                     className={cn('rounded-md px-3 py-1 text-xs font-semibold transition-all', convLogFilter === f ? 'bg-primary text-black' : 'text-muted-foreground hover:text-foreground')}>

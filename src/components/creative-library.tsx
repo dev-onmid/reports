@@ -329,7 +329,7 @@ export function CreativeLibrary({ clientId }: { clientId?: string }) {
             const topStatus = Object.entries(r.por_status).sort((a, b) => b[1] - a[1]).slice(0, 5);
             const amostraPequena = isRateSort(sortBy) && !hasMinSample(r);
             return (
-              <div key={`${r.client_id}|${r.ad_key}`} className="rounded-md border border-border bg-card p-3">
+              <div key={`${r.client_id}|${r.ad_key}`} className="min-w-0 rounded-md border border-border bg-card p-3">
                 <div className="flex items-start gap-3">
                   <div className="relative">
                     <Thumb url={en?.thumbnail_url ?? null} />

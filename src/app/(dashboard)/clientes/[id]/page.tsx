@@ -1292,7 +1292,7 @@ function InvestmentPaymentsTab({ clientId, clientName }: { clientId: string; cli
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px] items-start">
-        <div className="space-y-4">
+        <div className="min-w-0 space-y-4">
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <div>
               <h3 className="font-bold text-sm uppercase tracking-wider">Calendário de Pix de Investimento</h3>
@@ -1749,7 +1749,7 @@ function ClientGoalSettings({ goal, onChange }: {
     <div className="flex flex-wrap items-end gap-4 py-1">
       <div className="space-y-1.5">
         <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">Tipo de meta</Label>
-        <div className="flex gap-1 p-1 bg-muted/40 rounded-lg border border-border">
+        <div className="flex flex-wrap gap-1 p-1 bg-muted/40 rounded-lg border border-border">
           {GOAL_TYPE_OPTIONS.map((option) => (
             <button
               key={option.type}

@@ -839,7 +839,7 @@ export default function RastreamentoPage() {
             </p>
             <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
               {waSummary.formulario.map(bloco => (
-                <div key={bloco.pergunta} className="rounded-xl border border-border bg-background/40 p-4">
+                <div key={bloco.pergunta} className="min-w-0 rounded-xl border border-border bg-background/40 p-4">
                   <p className="text-xs font-bold text-foreground">{bloco.pergunta}</p>
                   <p className="mt-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">
                     {bloco.total} {bloco.total === 1 ? 'resposta' : 'respostas'}
@@ -851,7 +851,7 @@ export default function RastreamentoPage() {
                       return (
                         <div key={r.resposta}>
                           <div className="flex items-center justify-between gap-2">
-                            <span className="truncate text-xs font-semibold" title={r.resposta}>{r.resposta}</span>
+                            <span className="min-w-0 truncate text-xs font-semibold" title={r.resposta}>{r.resposta}</span>
                             <span className="shrink-0 text-xs font-bold tabular-nums" style={{ color: cor }}>{r.count}</span>
                           </div>
                           <div className="mt-0.5 h-1 w-full overflow-hidden rounded-full bg-muted/40">

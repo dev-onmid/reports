@@ -3923,7 +3923,7 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
         )}
 
         {/* Leads / Chat / Follow up toggle */}
-        <div className="flex overflow-hidden rounded-lg border border-border bg-card p-0.5">
+        <div className="flex flex-wrap overflow-hidden rounded-lg border border-border bg-card p-0.5">
           <button type="button" onClick={() => setCrmView('leads')}
             className={cn('flex items-center gap-1.5 h-8 px-3 rounded-md text-xs font-semibold transition-colors',
               crmView === 'leads' ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground')}>

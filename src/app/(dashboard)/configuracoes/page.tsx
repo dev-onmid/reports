@@ -363,7 +363,7 @@ function InstancesTab() {
         ) : instances.length === 0 ? (
           <div className="px-6 py-10 text-center text-sm text-muted-foreground">Nenhuma instância na VPS.</div>
         ) : (
-          <table className="w-full text-sm text-left">
+          <div className="overflow-x-auto"><table className="w-full text-sm text-left">
             <thead>
               <tr className="border-b border-border">
                 {['Instância', 'Status', 'Número', 'Vínculo', 'Ativa', ''].map(h => (
@@ -452,7 +452,7 @@ function InstancesTab() {
                 );
               })}
             </tbody>
-          </table>
+          </table></div>
         )}
         {!loading && !error && instances.some(i => i.oculta) && (
           <div className="border-t border-border px-6 py-2.5">
@@ -974,7 +974,7 @@ export default function ConfiguracoesPage() {
       </div>
 
       {/* ── TABS (underline style) ── */}
-      <div className="flex gap-6 border-b border-border">
+      <div className="flex flex-wrap gap-x-6 gap-y-1 border-b border-border">
         {TABS.map((tab) => (
           <button
             key={tab.key}
@@ -1059,7 +1059,7 @@ export default function ConfiguracoesPage() {
             </div>
 
             {/* Table */}
-            <table className="w-full text-sm text-left">
+            <div className="overflow-x-auto"><table className="w-full text-sm text-left">
               <thead>
                 <tr className="border-b border-border">
                   <th className="px-6 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Usuário</th>
@@ -1180,7 +1180,7 @@ export default function ConfiguracoesPage() {
                   );
                 })}
               </tbody>
-            </table>
+            </table></div>
 
             {/* Card footer — a lista não é paginada: mostra todos os usuários */}
             <div className="flex items-center px-6 py-4 border-t border-border">
@@ -1715,7 +1715,7 @@ export default function ConfiguracoesPage() {
                       </button>
                     </div>
                   </div>
-                  <table className="w-full text-sm text-left">
+                  <div className="overflow-x-auto"><table className="w-full text-sm text-left">
                     <thead>
                       <tr className="border-b border-border">
                         <th className="px-6 py-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Cliente</th>
@@ -1773,7 +1773,7 @@ export default function ConfiguracoesPage() {
                         </tr>
                       )}
                     </tbody>
-                  </table>
+                  </table></div>
                 </div>
               </>
             );

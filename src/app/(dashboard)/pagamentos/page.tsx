@@ -2684,7 +2684,7 @@ export default function PagamentosPage() {
                 </p>
               </div>
             </div>
-            <div className="flex items-center gap-4">
+            <div className="flex flex-wrap items-center gap-4">
               <div className="flex items-center gap-3">
                 <button type="button" onClick={() => setSelectedDate(shiftMonth(selectedDate, -1))} className="flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-background text-muted-foreground hover:text-foreground">
                   <ChevronLeft className="h-4 w-4" />

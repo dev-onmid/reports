@@ -912,12 +912,12 @@ export default function RelatoriosPage() {
             </div>
 
             {/* Pagination */}
-            <div className="flex items-center justify-between px-5 py-3 border-t border-border">
+            <div className="flex flex-wrap items-center justify-between gap-2 px-5 py-3 border-t border-border">
               <p className="text-xs text-muted-foreground">
                 Mostrando {filtered.length === 0 ? 0 : (page - 1) * PAGE_SIZE + 1} a{' '}
                 {Math.min(page * PAGE_SIZE, filtered.length)} de {filtered.length} relatórios
               </p>
-              <div className="flex items-center gap-1">
+              <div className="flex flex-wrap items-center gap-1">
                 <button
                   disabled={page === 1}
                   onClick={() => setPage(p => p - 1)}

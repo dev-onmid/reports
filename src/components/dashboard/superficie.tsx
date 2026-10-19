@@ -83,7 +83,7 @@ export function CabecalhoCard({ titulo, sub, icone, direita, className }: {
           {sub && <p className={cn('mt-1 leading-snug', T.cardSub)}>{sub}</p>}
         </div>
       </div>
-      {direita && <div className="flex shrink-0 items-center gap-2">{direita}</div>}
+      {direita && <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2">{direita}</div>}
     </div>
   );
 }
