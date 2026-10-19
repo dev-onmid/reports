@@ -285,7 +285,7 @@ export default function AutomacoesPage() {
             <p className="mt-1 text-base text-slate-400">Integre com Webhooks, ClickUp, Google Forms, Zapier, Make e outros.</p>
           </div>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <button
             type="button"
             onClick={() => setShowForm(v => !v)}

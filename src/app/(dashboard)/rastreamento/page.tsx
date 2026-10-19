@@ -794,7 +794,7 @@ export default function RastreamentoPage() {
                 ? [{ title: 'Por cidade (informada no formulário)', items: waSummary.porCidade }]
                 : []),
             ].map(({ title, items }) => (
-              <div key={title} className="rounded-xl border border-border bg-card p-4">
+              <div key={title} className="min-w-0 rounded-xl border border-border bg-card p-4">
                 <p className="mb-3 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{title}</p>
                 {items.length === 0 ? (
                   <p className="text-xs text-muted-foreground/60 italic">Sem dados ainda</p>

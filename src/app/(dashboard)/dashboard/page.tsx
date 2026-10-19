@@ -7168,7 +7168,7 @@ export default function GeneralDashboard() {
   const temGraficoCpl = comMetas && diasSel.length >= 2 && gastoDia.some(v => v > 0) && leadsDia.some(v => v > 0);
 
   return (
-    <div className="-m-3 min-h-full bg-[#05090B] text-[#f4f7f8] sm:-m-6">
+    <div className="-my-3 min-h-full bg-[#05090B] text-[#f4f7f8] sm:-my-6">
       {customizerOpen && (
         <MetricConfigPanel
           prefs={dashboardPrefs}

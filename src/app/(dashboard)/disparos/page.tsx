@@ -663,7 +663,7 @@ function CampaignCard({ campaign, onAction, onRefresh, onEdit, respostas }: {
   const pct = total > 0 ? Math.round(((sent + failed) / total) * 100) : 0;
 
   return (
-    <div className="rounded-[var(--radius)] border border-border bg-card/50 p-4 space-y-3">
+    <div className="min-w-0 rounded-[var(--radius)] border border-border bg-card/50 p-4 space-y-3">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <p className="font-semibold text-sm truncate">{campaign.name}</p>
@@ -680,7 +680,7 @@ function CampaignCard({ campaign, onAction, onRefresh, onEdit, respostas }: {
           <span>{pct}%</span>
         </div>
       </div>
-      <div className="flex gap-4 text-[11px]">
+      <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px]">
         <span className="flex items-center gap-1 text-emerald-400"><CheckCircle2 className="h-3 w-3" />{sent} enviados</span>
         <span className="flex items-center gap-1 text-red-400"><AlertCircle className="h-3 w-3" />{failed} falhas</span>
         {live?.currentPhone && status === 'running' && (
