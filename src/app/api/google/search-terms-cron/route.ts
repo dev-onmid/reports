@@ -195,10 +195,22 @@ export async function GET(req: NextRequest) {
         const keywordsAtivas = (kwRes?.results ?? [])
           .map((r) => String(r.adGroupCriterion?.keyword?.text ?? '')).filter(Boolean);
 
+        // Catálogo REAL do cliente: categorias de produto com venda ganha nos últimos
+        // 180 dias (vem do Agendor). Sem isso a IA deduz o portfólio pelas keywords.
+        const catalogo: string[] = await pool.query(
+          `SELECT DISTINCT p->>'categoria' AS categoria
+             FROM public.crm_leads l, jsonb_array_elements(COALESCE(l.produtos, '[]'::jsonb)) p
+            WHERE l.client_id = $1 AND l.fechou
+              AND COALESCE(l.fechado_em, l.lead_date, l.data) >= CURRENT_DATE - 180
+              AND COALESCE(p->>'categoria', '') <> ''`,
+          [cliente.id],
+        ).then((r) => r.rows.map((x) => String(x.categoria))).catch(() => [] as string[]);
+
         const contexto = [
           `Cliente: ${cliente.name ?? '(sem nome)'}`,
           cliente.city ? `Área de atendimento: ${cliente.city}` : 'Área de atendimento: não informada (não negative por cidade sem certeza)',
           ...(fazConquista ? ['ESTE CLIENTE FAZ CONQUISTA DE CONCORRENTE DE PROPÓSITO: nunca negative um termo por ser nome de concorrente ou de outro profissional do ramo — para esses termos, responda "ignorar".'] : []),
+          ...(catalogo.length ? [`CATÁLOGO VENDIDO (categorias com venda nos últimos 180 dias): ${catalogo.join(' | ')}`] : []),
           `Palavras-chave ativas da conta: ${keywordsAtivas.slice(0, 60).join(' | ') || '(nenhuma)'}`,
           '',
           'Termos de pesquisa dos últimos 30 dias (termo | impressões | cliques | gasto R$ | conversões):',
@@ -219,7 +231,7 @@ export async function GET(req: NextRequest) {
         }).catch(() => {});
 
         const texto = msg.content.filter((c) => c.type === 'text').map((c) => (c as { text: string }).text).join('\n');
-        const plano = planejarAplicacao(parseDecisoesIa(texto), analisar, keywordsAtivas, { nomeCliente: cliente.name ?? '', conquistaConcorrentes: fazConquista });
+        const plano = planejarAplicacao(parseDecisoesIa(texto), analisar, keywordsAtivas, { nomeCliente: cliente.name ?? '', conquistaConcorrentes: fazConquista, catalogo });
         res.recusadas = plano.recusadas.length;
 
         let negativadas = 0;

@@ -130,6 +130,33 @@ export function termoTemMarca(termo: string, nomeCliente: string): boolean {
   return tokensMarca.some((m) => alvo.includes(m));
 }
 
+/** Palavras de categoria que não identificam produto ("Diversos", "de", "Metal"). */
+const PALAVRAS_GENERICAS_CATALOGO = new Set([
+  'de', 'da', 'do', 'das', 'dos', 'e', 'com', 'para', 'em', 'diverso', 'outro', 'geral',
+  'metal', 'plastico', 'vidro', 'ecologico', 'ecologica', 'termico', 'termica', 'personalizado', 'personalizada',
+]);
+
+/** Singular ingênuo: "canetas" → "caneta", "squeezes" → "squeeze". Basta para casar categoria × busca. */
+function singular(p: string): string {
+  return p.length > 3 && p.endsWith('s') ? p.slice(0, -1) : p;
+}
+
+/**
+ * Termo cita um PRODUTO que o cliente vende? `categorias` vem do CRM (categorias de
+ * produto com venda ganha recente — Agendor). A IA não conhece o catálogo e julgava
+ * "fora do portfólio" pelo que via nas keywords: na Londrigifts negativou canetas,
+ * garrafas, chaveiros e blocos, que somavam ~R$ 50 mil vendidos em 90 dias
+ * (out/2026). Negativar produto vendido é decisão do gestor, nunca da rotina.
+ */
+export function termoEhDoCatalogo(termo: string, categorias: string[]): boolean {
+  const produtos = new Set(
+    categorias.flatMap((c) => palavras(c)).map(singular)
+      .filter((p) => p.length >= 3 && !PALAVRAS_GENERICAS_CATALOGO.has(p)),
+  );
+  if (produtos.size === 0) return false;
+  return palavras(termo).map(singular).some((p) => produtos.has(p));
+}
+
 /** Campanha de conquista (nome com "CONCORRENTE"): os termos dela SÃO os nomes de
  *  concorrentes, de propósito — a rotina não negativa nem promove nada ali. */
 export function ehCampanhaDeConcorrentes(nomeCampanha: string): boolean {
@@ -143,7 +170,7 @@ export function planejarAplicacao(
   decisoes: DecisaoIa[],
   analisados: TermoBruto[],
   keywordsAtivas: string[],
-  opts: { maxNegativas?: number; maxKeywords?: number; cliquesMinimos?: number; nomeCliente?: string; conquistaConcorrentes?: boolean } = {},
+  opts: { maxNegativas?: number; maxKeywords?: number; cliquesMinimos?: number; nomeCliente?: string; conquistaConcorrentes?: boolean; catalogo?: string[] } = {},
 ): PlanoAplicacao {
   const maxNeg = opts.maxNegativas ?? MAX_NEGATIVAS_RODADA;
   const maxKw = opts.maxKeywords ?? MAX_KEYWORDS_RODADA;
@@ -172,6 +199,10 @@ export function planejarAplicacao(
       if (ativas.has(chave)) { recusadas.push({ termo: chave, decisao: d.decisao, motivo: 'é uma palavra-chave ATIVA da conta' }); continue; }
       if (opts.nomeCliente && termoTemMarca(chave, opts.nomeCliente)) {
         recusadas.push({ termo: chave, decisao: d.decisao, motivo: 'busca pela MARCA do cliente — negativar marca é decisão do gestor, não da rotina' });
+        continue;
+      }
+      if (opts.catalogo?.length && termoEhDoCatalogo(chave, opts.catalogo)) {
+        recusadas.push({ termo: chave, decisao: d.decisao, motivo: 'produto que o cliente VENDE (categoria com venda no CRM) — negativar é decisão do gestor' });
         continue;
       }
       // Cliente que faz conquista de concorrente: nome de concorrente é público-alvo,
@@ -264,6 +295,7 @@ Para CADA termo recebido, decida:
 REGRAS DURAS:
 1. Só responda sobre os termos que EU enviei. Nunca invente termo.
 2. NUNCA negative um termo que descreve o produto/serviço principal do cliente, mesmo com custo alto — custo alto em termo relevante é problema de lance, não de relevância.
+   Quando eu informar o CATÁLOGO VENDIDO, todo produto dele é do cliente, mesmo que não apareça nas palavras-chave: busca por esses produtos NUNCA é "fora do portfólio".
 3. Cidade/bairro dentro da área de atendimento informada NÃO é motivo de negativa. Cidade fora dela é.
 4. NUNCA negative busca pela MARCA do cliente (nome da clinica/empresa, ainda que com "telefone", "endereco", "avaliacoes") — quem busca a marca ja conhece o cliente.
 5. Motivo em UMA frase curta, factual, em português.
