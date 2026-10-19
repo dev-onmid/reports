@@ -1041,7 +1041,7 @@ function ClientesTab() {
       </div>
 
       {/* Main grid */}
-      <div className="grid gap-6 xl:grid-cols-[1fr_300px]">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-6 xl:grid-cols-[minmax(0,1fr)_300px]">
         <div className="space-y-6 min-w-0">
 
           {/* Nova instância form */}
@@ -2549,7 +2549,7 @@ function DashboardTab({ onReuse, onNewCampaign, onManageInstances, onEdit }: {
   if (loading) return (
     <div className="space-y-6">
       <div className="grid grid-cols-5 gap-4">{[1,2,3,4,5].map(i => <div key={i} className="h-24 animate-pulse rounded-[var(--radius)] border border-border bg-card" />)}</div>
-      <div className="grid grid-cols-[1fr_380px] gap-6">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-6 xl:grid-cols-[minmax(0,1fr)_380px]">
         <div className="space-y-4">{[1,2].map(i => <div key={i} className="h-64 animate-pulse rounded-[var(--radius)] border border-border bg-card" />)}</div>
         <div className="space-y-4">{[1,2,3].map(i => <div key={i} className="h-40 animate-pulse rounded-[var(--radius)] border border-border bg-card" />)}</div>
       </div>
@@ -2604,13 +2604,13 @@ function DashboardTab({ onReuse, onNewCampaign, onManageInstances, onEdit }: {
       )}
 
       {/* ── Main Grid ───────────────────────────────────────────────────── */}
-      <div className="grid gap-6 xl:grid-cols-[1fr_380px]">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-6 xl:grid-cols-[minmax(0,1fr)_380px]">
 
         {/* Left column */}
         <div className="space-y-6 min-w-0">
 
           {/* Weekly chart */}
-          <div className="rounded-[var(--radius)] border border-border bg-card p-5">
+          <div className="min-w-0 overflow-hidden rounded-[var(--radius)] border border-border bg-card p-5">
             <div className="flex items-center justify-between mb-5">
               <div className="flex items-center gap-2">
                 <p className="font-semibold text-sm">Envios na semana</p>
@@ -3319,7 +3319,7 @@ export default function DisparosPage() {
   return (
     <div className="space-y-6 pb-10">
       {/* Header */}
-      <div className="sticky top-0 z-20 -mx-6 px-6 py-3 -mt-6 bg-background/90 backdrop-blur-sm border-b border-border">
+      <div className="sticky top-0 z-20 -mx-3 px-3 py-3 -mt-3 sm:-mx-6 sm:px-6 sm:-mt-6 bg-background/90 backdrop-blur-sm border-b border-border">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <div className="flex h-11 w-11 items-center justify-center rounded-full shrink-0" style={{ background: 'radial-gradient(circle at 35% 35%, #25D366, #128C7E)', boxShadow: '0 0 18px rgba(37,211,102,0.35)' }}>

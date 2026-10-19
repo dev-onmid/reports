@@ -445,7 +445,7 @@ export default function RastreamentoPage() {
       </div>
 
       {/* Charts row */}
-      <div className="grid gap-4 xl:grid-cols-[1fr_340px]">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
         {/* Clicks over time */}
         <div className="rounded-[var(--radius)] border border-border bg-card p-5">
           <p className="mb-4 text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Cliques por dia</p>

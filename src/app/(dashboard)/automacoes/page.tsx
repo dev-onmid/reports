@@ -383,7 +383,7 @@ export default function AutomacoesPage() {
         </div>
       </section>
 
-      <div className="flex gap-8 border-b border-white/10">
+      <div className="flex flex-wrap gap-x-8 gap-y-1 border-b border-white/10">
         {(['webhooks', 'multi', 'logs', 'docs'] as const).map(t => (
           <button
             key={t}
