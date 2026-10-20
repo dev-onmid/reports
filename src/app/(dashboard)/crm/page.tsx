@@ -3843,16 +3843,16 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
       <div className="flex flex-wrap items-center gap-2">
         {/* Título na MESMA linha dos controles (pedido do Matheus, 2026-10-20):
             sozinho ele gastava ~60px de altura para dizer "CRM". Os controles
-            encolheram para caber: cliente w-44, busca até 260px. */}
+            encolheram para caber: cliente w-44, busca entre 160 e 260px, origem
+            até 200px — tudo numa linha a partir de ~1500px de conteúdo. */}
         {!embedded && (
           <div className="mr-1 flex shrink-0 items-center gap-2.5">
             <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-violet-600/20 border border-violet-500/30">
               <Users className="h-5 w-5 text-violet-400" />
             </div>
-            <div className="leading-tight">
-              <h1 className="font-heading font-normal text-xl uppercase leading-none tracking-wide text-foreground">CRM</h1>
-              <p className="hidden text-[11px] text-muted-foreground 2xl:block">Gestão de leads e funil de vendas por cliente.</p>
-            </div>
+            {/* Só o nome: a descrição ("Gestão de leads e funil…") era o que
+                empurrava a busca para a linha de baixo (print do Matheus, 20/10). */}
+            <h1 className="font-heading font-normal text-xl uppercase leading-none tracking-wide text-foreground">CRM</h1>
             {saving && <span className="ml-1 text-xs font-medium text-amber-400 animate-pulse">Salvando…</span>}
           </div>
         )}
