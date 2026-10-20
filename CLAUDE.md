@@ -224,6 +224,15 @@ Decisão do Matheus no diagnóstico do Adriano Moleiro: "vamos fazer a campanha 
 - Adriano: campanha `[ON] [SEARCH] [CONCORRENTES] [PR] - 09/10` criada PAUSADA (34 nomes em frase, 32 negativas informacionais, R$ 10/dia). Anúncio nunca cita nome de concorrente (política de marca).
 - ⚠️ "Local actions - Directions" (GOOGLE_HOSTED) não aceita mutate na ação; tirar do lance = `customerConversionGoals/GET_DIRECTIONS~GOOGLE_HOSTED` com `biddable: false`.
 
+## Dashboard — conversa que recebeu negócio do Agendor passa a contar como lead (caso Cinfel, 2026-10-20)
+
+Pergunta do Matheus: "estamos com parcial de leads mais baixo, estamos gastando certo?". A Cinfel mostrava 109 leads de 1 a 15/10 contra 165 esperados, mas o Agendor dela tinha 161 negócios (69 Google/Site + 92 Instagram/Facebook) só nesse período.
+
+- **Causa**: desde 29/09 o WhatsApp da Cinfel entra no CRM, e o negócio do Agendor passou a ser anexado à conversa já existente (régua única de identidade). A linha ganha `external_id = 'agendor:…'`, mas a coluna `porta` continua `'chat'` e `portaSql` deixava a coluna gravada vencer a dedução. Chat sem rastro pago não conta → o lead do Google (WhatsApp do site, sem rastro) sumia da dashboard, e o alerta "leads de anúncio que não estão no CRM do cliente" acusava justamente os que estavam no Agendor.
+- **Correção** (`lead-contagem.ts`): `negocioCrmExternoSql` — `external_id LIKE 'agendor:%'` vence a porta gravada e vira `'crm_externo'`. **⚠️ Só Agendor, de propósito**: com o SULTS, a nossa ida empurra conversas para o CRM do cliente e elas voltam com `sults:…`; incluir faria conversa orgânica contar (medido no CondoStore: +25 em outubro).
+- ✅ Medido em produção comparando a regra antiga e a nova (1–19/10): Cinfel **155 → 251** leads e alerta 154 → 45; Londrigifts 84 → 86; os outros 27 clientes sem mudança.
+- Na mesma rodada (aprovado pelo Matheus): Google Corte e Dobra R$ 27→10/dia, Peças 18→30, Marca 9→13, 5 negativas na Corte e Dobra; Meta Segmentado 2.0 R$ 20→12, Advantage 2.0 20→28, Advantage original 20→25 (voltar a 20 depois do aporte de 23/10). Registrado no Histórico do cliente. O rastreio `/r/` dos botões do site já estava no ar desde 16/10 (outra sessão).
+
 ## CRM — conversa em modo LID passa a vincular no ENVIO (caso CondoStore, 2026-10-08)
 
 Matheus: "os leads da CondoStore entram pela integração com o SULTS, mas os chats e atendimentos não estão sendo vinculados".
