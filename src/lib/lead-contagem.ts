@@ -44,7 +44,14 @@ const col = (alias: string, c: string) => (alias ? `${alias}.${c}` : c);
 /** Expressão SQL da porta do lead: a coluna quando gravada, senão deduzida dos marcadores. */
 export function portaSql(alias = ''): string {
   const c = (n: string) => col(alias, n);
-  return `COALESCE(NULLIF(${c('porta')}, ''), CASE
+  // ⚠️ Negócio de CRM externo VENCE a porta gravada. A conversa nasce 'chat' e
+  // depois recebe o negócio do Agendor (régua única de identidade: a linha
+  // de conversa recebe o negócio), mas a coluna `porta` continua 'chat' e o
+  // COALESCE abaixo a deixava mandar. Resultado medido na Cinfel em 20/10/2026:
+  // 247 leads com negócio no Agendor fora da dashboard, que contou 109 leads em
+  // outubro quando o Agendor tinha 161 só de 1 a 15/10 — e o alerta de "leads de
+  // anúncio que não estão no CRM do cliente" acusava justamente os que estavam.
+  return `CASE WHEN ${negocioCrmExternoSql(alias)} THEN 'crm_externo' ELSE COALESCE(NULLIF(${c('porta')}, ''), CASE
     WHEN ${c('raw')} IS NOT NULL OR ${c('upload_id')} IS NOT NULL THEN 'planilha'
     WHEN NULLIF(${c('external_id')}, '') IS NOT NULL
       OR lower(${c('origin')}) IN ('sults', 'agendor', 'datalytics') THEN 'crm_externo'
@@ -56,7 +63,17 @@ export function portaSql(alias = ''): string {
       -- sumiam da dashboard (medido 2026-10-10: 10 leads em 5 clientes).
       OR ${c('canal')} ILIKE 'lp %' THEN 'formulario'
     WHEN NULLIF(${c('instance_id')}, '') IS NOT NULL OR ${c('whatsapp_last_message_at')} IS NOT NULL THEN 'chat'
-    ELSE 'manual' END)`;
+    ELSE 'manual' END) END`;
+}
+
+/**
+ * A linha carrega um negócio do Agendor (pelo id da fonte).
+ * ⚠️ Só Agendor, de propósito: no SULTS a nossa ida empurra conversas para o CRM
+ * do cliente e elas voltam com `sults:…` — incluir o SULTS aqui faria conversa
+ * orgânica que NÓS mandamos contar como lead (medido no CondoStore: +25 em out).
+ */
+function negocioCrmExternoSql(alias = ''): string {
+  return `(COALESCE(${col(alias, 'external_id')}, '') LIKE 'agendor:%')`;
 }
 
 /** Lead do chat com prova de tráfego pago.
@@ -167,7 +184,8 @@ export function rastreadoForaDoCrmSql(alias = ''): string {
  * que falta cadastro na ponta justamente onde a integração está funcionando.
  *
  * Agendor e Datalytics não precisam de linha aqui: lá o lead ganha `external_id`
- * ou `origin`, e a porta já o classifica como 'crm_externo'. O SULTS é o caso
+ * ou `origin`, e a porta já o classifica como 'crm_externo' (para o Agendor,
+ * mesmo quando a linha nasceu conversa — ver `negocioCrmExternoSql`). O SULTS é o caso
  * que escapa porque a ida não marca o lead — ela cria o negócio do lado de lá.
  */
 function noCrmExternoPorPushSql(alias = ''): string {
