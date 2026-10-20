@@ -2386,7 +2386,7 @@ export default function PagamentosPage() {
 
       {showAlertConfigModal && <BalanceAlertSettings onClose={() => setShowAlertConfigModal(false)} />}
 
-      <div className="grid gap-4 xl:grid-cols-5">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         {viewMode === 'dia' ? (
           <>
             <DayMetricCard label="Total do dia" value={totalDay} color="#a855f7" glow="rgba(168,85,247,0.18)" icon={WalletCards} count={`${selectedScopePayments.length} pagamentos`} />
@@ -2414,7 +2414,7 @@ export default function PagamentosPage() {
           <h2 className="text-sm font-bold uppercase tracking-wider">Novo Pagamento</h2>
           <p className="text-xs text-muted-foreground">Cadastre um novo Pix ou agende para futuras datas.</p>
         </div>
-        <div className="grid gap-3 xl:grid-cols-[1.2fr_0.85fr_0.95fr_0.8fr_0.9fr_auto_auto_auto_0.9fr]">
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-[1.2fr_0.85fr_0.95fr_0.8fr_0.9fr_auto_auto_auto_0.9fr]">
           <label className="space-y-1.5">
             <span className="text-xs font-bold text-foreground">Cliente</span>
             <select value={newPayment.clientId} onChange={(e) => handleClientChange(e.target.value)} className="h-9 w-full rounded-lg border border-border bg-background px-3 text-sm text-muted-foreground outline-none focus:border-primary">

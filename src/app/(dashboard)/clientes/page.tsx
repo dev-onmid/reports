@@ -545,7 +545,7 @@ export default function ClientesPage() {
       </div>
 
       {/* ── CLIENT LIST ── */}
-      <div className={cn('grid grid-cols-1 gap-3', viewMode === 'grid' && 'xl:grid-cols-2')}>
+      <div className={cn('grid grid-cols-1 gap-3', viewMode === 'grid' && 'md:grid-cols-2 2xl:grid-cols-3')}>
         {pagedClients.map(cliente => {
           const finance = getFinancialInfo(cliente.id, cliente.ads_billing_mode);
 
