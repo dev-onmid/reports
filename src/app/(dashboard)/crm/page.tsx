@@ -1281,15 +1281,6 @@ function KanbanCard({
   );
 }
 
-const semAcentoMin = (t: string) => t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
-
-/** Atalhos da barra: "Meus leads", "Agenda de hoje" e "Ações atrasadas". */
-function passaAtalho(l: CrmLead, atalho: 'meus' | 'hoje' | 'atrasados', meuNome: string): boolean {
-  if (atalho === 'meus') return !!meuNome && !!l.responsavel && semAcentoMin(l.responsavel) === semAcentoMin(meuNome);
-  if (atalho === 'hoje') return !!l.data_agendada && String(l.data_agendada).slice(0, 10) === diaLocal(new Date());
-  return !!l.proxima_acao_em && new Date(l.proxima_acao_em).getTime() < Date.now();
-}
-
 function iniciais(nome: string): string {
   const partes = nome.trim().split(/\s+/).filter(Boolean);
   return ((partes[0]?.[0] ?? '') + (partes.length > 1 ? partes[partes.length - 1][0] : '')).toUpperCase() || '?';
@@ -3100,10 +3091,8 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
   // agência. O servidor já recusa as rotas fora da lista dele.
   const modoCliente = useEhUsuarioCliente();
   const gestorCliente = useEhGestorCliente();
-  const meuNome = useMeuNome();
   const [showNovoLead, setShowNovoLead] = useState(false);
   // Atalhos de operação: ignoram o período (a consulta de hoje pode ser de um lead de agosto).
-  const [atalho, setAtalho] = useState<'' | 'meus' | 'hoje' | 'atrasados'>('');
 
   // Deep-link `?clientId=&lead=` — é como o modal do Funil de Performance (e
   // qualquer outra tela) manda abrir a conversa de um lead específico. A URL
@@ -3156,7 +3145,6 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
   const [loading, setLoading]       = useState(false);
   const [leadsErro, setLeadsErro]   = useState(false);
   const [search, setSearch]         = useState('');
-  const [soAtendimentoRuim, setSoAtendimentoRuim] = useState(false);
   const [statusFilter, setStatusFilter] = useState('');
   const [temperatureFilter, setTemperatureFilter] = useState('');
   const [monthFilter, setMonthFilter] = useState('');
@@ -3439,16 +3427,14 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
   // um lead de setembro não achava e concluía que ele não existia.
   const busca = useMemo(() => prepararBusca(search), [search]);
   const filtered = useMemo(() => leads.filter(l => {
-    const semPeriodo = !!busca || !!atalho;
+    const semPeriodo = !!busca;
     if (!semPeriodo && monthFilter && monthFromDate(l.data) !== monthFilter) return false;
     if (!semPeriodo && (dateFromFilter || dateToFilter) && !isDateInRange(l.data, dateFromFilter, dateToFilter)) return false;
-    if (atalho && !passaAtalho(l, atalho, meuNome)) return false;
     if (statusFilter && l.status !== statusFilter) return false;
     if (temperatureFilter) {
       if (temperatureFilter === 'sem' && l.temperatura) return false;
       if (temperatureFilter !== 'sem' && l.temperatura !== temperatureFilter) return false;
     }
-    if (soAtendimentoRuim && !(temNota(l) && l.nota_atendimento <= 2)) return false;
     if (tagFilter && !(l.tags ?? []).some(t => t.id === tagFilter)) return false;
     if (busca && !leadCasaBusca(l, busca)) return false;
     return true;
@@ -3456,7 +3442,7 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
     if (a.time_interno !== b.time_interno) return a.time_interno ? 1 : -1;
     // Mais recente primeiro dentro de cada coluna do Kanban.
     return ordemPorData(a, b);
-  }), [leads, busca, atalho, meuNome, soAtendimentoRuim, statusFilter, temperatureFilter, tagFilter, monthFilter, dateFromFilter, dateToFilter]);
+  }), [leads, busca, statusFilter, temperatureFilter, tagFilter, monthFilter, dateFromFilter, dateToFilter]);
 
   /**
    * Tag grava NA HORA (otimista) — é um clique no card, sem Salvar. Em erro
@@ -3480,12 +3466,6 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
     }
   }
   const podeConfigurarTags = !modoCliente || gestorCliente;
-
-  const contagemAtalho = useMemo(() => ({
-    meus: meuNome ? leads.filter(l => passaAtalho(l, 'meus', meuNome)).length : 0,
-    hoje: leads.filter(l => passaAtalho(l, 'hoje', meuNome)).length,
-    atrasados: leads.filter(l => passaAtalho(l, 'atrasados', meuNome)).length,
-  }), [leads, meuNome]);
 
   /**
    * Recorte da análise de IA: CLIENTE + PERÍODO, nada mais (instrução do
@@ -3719,7 +3699,7 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
           subtítulo e ícone custava ~75px da altura do quadro — que é a parte
           que o gestor realmente usa. Os avisos de "Salvando…"/erro migram para
           a barra de filtros, que continua visível. */}
-      {!embedded && (
+      {!embedded && !clientId && (
       <div className="flex items-center gap-3">
         <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-violet-600/20 border border-violet-500/30">
           {clientId ? <Users className="h-5 w-5 text-violet-400" /> : <Sparkles className="h-5 w-5 text-violet-400" />}
@@ -3861,6 +3841,21 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
       {clientId && (
       <>
       <div className="flex flex-wrap items-center gap-2">
+        {/* Título na MESMA linha dos controles (pedido do Matheus, 2026-10-20):
+            sozinho ele gastava ~60px de altura para dizer "CRM". Os controles
+            encolheram para caber: cliente w-44, busca até 260px. */}
+        {!embedded && (
+          <div className="mr-1 flex shrink-0 items-center gap-2.5">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-violet-600/20 border border-violet-500/30">
+              <Users className="h-5 w-5 text-violet-400" />
+            </div>
+            <div className="leading-tight">
+              <h1 className="font-heading font-normal text-xl uppercase leading-none tracking-wide text-foreground">CRM</h1>
+              <p className="hidden text-[11px] text-muted-foreground 2xl:block">Gestão de leads e funil de vendas por cliente.</p>
+            </div>
+            {saving && <span className="ml-1 text-xs font-medium text-amber-400 animate-pulse">Salvando…</span>}
+          </div>
+        )}
         {lockedClientId ? (
           // Só fora da página do cliente: lá dentro o nome está no cabeçalho.
           !embedded && (
@@ -3876,7 +3871,7 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
           </div>
         ) : (
           <IconSelect icon={Users} value={clientId} onChange={openClientCrm}
-            placeholder="Selecionar cliente..." className="min-w-[180px]">
+            placeholder="Selecionar cliente..." className="w-44">
             {activeClients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
           </IconSelect>
         )}
@@ -4115,7 +4110,7 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
               <>
                 {/* A busca cresce e come a sobra da linha: espaço vazio numa
                     barra de ferramentas não é respiro, é desperdício. */}
-                <div className="relative min-w-[160px] flex-1">
+                <div className="relative min-w-[160px] max-w-[260px] flex-1">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
                   <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar por nome ou número..."
                     className={cn('w-full pl-8 py-2 rounded-lg border border-border bg-card text-sm focus:outline-none focus:ring-1 focus:ring-primary', search && (monthFilter || dateFromFilter || dateToFilter) ? 'pr-36' : 'pr-3')} />
@@ -4124,39 +4119,6 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
                   )}
                 </div>
 
-                <div className="flex shrink-0 overflow-hidden rounded-lg border border-border bg-card p-0.5">
-                  {([
-                    ['meus', 'Meus leads', contagemAtalho.meus, 'Leads em que você é o responsável'],
-                    ['hoje', 'Agenda de hoje', contagemAtalho.hoje, 'Agendados para hoje, de qualquer período'],
-                    ['atrasados', 'Atrasados', contagemAtalho.atrasados, 'Próxima ação com prazo vencido'],
-                  ] as const).map(([id, rotulo, n, dica]) => (
-                    <button key={id} type="button" title={dica}
-                      onClick={() => setAtalho(a => a === id ? '' : id)}
-                      className={cn('flex h-8 items-center gap-1 rounded-md px-2.5 text-xs font-semibold transition-colors',
-                        atalho === id
-                          ? id === 'atrasados' ? 'bg-red-500/15 text-red-300' : 'bg-primary/15 text-primary'
-                          : 'text-muted-foreground hover:text-foreground')}>
-                      {rotulo}
-                      {n > 0 && <span className={cn('rounded px-1 text-[10px]', id === 'atrasados' ? 'bg-red-500/20 text-red-300' : 'bg-muted')}>{n}</span>}
-                    </button>
-                  ))}
-                  {/* "Atendimento ruim" é um atalho como os três ao lado — virou o 4º
-                      chip do mesmo grupo em vez de um botão solto que caía sozinho
-                      na linha de baixo (2026-10-20). */}
-                  {!modoCliente && (() => {
-                    const ruins = leads.filter(l => temNota(l) && l.nota_atendimento <= 2).length;
-                    if (!ruins && !soAtendimentoRuim) return null;
-                    return (
-                      <button type="button" title="Mostra só os leads com nota de atendimento 0, 1 ou 2"
-                        onClick={() => setSoAtendimentoRuim(v => !v)}
-                        className={cn('flex h-8 items-center gap-1 rounded-md px-2.5 text-xs font-semibold transition-colors',
-                          soAtendimentoRuim ? 'bg-red-500/15 text-red-300' : 'text-muted-foreground hover:text-foreground')}>
-                        <Star className="h-3.5 w-3.5" /> Atend. ruim
-                        <span className="rounded bg-red-500/20 px-1 text-[10px] text-red-300">{ruins}</span>
-                      </button>
-                    );
-                  })()}
-                </div>
 
 
                 {/* Abre o modal em qualquer visão. Antes chamava saveNew(), que só
@@ -4224,23 +4186,6 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
               </div>
             </div>
           ))}
-          {/* Temperatura é COMPOSIÇÃO do total ao lado, não uma métrica irmã dele —
-              por isso vem depois de uma divisória e num corpo menor. Com o mesmo
-              peso das três primeiras, a faixa virava seis números indistinguíveis. */}
-          <span className="h-6 w-px shrink-0 bg-border" aria-hidden />
-          <div className="flex items-center gap-3">
-            {([
-              { label: 'frio', value: stats.frios, color: '#60a5fa' },
-              { label: 'morno', value: stats.mornos, color: '#f59e0b' },
-              { label: 'quente', value: stats.quentes, color: '#f87171' },
-            ] as const).map(item => (
-              <div key={item.label} className="flex items-baseline gap-1.5" title={item.label}>
-                <span className="h-2 w-2 shrink-0 self-center rounded-full" style={{ background: item.color }} />
-                <span className="font-heading text-base leading-none" style={{ color: item.color }}>{item.value.toLocaleString('pt-BR')}</span>
-                <span className="text-[10px] text-muted-foreground">{item.label}</span>
-              </div>
-            ))}
-          </div>
           {stats.foraDaConta > 0 && (
             <span className="text-[11px] text-muted-foreground"
               title="Conversas que não vieram de anúncio, leads criados à mão, pacientes e equipe aparecem no quadro, mas não entram nos números acima nem no dashboard.">

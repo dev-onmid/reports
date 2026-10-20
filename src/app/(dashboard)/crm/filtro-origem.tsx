@@ -73,7 +73,7 @@ export function FiltroOrigem({ clientId, funnelId, from, to, valor, onChange }: 
         value={valor}
         onChange={e => onChange(e.target.value)}
         title="Quais conversas aparecem no quadro. Os números do topo e o dashboard contam só o tráfego."
-        className={cn('h-10 max-w-[230px] appearance-none rounded-lg border border-border bg-card pl-8 pr-7 text-sm font-semibold outline-none transition-colors hover:bg-muted/50',
+        className={cn('h-10 max-w-[200px] appearance-none rounded-lg border border-border bg-card pl-8 pr-7 text-sm font-semibold outline-none transition-colors hover:bg-muted/50',
           valor === 'trafego' ? 'text-muted-foreground' : 'text-foreground')}
       >
         <option value="trafego">Tráfego{n(opcoes?.trafego)}</option>
