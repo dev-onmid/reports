@@ -3884,6 +3884,10 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
         {/* Funnel selector */}
         {funnels.length > 0 && (
           <div className="flex items-center gap-1">
+            {/* Com um funil só, o seletor é um controle que não escolhe nada e
+                ocupa ~170px da barra (2026-10-20); o ⋮ ao lado continua, porque
+                é por ele que se edita o funil e se gera o portal. */}
+            {funnels.length > 1 && (
             <div className="relative flex items-center">
               <Layers className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none z-10" />
               <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none z-10" />
@@ -3895,6 +3899,7 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
                 {funnels.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
               </select>
             </div>
+            )}
             {/* ⚠️ Configuração, não operação: editar funil e gerar o portal
                 acontecem uma vez e ficavam ocupando ~230px da barra para
                 sempre. Dentro do CLIENTE nem o menu fica — os 4 itens moram
@@ -4135,32 +4140,36 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
                       {n > 0 && <span className={cn('rounded px-1 text-[10px]', id === 'atrasados' ? 'bg-red-500/20 text-red-300' : 'bg-muted')}>{n}</span>}
                     </button>
                   ))}
+                  {/* "Atendimento ruim" é um atalho como os três ao lado — virou o 4º
+                      chip do mesmo grupo em vez de um botão solto que caía sozinho
+                      na linha de baixo (2026-10-20). */}
+                  {!modoCliente && (() => {
+                    const ruins = leads.filter(l => temNota(l) && l.nota_atendimento <= 2).length;
+                    if (!ruins && !soAtendimentoRuim) return null;
+                    return (
+                      <button type="button" title="Mostra só os leads com nota de atendimento 0, 1 ou 2"
+                        onClick={() => setSoAtendimentoRuim(v => !v)}
+                        className={cn('flex h-8 items-center gap-1 rounded-md px-2.5 text-xs font-semibold transition-colors',
+                          soAtendimentoRuim ? 'bg-red-500/15 text-red-300' : 'text-muted-foreground hover:text-foreground')}>
+                        <Star className="h-3.5 w-3.5" /> Atend. ruim
+                        <span className="rounded bg-red-500/20 px-1 text-[10px] text-red-300">{ruins}</span>
+                      </button>
+                    );
+                  })()}
                 </div>
 
-                {!modoCliente && (() => {
-                  const ruins = leads.filter(l => temNota(l) && l.nota_atendimento <= 2).length;
-                  if (!ruins && !soAtendimentoRuim) return null;
-                  return (
-                    <button
-                      type="button"
-                      onClick={() => setSoAtendimentoRuim(v => !v)}
-                      title="Mostra só os leads com nota de atendimento 0, 1 ou 2"
-                      className={cn('flex shrink-0 items-center gap-1.5 rounded-lg border px-3 py-2 text-sm font-semibold transition-colors',
-                        soAtendimentoRuim ? 'border-red-500/50 bg-red-500/15 text-red-300' : 'border-border bg-card text-muted-foreground hover:text-foreground')}
-                    >
-                      <Star className="h-3.5 w-3.5" /> Atendimento ruim <span className="rounded bg-red-500/20 px-1.5 text-[11px] text-red-300">{ruins}</span>
-                    </button>
-                  );
-                })()}
 
                 {/* Abre o modal em qualquer visão. Antes chamava saveNew(), que só
                     gravava a linha em branco da visão LISTA — no Kanban (a visão
-                    padrão) o botão não fazia nada. */}
+                    padrão) o botão não fazia nada. Na visão de leads o botão mora
+                    na faixa de números (2026-10-20); aqui fica só para as outras. */}
+                {crmView !== 'leads' && (
                 <button onClick={() => setShowNovoLead(true)}
                   className="flex shrink-0 items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors"
                 >
                   <Plus className="h-4 w-4" /> Novo Lead
                 </button>
+                )}
               </>
             )}
           </>
@@ -4193,8 +4202,12 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
       )}
 
       {/* ── STATS (faixa única compacta — o espaço vertical é do funil) ── */}
-      {clientId && !loading && leads.length > 0 && crmView === 'leads' && (
-        <div className="shrink-0 flex flex-wrap items-center justify-between gap-x-6 gap-y-2 rounded-xl border border-border bg-card px-6 py-2.5">
+      {/* Tags e Analisar com IA moram aqui desde 2026-10-20: a linha "LEADS" que os
+          carregava era uma faixa inteira para um rótulo e dois botões, e esta faixa
+          tinha metade da largura vazia. A faixa aparece mesmo com zero leads no
+          recorte: sem ela os dois botões sumiriam junto. */}
+      {clientId && !loading && crmView === 'leads' && (
+        <div className="shrink-0 flex flex-wrap items-center gap-x-6 gap-y-2 rounded-xl border border-border bg-card px-5 py-2.5">
           {([
             { label: 'leads no funil', value: stats.total.toLocaleString('pt-BR'), Icon: Users, color: '#8b5cf6' },
             { label: 'qualificados', value: stats.qualificados.toLocaleString('pt-BR'), Icon: BadgeCheck, color: '#55f52f' },
@@ -4234,6 +4247,39 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
               + {stats.foraDaConta.toLocaleString('pt-BR')} no quadro fora da conta
             </span>
           )}
+          <div className="ml-auto flex items-center gap-2">
+            {clientId && podeConfigurarTags && (
+              <button
+                type="button"
+                onClick={() => setShowTagsConfig(true)}
+                title="Criar e editar as tags de qualificação deste cliente"
+                className="flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs font-semibold text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              >
+                <Tag className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Tags</span>
+              </button>
+            )}
+            {/* Análise de IA sob demanda — recupera o retroativo que a
+                automação desligada não fez (pedido do Matheus, 2026-10-02).
+                Age sobre `leadsDoPeriodo`: só o cliente aberto e o período
+                escolhido, sem herdar busca nem filtros de coluna.
+                Fica com a agência: custa IA e a rota é recusada ao cliente. */}
+            {clientId && !modoCliente && (
+              <button
+                type="button"
+                onClick={() => setAnaliseIaAberta(true)}
+                title="A IA lê as conversas do recorte atual e move os leads no Kanban"
+                className="flex items-center gap-1.5 rounded-lg border border-primary/40 bg-primary/10 px-2.5 py-1.5 text-xs font-semibold text-primary transition-colors hover:bg-primary/20"
+              >
+                <Sparkles className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Analisar com IA</span>
+              </button>
+            )}
+            <button onClick={() => setShowNovoLead(true)}
+              className="flex shrink-0 items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90 transition-colors">
+              <Plus className="h-3.5 w-3.5" /> Novo Lead
+            </button>
+          </div>
         </div>
       )}
 
@@ -4303,43 +4349,6 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
               </button>
             </div>
           )}
-
-          {/* Table toolbar */}
-          <div className="flex items-center justify-between px-4 py-2.5 border-b border-border shrink-0">
-            <div className="flex items-center gap-2">
-              <LayoutGrid className="h-4 w-4 text-primary" />
-              <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Leads</span>
-            </div>
-            <div className="flex items-center gap-2">
-              {clientId && podeConfigurarTags && (
-                <button
-                  type="button"
-                  onClick={() => setShowTagsConfig(true)}
-                  title="Criar e editar as tags de qualificação deste cliente"
-                  className="flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs font-semibold text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                >
-                  <Tag className="h-3.5 w-3.5" />
-                  <span className="hidden sm:inline">Tags</span>
-                </button>
-              )}
-              {/* Análise de IA sob demanda — recupera o retroativo que a
-                  automação desligada não fez (pedido do Matheus, 2026-10-02).
-                  Age sobre `leadsDoPeriodo`: só o cliente aberto e o período
-                  escolhido, sem herdar busca nem filtros de coluna.
-                  Fica com a agência: custa IA e a rota é recusada ao cliente. */}
-              {clientId && !modoCliente && (
-                <button
-                  type="button"
-                  onClick={() => setAnaliseIaAberta(true)}
-                  title="A IA lê as conversas do recorte atual e move os leads no Kanban"
-                  className="flex items-center gap-1.5 rounded-lg border border-primary/40 bg-primary/10 px-2.5 py-1.5 text-xs font-semibold text-primary transition-colors hover:bg-primary/20"
-                >
-                  <Sparkles className="h-3.5 w-3.5" />
-                  <span className="hidden sm:inline">Analisar com IA</span>
-                </button>
-              )}
-            </div>
-          </div>
 
           {/* Kanban view — as colunas ocupam toda a altura; o scroll vertical é POR coluna */}
           <div className="flex flex-1 min-h-0 flex-col overflow-hidden p-2.5">

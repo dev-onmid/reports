@@ -2494,7 +2494,7 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
       <div className="absolute top-0 right-0 w-[400px] h-[400px] bg-secondary/5 rounded-full blur-[100px] pointer-events-none" />
 
       {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b border-border pb-5">
+      <div className="flex flex-col gap-4 border-b border-border pb-5 md:flex-row md:items-center md:justify-between">
         <div className="flex items-center gap-4">
           <ClientSwitcher currentId={id} currentName={displayName} tab={tab} />
           <div>
@@ -2597,37 +2597,36 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
             </div>
           </div>
         </div>
-      </div>
+        {/* Abas + Configurações na MESMA linha do cabeçalho (pedido do Matheus,
+            2026-10-20: "muita coisa pode ficar na mesma linha"). A linha do
+            cabeçalho tinha o lado direito vazio e a das abas, o lado esquerdo.
+            Juntas somem ~60px antes do conteúdo em tela larga; abaixo de
+            ~1500px as abas quebram para baixo sozinhas (flex-wrap), que era o
+            desenho anterior. */}
+        <div className="flex min-w-0 flex-wrap items-center gap-3 md:justify-end">
+        <div className="flex gap-1 bg-card border border-border p-1 rounded-xl w-fit flex-wrap">
+          {[...PRIMARY_TABS, ...(clientFidelidade ? (['fidelidade'] as Tab[]) : []), 'historico' as Tab].map((t) => (
+            <button key={t} onClick={() => setTab(t)}
+              className={cn(
+                'px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-colors',
+                tab === t
+                  ? 'bg-primary/20 text-primary shadow-[0_0_10px_rgba(85,245,47,0.15)]'
+                  : 'text-muted-foreground hover:text-foreground'
+              )}>
+              {tabLabel[t]}
+            </button>
+          ))}
+        </div>
 
-      {/* ⚠️ Abas e Configurações na MESMA linha. Antes eram duas faixas
-          empilhadas — a das abas ficava com um vazio à direita do tamanho da
-          tela inteira, e o botão sozinho numa faixa só dele. Juntas, some uma
-          linha inteira e o vazio vira o espaçamento entre as duas coisas.
-          ("Vincular Contas" e "Desativar Cliente" já tinham entrado no modal:
-          a primeira acontece na montagem do cliente, a segunda quase nunca.) */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-      <div className="flex gap-1 bg-card border border-border p-1 rounded-xl w-fit flex-wrap">
-        {[...PRIMARY_TABS, ...(clientFidelidade ? (['fidelidade'] as Tab[]) : []), 'historico' as Tab].map((t) => (
-          <button key={t} onClick={() => setTab(t)}
-            className={cn(
-              'px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-colors',
-              tab === t
-                ? 'bg-primary/20 text-primary shadow-[0_0_10px_rgba(85,245,47,0.15)]'
-                : 'text-muted-foreground hover:text-foreground'
-            )}>
-            {tabLabel[t]}
-          </button>
-        ))}
-      </div>
-
-        <Button
-          variant="outline"
-          className="border-border h-9 shrink-0 text-xs font-bold uppercase tracking-wider gap-2"
-          onClick={() => setConfigOpen(true)}
-        >
-          <Settings className="w-4 h-4 text-primary" />
-          Configurações
-        </Button>
+          <Button
+            variant="outline"
+            className="border-border h-9 shrink-0 text-xs font-bold uppercase tracking-wider gap-2"
+            onClick={() => setConfigOpen(true)}
+          >
+            <Settings className="w-4 h-4 text-primary" />
+            Configurações
+          </Button>
+        </div>
       </div>
 
       {/* Tab content */}
