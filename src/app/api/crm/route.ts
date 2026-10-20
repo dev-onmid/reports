@@ -5,6 +5,7 @@ import { requireAdmin } from '@/lib/api-auth';
 import { autorDaRequisicao, ensureColunasOperacao, registrarEventos } from '@/lib/crm-eventos';
 import { ensureCrmMessagesSchema, ensureDefaultFunnel, getFirstFunnelStageLabel } from '@/lib/crm-conversation-sync';
 import { leadContaSql } from '@/lib/lead-contagem';
+import { filtroOrigemSql, lerJanela, lerOrigem } from '@/lib/crm-origem-filtro';
 import { ensureCrmTagsSchema, tagsDoLeadSql } from '@/lib/crm-tags';
 
 async function ensureTableInterno(pool: ReturnType<typeof makeServerPool>) {
@@ -113,6 +114,10 @@ export async function GET(req: NextRequest) {
   const clientId = searchParams.get('clientId');
   const funnelId = searchParams.get('funnelId');
   const since    = searchParams.get('since');
+  // Origem (padrão: tráfego) e período. A conversa sem anúncio só vem dentro do
+  // período, para o CRM não baixar milhares de conversas (crm-origem-filtro.ts).
+  const origem   = lerOrigem(searchParams.get('origem'));
+  const janela   = lerJanela(searchParams.get('from'), searchParams.get('to'));
   if (!clientId) return Response.json({ error: 'clientId required' }, { status: 400 });
   const pool = makeServerPool();
   try {
@@ -126,6 +131,8 @@ export async function GET(req: NextRequest) {
     // ⚠️ Mesmos filtros da lista completa (funil + número válido),
     // senão o incremental traz linha que a carga completa não mostra.
     if (since) {
+      const paramsInc: unknown[] = [clientId, since, funnelId ?? null];
+      const filtroInc = filtroOrigemSql('l', origem, janela, paramsInc, false);
       const { rows } = await pool.query(
         `SELECT l.*,
                 COALESCE(l.lead_date, l.data) AS normalized_date,
@@ -146,11 +153,14 @@ export async function GET(req: NextRequest) {
               NULLIF(regexp_replace(COALESCE(l.numero, ''), '\\D', '', 'g'), '') IS NULL
               OR regexp_replace(l.numero, '\\D', '', 'g') ~ '^[0-9]{8,15}$'
             )
+            ${filtroInc}
           ORDER BY l.updated_at DESC`,
-        [clientId, since, funnelId ?? null],
+        paramsInc,
       );
       return Response.json(rows.map(semCru));
     }
+    const paramsFull: unknown[] = [clientId, funnelId ?? null];
+    const filtroFull = filtroOrigemSql('', origem, janela, paramsFull);
     const { rows } = await pool.query(
       `WITH ranked AS (
         SELECT *,
@@ -180,7 +190,8 @@ export async function GET(req: NextRequest) {
           -- O CRM mostra TODAS as conversas, inclusive as que não vieram de anúncio
           -- (decisão do Matheus, 2026-10-20). Quem decide o que conta no dashboard,
           -- no funil e nos números do topo do Kanban é a coluna conta_dashboard, a mesma
-          -- régua de lead-contagem.ts.
+          -- régua de lead-contagem.ts. Qual parte aparece é o filtro de origem.
+          ${filtroFull}
       )
       SELECT ranked.*,
              COALESCE(ranked.whatsapp_last_message_at, lm.last_contact_at, ranked.updated_at, ranked.created_at) AS last_contact_at,
@@ -193,7 +204,7 @@ export async function GET(req: NextRequest) {
       ) lm ON true
       WHERE rn = 1
       ORDER BY COALESCE(normalized_date, data) DESC NULLS LAST, created_at DESC`,
-      [clientId, funnelId ?? null]
+      paramsFull
     );
     return Response.json(rows.map(semCru));
   } finally {

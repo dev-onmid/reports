@@ -23,6 +23,7 @@ import { CamposAtendimento, HistoricoLead, NovoLeadModal, opcoesDeOrigem } from 
 import { ModoClienteContext, useEhGestorCliente, useEhUsuarioCliente, useMeuNome, useModoCliente } from '@/lib/modo-cliente';
 import { EquipeCliente } from './cliente-gestor';
 import { DICAS_ATENDIMENTO, InfoDica } from './info-dica';
+import { FiltroOrigem, lerOrigemSalva, salvarOrigem } from './filtro-origem';
 import { BotaoTags, FiltroTag, TagChips, TagsConfigModal, salvarTagsDoLead, useTagsDoCliente, type CrmTag } from './tags';
 import { AcessosClienteModal } from './acessos-cliente-modal';
 import { SeletorModeloFunil } from '@/components/crm/seletor-modelo-funil';
@@ -3166,6 +3167,11 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
   const [dateFromFilter, setDateFromFilter] = useState(() => presetDateRange('thisMonth').from);
   const [dateToFilter, setDateToFilter] = useState(() => presetDateRange('thisMonth').to);
   const [datePreset, setDatePreset] = useState<DatePreset>('thisMonth');
+  // Origem do quadro (tráfego por padrão). Fora do tráfego o servidor só manda a
+  // conversa sem anúncio do período, por isso o período entra na chave da carga.
+  const [origem, setOrigemState] = useState<string>(() => (typeof window === 'undefined' ? 'trafego' : lerOrigemSalva()));
+  function setOrigem(v: string) { setOrigemState(v); salvarOrigem(v); }
+  const origemChave = origem === 'trafego' ? 'trafego' : `${origem}|${dateFromFilter}|${dateToFilter}`;
   const [funnelMenuOpen, setFunnelMenuOpen] = useState(false);
   const [dateMenuOpen, setDateMenuOpen] = useState(false);
   const [saving, setSaving]         = useState(false);
@@ -3298,7 +3304,7 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
       setLeads([]);
       return;
     }
-    const chave = `${clientId}:${selectedFunnelId}`;
+    const chave = `${clientId}:${selectedFunnelId}:${origemChave}`;
     const inicio = Date.now();
     let since: string | null = null;
     if (options?.incremental && chaveCarregada.current === chave && inicio - ultimaCargaCompleta.current < 120_000) {
@@ -3309,7 +3315,11 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
     }
     if (!options?.silent) setLoading(true);
     if (!since) setLeadsErro(false);
-    const qs = new URLSearchParams({ clientId, funnelId: selectedFunnelId });
+    const qs = new URLSearchParams({ clientId, funnelId: selectedFunnelId, origem });
+    if (origem !== 'trafego') {
+      if (dateFromFilter) qs.set('from', dateFromFilter);
+      if (dateToFilter) qs.set('to', dateToFilter);
+    }
     if (since) qs.set('since', since);
     fetch(`/api/crm?${qs}`)
       .then(async r => {
@@ -3373,9 +3383,9 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
   }, [selectedFunnelId]);
 
   useEffect(() => {
-    chaveAtual.current = `${clientId}:${selectedFunnelId}`;
+    chaveAtual.current = `${clientId}:${selectedFunnelId}:${origemChave}`;
     refreshLeads();
-  }, [clientId, selectedFunnelId]);
+  }, [clientId, selectedFunnelId, origemChave]);
 
   useEffect(() => {
     if (crmView !== 'leads') return;
@@ -3393,7 +3403,7 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
       window.removeEventListener('focus', onFocus);
       document.removeEventListener('visibilitychange', onFocus);
     };
-  }, [clientId, selectedFunnelId]);
+  }, [clientId, selectedFunnelId, origemChave]);
 
 
 
@@ -4089,6 +4099,11 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
               )}
             </div>
 
+            {crmView === 'leads' && clientId && (
+              <FiltroOrigem clientId={clientId} funnelId={selectedFunnelId} from={dateFromFilter} to={dateToFilter}
+                valor={origem} onChange={setOrigem} />
+            )}
+
             {crmView === 'leads' && <FiltroTag tags={tags} valor={tagFilter} onChange={setTagFilter} />}
 
             {crmView === 'leads' && (
@@ -4215,8 +4230,8 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
           </div>
           {stats.foraDaConta > 0 && (
             <span className="text-[11px] text-muted-foreground"
-              title="Conversas que não vieram de anúncio (ou pacientes e equipe) aparecem no quadro, mas não entram nos números acima nem no dashboard.">
-              + {stats.foraDaConta.toLocaleString('pt-BR')} {stats.foraDaConta === 1 ? 'conversa' : 'conversas'} sem anúncio no quadro, fora da conta
+              title="Conversas que não vieram de anúncio, leads criados à mão, pacientes e equipe aparecem no quadro, mas não entram nos números acima nem no dashboard.">
+              + {stats.foraDaConta.toLocaleString('pt-BR')} no quadro fora da conta
             </span>
           )}
         </div>
