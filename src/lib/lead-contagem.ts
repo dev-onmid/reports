@@ -124,16 +124,12 @@ export function leadContaSql(alias = ''): string {
 }
 
 /**
- * Predicado: o lead APARECE no CRM (Kanban/lista) — pedido do Matheus,
- * 2026-09-24: "só os qualificados para o funil, mesmas regras". Difere da
- * dashboard num ponto, de propósito: lead criado À MÃO no CRM continua
- * visível (senão o gestor cria e ele some no próximo poll). O que sai é o chat
- * do Evolution sem rastro pago — só em cliente que TEM porta validada (Lei 3:
- * sem importação, o chat é o CRM e fica inteiro) — e o não-lead sem rastro.
+ * O CRM (Kanban/lista) mostra TODAS as conversas desde 2026-10-20 (pedido do
+ * Matheus: "ver no CRM todos os leads, mas no funil e dashboard só os do
+ * tráfego"). A rota do CRM devolve leadContaSql como conta_dashboard em cada
+ * lead, e os números do topo do Kanban somam só esses. Antes existia aqui um
+ * leadVisivelCrmSql que escondia o chat sem rastro pago do quadro.
  */
-export function leadVisivelCrmSql(alias = ''): string {
-  return `(NOT ((${portaSql(alias)}) = 'chat' AND NOT ${chatContaSql(alias)}) AND NOT (${naoLeadSql(alias)} AND NOT ${rastroPagoSql(alias)}))`;
-}
 
 /**
  * Predicado: lead que o ANÚNCIO comprovadamente trouxe e que o cliente NÃO

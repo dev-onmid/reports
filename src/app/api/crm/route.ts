@@ -4,7 +4,7 @@ import { makeServerPool } from '@/lib/server-db';
 import { requireAdmin } from '@/lib/api-auth';
 import { autorDaRequisicao, ensureColunasOperacao, registrarEventos } from '@/lib/crm-eventos';
 import { ensureCrmMessagesSchema, ensureDefaultFunnel, getFirstFunnelStageLabel } from '@/lib/crm-conversation-sync';
-import { leadVisivelCrmSql } from '@/lib/lead-contagem';
+import { leadContaSql } from '@/lib/lead-contagem';
 import { ensureCrmTagsSchema, tagsDoLeadSql } from '@/lib/crm-tags';
 
 async function ensureTableInterno(pool: ReturnType<typeof makeServerPool>) {
@@ -123,7 +123,7 @@ export async function GET(req: NextRequest) {
     // Modo incremental: o CRM busca a lista completa ao abrir e, entre uma carga e
     // outra, só o que mudou. A Atmos tem 3.500+ leads (8,5 MB): baixar tudo a cada
     // 8 s travava a tela e, chegando no meio de um arraste, jogava o lead de volta.
-    // ⚠️ Mesmos filtros da lista completa (funil + número válido + lead visível),
+    // ⚠️ Mesmos filtros da lista completa (funil + número válido),
     // senão o incremental traz linha que a carga completa não mostra.
     if (since) {
       const { rows } = await pool.query(
@@ -132,7 +132,8 @@ export async function GET(req: NextRequest) {
                 COALESCE(l.lead_name, l.nome) AS normalized_name,
                 COALESCE(NULLIF(l.revenue, 0), l.valor_rs, 0)::float AS normalized_revenue,
                 COALESCE(l.whatsapp_last_message_at, lm.last_contact_at, l.updated_at, l.created_at) AS last_contact_at,
-                ${tagsDoLeadSql('l')} AS tags
+                ${tagsDoLeadSql('l')} AS tags,
+                ${leadContaSql('l')} AS conta_dashboard
            FROM public.crm_leads l
            LEFT JOIN LATERAL (
              SELECT MAX(m.created_at) AS last_contact_at
@@ -145,7 +146,6 @@ export async function GET(req: NextRequest) {
               NULLIF(regexp_replace(COALESCE(l.numero, ''), '\\D', '', 'g'), '') IS NULL
               OR regexp_replace(l.numero, '\\D', '', 'g') ~ '^[0-9]{8,15}$'
             )
-            AND ${leadVisivelCrmSql('l')}
           ORDER BY l.updated_at DESC`,
         [clientId, since, funnelId ?? null],
       );
@@ -157,6 +157,7 @@ export async function GET(req: NextRequest) {
           COALESCE(lead_date, data) AS normalized_date,
           COALESCE(lead_name, nome) AS normalized_name,
           COALESCE(NULLIF(revenue, 0), valor_rs, 0)::float AS normalized_revenue,
+          ${leadContaSql()} AS conta_dashboard,
           ROW_NUMBER() OVER (
             PARTITION BY COALESCE(NULLIF(regexp_replace(COALESCE(numero, ''), '\\D', '', 'g'), ''), id::text)
             ORDER BY
@@ -176,10 +177,10 @@ export async function GET(req: NextRequest) {
             NULLIF(regexp_replace(COALESCE(numero, ''), '\\D', '', 'g'), '') IS NULL
             OR regexp_replace(numero, '\\D', '', 'g') ~ '^[0-9]{8,15}$'
           )
-          -- Só quem é lead de verdade (lead-contagem.ts): conversa do Evolution sem
-          -- rastro pago e "Paciente"/"Não lead" sem rastro ficam fora do Kanban e da
-          -- lista. O inbox (chat) continua mostrando todas as conversas.
-          AND ${leadVisivelCrmSql()}
+          -- O CRM mostra TODAS as conversas, inclusive as que não vieram de anúncio
+          -- (decisão do Matheus, 2026-10-20). Quem decide o que conta no dashboard,
+          -- no funil e nos números do topo do Kanban é a coluna conta_dashboard, a mesma
+          -- régua de lead-contagem.ts.
       )
       SELECT ranked.*,
              COALESCE(ranked.whatsapp_last_message_at, lm.last_contact_at, ranked.updated_at, ranked.created_at) AS last_contact_at,

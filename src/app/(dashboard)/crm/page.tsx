@@ -103,6 +103,8 @@ type CrmLead = {
   nota_atendimento_trecho?: TrechoAtendimento[] | null;
   nota_atendimento_em?: string | null;
   time_interno?: boolean;
+  /** Conta no dashboard/funil (lead-contagem.ts). O CRM mostra todas as conversas; os números do topo só estas. */
+  conta_dashboard?: boolean;
   ctwa_clid?: string | null;
   source_id?: string | null;
   source_url?: string | null;
@@ -3496,16 +3498,22 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
     [filtered],
   );
 
+  // Números do topo = só o que conta no dashboard (tráfego). O board mostra
+  // todas as conversas, inclusive orgânicas (decisão do Matheus, 2026-10-20);
+  // somá-las aqui faria o topo do CRM discordar do dashboard do mesmo cliente.
+  // conta_dashboard ausente (resposta antiga em cache) conta, para não zerar.
   const stats = useMemo(() => {
-    const closedLeads = kanbanLeads.filter(l => l.status === 'Comprou' || l.status === 'Fechado' || l.fechou);
+    const contam = kanbanLeads.filter(l => l.conta_dashboard !== false);
+    const closedLeads = contam.filter(l => l.status === 'Comprou' || l.status === 'Fechado' || l.fechou);
     return {
-      total: kanbanLeads.length,
-      qualificados: kanbanLeads.filter(l => l.qualificado).length,
+      total: contam.length,
+      foraDaConta: kanbanLeads.length - contam.length,
+      qualificados: contam.filter(l => l.qualificado).length,
       fechamentos: closedLeads.length,
       faturamento: closedLeads.reduce((s, l) => s + toMoneyNumber(l.valor_rs), 0),
-      quentes: kanbanLeads.filter(l => l.temperatura === 'quente').length,
-      mornos: kanbanLeads.filter(l => l.temperatura === 'morno').length,
-      frios: kanbanLeads.filter(l => l.temperatura === 'frio').length,
+      quentes: contam.filter(l => l.temperatura === 'quente').length,
+      mornos: contam.filter(l => l.temperatura === 'morno').length,
+      frios: contam.filter(l => l.temperatura === 'frio').length,
     };
   }, [kanbanLeads]);
 
@@ -4205,6 +4213,12 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
               </div>
             ))}
           </div>
+          {stats.foraDaConta > 0 && (
+            <span className="text-[11px] text-muted-foreground"
+              title="Conversas que não vieram de anúncio (ou pacientes e equipe) aparecem no quadro, mas não entram nos números acima nem no dashboard.">
+              + {stats.foraDaConta.toLocaleString('pt-BR')} {stats.foraDaConta === 1 ? 'conversa' : 'conversas'} sem anúncio no quadro, fora da conta
+            </span>
+          )}
         </div>
       )}
 
