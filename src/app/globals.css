@@ -306,3 +306,28 @@
   60%      { transform: translateX(-3px) rotate(-0.4deg); }
   80%      { transform: translateX(3px) rotate(0.4deg); }
 }
+
+/* ── Piso de legibilidade (responsividade, rodada 2 — 2026-10-19) ─────────────
+   Medido em produção: 65% do texto em tela tinha 10px ou menos (8.027 textos
+   ≤10px contra 3.667 ≥12px), porque o rótulo de 10px do Design System virou
+   tamanho de valor, nome e legenda. Decisão do Matheus: piso global, em todo
+   dispositivo. Regra num ponto só, SEM @layer de propósito: o Tailwind v4 emite
+   `.text-\[10px\]{font-size:10px}` dentro de @layer utilities, e regra fora de
+   camada vence qualquer utilitário sem depender de especificidade. Nenhum
+   elemento combina text-[8..11px] com variante responsiva de texto (conferido
+   por grep), então não há breakpoint sendo atropelado.
+   - rótulo em caixa alta (padrão do DS): piso 11px — curto e espaçado, aguenta;
+   - qualquer outro texto (valor, nome, chip, legenda): piso 12px.
+   Reverter = apagar este bloco. Ajuste fino de tela densa vai na própria tela. */
+.text-\[8px\],
+.text-\[9px\],
+.text-\[10px\],
+.text-\[11px\] {
+  font-size: 12px;
+}
+.text-\[8px\].uppercase,
+.text-\[9px\].uppercase,
+.text-\[10px\].uppercase,
+.text-\[11px\].uppercase {
+  font-size: 11px;
+}
