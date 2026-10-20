@@ -26,13 +26,28 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Construir a imagem
+        # ⚠️ Os dois registros públicos (ECR da Amazon e Docker Hub) limitam pull
+        # anônimo por IP, e os runners do GitHub compartilham IP: em 20/10/2026 três
+        # builds morreram em "429 Too Many Requests" ANTES de começar, e o remédio
+        # era alguém reexecutar na mão. Agora: 3 tentativas no ECR (90s entre elas)
+        # e, se ainda assim falhar, 2 no Docker Hub. É a MESMA imagem oficial.
         run: |
-          docker build \
-            --build-arg NEXT_PUBLIC_SUPABASE_URL=https://iremmorsgwiqrorzoihx.supabase.co \
-            --build-arg NEXT_PUBLIC_SUPABASE_ANON_KEY=sb_publishable_2HGMnVTG4ZeBupx8l73U5w_k_Z3kauw \
-            --build-arg NEXT_PUBLIC_APP_URL=https://reports.onmid.app \
-            --build-arg NEXT_PUBLIC_BASE_URL=https://reports.onmid.app \
-            -t onmid-reports:${GITHUB_SHA::8} .
+          build() {
+            docker build \
+              --build-arg BASE_IMAGE="$1" \
+              --build-arg NEXT_PUBLIC_SUPABASE_URL=https://iremmorsgwiqrorzoihx.supabase.co \
+              --build-arg NEXT_PUBLIC_SUPABASE_ANON_KEY=sb_publishable_2HGMnVTG4ZeBupx8l73U5w_k_Z3kauw \
+              --build-arg NEXT_PUBLIC_APP_URL=https://reports.onmid.app \
+              --build-arg NEXT_PUBLIC_BASE_URL=https://reports.onmid.app \
+              -t onmid-reports:${GITHUB_SHA::8} .
+          }
+          for base in public.ecr.aws/docker/library/node:22-alpine public.ecr.aws/docker/library/node:22-alpine public.ecr.aws/docker/library/node:22-alpine docker.io/library/node:22-alpine docker.io/library/node:22-alpine; do
+            echo "== build com base $base =="
+            if build "$base"; then exit 0; fi
+            echo "falhou; aguardando 90s antes da próxima tentativa"
+            sleep 90
+          done
+          echo "todas as tentativas de build falharam"; exit 1
 
       - name: Empacotar
         run: docker save onmid-reports:${GITHUB_SHA::8} | gzip > onmid-reports-image.tar.gz && ls -lh onmid-reports-image.tar.gz

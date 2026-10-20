@@ -12,7 +12,11 @@
 # Espelho público da Amazon da MESMA imagem oficial: o Docker Hub limita pulls
 # anônimos por IP e os runners do GitHub compartilham IP — em 09/10/2026 dois
 # builds seguidos morreram com "429 Too Many Requests" antes de começar.
-FROM public.ecr.aws/docker/library/node:22-alpine AS base
+# ⚠️ O espelho da Amazon TAMBÉM limita pulls anônimos (429 "Too Many Requests" /
+# "Data limit exceeded" em 20/10/2026, três builds em 24h). O workflow tenta o
+# ECR algumas vezes e cai para o Docker Hub via este ARG — a imagem é a mesma.
+ARG BASE_IMAGE=public.ecr.aws/docker/library/node:22-alpine
+FROM ${BASE_IMAGE} AS base
 # libc6-compat: o sharp (otimização de imagem do next/image) é compilado para
 # glibc; sem isto ele falha em Alpine na hora de servir imagem.
 RUN apk add --no-cache libc6-compat
