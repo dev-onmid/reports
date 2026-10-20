@@ -20,7 +20,7 @@ import { ChatView } from './chat-view';
 import { ConectarWhatsappModal } from './conectar-whatsapp';
 import { LeadChatPanel } from './lead-chat-panel';
 import { CamposAtendimento, HistoricoLead, NovoLeadModal, opcoesDeOrigem } from './lead-operacao';
-import { ModoClienteContext, useEhGestorCliente, useEhUsuarioCliente, useMeuNome, useModoCliente } from '@/lib/modo-cliente';
+import { ModoClienteContext, useEhGestorCliente, useEhUsuarioCliente, useModoCliente } from '@/lib/modo-cliente';
 import { EquipeCliente } from './cliente-gestor';
 import { DICAS_ATENDIMENTO, InfoDica } from './info-dica';
 import { FiltroOrigem, lerOrigemSalva, salvarOrigem } from './filtro-origem';
