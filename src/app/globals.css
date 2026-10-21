@@ -331,3 +331,15 @@
 .text-\[11px\].uppercase {
   font-size: 11px;
 }
+
+/* ── Barras de rolagem no tema (2026-10-20) ────────────────────────────────────
+   O app nunca disse ao navegador que é escuro (`color-scheme`), então a barra
+   nativa saía CLARA: um trilho branco e grosso dentro das colunas do Kanban e
+   no rodapé do quadro (print do Matheus no crm.onmid.app, com mouse — sem
+   trackpad o macOS mostra a barra clássica o tempo todo). `color-scheme` faz o
+   navegador pintar barra, select e calendário no tom do tema; o resto é a
+   barra fina e discreta, com trilho transparente, nos dois temas. */
+:root { color-scheme: light; }
+.dark { color-scheme: dark; }
+* { scrollbar-width: thin; scrollbar-color: rgb(0 0 0 / 0.28) transparent; }
+.dark * { scrollbar-color: rgb(255 255 255 / 0.16) transparent; }
