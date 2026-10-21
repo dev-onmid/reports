@@ -364,12 +364,7 @@ export default function RastreamentoPage() {
     <div className="space-y-6 pb-10">
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-bold">Rastreamento de Links</h1>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            Crie links que capturam UTMs e redireciona para o WhatsApp.
-          </p>
-        </div>
+        <h1 className="font-heading font-normal text-xl uppercase leading-none tracking-wide text-foreground">Rastreamento de Links</h1>
         <button
           onClick={() => { setEditingId(null); setForm({ clientId: '', name: '', slug: '', whatsapp: '', message: 'Olá, vim pelo anúncio!' }); setShowForm(true); }}
           className="flex items-center gap-1.5 rounded-xl bg-primary px-4 py-2 text-sm font-bold text-black shadow-[0_0_16px_rgba(85,245,47,0.35)] hover:bg-primary/90 transition-colors"
@@ -423,23 +418,24 @@ export default function RastreamentoPage() {
         )}
       </div>
 
-      {/* KPIs */}
-      <div className="grid gap-3 sm:grid-cols-4">
+      {/* KPIs numa faixa só (2026-10-21): 4 cards de 83px viraram uma linha. */}
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-2 rounded-xl border border-border bg-card px-5 py-2.5">
         {[
           { label: 'Cliques no período', value: analytics.totalClicks, icon: MousePointerClick, color: '#55F52F' },
           { label: 'Links ativos',        value: analytics.activeLinks,  icon: Link2,            color: '#3b82f6' },
           { label: 'Links cadastrados',   value: totalLinksFiltered,     icon: BarChart2,         color: '#a855f7' },
           { label: 'Total de cliques',    value: totalClicksFiltered,    icon: TrendingUp,        color: '#f59e0b' },
         ].map(({ label, value, icon: Icon, color }) => (
-          <div key={label} className="relative overflow-hidden rounded-xl border bg-card p-4" style={{ borderColor: `${color}44` }}>
-            <div className="pointer-events-none absolute inset-0" style={{ background: `radial-gradient(circle at 85% 15%, ${color}22, transparent 50%)` }} />
-            <div className="flex items-center justify-between">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{label}</p>
+          <div key={label} className="flex items-center gap-2">
+            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg" style={{ background: `${color}22` }}>
               <Icon className="h-4 w-4" style={{ color }} />
             </div>
-            <p className="mt-2 text-base font-bold tabular-nums" style={{ color }}>
-              {analyticsLoading ? <span className="inline-block h-7 w-16 animate-pulse rounded bg-muted" /> : value}
-            </p>
+            <div className="flex items-baseline gap-1.5">
+              <span className="font-heading text-2xl leading-none tabular-nums" style={{ color }}>
+                {analyticsLoading ? <span className="inline-block h-5 w-12 animate-pulse rounded bg-muted align-middle" /> : value}
+              </span>
+              <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{label}</span>
+            </div>
           </div>
         ))}
       </div>

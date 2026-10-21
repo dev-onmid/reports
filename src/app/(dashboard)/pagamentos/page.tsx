@@ -2310,11 +2310,10 @@ export default function PagamentosPage() {
           onClose={() => setEditingPayment(null)}
         />
       )}
-      <div className="flex flex-wrap items-start justify-between gap-4 pt-2">
-        <div>
-          <h1 className="font-heading font-normal text-xl uppercase leading-none tracking-wide text-foreground">Acompanhamento de Pagamentos</h1>
-          <p className="mt-1 text-sm text-muted-foreground">Gerencie investimentos, recorrências e status dos pagamentos dos clientes.</p>
-        </div>
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        {/* Só o título (2026-10-21): o subtítulo custava uma linha e o resto da
+            faixa já é ocupado pelos controles. */}
+        <h1 className="font-heading font-normal text-xl uppercase leading-none tracking-wide text-foreground">Pagamentos</h1>
         {/* `flex-wrap`: a fileira já passava da largura do celular com 4
             controles (medido: 619px em 375px de tela) e o filtro de cliente a
             deixaria mais longa ainda — Pagamentos é uma das telas que abrem no

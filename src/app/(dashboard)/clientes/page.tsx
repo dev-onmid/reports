@@ -432,25 +432,11 @@ export default function ClientesPage() {
   return (
     <div className="space-y-5">
 
-      {/* ── HEADER ── */}
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="font-heading font-normal text-xl uppercase leading-none tracking-wide text-foreground">Meus Clientes</h1>
-          <div className="mt-1 h-[3px] w-14 rounded-full bg-violet-500" />
-          <p className="mt-2 text-sm text-muted-foreground">
-            Gerencie a base de clientes e acesse os dashboards individuais.
-          </p>
-        </div>
-        <Link
-          href="/clientes/novo"
-          className="flex shrink-0 items-center gap-1.5 rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors"
-        >
-          <Plus className="h-4 w-4" /> Novo Cliente
-        </Link>
-      </div>
-
-      {/* ── TOOLBAR ── */}
+      {/* ── TOOLBAR (título + busca + filtros + ação na MESMA linha, 2026-10-21) ──
+          O cabeçalho (título, risco violeta e subtítulo) gastava 55px para
+          dizer "Meus Clientes" com o lado direito vazio. */}
       <div className="flex flex-wrap items-center gap-2">
+        <h1 className="mr-2 font-heading font-normal text-xl uppercase leading-none tracking-wide text-foreground">Meus Clientes</h1>
         {/* Search */}
         <div className="relative flex-1 min-w-[220px]">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
@@ -542,6 +528,12 @@ export default function ClientesPage() {
             <LayoutGrid className="h-4 w-4" />
           </button>
         </div>
+        <Link
+          href="/clientes/novo"
+          className="flex shrink-0 items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90"
+        >
+          <Plus className="h-4 w-4" /> Novo Cliente
+        </Link>
       </div>
 
       {/* ── CLIENT LIST ── */}

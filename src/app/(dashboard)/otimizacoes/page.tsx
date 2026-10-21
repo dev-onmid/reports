@@ -867,12 +867,8 @@ export default function OtimizacoesPage() {
   return (
     <div className="space-y-4 p-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="font-bebas text-3xl uppercase tracking-wide">Histórico</h1>
-          <p className="text-sm text-muted-foreground">
-            O que foi feito em cada conta, por quem, em qual canal — e a programação de quando otimizar de novo.
-          </p>
-        </div>
+        <h1 className="font-heading font-normal text-xl uppercase leading-none tracking-wide text-foreground"
+            title="O que foi feito em cada conta, por quem, em qual canal — e a programação de quando otimizar de novo.">Histórico</h1>
         <div className="flex flex-wrap items-center gap-2">
         <button
           onClick={() => setBulkAberto(true)}

@@ -604,91 +604,67 @@ export default function RelatoriosPage() {
   return (
     <div className="space-y-6 p-6">
 
-      {/* ── HEADER ── */}
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="flex items-center gap-4">
-          <div className="w-12 h-12 rounded-xl bg-violet-500/20 border border-violet-500/30 flex items-center justify-center shrink-0">
-            <BarChart2 className="w-6 h-6 text-violet-400" />
+      {/* ── CABEÇALHO EM UMA LINHA (2026-10-21) ──
+          Antes: faixa do título (ícone + subtítulo) e faixa das abas, cada uma
+          com o lado oposto vazio — 94px antes do primeiro número. Agora título,
+          abas e a ação principal dividem a mesma linha. */}
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="mr-1 flex items-center gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-violet-500/30 bg-violet-500/20">
+            <BarChart2 className="h-5 w-5 text-violet-400" />
           </div>
-          <div>
-            <h1 className="font-heading font-normal text-xl uppercase leading-none tracking-wide text-foreground">Relatórios</h1>
-            <p className="text-sm text-muted-foreground mt-0.5">
-              Diagnósticos de performance gerados a partir de Meta Ads, Google Ads e CRM.
-            </p>
-          </div>
+          <h1 className="font-heading font-normal text-xl uppercase leading-none tracking-wide text-foreground">Relatórios</h1>
+        </div>
+        <div className="flex items-center gap-0.5 rounded-lg border border-border bg-card p-0.5">
+          {([
+            ['relatorios', 'Relatórios', Sparkles],
+            ['automacoes', 'Automações', Settings2],
+          ] as const).map(([key, label, Icon]) => (
+            <button
+              key={key}
+              onClick={() => { setTab(key); setPage(1); }}
+              className={cn(
+                'flex h-8 items-center gap-1.5 rounded-md px-3 text-xs font-bold uppercase tracking-wider transition-colors',
+                tab === key ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground',
+              )}
+            >
+              <Icon className="h-3.5 w-3.5" />
+              {label}
+            </button>
+          ))}
         </div>
         <Button
           onClick={openGenModal}
-          className="bg-violet-600 hover:bg-violet-700 text-white gap-2 shrink-0"
+          className="ml-auto shrink-0 gap-2 bg-violet-600 text-white hover:bg-violet-700"
         >
           <TrendingUp className="w-4 h-4" />
           Gerar Relatório
         </Button>
       </div>
 
-      {/* ── TABS ── */}
-      <div className="flex border-b border-border gap-0">
-        {([
-          ['relatorios', 'Relatórios', Sparkles],
-          ['automacoes', 'Automações', Settings2],
-        ] as const).map(([key, label, Icon]) => (
-          <button
-            key={key}
-            onClick={() => { setTab(key); setPage(1); }}
-            className={cn(
-              'flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors border-b-2 -mb-px',
-              tab === key ? 'border-emerald-500 text-emerald-400' : 'border-transparent text-muted-foreground hover:text-foreground',
-            )}
-          >
-            <Icon className="w-4 h-4" />
-            {label}
-          </button>
-        ))}
-      </div>
-
       {/* ── RELATÓRIOS TAB ── */}
       {tab === 'relatorios' && (
         <>
-          {/* KPI Cards */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div className="bg-card border border-border rounded-[var(--radius)] p-4 flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-emerald-500/15 flex items-center justify-center shrink-0">
-                <FileCheck2 className="w-5 h-5 text-emerald-400" />
+          {/* KPIs numa faixa só (2026-10-21): os 4 cards de 74px viraram uma
+              linha de 48px — o número e o rótulo são os mesmos, sem o círculo
+              decorativo e o padding de card. */}
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-2 rounded-xl border border-border bg-card px-5 py-2.5">
+            {([
+              ['Total de relatórios', visibleDiagnostics.length, FileCheck2, '#34d399'],
+              ['Gerados este mês', thisMonth, CalendarDays, '#a78bfa'],
+              ['Clientes únicos', uniqueClients, Users, '#60a5fa'],
+              ['Automações ativas', visibleConfigs.filter(c => c.active).length, CheckCircle2, '#fbbf24'],
+            ] as const).map(([label, value, Icon, color]) => (
+              <div key={label} className="flex items-center gap-2">
+                <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg" style={{ background: `${color}22` }}>
+                  <Icon className="h-4 w-4" style={{ color }} />
+                </div>
+                <div className="flex items-baseline gap-1.5">
+                  <span className="font-heading text-2xl leading-none">{value}</span>
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{label}</span>
+                </div>
               </div>
-              <div>
-                <p className="text-xs text-muted-foreground">Total de relatórios</p>
-                <p className="font-heading font-normal text-xl leading-none text-foreground mt-0.5">
-                  {visibleDiagnostics.length}<span className="text-violet-400 text-sm ml-1">✦</span>
-                </p>
-              </div>
-            </div>
-            <div className="bg-card border border-border rounded-[var(--radius)] p-4 flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-violet-500/15 flex items-center justify-center shrink-0">
-                <CalendarDays className="w-5 h-5 text-violet-400" />
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">Gerados este mês</p>
-                <p className="font-heading font-normal text-xl leading-none text-foreground mt-0.5">{thisMonth}</p>
-              </div>
-            </div>
-            <div className="bg-card border border-border rounded-[var(--radius)] p-4 flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-blue-500/15 flex items-center justify-center shrink-0">
-                <Users className="w-5 h-5 text-blue-400" />
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">Clientes únicos</p>
-                <p className="font-heading font-normal text-xl leading-none text-foreground mt-0.5">{uniqueClients}</p>
-              </div>
-            </div>
-            <div className="bg-card border border-border rounded-[var(--radius)] p-4 flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-amber-500/15 flex items-center justify-center shrink-0">
-                <CheckCircle2 className="w-5 h-5 text-amber-400" />
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">Automações ativas</p>
-                <p className="font-heading font-normal text-xl leading-none text-foreground mt-0.5">{visibleConfigs.filter(c => c.active).length}</p>
-              </div>
-            </div>
+            ))}
           </div>
 
           {/* Filters */}

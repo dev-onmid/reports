@@ -954,27 +954,11 @@ export default function ConfiguracoesPage() {
 
   return (
     <div className="space-y-6 pb-10">
-      {/* ── HEADER ── */}
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="font-heading font-normal text-xl uppercase leading-none tracking-wide text-foreground">
-            CONFIGURAÇÕES
-          </h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Gerencie usuários e permissões do sistema.
-          </p>
-        </div>
-        <button
-          onClick={openCreateDialog}
-          className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-400 text-white text-sm font-semibold px-4 py-2 rounded-lg shadow-[0_0_16px_rgba(16,185,129,0.35)] transition-all"
-        >
-          <Plus className="w-4 h-4" />
-          Novo Usuário
-        </button>
-      </div>
-
-      {/* ── TABS (underline style) ── */}
-      <div className="flex flex-wrap gap-x-6 gap-y-1 border-b border-border">
+      {/* ── TÍTULO + ABAS + AÇÃO NA MESMA LINHA (2026-10-21) ──
+          O cabeçalho com subtítulo e a linha de abas eram duas faixas com o lado
+          oposto vazio. */}
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-1 border-b border-border">
+        <h1 className="mr-2 pb-3 font-heading font-normal text-xl uppercase leading-none tracking-wide text-foreground">Configurações</h1>
         {TABS.map((tab) => (
           <button
             key={tab.key}
@@ -989,6 +973,13 @@ export default function ConfiguracoesPage() {
             {tab.label}
           </button>
         ))}
+        <button
+          onClick={openCreateDialog}
+          className="mb-2 ml-auto flex items-center gap-2 rounded-lg bg-emerald-500 px-3 py-1.5 text-xs font-semibold text-white shadow-[0_0_16px_rgba(16,185,129,0.25)] hover:bg-emerald-400"
+        >
+          <Plus className="h-4 w-4" />
+          Novo Usuário
+        </button>
       </div>
 
       {/* ══════════════════════════════════
