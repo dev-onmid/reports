@@ -363,3 +363,45 @@
 :root:not(.dark) :is(.text-blue-300, .text-blue-400, .text-sky-300, .text-sky-400) { color: var(--color-blue-700); }
 :root:not(.dark) :is(.text-cyan-300, .text-cyan-400, .text-teal-300, .text-teal-400) { color: var(--color-cyan-800); }
 :root:not(.dark) :is(.text-violet-300, .text-violet-400, .text-purple-300, .text-purple-400, .text-fuchsia-300, .text-fuchsia-400, .text-indigo-300, .text-indigo-400) { color: var(--color-violet-700); }
+
+/* ── Tema CLARO para o que foi pintado "na mão" (2026-10-22) ───────────────────
+   Dashboard, CRM, Pagamentos e componentes do dashboard usam uma paleta FIXA
+   em hex (fundo #05090B, cards #0d1519/#111722/#172027, texto #f4f7f8, apoio
+   #9aa4aa…, verde #6cff2f) e superfícies "white/α" — tudo escolhido para o
+   escuro e ignorando os tokens. No claro essas telas continuavam pretas com
+   texto branco ("a Dashboard não tem versão branca", print do Matheus).
+   Em vez de reescrever ~1.300 classes, o mapa abaixo traduz cada cor fixa
+   para o token equivalente SÓ quando não há `.dark`. Fundos de marca
+   (verde/laranja sólidos), bordas de marca e `text-white` sobre botão
+   sólido ficam como estão. Sobrescrever por atributo (`[class*=…]`) cobre
+   também as variantes com opacidade (`bg-[#0d1519]/92`). */
+:root:not(.dark) {
+  /* fundo de página do dashboard */
+  & [class*="bg-[#05090B]"], & [class*="bg-[#05090b]"], & [class*="bg-[#0e0f14]"], & [class*="bg-[#050A0C]"] { background-color: var(--background); }
+  /* cards e superfícies */
+  & [class*="bg-[#0d1519]"], & [class*="bg-[#0D1519]"], & [class*="bg-[#071014]"], & [class*="bg-[#0b1216]"],
+  & [class*="bg-[#101522]"], & [class*="bg-[#0d1322]"], & [class*="bg-[#111722]"], & [class*="bg-[#172027]"],
+  & [class*="bg-[#101621]"], & [class*="bg-[#090e16]"], & [class*="bg-[#0f151f]"], & [class*="bg-[#060a0d]"],
+  & [class*="bg-[#28343B]"] { background-color: var(--card); }
+  /* texto principal */
+  & [class*="text-[#f4f7f8]"], & [class*="text-[#F4F7F8]"], & [class*="text-[#dce4e8]"], & [class*="text-[#e6ecef]"],
+  & [class*="text-[#F1F4F5]"], & [class*="text-[#c7d0d5]"], & [class*="text-[#c3ccd1]"] { color: var(--foreground); }
+  /* texto de apoio */
+  & [class*="text-[#9aa4aa]"], & [class*="text-[#a7b0b6]"], & [class*="text-[#7c868c]"], & [class*="text-[#6c767c]"],
+  & [class*="text-[#87929B]"], & [class*="text-[#6b7478]"], & [class*="text-[#8696A0]"], & [class*="text-[#9BB5A8]"],
+  & [class*="text-[#4a545a]"], & [class*="text-[#3d474d]"], & [class*="text-slate-300"], & [class*="text-slate-400"],
+  & [class*="text-slate-500"] { color: var(--muted-foreground); }
+  /* verde da marca como TEXTO: fecha para dar contraste (o CTA sólido não muda) */
+  & [class*="text-[#6cff2f]"], & [class*="text-[#40ff2a]"], & [class*="text-[#55f52f]"], & [class*="text-[#55F52F]"] { color: #1f7a0f; }
+  & [class*="text-[#ff6b6b]"] { color: var(--color-red-700); }
+  & [class*="text-[#FF6B35]"] { color: var(--color-orange-700); }
+  & [class*="text-[#168BFF]"], & [class*="text-[#53BDEB]"], & [class*="text-[#38bdf8]"] { color: var(--color-blue-700); }
+  /* superfícies e bordas "brancas translúcidas" viram pretas translúcidas */
+  & [class*="bg-white/"] { background-color: rgb(0 0 0 / 0.05); }
+  & [class*="border-white/"], & [class*="border-[#28343B]"] { border-color: var(--border); }
+  & [class*="ring-white/"] { --tw-ring-color: rgb(0 0 0 / 0.08); }
+  & [class*="divide-white/"] > :not([hidden]) ~ :not([hidden]) { border-color: var(--border); }
+  /* logo: só existe em branco; no claro inverte (o verde da marca é
+     recomposto pelo hue-rotate). Trocar por um PNG escuro quando houver. */
+  & img[src*="onmid-logo-white"] { filter: invert(1) hue-rotate(180deg); }
+}
