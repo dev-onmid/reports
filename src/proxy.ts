@@ -29,6 +29,7 @@ const PUBLIC_PREFIXES = [
   '/api/auth/login',
   '/api/auth/logout',
   '/api/auth/me',
+  '/api/auth/tema',
   // OAuth: o Google redireciona o browser pra cá sem cookie nosso garantido.
   '/api/auth/google/callback',
   // OAuth do Instagram Login (conta SEM Página): mesmo caso — o Instagram

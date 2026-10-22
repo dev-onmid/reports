@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { getAuthSession, clearAuthSession } from '@/lib/auth-store';
+import { useTheme } from '@/components/theme-provider';
 import { defaultPermission, type Permission } from '@/lib/mock-data';
 
 type Role = 'Administrador' | 'Usuário' | 'Visualizador';
@@ -65,6 +66,8 @@ function getRequiredFeature(pathname: string): keyof Permission | null {
 
 export function AuthGuard({ children }: { children: React.ReactNode }) {
   const router = useRouter();
+  // Tema guardado na conta (users.tema) vence o do navegador — ver /api/auth/tema.
+  const { setTheme } = useTheme();
   const pathname = usePathname();
   const [allowed, setAllowed] = useState(false);
   const [indisponivel, setIndisponivel] = useState(false);
@@ -103,7 +106,15 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
           }).catch(() => router.replace(`/?expirado=1&next=${encodeURIComponent(pathname)}`));
           return;
         }
-        if (!res.ok) setIndisponivel(true);
+        if (!res.ok) { setIndisponivel(true); return; }
+        void res.clone().json().then((d: { tema?: string }) => {
+          if (!active) return;
+          if (d?.tema === 'light' || d?.tema === 'dark') {
+            let atual: string | null = null;
+            try { atual = window.localStorage.getItem('onmid-theme'); } catch { /* sem localStorage */ }
+            if (atual !== d.tema) setTheme(d.tema);
+          }
+        }).catch(() => {});
       })
       .catch(() => { if (active) setIndisponivel(true); });
 

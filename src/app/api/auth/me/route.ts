@@ -18,7 +18,7 @@ export async function GET(req: Request) {
   try {
     const { rows } = await pool.query(
       `SELECT id, name, email, role, status, COALESCE(team, 'onmid') AS team,
-              COALESCE(perfil_cliente, 'atendente') AS perfil
+              COALESCE(perfil_cliente, 'atendente') AS perfil, tema
          FROM public.users WHERE id = $1 LIMIT 1`,
       [session.uid],
     );
@@ -34,6 +34,7 @@ export async function GET(req: Request) {
     return Response.json({
       userId: String(user.id), name: user.name, email: user.email, role: user.role, team: user.team,
       perfil: user.team === 'cliente' ? user.perfil : undefined,
+      tema: user.tema === 'light' || user.tema === 'dark' ? user.tema : undefined,
     });
   } catch {
     // auditoria 2026-08-22: falha de banco NÃO é sessão inválida. Devolver 401

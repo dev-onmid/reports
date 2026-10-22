@@ -10,7 +10,8 @@ function garantirColunasLogin(pool: ReturnType<typeof makeServerPool>): Promise<
     colunasLogin = pool.query(`ALTER TABLE public.users
       ADD COLUMN IF NOT EXISTS team TEXT NOT NULL DEFAULT 'onmid',
       ADD COLUMN IF NOT EXISTS client_ids TEXT[] NOT NULL DEFAULT '{}',
-      ADD COLUMN IF NOT EXISTS perfil_cliente TEXT NOT NULL DEFAULT 'atendente'`)
+      ADD COLUMN IF NOT EXISTS perfil_cliente TEXT NOT NULL DEFAULT 'atendente',
+      ADD COLUMN IF NOT EXISTS tema TEXT`)
       .then(() => undefined).catch((e) => { colunasLogin = null; throw e; });
   }
   return colunasLogin;
@@ -66,7 +67,7 @@ export async function POST(req: Request) {
     await garantirColunasLogin(pool);
     const { rows } = await pool.query(
       `SELECT id, name, email, password, role, status, COALESCE(team, 'onmid') AS team,
-              COALESCE(perfil_cliente, 'atendente') AS perfil
+              COALESCE(perfil_cliente, 'atendente') AS perfil, tema
          FROM public.users
         WHERE LOWER(TRIM(email)) = $1
         LIMIT 1`,
@@ -107,6 +108,9 @@ export async function POST(req: Request) {
         role: user.role,
         team: user.team,
         perfil: user.team === 'cliente' ? user.perfil : undefined,
+        // Tema escolhido pela pessoa (sol/lua), guardado na conta: quem escolheu
+        // claro entra no claro em qualquer navegador (pedido do Matheus, 22/10).
+        tema: user.tema === 'light' || user.tema === 'dark' ? user.tema : undefined,
       },
       { headers: { 'Set-Cookie': sessionCookieHeader(token) } },
     );

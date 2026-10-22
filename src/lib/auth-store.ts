@@ -13,6 +13,8 @@ export type AuthSession = {
   team: Team;
   /** Só para team='cliente': 'gestor' | 'atendente'. */
   perfil?: string;
+  /** Tema guardado na conta ('light' | 'dark'); ausente = nunca escolheu. */
+  tema?: 'light' | 'dark';
 };
 
 /**
@@ -51,6 +53,14 @@ export async function authenticateUser(email: string, password: string): Promise
     if (!res.ok) return { ok: false, motivo: res.status >= 500 ? 'servidor' : 'credencial' };
     const data = await res.json() as Partial<AuthSession>;
     if (!data?.userId) return { ok: false, motivo: 'credencial' };
+    // O tema da conta vence o do navegador, e entra ANTES da primeira tela
+    // (o script inline do layout lê 'onmid-theme' no carregamento seguinte).
+    if (data.tema === 'light' || data.tema === 'dark') {
+      try {
+        window.localStorage.setItem('onmid-theme', data.tema);
+        document.documentElement.classList.toggle('dark', data.tema === 'dark');
+      } catch { /* sem localStorage: segue o padrão */ }
+    }
 
     const session: AuthSession = {
       userId: data.userId,

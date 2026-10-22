@@ -12,7 +12,13 @@ export function ThemeToggle() {
       variant="ghost"
       size="icon"
       className="rounded-full w-10 h-10 bg-muted/50 hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-      onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+      onClick={() => {
+        const novo = theme === "dark" ? "light" : "dark";
+        setTheme(novo);
+        // Guarda na conta: a escolha vale em qualquer navegador (2026-10-22).
+        // Best-effort: se a rota falhar, o localStorage já segurou esta sessão.
+        void fetch("/api/auth/tema", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tema: novo }) }).catch(() => {});
+      }}
       title={`Mudar para modo ${theme === "dark" ? "claro" : "escuro"}`}
     >
       {theme === "dark" ? (

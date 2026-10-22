@@ -343,3 +343,23 @@
 .dark { color-scheme: dark; }
 * { scrollbar-width: thin; scrollbar-color: rgb(0 0 0 / 0.28) transparent; }
 .dark * { scrollbar-color: rgb(255 255 255 / 0.16) transparent; }
+
+/* ── Legibilidade no tema CLARO (2026-10-22) ───────────────────────────────────
+   O app nasceu escuro e o texto colorido foi escolhido para fundo preto: tons
+   -300/-400 (amber-300, emerald-400, cyan-300…) e o Verde Onmid como COR DE
+   TEXTO ("IA: qualificar", "Analisar com IA", badge Meta, notas 3/5 e 4/5).
+   Sobre branco esses tons ficam a 1,5–2,5:1 de contraste — o cliente não lê.
+   Em vez de reescrever ~1.000 classes, no claro cada tom claro de TEXTO vira o
+   tom escuro da mesma família (-700/-800) e `text-primary` vira um verde fechado;
+   fundos (bg-*), botões sólidos e o CTA continuam na cor da marca. No escuro
+   nada muda: as regras só valem sem `.dark`. */
+:root:not(.dark) .text-primary { color: #1f7a0f; }
+:root:not(.dark) .text-secondary { color: #5b1fc2; }
+:root:not(.dark) :is(.text-amber-200, .text-amber-300, .text-amber-400) { color: var(--color-amber-700); }
+:root:not(.dark) :is(.text-yellow-300, .text-yellow-400) { color: var(--color-yellow-700); }
+:root:not(.dark) :is(.text-orange-200, .text-orange-300, .text-orange-400) { color: var(--color-orange-700); }
+:root:not(.dark) :is(.text-emerald-300, .text-emerald-400, .text-green-400) { color: var(--color-emerald-700); }
+:root:not(.dark) :is(.text-red-200, .text-red-300, .text-red-400, .text-rose-300, .text-rose-400) { color: var(--color-red-700); }
+:root:not(.dark) :is(.text-blue-300, .text-blue-400, .text-sky-300, .text-sky-400) { color: var(--color-blue-700); }
+:root:not(.dark) :is(.text-cyan-300, .text-cyan-400, .text-teal-300, .text-teal-400) { color: var(--color-cyan-800); }
+:root:not(.dark) :is(.text-violet-300, .text-violet-400, .text-purple-300, .text-purple-400, .text-fuchsia-300, .text-fuchsia-400, .text-indigo-300, .text-indigo-400) { color: var(--color-violet-700); }
