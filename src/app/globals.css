@@ -426,6 +426,8 @@
   /* texto branco herdado de superfície que era escura (Luna, chips) — só onde
      o próprio elemento não tem fundo sólido (botão violeta continua branco) */
   & [class*="bg-[#"] [class*="text-white"]:not([class*="bg-primary"]):not([class*="bg-secondary"]):not([class*="bg-[#"]):not([class*="bg-violet"]):not([class*="bg-red"]):not([class*="bg-emerald"]):not([class*="bg-green"]):not([class*="bg-blue"]):not([class*="bg-amber"]):not([class*="bg-black"]):not([class*="bg-zinc-9"]):not([class*="bg-gradient"]) { color: var(--foreground); }
+  /* a mesma regra para o card da Luna com fundo bg-white/[0.035] (translúcido, não é fundo sólido) */
+  & [class*="bg-[#"] [class*="bg-white/"] [class*="text-white"] { color: var(--foreground); }
   /* verde da marca aplicado por style inline (ícones em quadradinho, legendas
      de gráfico, "Bom"/"127%"): fecha para o tom que lê sobre branco */
   & [style*="color: rgb(108, 255, 47)"], & [style*="color: rgb(85, 245, 47)"], & [style*="color: rgb(64, 255, 42)"] { color: #1f7a0f !important; }
@@ -449,4 +451,39 @@
   /* brilhos verdes e sombras pesadas desenhadas para fundo escuro */
   & [class*="shadow-["][class*="245,47"], & [class*="shadow-["][class*="245, 47"] { box-shadow: none; }
   & [class*="shadow-[0_2"], & [class*="shadow-[0_18px"], & [class*="shadow-[0_24px"], & [class*="shadow-[inset"] { box-shadow: 0 2px 12px rgb(0 0 0 / 0.08); }
+}
+
+/* ── Tema claro, 3ª rodada: classes com OPACIDADE (text-cyan-400/80,
+   text-primary/75, text-white/60) escapavam do seletor por classe exata ──── */
+:root:not(.dark) {
+  /* famílias claras de texto, agora por prefixo (cobre text-x-400/80 etc.) */
+  & [class*="text-amber-200"], & [class*="text-amber-300"], & [class*="text-amber-400"] { color: var(--color-amber-700); }
+  & [class*="text-yellow-200"], & [class*="text-yellow-300"], & [class*="text-yellow-400"] { color: var(--color-yellow-800); }
+  & [class*="text-orange-200"], & [class*="text-orange-300"], & [class*="text-orange-400"] { color: var(--color-orange-700); }
+  & [class*="text-lime-200"], & [class*="text-lime-300"], & [class*="text-lime-400"] { color: var(--color-lime-800); }
+  & [class*="text-green-200"], & [class*="text-green-300"], & [class*="text-green-400"] { color: var(--color-green-700); }
+  & [class*="text-emerald-200"], & [class*="text-emerald-300"], & [class*="text-emerald-400"] { color: var(--color-emerald-700); }
+  & [class*="text-red-200"], & [class*="text-red-300"], & [class*="text-red-400"] { color: var(--color-red-700); }
+  & [class*="text-rose-200"], & [class*="text-rose-300"], & [class*="text-rose-400"] { color: var(--color-rose-700); }
+  & [class*="text-pink-200"], & [class*="text-pink-300"], & [class*="text-pink-400"] { color: var(--color-pink-700); }
+  & [class*="text-blue-200"], & [class*="text-blue-300"], & [class*="text-blue-400"] { color: var(--color-blue-700); }
+  & [class*="text-sky-200"], & [class*="text-sky-300"], & [class*="text-sky-400"] { color: var(--color-sky-700); }
+  & [class*="text-cyan-200"], & [class*="text-cyan-300"], & [class*="text-cyan-400"] { color: var(--color-cyan-800); }
+  & [class*="text-teal-200"], & [class*="text-teal-300"], & [class*="text-teal-400"] { color: var(--color-teal-800); }
+  & [class*="text-violet-200"], & [class*="text-violet-300"], & [class*="text-violet-400"] { color: var(--color-violet-700); }
+  & [class*="text-purple-200"], & [class*="text-purple-300"], & [class*="text-purple-400"] { color: var(--color-purple-700); }
+  & [class*="text-fuchsia-200"], & [class*="text-fuchsia-300"], & [class*="text-fuchsia-400"] { color: var(--color-fuchsia-700); }
+  & [class*="text-indigo-200"], & [class*="text-indigo-300"], & [class*="text-indigo-400"] { color: var(--color-indigo-700); }
+  /* verde da marca com opacidade (badge "IA: qualificar" do CRM) */
+  & [class*="text-primary/"] { color: #1f7a0f; }
+  /* branco translúcido vira texto de apoio; branco quase sólido vira texto */
+  & [class*="text-white/4"], & [class*="text-white/5"], & [class*="text-white/6"], & [class*="text-white/7"] { color: var(--muted-foreground); }
+  & [class*="text-white/8"], & [class*="text-white/9"] { color: var(--foreground); }
+  /* tons quase brancos (Luna: text-slate-100) */
+  & [class*="text-slate-100"], & [class*="text-slate-200"], & [class*="text-zinc-100"], & [class*="text-zinc-200"],
+  & [class*="text-gray-100"], & [class*="text-gray-200"], & [class*="text-neutral-100"], & [class*="text-neutral-200"] { color: var(--foreground); }
+  & [class*="text-zinc-300"], & [class*="text-zinc-400"], & [class*="text-gray-300"], & [class*="text-gray-400"],
+  & [class*="text-neutral-300"], & [class*="text-neutral-400"] { color: var(--muted-foreground); }
+  /* barra de meta estourada: sem listras no claro (sobre branco viram ruído) */
+  & .meta-estourada { background-image: none !important; }
 }
