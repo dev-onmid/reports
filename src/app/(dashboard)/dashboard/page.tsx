@@ -62,6 +62,7 @@ import { useEhUsuarioCliente } from '@/lib/modo-cliente';
 import { cn, formatCurrencyBRL } from '@/lib/utils';
 import { T } from '@/lib/dashboard-tipografia';
 import { ClientAvatar } from '@/components/client-avatar';
+import { ThemeToggle } from '@/components/theme-toggle';
 import { FunilCriativosPanel } from '@/components/dashboard/funil-criativos';
 import type { FunilDoCriativo } from '@/app/api/crm/funil-criativos/route';
 import type { VendasPorAnuncio } from '@/app/api/crm/vendas-por-anuncio/route';
@@ -77,7 +78,6 @@ import type { FunilPorCanalResposta, LinhaCanal as LinhaFunilCanal } from '@/app
 import type { CampaignPerformance } from '@/app/api/campaigns/route';
 import type { GoogleKeyword } from '@/app/api/google/keywords/route';
 import type { AudienceBreakdowns, AudienceResponse, AudienceSlice } from '@/app/api/audience/route';
-import { ThemeToggle } from '@/components/theme-toggle';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Input } from '@/components/ui/input';
 import { APP_VERSION } from '@/lib/app-version';
@@ -7337,6 +7337,10 @@ export default function GeneralDashboard() {
           {/* "Métricas" e "Copiar layout" saíram: configuravam componentes que
               não são mais renderizados (grades RGL antigas) — clicar não mudava
               nada na tela. Os componentes continuam no arquivo, sem botão. */}
+          {/* A dashboard tem cabeçalho próprio (o do shell não aparece aqui),
+              então o botão de tema precisa existir também neste cabeçalho —
+              senão quem está na dashboard não tem como trocar claro/escuro. */}
+          <ThemeToggle />
           <Avatar className="h-9 w-9 border border-white/[0.08]">
             <AvatarFallback className="bg-[#78d957] text-sm font-black text-black">
               {(session?.name ?? 'M').slice(0, 1).toUpperCase()}

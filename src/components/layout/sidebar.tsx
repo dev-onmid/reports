@@ -123,7 +123,7 @@ export function Sidebar({
       <div className={cn('h-14 flex items-center relative border-b border-border', isCollapsed ? 'justify-center' : 'px-4')}>
         {isCollapsed ? (
           <Link href="/inicio" onClick={onNavigate}>
-            <img src="/brand/onmid-logo-white.png" alt="Onmid" className="h-6 w-auto object-contain" />
+            <img src="/brand/onmid-mark.png" alt="Onmid" className="h-7 w-auto object-contain" />
           </Link>
         ) : (
           <Link href="/inicio" onClick={onNavigate} className="flex items-center gap-3 overflow-hidden">

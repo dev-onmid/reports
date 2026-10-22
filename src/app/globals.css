@@ -401,9 +401,9 @@
   & [class*="border-white/"], & [class*="border-[#28343B]"] { border-color: var(--border); }
   & [class*="ring-white/"] { --tw-ring-color: rgb(0 0 0 / 0.08); }
   & [class*="divide-white/"] > :not([hidden]) ~ :not([hidden]) { border-color: var(--border); }
-  /* logo: só existe em branco; no claro inverte (o verde da marca é
-     recomposto pelo hue-rotate). Trocar por um PNG escuro quando houver. */
-  & img[src*="onmid-logo-white"] { filter: invert(1) hue-rotate(180deg); }
+  /* logo: no claro troca pela versão escura (texto chumbo, pílula verde,
+     bolinha BRANCA). Inverter por filtro deixava a bolinha preta. */
+  & img[src*="onmid-logo-white"] { content: url("/brand/onmid-logo-dark.png"); }
 }
 
 /* ── Tema claro, 2ª rodada: o que a auditoria página a página achou ─────────
