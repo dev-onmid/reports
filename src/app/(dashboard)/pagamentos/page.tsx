@@ -1161,7 +1161,7 @@ function PaymentMetricCard({
       className="relative min-h-[84px] overflow-hidden rounded-xl border p-3"
       style={{
         borderColor: `${color}35`,
-        background: `radial-gradient(circle at 12% 28%, ${glow}, transparent 34%), linear-gradient(135deg, ${color}12, rgba(15,18,29,0.88) 58%, rgba(6,8,15,0.94))`,
+        background: `radial-gradient(circle at 12% 28%, ${glow}, transparent 34%), linear-gradient(135deg, ${color}12, var(--kpi-base-a) 58%, var(--kpi-base-b))`,
         boxShadow: `inset 0 0 0 1px rgba(255,255,255,0.025), 0 0 26px ${color}12`,
       }}
     >
@@ -1207,7 +1207,7 @@ function DayMetricCard({
       className="relative min-h-[84px] overflow-hidden rounded-xl border p-3"
       style={{
         borderColor: `${color}30`,
-        background: `radial-gradient(circle at 10% 30%, ${glow}, transparent 36%), linear-gradient(135deg, ${color}10, rgba(10,13,22,0.9) 58%, rgba(5,8,14,0.96))`,
+        background: `radial-gradient(circle at 10% 30%, ${glow}, transparent 36%), linear-gradient(135deg, ${color}10, var(--kpi-base-a) 58%, var(--kpi-base-b))`,
         boxShadow: `inset 0 0 0 1px rgba(255,255,255,0.025), 0 0 28px ${color}10`,
       }}
     >

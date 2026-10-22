@@ -405,3 +405,48 @@
      recomposto pelo hue-rotate). Trocar por um PNG escuro quando houver. */
   & img[src*="onmid-logo-white"] { filter: invert(1) hue-rotate(180deg); }
 }
+
+/* ── Tema claro, 2ª rodada: o que a auditoria página a página achou ─────────
+   Base dos cards de KPI de Pagamentos (o gradiente é montado em style inline,
+   então a cor de fundo entra por variável e cada tema define a sua). */
+:root { --kpi-base-a: rgba(255, 255, 255, 0.9); --kpi-base-b: rgba(247, 248, 250, 0.97); }
+.dark { --kpi-base-a: rgba(15, 18, 29, 0.88); --kpi-base-b: rgba(6, 8, 15, 0.94); }
+
+:root:not(.dark) {
+  /* superfícies escuras que a 1ª rodada não cobria (Luna, selects, trilhos) */
+  & [class*="bg-[#0b1114]"], & [class*="bg-[#0d1117]"], & [class*="bg-[#0b1019]"], & [class*="bg-[#070B14]"],
+  & [class*="bg-[#06100D]"], & [class*="bg-[#111a20]"], & [class*="bg-[#111A20]"], & [class*="bg-[#0e1c12]"],
+  & [class*="bg-[#0d1420]"], & [class*="bg-[#263038]"], & [class*="bg-[#3b4a55]"], & [class*="bg-[#1a1a2e]"],
+  & [class*="bg-[#151d2f]"], & [class*="bg-[#121827]"], & [class*="bg-[#101827]"], & [class*="bg-[#0c1220]"],
+  & [class*="bg-[#0b1020]"], & [class*="bg-[#0a1020]"], & [class*="bg-[#090e1a]"] { background-color: var(--card); }
+  /* trilho da barra de meta: era uma tarja preta sólida sobre o card branco */
+  & [class*="bg-[#081014]"] { background-color: rgb(0 0 0 / 0.06); }
+  & [class*="border-[#233038]"], & [class*="border-[#1f2a31]"] { border-color: var(--border); }
+  & [class*="text-[#87929B]"] { color: var(--foreground); }
+  /* texto branco herdado de superfície que era escura (Luna, chips) — só onde
+     o próprio elemento não tem fundo sólido (botão violeta continua branco) */
+  & [class*="bg-[#"] [class*="text-white"]:not([class*="bg-primary"]):not([class*="bg-secondary"]):not([class*="bg-[#"]):not([class*="bg-violet"]):not([class*="bg-red"]):not([class*="bg-emerald"]):not([class*="bg-green"]):not([class*="bg-blue"]):not([class*="bg-amber"]):not([class*="bg-black"]):not([class*="bg-zinc-9"]):not([class*="bg-gradient"]) { color: var(--foreground); }
+  /* verde da marca aplicado por style inline (ícones em quadradinho, legendas
+     de gráfico, "Bom"/"127%"): fecha para o tom que lê sobre branco */
+  & [style*="color: rgb(108, 255, 47)"], & [style*="color: rgb(85, 245, 47)"], & [style*="color: rgb(64, 255, 42)"] { color: #1f7a0f !important; }
+  & [style*="border-color: rgba(108, 255, 47"], & [style*="border-left: 2px solid rgba(108, 255, 47"] { border-color: rgb(31 122 15 / 0.45) !important; }
+  & [style*="box-shadow"][style*="108, 255, 47"], & [style*="box-shadow"][style*="85, 245, 47"] { box-shadow: none !important; }
+  /* preenchimento de barra de meta no verde neon + brilho pulsante: no claro
+     a barra fica num verde fechado e sem brilho (brilho só faz sentido no escuro) */
+  & [style*="background-color: rgb(108, 255, 47)"] { background-color: #2fb11a !important; }
+  & .meta-estourada { animation: none; box-shadow: none; filter: none; }
+  & span[class*="w-1.5"][class*="bg-[#6cff2f]"] { background-color: #2fb11a; }
+  /* cores de status inline (Pagamentos, dias da semana): claras demais sobre branco */
+  & [style*="color: rgb(245, 158, 11)"] { color: var(--color-amber-700) !important; }
+  & [style*="color: rgb(36, 152, 255)"] { color: var(--color-blue-700) !important; }
+  & [style*="color: rgb(255, 71, 120)"] { color: var(--color-rose-700) !important; }
+  & [style*="color: rgb(168, 85, 247)"] { color: var(--color-violet-700) !important; }
+  /* gráficos: traço/preenchimento no verde neon e tooltip com fundo fixo escuro */
+  & svg [stroke="#6cff2f"], & svg [stroke="#55f52f"], & svg [stroke="#40ff2a"] { stroke: #22a30e; }
+  & svg [fill="#6cff2f"], & svg [fill="#55f52f"], & svg [fill="#40ff2a"] { fill: #3bc411; }
+  & .recharts-default-tooltip { background: var(--card) !important; border-color: var(--border) !important; }
+  & .recharts-tooltip-label { color: var(--foreground) !important; }
+  /* brilhos verdes e sombras pesadas desenhadas para fundo escuro */
+  & [class*="shadow-["][class*="245,47"], & [class*="shadow-["][class*="245, 47"] { box-shadow: none; }
+  & [class*="shadow-[0_2"], & [class*="shadow-[0_18px"], & [class*="shadow-[0_24px"], & [class*="shadow-[inset"] { box-shadow: 0 2px 12px rgb(0 0 0 / 0.08); }
+}
