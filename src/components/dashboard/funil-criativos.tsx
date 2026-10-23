@@ -186,14 +186,16 @@ export function FunilCriativosPanel({ criativos, crm, loading, onPreview, receit
       )}
     >
       {loading && itens.length === 0 ? (
-        <div className="grid auto-cols-[440px] grid-flow-col grid-rows-2 gap-3 overflow-hidden">
-          {Array.from({ length: 6 }).map((_, i) => <div key={i} className="h-[218px] animate-pulse rounded-xl bg-white/[0.04]" />)}
+        <div className="grid auto-cols-[540px] grid-flow-col grid-rows-2 gap-4 overflow-hidden">
+          {Array.from({ length: 6 }).map((_, i) => <div key={i} className="h-[236px] animate-pulse rounded-xl bg-white/[0.04]" />)}
         </div>
       ) : (
         <>
           {/* Duas linhas fixas, rolando para o LADO — mesmo padrão dos "Melhores criativos". */}
           {/* Cada etapa do meio a mais alarga o card: o nome real da coluna ("Visita/reunião", "Em Atendimento") não cabe em 440. */}
-          <div className={cn('grid grid-flow-col grid-rows-2 gap-3 overflow-x-auto pb-2', etapas.length >= 3 ? 'auto-cols-[530px]' : etapas.length === 2 ? 'auto-cols-[470px]' : 'auto-cols-[440px]')}>
+          {/* Largura com folga (2026-10-23, "as box estão muito apertadas"): o rodapé
+              cortava "FATURAME…" e "clique → v…" em 440px. Cresce com as etapas do funil. */}
+          <div className={cn('grid grid-flow-col grid-rows-2 gap-4 overflow-x-auto pb-2', etapas.length >= 3 ? 'auto-cols-[620px]' : etapas.length === 2 ? 'auto-cols-[580px]' : 'auto-cols-[540px]')}>
             {ordenados.map((i, idx) => (
               <CardFunil key={i.chave} item={i} index={idx} leads={leadsDe(i)} temCrm={temCrm} etapas={etapas} cardapio={comCompras} onPreview={onPreview} />
             ))}
@@ -219,7 +221,7 @@ function Miniatura({ item, index, onPreview }: { item: Item; index: number; onPr
       type="button"
       disabled={!c}
       onClick={() => c && onPreview(c)}
-      className="group relative h-full w-[108px] shrink-0 overflow-hidden rounded-lg bg-[#071014] disabled:cursor-default"
+      className="group relative h-full w-[124px] shrink-0 overflow-hidden rounded-lg bg-[#071014] disabled:cursor-default"
       title={c ? 'Ver o criativo' : undefined}
     >
       {url && etapa !== 'erro' ? (
@@ -314,7 +316,7 @@ function CardFunil({ item, index, leads, temCrm, etapas, cardapio, onPreview }: 
   const roas = item.gasto > 0 && receita > 0 ? receita / item.gasto : null;
 
   return (
-    <div className="flex h-[218px] gap-3 rounded-xl bg-white/[0.03] p-2.5 ring-1 ring-white/[0.05]">
+    <div className="flex h-[236px] gap-4 rounded-xl bg-white/[0.03] p-3 ring-1 ring-white/[0.05]">
       <Miniatura item={item} index={index} onPreview={onPreview} />
       <div className="flex min-w-0 flex-1 flex-col">
         <div className="flex items-start justify-between gap-2">
@@ -338,7 +340,7 @@ function CardFunil({ item, index, leads, temCrm, etapas, cardapio, onPreview }: 
             <div key={e.rotulo} className="flex min-w-0 flex-1 items-stretch">
               {i > 0 && <ChevronRight className="h-3 w-3 shrink-0 self-center text-[#3d474d]" />}
               <div className="min-w-0 flex-1 text-center" title={e.dica}>
-                <p className={cn('font-heading text-[18px] leading-none tabular-nums', e.valor > 0 ? 'text-[#f4f7f8]' : 'text-[#4a545a]')}>{compacto(e.valor)}</p>
+                <p className={cn('font-heading text-[22px] leading-none tabular-nums', e.valor > 0 ? 'text-[#f4f7f8]' : 'text-[#4a545a]')}>{compacto(e.valor)}</p>
                 {/* Nome real da coluna do cliente: quebra em 2 linhas em vez de virar "ENGA…". */}
                 <p className="mt-0.5 line-clamp-2 min-h-[2.2em] text-[9.5px] font-bold leading-[1.1] [overflow-wrap:normal] text-[#9aa4aa]">{e.rotulo}</p>
                 {e.nota
@@ -363,7 +365,7 @@ function CardFunil({ item, index, leads, temCrm, etapas, cardapio, onPreview }: 
         )}
 
         {/* Resultado do criativo: faturamento, conversão e a leitura do vídeo. */}
-        <div className="mt-auto grid grid-cols-[1.15fr_1.1fr_0.9fr_0.95fr] gap-2 border-t border-white/[0.06] pt-2">
+        <div className="mt-auto grid grid-cols-4 gap-3 border-t border-white/[0.06] pt-2.5">
           <Kpi rotulo="Faturamento" valor={receita > 0 ? moedaCurta(receita) : '—'} forte={receita > 0}
             nota={roas !== null ? `ROAS ${roas.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}x` : undefined} />
           <Kpi rotulo="Conversão" valor={fmtPct(conversao)} nota={porClique ? 'clique → venda' : 'lead → venda'} dica={porClique ? 'Vendas ÷ cliques' : 'Vendas ÷ leads'} />
@@ -379,7 +381,7 @@ function Kpi({ rotulo, valor, nota, forte, barra, dica }: { rotulo: string; valo
   return (
     <div className="min-w-0" title={dica}>
       <p className="truncate text-[9px] font-black uppercase tracking-[0.02em] text-[#9aa4aa]">{rotulo}</p>
-      <p className={cn('truncate text-[13px] font-black tabular-nums', forte ? 'text-[#6cff2f]' : 'text-[#f4f7f8]')} title={valor}>{valor}</p>
+      <p className={cn('truncate text-[15px] font-black tabular-nums', forte ? 'text-[#6cff2f]' : 'text-[#f4f7f8]')} title={valor}>{valor}</p>
       {typeof barra === 'number' ? (
         <div className="mt-1 h-1 overflow-hidden rounded-full bg-white/[0.06]">
           <div className="h-full rounded-full" style={{ width: `${Math.min(100, barra)}%`, background: VERDE }} />

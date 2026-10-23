@@ -3,7 +3,9 @@
 import {
   ComposedChart, Line, Area, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine, ResponsiveContainer, Legend,
 } from 'recharts';
+import { Activity, TrendingUp } from 'lucide-react';
 import { Superficie } from './superficie';
+import { IconeBadge } from './indicador-card';
 import {
   COR_PRIMARIA, COR_SECUNDARIA, COR_REFERENCIA, TRACO_REFERENCIA, TRACO_PROJECAO, ALTURA_GRAFICO, AREA_OPACIDADE,
   eixoXProps, eixoYProps, gradeProps, margemGrafico, tooltipProps, legendaProps,
@@ -28,9 +30,9 @@ function ddmm(iso: string) {
   return `${d}/${m}`;
 }
 
-function Moldura({ titulo, sub, children }: { titulo: string; sub?: string; children: React.ReactNode }) {
+function Moldura({ titulo, sub, icone, children }: { titulo: string; sub?: string; icone: React.ElementType; children: React.ReactNode }) {
   return (
-    <Superficie titulo={titulo} sub={sub}>
+    <Superficie titulo={titulo} sub={sub} icone={<IconeBadge icone={icone} />}>
       <div className="w-full" style={{ height: ALTURA_GRAFICO }}>{children}</div>
     </Superficie>
   );
@@ -89,7 +91,7 @@ export function RitmoMesChart({ titulo, sub, dias, diario, metaTotal, formato, p
   const fmt = formato === 'currency' ? moeda : inteiro;
 
   return (
-    <Moldura titulo={titulo} sub={sub}>
+    <Moldura titulo={titulo} sub={sub} icone={TrendingUp}>
       <ResponsiveContainer width="100%" height="100%">
         <ComposedChart data={dados} margin={margemGrafico}>
           <Degrade id="ritmo-realizado" />
@@ -142,7 +144,7 @@ export function CplDiarioChart({ dias, gasto, leads, metaCpl }: {
   });
 
   return (
-    <Moldura titulo="CPL diário" sub="investimento ÷ leads das plataformas · média móvel de 7 dias">
+    <Moldura titulo="CPL diário" sub="investimento ÷ leads das plataformas · média móvel de 7 dias" icone={Activity}>
       <ResponsiveContainer width="100%" height="100%">
         <ComposedChart data={dados} margin={margemGrafico}>
           <Degrade id="cpl-media7" />

@@ -31,6 +31,7 @@ import { useMemo, useState, type ElementType, type ReactNode } from 'react';
 import {
   ArrowDown, ArrowUp, BarChart3, ChevronDown, ChevronRight, ChevronsUpDown, Clock, FileText, Info, MessageCircle, MessageSquare,
   MousePointerClick, Percent, Phone, Search, UserPlus, Users, Activity, Ban, Smartphone, User, CalendarDays, ArrowRight, CircleDollarSign, DollarSign, Link2, Calculator, Star, Package,
+  MapPin, PieChart, LogIn, LayoutList, PlayCircle, Filter, Globe, Megaphone, ArrowDownToLine, Pointer, ListChecks,
 } from 'lucide-react';
 import {
   ROTULOS_CANAL_GA4, ROTULOS_DISPOSITIVO_GA4, contatosDoSeg, seletorContatos,
@@ -111,8 +112,8 @@ function Card({ children, className, linha = false }: { children: ReactNode; cla
 const LISTA_CHEIA = 'flex flex-1 flex-col justify-evenly gap-3';
 
 /** Título de card no padrão do dashboard, com descrição opcional e slot à direita. */
-function Titulo({ children, dica, direita }: { children: ReactNode; dica?: string; direita?: ReactNode }) {
-  return <CabecalhoCard titulo={children} sub={dica} direita={direita} />;
+function Titulo({ children, dica, direita, icone }: { children: ReactNode; dica?: string; direita?: ReactNode; icone: ElementType }) {
+  return <CabecalhoCard titulo={children} sub={dica} direita={direita} icone={<CaixaIcone icone={icone} />} />;
 }
 
 /** Chip de status colorido. */
@@ -509,12 +510,17 @@ function MapaBrasil({ pesos, titulo }: { pesos: Record<string, number>; titulo: 
 }
 
 /** Cabeçalho compacto do mock: título em caixa alta, sub e "Ver todas →" (só quando há mais que o limite). */
-function CabecalhoMini({ titulo, sub, verTodas }: { titulo: ReactNode; sub?: ReactNode; verTodas?: { aberto: boolean; onClick: () => void } }) {
+// Ícone OBRIGATÓRIO: todo título de card do dashboard leva o seu (pedido do
+// Matheus, 2026-10-23 — "veja onde tem título sem ícone e deixe padrão").
+function CabecalhoMini({ titulo, sub, verTodas, icone }: { titulo: ReactNode; sub?: ReactNode; verTodas?: { aberto: boolean; onClick: () => void }; icone: ElementType }) {
   return (
     <div className="mb-4 flex items-start justify-between gap-3">
-      <div className="min-w-0">
-        <h4 className={T.cardTitulo}>{titulo}</h4>
-        {sub && <p className={cx('mt-1', T.cardSub)}>{sub}</p>}
+      <div className="flex min-w-0 items-center gap-3">
+        <CaixaIcone icone={icone} />
+        <div className="min-w-0">
+          <h4 className={T.cardTitulo}>{titulo}</h4>
+          {sub && <p className={cx('mt-1', T.cardSub)}>{sub}</p>}
+        </div>
       </div>
       {verTodas && (
         <button type="button" onClick={verTodas.onClick} className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-xs font-semibold text-[#dce4e8] underline decoration-white/40 underline-offset-4 transition-colors hover:text-[#6cff2f]">
@@ -572,7 +578,7 @@ function CardCidades({ cidades, totalSessoes }: { cidades: Ga4Seg[]; totalSessoe
   const vis = todas ? ord : ord.slice(0, 5);
   return (
     <Card>
-      <CabecalhoMini titulo="Cidades" sub="Cidades com mais sessões." verTodas={ord.length > 5 ? { aberto: todas, onClick: () => setTodas(v => !v) } : undefined} />
+      <CabecalhoMini icone={MapPin} titulo="Cidades" sub="Cidades com mais sessões." verTodas={ord.length > 5 ? { aberto: todas, onClick: () => setTodas(v => !v) } : undefined} />
       {/* Container query: mapa ao lado da lista só quando o card tem largura (≥ 30rem); estreito, mapa em cima. */}
       <div className={cx('@container grid flex-1 items-center gap-4', temMapa && '@[30rem]:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]')}>
         {temMapa && (
@@ -605,7 +611,7 @@ function CardCanalRosca({ canais, totalSessoes }: { canais: Ga4Seg[]; totalSesso
   ];
   return (
     <Card>
-      <CabecalhoMini titulo="Qualidade por canal" sub="Engajamento e conversão por canal de origem." />
+      <CabecalhoMini icone={PieChart} titulo="Qualidade por canal" sub="Engajamento e conversão por canal de origem." />
       <div className="@container flex flex-1 flex-col items-center justify-center gap-6 @[26rem]:flex-row">
         <Donut tamanho={196} espessura={34} fatias={fatias} centroTitulo="sessões" centroValor={fmtN(total)} formatar={(n) => `${fmtN(n)} sessões`} />
         <ul className="flex w-full min-w-0 flex-col justify-center gap-4">
@@ -632,7 +638,7 @@ function CardPaginasEntrada({ paginas, totalSessoes }: { paginas: Ga4Seg[]; tota
   const vis = todas ? ord : ord.slice(0, 5);
   return (
     <Card>
-      <CabecalhoMini titulo="Página de entrada" sub="Páginas por onde mais gente entrou." verTodas={ord.length > 5 ? { aberto: todas, onClick: () => setTodas(v => !v) } : undefined} />
+      <CabecalhoMini icone={LogIn} titulo="Página de entrada" sub="Páginas por onde mais gente entrou." verTodas={ord.length > 5 ? { aberto: todas, onClick: () => setTodas(v => !v) } : undefined} />
       <ul className={LISTA_CHEIA}>
         {vis.map(p => (
           <LinhaCompacta key={`${p.valor}|${p.sub ?? ''}`} esquerda={<Tile texto={iniciais(p.valor)} />} rotulo={p.valor || '/'} n={p.sessoes} pct={div(p.sessoes, total)} barra={p.sessoes / max} />
@@ -680,8 +686,8 @@ const usaBarras = (linhas: Ga4Linha[]) => linhas.slice(0, MAX_BARRAS).every(l =>
  * Bloco de evento do mock ("Onde clicam para falar", "Peças mais pedidas", "Materiais"…):
  * o título/existência muda por cliente (dimensões personalizadas do GA4), o desenho não.
  */
-function BlocoEventos({ titulo, sub, linhas, total, modo, tile = false, rotulo }: {
-  titulo: string; sub: string; linhas: Ga4Linha[]; total: number; modo: 'contagem' | 'pct'; tile?: boolean; rotulo?: (v: string) => string;
+function BlocoEventos({ titulo, sub, linhas, total, modo, tile = false, rotulo, icone }: {
+  titulo: string; sub: string; linhas: Ga4Linha[]; total: number; modo: 'contagem' | 'pct'; tile?: boolean; rotulo?: (v: string) => string; icone: ElementType;
 }) {
   const [todas, setTodas] = useState(false);
   if (linhas.length === 0) return null;
@@ -690,7 +696,7 @@ function BlocoEventos({ titulo, sub, linhas, total, modo, tile = false, rotulo }
     const sobra = ord.length - MAX_BARRAS;
     return (
       <Card>
-        <CabecalhoMini titulo={titulo} sub={sobra > 0 ? `${sub} Top ${MAX_BARRAS} de ${fmtN(ord.length)}.` : sub} />
+        <CabecalhoMini icone={icone} titulo={titulo} sub={sobra > 0 ? `${sub} Top ${MAX_BARRAS} de ${fmtN(ord.length)}.` : sub} />
         <BarrasVerticais linhas={ord.slice(0, MAX_BARRAS)} total={total} modo={modo} />
       </Card>
     );
@@ -699,7 +705,7 @@ function BlocoEventos({ titulo, sub, linhas, total, modo, tile = false, rotulo }
   const vis = todas ? ord : ord.slice(0, 5);
   return (
     <Card>
-      <CabecalhoMini titulo={titulo} sub={sub} verTodas={ord.length > 5 ? { aberto: todas, onClick: () => setTodas(v => !v) } : undefined} />
+      <CabecalhoMini icone={icone} titulo={titulo} sub={sub} verTodas={ord.length > 5 ? { aberto: todas, onClick: () => setTodas(v => !v) } : undefined} />
       <ul className={LISTA_CHEIA}>
         {vis.map((l, i) => (
           <LinhaCompacta
@@ -782,9 +788,12 @@ function Rolagem({ linhas, visitantes }: { linhas: Ga4Linha[]; visitantes: numbe
     const pct = div(linhas.reduce((t, l) => t + l.n, 0), visitantes);
     return (
       <Card linha className="flex flex-wrap items-center gap-x-6 gap-y-3">
-        <div className="min-w-[150px]">
-          <h3 className={T.cardTitulo}>Rolagem da página</h3>
-          <p className={cx('mt-1', T.cardSub)}>chegaram a 90% da página</p>
+        <div className="flex min-w-[150px] items-center gap-3">
+          <CaixaIcone icone={ArrowDownToLine} />
+          <div>
+            <h3 className={T.cardTitulo}>Rolagem da página</h3>
+            <p className={cx('mt-1', T.cardSub)}>chegaram a 90% da página</p>
+          </div>
         </div>
         <p className={cx('tabular-nums', T.kpiValor)}>{fmtPct(pct, 0)}</p>
         <div className="h-2 min-w-[160px] flex-1 rounded-full bg-white/[0.05]"><div className="h-2 rounded-full bg-[#6cff2f]" style={{ width: `${Math.min(100, pct * 100)}%` }} /></div>
@@ -795,9 +804,12 @@ function Rolagem({ linhas, visitantes }: { linhas: Ga4Linha[]; visitantes: numbe
   const passos = [...linhas].sort((a, b) => Number(a.valor) - Number(b.valor));
   return (
     <Card linha className="flex flex-wrap items-center gap-x-6 gap-y-3">
-      <div className="min-w-[150px]">
-        <h3 className={T.cardTitulo}>Até onde rolam</h3>
-        <p className={cx('mt-1', T.cardSub)}>% dos visitantes em cada ponto</p>
+      <div className="flex min-w-[150px] items-center gap-3">
+        <CaixaIcone icone={ArrowDownToLine} />
+        <div>
+          <h3 className={T.cardTitulo}>Até onde rolam</h3>
+          <p className={cx('mt-1', T.cardSub)}>% dos visitantes em cada ponto</p>
+        </div>
       </div>
       <div className="grid min-w-[260px] flex-1 gap-4" style={{ gridTemplateColumns: `repeat(${passos.length}, minmax(0, 1fr))` }}>
         {passos.map(l => {
@@ -827,7 +839,7 @@ function FunilForm({ f }: { f: Ga4Consolidado['comportamento']['funil'] }) {
   ];
   return (
     <Card>
-      <Titulo dica="Pessoas (não cliques) em cada etapa do formulário.">Funil do formulário</Titulo>
+      <Titulo icone={Filter} dica="Pessoas (não cliques) em cada etapa do formulário.">Funil do formulário</Titulo>
       <ListaBarras itens={etapas.map((e, i) => ({
         chave: e.rotulo, rotulo: e.rotulo, valor: e.n,
         direita: <span className="font-bold text-[#f4f7f8]">{fmtN(e.n)}</span>,
@@ -1394,7 +1406,7 @@ export function Ga4LandingPanel({ dados, loading, aviso }: { dados: Ga4Consolida
       {/* Campanhas na página (antes "Tráfego pago") */}
       {temPago && (
         <>
-          <GrupoTitulo titulo="Campanhas na página" sub="o que o GA4 viu de cada campanha e palavra-chave" />
+          <GrupoTitulo icone={<CaixaIcone icone={Megaphone} />} titulo="Campanhas na página" sub="o que o GA4 viu de cada campanha e palavra-chave" />
           {semVinculoAds && (
             <p className="rounded-lg px-3 py-2 text-[11px]" style={{ background: `${AMBAR}14`, color: AMBAR }}>
               Esta propriedade GA4 não está vinculada ao Google Ads: custo por campanha, palavras-chave e termos pesquisados não aparecem.
@@ -1409,7 +1421,7 @@ export function Ga4LandingPanel({ dados, loading, aviso }: { dados: Ga4Consolida
       {/* Audiência */}
       {temAudiencia && (
         <>
-          <GrupoTitulo titulo="Audiência" sub="Entenda quem visita seu site e como eles se comportam." />
+          <GrupoTitulo icone={<CaixaIcone icone={Users} />} titulo="Audiência" sub="Entenda quem visita seu site e como eles se comportam." />
           {(au.dispositivos.length > 0 || au.novosRecorrentes.length > 0) && (
             <div className="grid gap-4 md:grid-cols-2">
               {au.dispositivos.length > 0 && (
@@ -1440,12 +1452,12 @@ export function Ga4LandingPanel({ dados, loading, aviso }: { dados: Ga4Consolida
           {/* 5º mock, 2ª linha: blocos de evento (variam por cliente) no mesmo desenho */}
           {temExtras && (
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-              <BlocoEventos titulo="Onde clicam para falar" sub="Principais cliques em botões/links." linhas={dados.posicoes} total={a.contatos} modo="contagem" />
+              <BlocoEventos icone={MousePointerClick} titulo="Onde clicam para falar" sub="Principais cliques em botões/links." linhas={dados.posicoes} total={a.contatos} modo="contagem" />
               {dados.detalhes.map(d => (
-                <BlocoEventos key={d.param} titulo={d.rotulo} sub={SUB_DETALHE[d.param] ?? 'Mais pedidos no período.'} linhas={d.linhas} total={d.param === 'cta_id' ? a.cta : a.whatsapp} modo="pct" tile={d.param === 'peca'} />
+                <BlocoEventos key={d.param} icone={d.param === 'cta_id' ? Pointer : ListChecks} titulo={d.rotulo} sub={SUB_DETALHE[d.param] ?? 'Mais pedidos no período.'} linhas={d.linhas} total={d.param === 'cta_id' ? a.cta : a.whatsapp} modo="pct" tile={d.param === 'peca'} />
               ))}
-              <BlocoEventos titulo="Seções vistas" sub="% dos visitantes que viram cada seção." linhas={co.secoes} total={a.usuarios} modo="pct" />
-              <BlocoEventos titulo="Vídeos assistidos" sub="Vídeos mais assistidos na página." linhas={co.videos} total={a.video} modo="pct" />
+              <BlocoEventos icone={LayoutList} titulo="Seções vistas" sub="% dos visitantes que viram cada seção." linhas={co.secoes} total={a.usuarios} modo="pct" />
+              <BlocoEventos icone={PlayCircle} titulo="Vídeos assistidos" sub="Vídeos mais assistidos na página." linhas={co.videos} total={a.video} modo="pct" />
               <FunilForm f={co.funil} />
             </div>
           )}
@@ -1475,11 +1487,11 @@ export function Ga4LandingPanel({ dados, loading, aviso }: { dados: Ga4Consolida
       {/* Comportamento: só o fallback "De onde vêm" (quando o GA4 não devolve canal) */}
       {temComportamento && (
         <>
-          <GrupoTitulo titulo="Comportamento" />
+          <GrupoTitulo icone={<CaixaIcone icone={Activity} />} titulo="Comportamento" />
           {canais.length === 0 && origens.length > 0 && (
             <div className="grid gap-4 md:grid-cols-2">
               <Card>
-                <Titulo dica={origensTemConv ? 'Conversões (eventos-chave do GA4) por origem / mídia.' : 'Sessões por origem / mídia.'}>
+                <Titulo icone={Globe} dica={origensTemConv ? 'Conversões (eventos-chave do GA4) por origem / mídia.' : 'Sessões por origem / mídia.'}>
                   {origensTemConv ? 'De onde vêm as conversões' : 'De onde vêm as sessões'}
                 </Titulo>
                 <ListaBarras itens={origens.map(o => ({

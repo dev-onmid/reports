@@ -2,6 +2,12 @@
 
 Movido do CLAUDE.md em 2026-10-22 (conteúdo original, sem edição). Entrada nova deste setor entra aqui, no topo, não no CLAUDE.md.
 
+## Dashboard — modal de período/comparação, ícones em todo título e ajustes de densidade (2026-10-23)
+
+- **Modal "Período e comparação"** (`src/components/dashboard/periodo-modal.tsx`): o botão de calendário (personalizado) e o chip do comparativo no cabeçalho ("⇄ vs 1–23/set ▾") abrem a MESMA janela, com De/Até do período e as 4 opções de comparação (+ De/Até quando "Escolher datas"), aplicados JUNTOS no "Aplicar". Saíram as duas faixas de data embaixo do cabeçalho: cada data digitada recarregava a tela inteira ("fica muito lento"). Mexeu nas datas do período → vira personalizado; só trocou a comparação → o período segue. O botão de calendário mostra as datas ("01/10 – 23/10") quando personalizado.
+- **Ícone em todo título de card** ("faça uma geral"): `CabecalhoMini`, `Titulo` e `BlocoEventos` do painel de LP passaram a EXIGIR `icone` (título novo sem ícone não compila); GrupoTitulo (Campanhas na página/Audiência/Comportamento), Rolagem, Ritmo do mês, CPL diário, Funil por canal, Desempenho por região, Resumo por cliente, Delivery · Resultado e os 2 cards do Comercial ganharam o seu. Canal na tabela "Funil por canal" ganhou o logo da rede (`marcaDoCanal`), e "Meta" (Formulário Meta, plataforma não informada) ganhou o logo da Meta.
+- Densidade: Funil de criativos 540/580/620px por nº de etapas, 236px de altura (rótulos do rodapé não cortam mais); cartões de campanha com as 6 métricas em caixas iguais e número de 26px; Instagram com a 2ª linha (cliques na bio, interações, salvamentos, visitas) no MESMO card grande da 1ª; legenda dos cards de canal em 14–15px; "Resumo por canal" estica as linhas até a altura da caixa (sem vão embaixo).
+
 ## Dashboard — seletor "Comparar com" (todos os dashboards) (2026-10-23)
 
 - Pedido do Matheus: "quero clicar no botão e escolher com qual mês comparar", em qualquer dashboard. Cabeçalho ganhou **"Comparar com"** (ao lado dos períodos; some em "Todo período"): **Período anterior** (o automático de sempre, `faixaAnterior`), **Mesmo período do mês anterior**, **Mesmo período do ano passado** e **Escolher datas** (abre "Comparar de / até" embaixo, começando na janela que estava valendo). Escolha lembrada no navegador (`localStorage dashboard:comparar`, estado inicializado no `useState` como o resto da página — efeito com setState quebra o lint).

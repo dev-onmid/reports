@@ -207,9 +207,10 @@ function CartaoCampanha({ c, anuncios, vendasCrm, comReceita, comprasMeta, onPre
             <p className="mt-2 text-[12.5px] leading-snug text-[#c9d1d6]">{frase}</p>
           </div>
         </div>
-        <div className="mt-3 border-t border-white/[0.06] pt-3">
-          <div className="grid grid-cols-3 gap-3">{linha1.map((m) => <MetricaItem key={m.rotulo} m={m} cor={est.cor} />)}</div>
-          <div className="mt-3 grid grid-cols-3 gap-3">{linha2.map((m) => <MetricaItem key={m.rotulo} m={m} cor={est.cor} />)}</div>
+        {/* Métricas em caixinhas do mesmo tamanho, número grande (pedido do Matheus:
+            "distribuir melhor e aumentar essas infos"). */}
+        <div className="mt-4 grid grid-cols-3 gap-2.5">
+          {[...linha1, ...linha2].map((m) => <MetricaItem key={m.rotulo} m={m} cor={est.cor} />)}
         </div>
       </div>
 
@@ -233,14 +234,12 @@ function CartaoCampanha({ c, anuncios, vendasCrm, comReceita, comprasMeta, onPre
 
 function MetricaItem({ m, cor }: { m: Metrica; cor: string }) {
   return (
-    <div className="flex min-w-0 items-start gap-2" title={m.dica}>
-      <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full" style={{ background: `${cor}14` }}>
-        <m.icone className="h-3.5 w-3.5" style={{ color: cor }} />
-      </span>
-      <div className="min-w-0">
-        <p className="truncate text-[11px] font-semibold text-[#9aa4aa]">{m.rotulo}</p>
-        <p className={cn('truncate text-[16px] font-extrabold leading-tight tabular-nums', m.valor === '—' ? 'text-[#4a545a]' : 'text-[#f4f7f8]')}>{m.valor}</p>
+    <div className="min-w-0 rounded-[10px] bg-white/[0.025] px-3 py-2.5 ring-1 ring-white/[0.05]" title={m.dica}>
+      <div className="flex items-center gap-1.5">
+        <m.icone className="h-3.5 w-3.5 shrink-0" style={{ color: cor }} />
+        <p className="truncate text-[11.5px] font-semibold text-[#9aa4aa]">{m.rotulo}</p>
       </div>
+      <p className={cn('mt-1 truncate font-heading text-[26px] leading-none tabular-nums', m.valor === '—' ? 'text-[#4a545a]' : 'text-[#f4f7f8]')}>{m.valor}</p>
     </div>
   );
 }

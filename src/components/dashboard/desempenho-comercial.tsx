@@ -13,11 +13,12 @@
 // juntar tudo como dinheiro faria R$ 1,02 mi de "perdidos" parecer receita.
 
 import { useMemo, useState } from 'react';
-import { ArrowRight } from 'lucide-react';
+import { ArrowRight, Trophy, Tags } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip } from 'recharts';
 import { cn, formatCurrencyBRL } from '@/lib/utils';
 import { T } from '@/lib/dashboard-tipografia';
 import { SUPERFICIE } from './superficie';
+import { IconeBadge } from './indicador-card';
 
 export type LinhaVendedor = {
   responsavel: string;
@@ -57,15 +58,15 @@ function iniciais(nome: string): string {
 
 // ── Peças compartilhadas pelos dois cards ───────────────────────────────────
 
-function Cartao({ titulo, acao, children }: {
-  titulo: string; acao?: React.ReactNode; children: React.ReactNode;
+function Cartao({ titulo, acao, children, icone }: {
+  titulo: string; acao?: React.ReactNode; children: React.ReactNode; icone: React.ElementType;
 }) {
   return (
     // Mesma superfície de todo card do dashboard (superficie.tsx) — antes era
     // um card mais escuro aninhado dentro do painel "Performance comercial".
     <section className={cn(SUPERFICIE, 'flex h-full flex-col p-5')}>
       <div className="mb-4 flex items-center justify-between gap-3">
-        <h3 className={T.cardTitulo}>{titulo}</h3>
+        <h3 className={cn('flex items-center gap-3', T.cardTitulo)}><IconeBadge icone={icone} />{titulo}</h3>
         {acao}
       </div>
       {children}
@@ -157,7 +158,7 @@ export function VendedoresCard({ linhas, loading }: { linhas: LinhaVendedor[]; l
   );
 
   return (
-    <Cartao titulo="Ranking comercial" acao={seletor}>
+    <Cartao titulo="Ranking comercial" acao={seletor} icone={Trophy}>
       {loading ? <Esqueleto />
         : ordenadas.length === 0 ? <Vazio texto="Nenhum negócio com responsável no período." />
         : (
@@ -276,7 +277,7 @@ export function CategoriasCard({ linhas, loading }: { linhas: LinhaCategoria[]; 
   );
 
   return (
-    <Cartao titulo="Categorias mais vendidas" acao={toggle}>
+    <Cartao titulo="Categorias mais vendidas" acao={toggle} icone={Tags}>
       {loading ? <Esqueleto />
         : lista.length === 0 ? <Vazio texto="Nenhum produto lançado nos negócios ganhos do período." />
         : (

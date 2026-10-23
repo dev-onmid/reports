@@ -65,6 +65,7 @@ import { ClientAvatar } from '@/components/client-avatar';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { FunilCriativosPanel } from '@/components/dashboard/funil-criativos';
 import { CampanhasMetaCartoes } from '@/components/dashboard/campanhas-meta-cartoes';
+import { PeriodoModal } from '@/components/dashboard/periodo-modal';
 import type { EtapaDoCriativo, FunilDoCriativo } from '@/app/api/crm/funil-criativos/route';
 import type { VendasPorAnuncio } from '@/app/api/crm/vendas-por-anuncio/route';
 import type { FaturamentoCanalDelivery } from '@/app/api/delivery/faturamento-canal/route';
@@ -114,7 +115,7 @@ import { Donut } from '@/components/dashboard/donut';
 import { BulletMetaCard, CustoMetaCard } from '@/components/dashboard/bullet-meta';
 import { RitmoMesChart, CplDiarioChart } from '@/components/dashboard/ritmo-chart';
 import { SUPERFICIE, Superficie, GrupoTitulo } from '@/components/dashboard/superficie';
-import { IndicadorCard, IndicadorMini, FaixaIndicadores, IconeBadge } from '@/components/dashboard/indicador-card';
+import { IndicadorCard, IndicadorMini, IconeBadge } from '@/components/dashboard/indicador-card';
 
 type Period = 'yesterday' | 'last_7d' | 'last_14d' | 'last_30d' | 'this_month' | 'last_month' | 'last_3m' | 'last_6m' | 'this_year' | 'all_time' | 'custom';
 type VendasCohort = { periodo: number; anteriores: number; semData: number };
@@ -4136,6 +4137,8 @@ const MARCAS_CANAL: { teste: RegExp; cor: string; Logo: () => React.ReactElement
   { teste: /facebook/, cor: '#1877F2', Logo: LogoFacebook },
   { teste: /google/, cor: '#EA4335', Logo: LogoGoogle },
   { teste: /whats|chatwoot/, cor: '#25D366', Logo: LogoWhatsApp },
+  // "Formulário Meta", "Meta · plataforma não informada": sem rede específica, logo da Meta.
+  { teste: /\bmeta\b/, cor: '#168BFF', Logo: () => <MetaAdsMark className="h-4 w-4 text-[#168BFF]" /> },
 ];
 
 /** Cor+logo fixos da marca do canal, ou null quando é canal genérico/neutro. */
@@ -4253,13 +4256,14 @@ function CanalDonutCard({ titulo, fatiasBrutas, total, semCanal, formato, aviso,
               <div key={o.label} className="min-w-0" title={o.nota ? `${o.label} · ${o.nota}` : o.label}>
                 <div className="flex items-baseline gap-2">
                   {marca ? (
-                    <span className="flex h-4 w-4 shrink-0 items-center justify-center self-center">{marca.logo}</span>
+                    <span className="flex h-5 w-5 shrink-0 items-center justify-center self-center">{marca.logo}</span>
                   ) : (
-                    <span className="h-2.5 w-2.5 shrink-0 self-center rounded-sm" style={{ backgroundColor: cor }} />
+                    <span className="h-3 w-3 shrink-0 self-center rounded-sm" style={{ backgroundColor: cor }} />
                   )}
-                  <span className={cn('min-w-0 flex-1 truncate', T.listaRotulo)}>{o.label}</span>
-                  <span className={cn('w-12 shrink-0 text-right tabular-nums', T.nota)}>{pctTotal.toFixed(1).replace('.', ',')}%</span>
-                  <span className="shrink-0 whitespace-nowrap text-right text-xs font-bold tabular-nums text-[#f4f7f8]">{premiumValue(o.valor, formato)}</span>
+                  {/* Maior que o padrão de lista: a legenda tem altura de sobra ao lado da rosca (pedido do Matheus, 2026-10-23). */}
+                  <span className="min-w-0 flex-1 truncate text-[14px] font-semibold text-[#e6ecef]">{o.label}</span>
+                  <span className="w-14 shrink-0 text-right text-[12.5px] tabular-nums text-[#9aa4aa]">{pctTotal.toFixed(1).replace('.', ',')}%</span>
+                  <span className="shrink-0 whitespace-nowrap text-right text-[15px] font-extrabold tabular-nums text-[#f4f7f8]">{premiumValue(o.valor, formato)}</span>
                 </div>
               </div>
             );
@@ -4345,12 +4349,6 @@ function IgKpi({ label, icon, valor, variacao, comparacao, sub, subRuim, destaqu
     <IndicadorCard rotulo={label} icone={icon} cor={ROSA_IG} valor={valor} variacao={variacao}
       comparacao={comparacao} nota={sub} notaRuim={subRuim} destaque={destaque} />
   );
-}
-
-function IgMini({ label, icon, valor, variacao }: {
-  label: string; icon: React.ElementType; valor: string; variacao: number | null;
-}) {
-  return <IndicadorMini rotulo={label} icone={icon} cor={ROSA_IG} valor={valor} variacao={variacao} />;
 }
 
 const FUNNEL_STEP_COLORS = ['#6cff2f', '#0ea5e9', '#7b2cff', '#f97316', '#ec4899', '#f59e0b', '#84cc16'];
@@ -4644,7 +4642,7 @@ function DeliveryResumoCard({ clientId, from, to, comparar }: { clientId: string
     <PremiumPanel className="p-5">
       <div className="mb-4 flex items-center justify-between">
         <div className="flex items-baseline gap-2">
-          <h3 className={T.cardTitulo}>Delivery — Resultado</h3>
+          <h3 className={cn('flex items-center gap-3', T.cardTitulo)}><IconeBadge icone={Receipt} />Delivery · Resultado</h3>
           <span className="text-[10px] text-[#9aa4aa]">· cardápio digital</span>
         </div>
         <Link href={`/clientes/${clientId}?tab=delivery`} className="text-[10px] font-black uppercase text-[#6cff2f] hover:underline">
@@ -4795,8 +4793,10 @@ function ChannelSummaryTable({ rows, total, metaCpl, comparacao }: {
           <p className={cn('mt-1', T.cardSub)}>Meta Ads, Google Ads e o total no período{comparacao ? ` · variação ${comparacao}` : ''}.</p>
         </div>
       </div>
-      <div className="flex-1 overflow-x-auto">
-        <table className="w-full min-w-[440px] text-left text-sm tabular-nums">
+      {/* A tabela ocupa a altura da caixa (o card vizinho é mais alto): as linhas
+          se espaçam em vez de deixar um vão vazio embaixo (pedido do Matheus, 2026-10-23). */}
+      <div className="flex flex-1 flex-col overflow-x-auto">
+        <table className="h-full w-full min-w-[440px] text-left text-[14.5px] tabular-nums">
           <thead>
             <tr className="bg-white/[0.04] text-[11px] font-black uppercase tracking-[0.08em] text-[#a7b0b6]">
               <th className="rounded-l-lg py-2.5 pl-4 pr-2">Métrica</th>
@@ -5034,8 +5034,8 @@ function TabelaFunilCanal({ linhas, investimento, semReceita = false }: {
 
   return (
     <PremiumPanel className="p-5">
-      <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
-        <h3 className={T.cardTitulo}>Funil por canal</h3>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <h3 className={cn('flex items-center gap-3', T.cardTitulo)}><IconeBadge icone={Funnel} />Funil por canal</h3>
         <span className={T.cardSub}>canal de origem do lead no CRM · investimento só nos canais pagos · clique no cabeçalho para ordenar</span>
       </div>
       <div className="-mx-2">
@@ -5063,7 +5063,11 @@ function TabelaFunilCanal({ linhas, investimento, semReceita = false }: {
                 return (
                   <tr key={l.canal} className={cn(l.semCanal && 'text-[#9aa4aa]', temVenda && !l.semCanal && 'bg-[#6cff2f]/[0.08]')}>
                     <td className="py-2.5 pl-2 pr-3">
-                      <span className={cn('font-bold', l.semCanal ? 'text-[#9aa4aa]' : temVenda ? 'text-[#6cff2f]' : 'text-[#f4f7f8]')}>{l.canal}</span>
+                      {/* Logo da rede ao lado do canal (pedido do Matheus, 2026-10-23). */}
+                      <span className="inline-flex items-center gap-2">
+                        {(() => { const m = marcaDoCanal(l.canal); return m ? <span className="flex h-4 w-4 shrink-0 items-center justify-center">{m.logo}</span> : <span className="h-4 w-4 shrink-0" />; })()}
+                        <span className={cn('font-bold', l.semCanal ? 'text-[#9aa4aa]' : temVenda ? 'text-[#6cff2f]' : 'text-[#f4f7f8]')}>{l.canal}</span>
+                      </span>
                     </td>
                     <CelFunil forte>{moeda(inv)}</CelFunil>
                     <CelFunil forte>{n(l.leads)}{parte(l.leads, soma.leads)}</CelFunil>
@@ -5215,8 +5219,8 @@ function TabelaRegioes({ linhas, semRegiao, total, nacionalPorUf, ufs }: {
 
   return (
     <PremiumPanel className="p-5">
-      <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
-        <h3 className={T.cardTitulo}>Desempenho por região</h3>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <h3 className={cn('flex items-center gap-3', T.cardTitulo)}><IconeBadge icone={Target} />Desempenho por região</h3>
         <span className={T.cardSub}>campanha com a região no nome × leads com DDD/cidade da região · clique no cabeçalho para ordenar</span>
       </div>
       <div className="-mx-2">
@@ -5350,6 +5354,7 @@ export default function GeneralDashboard() {
     return padrao;
   });
   const [modoComp, setModoComp] = useState<ModoComparacao>(compSalvo.modo);
+  const [modalPeriodo, setModalPeriodo] = useState(false);
   const [compDe, setCompDe] = useState(compSalvo.de);
   const [compAte, setCompAte] = useState(compSalvo.ate);
   useEffect(() => {
@@ -7024,12 +7029,14 @@ export default function GeneralDashboard() {
                       />
                       <IgKpi label="Visualizações" icon={BarChart3} valor={pageInsightsLoading ? '…' : igViews > 0 ? premiumValue(igViews) : '—'} variacao={chg(igViews, prevViews)} comparacao={rotuloComp} sub="vezes que o conteúdo foi visto" />
                     </div>
-                    <FaixaIndicadores className="grid-cols-2 md:grid-cols-4">
-                      <IgMini label="Cliques na bio" icon={ExternalLink} valor={pageInsightsLoading ? '…' : igClicks > 0 ? premiumValue(igClicks) : '—'} variacao={chg(igClicks, prevClicks)} />
-                      <IgMini label="Interações" icon={Zap} valor={pageInsightsLoading ? '…' : igInteract > 0 ? premiumValue(igInteract) : '—'} variacao={chg(igInteract, prevInteract)} />
-                      <IgMini label="Salvamentos" icon={Bookmark} valor={pageInsightsLoading ? '…' : igSaves > 0 ? premiumValue(igSaves) : '—'} variacao={chg(igSaves, prevSaves)} />
-                      <IgMini label="Visitas ao perfil" icon={Monitor} valor={pageInsightsLoading ? '…' : igPViews > 0 ? premiumValue(igPViews) : '—'} variacao={chg(igPViews, prevPViews)} />
-                    </FaixaIndicadores>
+                    {/* Segunda linha no MESMO tamanho da primeira (pedido do Matheus,
+                        2026-10-23: "não faz sentido uma maior e uma menor"). */}
+                    <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                      <IgKpi label="Cliques na bio" icon={ExternalLink} valor={pageInsightsLoading ? '…' : igClicks > 0 ? premiumValue(igClicks) : '—'} variacao={chg(igClicks, prevClicks)} comparacao={rotuloComp} sub="cliques no link do perfil" />
+                      <IgKpi label="Interações" icon={Zap} valor={pageInsightsLoading ? '…' : igInteract > 0 ? premiumValue(igInteract) : '—'} variacao={chg(igInteract, prevInteract)} comparacao={rotuloComp} sub="curtidas, comentários e compartilhamentos" />
+                      <IgKpi label="Salvamentos" icon={Bookmark} valor={pageInsightsLoading ? '…' : igSaves > 0 ? premiumValue(igSaves) : '—'} variacao={chg(igSaves, prevSaves)} comparacao={rotuloComp} sub="vezes que salvaram um post" />
+                      <IgKpi label="Visitas ao perfil" icon={Monitor} valor={pageInsightsLoading ? '…' : igPViews > 0 ? premiumValue(igPViews) : '—'} variacao={chg(igPViews, prevPViews)} comparacao={rotuloComp} sub="abriram o perfil" />
+                    </div>
                 </>
               );
             })()}
@@ -7259,7 +7266,7 @@ export default function GeneralDashboard() {
     <>
             {selectedClients.length > 1 && (
               <PremiumPanel className="p-5">
-                <h3 className={cn('mb-3', T.cardTitulo)}>Resumo por cliente</h3>
+                <h3 className={cn('mb-3 flex items-center gap-3', T.cardTitulo)}><IconeBadge icone={Users} />Resumo por cliente</h3>
                 <div className="divide-y divide-white/[0.07]">
                   {selectedClients.map(client => {
                     const m = metricsByClient[client.id];
@@ -7391,14 +7398,10 @@ export default function GeneralDashboard() {
                 key={p.value}
                 type="button"
                 onClick={() => {
-                  // Entrar em "personalizado" com os campos vazios travava a tela:
-                  // `customReady` só libera com as duas datas completas, então
-                  // nada acontecia e parecia quebrado. Começa nos últimos 30 dias.
-                  if (p.value === 'custom' && !(customDateFrom && customDateTo)) {
-                    const inicial = periodToDateRange('last_30d');
-                    setCustomDateFrom(toInputDate(inicial.from));
-                    setCustomDateTo(toInputDate(inicial.to));
-                  }
+                  // Personalizado abre o modal (período + comparação, aplicados
+                  // juntos no "Aplicar") — antes abria uma faixa de datas que
+                  // recarregava a tela a cada data digitada.
+                  if (p.value === 'custom') { setModalPeriodo(true); return; }
                   setPeriod(p.value);
                 }}
                 className={cn(
@@ -7407,32 +7410,41 @@ export default function GeneralDashboard() {
                 )}
               >
                 {p.value === 'custom' ? (
-                  <><Calendar className="h-4 w-4" />{period === 'custom' ? 'Personalizado' : ''}</>
+                  <><Calendar className="h-4 w-4" />{period === 'custom' ? `${faixaSel.from.split('-').reverse().slice(0, 2).join('/')} – ${faixaSel.to.split('-').reverse().slice(0, 2).join('/')}` : ''}</>
                 ) : p.label}
               </button>
             ))}
           </div>
-          {/* Com o que comparar — vale para todos os "vs" da tela (pedido do Matheus, 2026-10-23). */}
-          {period !== 'all_time' && (
-            <label
-              className="flex h-10 shrink-0 items-center gap-2 rounded-[10px] border border-white/[0.08] bg-[#0b1216] pl-3 pr-1 text-xs font-bold text-[#a7b0b6]"
-              title={faixaPrev ? `Comparando com ${dataLonga(faixaPrev.from)} – ${dataLonga(faixaPrev.to)}` : undefined}
+          {/* Com o que comparar — vale para todos os "vs" da tela (pedido do Matheus,
+              2026-10-23). Abre o mesmo modal do período: as duas escolhas juntas. */}
+          {period !== 'all_time' && faixaPrev && (
+            <button
+              type="button"
+              onClick={() => setModalPeriodo(true)}
+              className="flex h-10 shrink-0 items-center gap-2 rounded-[10px] border border-white/[0.08] bg-[#0b1216] px-3 text-xs font-bold text-[#a7b0b6] transition-colors hover:text-white"
+              title={`Comparando com ${dataLonga(faixaPrev.from)} – ${dataLonga(faixaPrev.to)}`}
             >
               <ArrowLeftRight className="h-4 w-4 text-[#6cff2f]" />
-              <span className="whitespace-nowrap">Comparar com</span>
-              <select
-                value={modoComp}
-                onChange={e => {
-                  const modo = e.target.value as ModoComparacao;
-                  // "Escolher datas" começa na janela que já estava valendo.
-                  if (modo === 'datas' && !(compDe && compAte) && faixaPrev) { setCompDe(faixaPrev.from); setCompAte(faixaPrev.to); }
-                  setModoComp(modo);
-                }}
-                className="h-8 rounded-md bg-transparent px-1 text-xs font-bold text-[#f4f7f8] outline-none [color-scheme:dark]"
-              >
-                {OPCOES_COMPARACAO.map(o => <option key={o.valor} value={o.valor}>{o.rotulo}</option>)}
-              </select>
-            </label>
+              <span className="whitespace-nowrap text-[#f4f7f8]">{rotuloComp}</span>
+              <ChevronDown className="h-3.5 w-3.5" />
+            </button>
+          )}
+          {modalPeriodo && (
+            <PeriodoModal
+              aberto
+              onFechar={() => setModalPeriodo(false)}
+              period={period}
+              faixa={faixaSel}
+              modo={modoComp}
+              compDe={compDe}
+              compAte={compAte}
+              hoje={toInputDate(new Date())}
+              onAplicar={(e) => {
+                if (e.periodo) { setCustomDateFrom(e.periodo.de); setCustomDateTo(e.periodo.ate); setPeriod('custom'); }
+                setModoComp(e.modo); setCompDe(e.compDe); setCompAte(e.compAte);
+                setModalPeriodo(false);
+              }}
+            />
           )}
           {/* Bloco 1 da seção 6: header mantido, só ganha o badge do segmento ativo. */}
           {perfilAtivo.segmento !== 'leads' && (
@@ -7490,70 +7502,6 @@ export default function GeneralDashboard() {
             </AvatarFallback>
           </Avatar>
         </div>
-        {modoComp === 'datas' && period !== 'all_time' && (() => {
-          const campoComp = 'h-10 w-[160px] rounded-[10px] border border-white/[0.10] bg-[#0b1216] px-3 text-sm font-semibold text-[#f4f7f8] outline-none [color-scheme:dark] focus:border-[#6cff2f]';
-          return (
-            <div className="mt-3 flex flex-wrap items-end gap-3">
-              <label className="flex flex-col gap-1">
-                <span className={T.miniRotulo}>Comparar de</span>
-                <input type="date" value={compDe} max={compAte || undefined} onChange={e => setCompDe(e.target.value)} className={campoComp} />
-              </label>
-              <label className="flex flex-col gap-1">
-                <span className={T.miniRotulo}>até</span>
-                <input type="date" value={compAte} min={compDe || undefined} onChange={e => setCompAte(e.target.value)} className={campoComp} />
-              </label>
-              {faixaPrev && (
-                <p className={cn('pb-2.5', T.nota)}>
-                  {dataLonga(faixaSel.from)} – {dataLonga(faixaSel.to)} comparado com {dataLonga(faixaPrev.from)} – {dataLonga(faixaPrev.to)}
-                </p>
-              )}
-            </div>
-          );
-        })()}
-        {period === 'custom' && (() => {
-          const hoje = toInputDate(new Date());
-          const faixa = periodToDateRange('custom', customDateFrom, customDateTo);
-          const completo = customDateFrom.length === 10 && customDateTo.length === 10;
-          const dias = Math.round((faixa.to.getTime() - faixa.from.getTime()) / 86400000) + 1;
-          const br = (d: Date) => d.toLocaleDateString('pt-BR');
-          // ⚠️ `[color-scheme:dark]` não é enfeite: sem ele o Chrome desenha o
-          // seletor nativo em tema claro e o ícone do calendário fica quase
-          // invisível sobre o fundo escuro — a razão de "não funciona direito".
-          const campo = 'h-11 w-[172px] rounded-[10px] border border-white/[0.10] bg-[#0b1216] px-3 text-sm font-semibold text-[#f4f7f8] outline-none [color-scheme:dark] focus:border-[#6cff2f]';
-          return (
-            <div className="mt-3 flex flex-wrap items-end gap-3">
-              <label className="flex flex-col gap-1">
-                <span className={T.miniRotulo}>De</span>
-                <input
-                  type="date"
-                  value={customDateFrom}
-                  max={customDateTo || hoje}
-                  onChange={e => setCustomDateFrom(e.target.value)}
-                  className={campo}
-                />
-              </label>
-              <span className="pb-3 text-xs text-[#9aa4aa]">até</span>
-              <label className="flex flex-col gap-1">
-                <span className={T.miniRotulo}>Até</span>
-                <input
-                  type="date"
-                  value={customDateTo}
-                  min={customDateFrom || undefined}
-                  max={hoje}
-                  onChange={e => setCustomDateTo(e.target.value)}
-                  className={campo}
-                />
-              </label>
-              {/* Resumo legível: sem ele não dá para saber se a janela pedida é
-                  a que a tela está mostrando. */}
-              <span className="pb-3 text-xs text-[#9aa4aa]">
-                {completo
-                  ? `${br(faixa.from)} a ${br(faixa.to)} · ${dias} ${dias === 1 ? 'dia' : 'dias'}`
-                  : 'preencha as duas datas para atualizar'}
-              </span>
-            </div>
-          );
-        })()}
       </div>
 
       <div className="px-5 py-6 xl:px-8">
