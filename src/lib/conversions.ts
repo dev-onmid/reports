@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'crypto';
 import type { Pool } from 'pg';
 import { eventoMensagemMeta } from '@/lib/meta-eventos-mensagem';
+import { resolverPaginaDoAnuncio } from '@/lib/meta-ad-resolver';
 import {
   resolveGoogleAdsAccess, resolveConversionAction, uploadClickConversion,
   type ClickIds,
@@ -12,6 +13,8 @@ export type ConversionLeadData = {
   id?: string | null;
   phone: string;
   ctwaClid?: string | null;
+  /** Anúncio de origem (`crm_leads.source_id`). Sem ele, lido do lead pelo `id`. */
+  sourceId?: string | null;
 };
 
 type ConversionConfig = {
@@ -171,6 +174,17 @@ export async function hasSuccessfulConversion(pool: Pool, data: {
 
 // ── Meta CAPI ─────────────────────────────────────────────────────────────────
 
+async function paginaDoLead(pool: Pool, clientId: string, leadData: ConversionLeadData): Promise<string | null> {
+  let sourceId = leadData.sourceId ?? null;
+  if (!sourceId && leadData.id) {
+    const { rows: [lead] } = await pool.query<{ source_id: string | null }>(
+      `SELECT source_id FROM public.crm_leads WHERE id = $1`, [leadData.id],
+    ).catch(() => ({ rows: [] as Array<{ source_id: string | null }> }));
+    sourceId = lead?.source_id ?? null;
+  }
+  return sourceId ? resolverPaginaDoAnuncio(pool, clientId, sourceId) : null;
+}
+
 export async function enviarEventoMeta(
   pool: Pool,
   clientId: string,
@@ -236,7 +250,11 @@ export async function enviarEventoMeta(
     const userData: Record<string, unknown> = {
       ph: [phoneHash],
     };
-    if (cfg.meta_page_id) userData.page_id = cfg.meta_page_id;
+    // page_id e ctwa_clid têm de ser da MESMA Página (subcode 2804072): com
+    // ctwa_clid, vale a Página do anúncio que trouxe o lead; a do config é só o
+    // fallback (cliente com duas Páginas — Cost, 2026-10-23).
+    const pageId = (leadData.ctwaClid ? await paginaDoLead(pool, clientId, leadData) : null) ?? cfg.meta_page_id;
+    if (pageId) userData.page_id = pageId;
     if (leadData.ctwaClid) userData.ctwa_clid = leadData.ctwaClid;
 
     const eventData: Record<string, unknown> = {

@@ -2,6 +2,16 @@
 
 Movido do CLAUDE.md em 2026-10-22 (conteúdo original, sem edição). Entrada nova deste setor entra aqui, no topo, não no CLAUDE.md.
 
+## Conversão Meta — `page_id` da Página do ANÚNCIO, não fixo por cliente (2026-10-23)
+
+Pergunta do Matheus ("estamos enviando para o Meta?") → `conversion_log` da Cost: envio saudável desde 16/10 (10–16 Lead/dia, Purchase ok), mas 6 Leads recusados com **subcode 2804072 "page_id e ctwa_clid não correspondentes"**. Todos do anúncio `120251591497360751` (Implantes, Página da **Dra. Tayná** `1320410274483948`), enquanto `client_conversion_config.meta_page_id` é a Página da **Cost** (`1980619558831070`).
+
+- **Regra da Meta**: em evento de mensagem (`business_messaging`), o `ctwa_clid` é gerado pela Página do anúncio e o `page_id` enviado tem de ser essa mesma Página. Um `meta_page_id` fixo por cliente só serve para quem anuncia por uma Página.
+- **Correção**: `resolverPaginaDoAnuncio` (`meta-ad-resolver.ts`) lê a Página do criativo do anúncio (`object_story_spec.page_id` → `actor_id` → prefixo de `effective_object_story_id`) com o token de Ads do cliente, cache em `meta_ad_page_cache` (DDL memoizado; a Página de um anúncio não muda). `enviarEventoMeta`: **com `ctwa_clid`**, usa a Página do anúncio do lead (`leadData.sourceId` ou `crm_leads.source_id` pelo id) e cai no `meta_page_id` do config se não resolver. Sem `ctwa_clid`, nada muda.
+- Os 6 recusados **não foram reenviados** (retroativo nunca dispara conversão).
+- ✅ 13 asserts (`scratchpad/test-pagina-anuncio.mjs`: pura, cache, Graph, payload com a Página da Tayná, fallback) + Graph conferida em produção (Implantes → Tayná, Protocolo → Cost).
+
+
 ## Formulário da Meta — 276 leads pagos perdidos porque o webhook não entrega, e nada na API diz por quê (2026-10-15)
 
 Queixa do Matheus (print do Kanban do SULTS do CondoStore): "no sults não consta todos os leads que chegaram. Só no meta ads temos 75 formulários".
