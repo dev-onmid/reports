@@ -2,7 +2,7 @@ import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { resolveMetaPeriod, applyMetaDateToUrl } from '@/lib/period-utils';
 import { getFreshMetaToken } from '@/lib/meta-token';
-import { countMetaResults, metaPurchases, type MetaAction } from '@/lib/meta-results';
+import { META_FUNIL_COMPRA, countMetaResults, metaPurchases, primeiraDaFamilia, type MetaAction } from '@/lib/meta-results';
 
 // Leads/conversas pela contagem CANÔNICA (lib/meta-results): uma prioridade por
 // família, nunca somando aliases. A lista local antiga somava `lead` +
@@ -63,6 +63,12 @@ export type TopCreative = {
   /** Compras que a Meta atribuiu ao anúncio (pixel/CAPI) e o valor delas — ver metaPurchases. */
   compras?: number;
   valorCompras?: number;
+  /** Objetivo da campanha (OUTCOME_SALES…) — decide se o card mostra o funil de compra ou o do CRM. */
+  objective?: string;
+  /** Funil de compra do pixel: abriu a página/cardápio → carrinho → checkout. */
+  visitas?: number;
+  carrinho?: number;
+  checkout?: number;
   /** Vídeo: reproduções de 3s (o "gancho") — `actions.video_view`. */
   views3s?: number;
   /** Vídeo: ThruPlays (15s ou até o fim) — a "retenção". */
@@ -229,7 +235,7 @@ export async function GET(request: NextRequest) {
           // Fetch top ads insights sorted by spend
           const insightsUrl = new URL(`https://graph.facebook.com/v21.0/${toMetaAccountNodeId(account.id)}/insights`);
           insightsUrl.searchParams.set('level', 'ad');
-          insightsUrl.searchParams.set('fields', 'ad_id,ad_name,campaign_id,campaign_name,adset_id,adset_name,spend,impressions,clicks,actions,action_values,video_thruplay_watched_actions,video_p25_watched_actions,video_p50_watched_actions,video_p75_watched_actions,video_p100_watched_actions');
+          insightsUrl.searchParams.set('fields', 'ad_id,ad_name,campaign_id,campaign_name,adset_id,adset_name,objective,spend,impressions,clicks,actions,action_values,video_thruplay_watched_actions,video_p25_watched_actions,video_p50_watched_actions,video_p75_watched_actions,video_p100_watched_actions');
           applyMetaDateToUrl(insightsUrl, metaPeriod);
           insightsUrl.searchParams.set('sort', 'spend_descending');
           insightsUrl.searchParams.set('limit', String(adIdsMode ? 50 : limit));
@@ -419,6 +425,10 @@ export async function GET(request: NextRequest) {
               cpl: leads > 0 ? spend / leads : 0,
               compras: compra.compras,
               valorCompras: compra.valor,
+              objective: (insight.objective as string | undefined) ?? undefined,
+              visitas: primeiraDaFamilia(insight.actions as MetaAction[] | undefined, META_FUNIL_COMPRA.visitas),
+              carrinho: primeiraDaFamilia(insight.actions as MetaAction[] | undefined, META_FUNIL_COMPRA.carrinho),
+              checkout: primeiraDaFamilia(insight.actions as MetaAction[] | undefined, META_FUNIL_COMPRA.checkout),
               views3s: ((insight.actions ?? []) as Array<{ action_type?: string; value?: string }>)
                 .filter(a => a.action_type === 'video_view')
                 .reduce((s, a) => s + (parseFloat(a.value ?? '0') || 0), 0),

@@ -89,3 +89,27 @@ export function metaPurchases(
   }
   return { compras: 0, valor: 0 };
 }
+
+// Etapas do funil de compra (pixel), na mesma régua de família: o mesmo evento
+// vem em omni_*, o nome curto e as versões fb_pixel/onsite_web — conta só a 1ª.
+// Sem view_content de propósito: ele conta CADA produto visto (191 "visualizações"
+// para 117 cliques no Ultimate Nacho da PicoLocos) e quebraria o funil.
+export const META_FUNIL_COMPRA = {
+  visitas: ['omni_landing_page_view', 'landing_page_view'],
+  carrinho: ['omni_add_to_cart', 'add_to_cart', 'offsite_conversion.fb_pixel_add_to_cart', 'onsite_web_add_to_cart'],
+  checkout: ['omni_initiated_checkout', 'initiate_checkout', 'offsite_conversion.fb_pixel_initiate_checkout', 'onsite_web_initiate_checkout'],
+} as const;
+
+export function primeiraDaFamilia(actions: MetaAction[] | undefined | null, familia: readonly string[]): number {
+  if (!Array.isArray(actions)) return 0;
+  for (const tipo of familia) {
+    const a = actions.find((x) => x?.action_type === tipo);
+    if (a) return Number(a.value) || 0;
+  }
+  return 0;
+}
+
+/** Objetivo de campanha que mede VENDA (o funil do card vira clique → compra). */
+export function objetivoDeVenda(objective: string | null | undefined): boolean {
+  return ['OUTCOME_SALES', 'CONVERSIONS', 'PRODUCT_CATALOG_SALES'].includes(String(objective ?? '').toUpperCase());
+}

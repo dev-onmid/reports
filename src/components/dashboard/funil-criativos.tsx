@@ -8,6 +8,7 @@ import { GoogleAdsMark } from '@/components/platform-logos';
 import { Superficie } from './superficie';
 import type { TopCreative } from '@/app/api/meta/top-creatives/route';
 import type { EtapaDoCriativo, FunilDoCriativo } from '@/app/api/crm/funil-criativos/route';
+import { objetivoDeVenda } from '@/lib/meta-results';
 import { descreverFontes, fontesPresentes, juntarFontes, totalDasFontes, type VendasPorFonte } from '@/lib/fonte-venda';
 
 /**
@@ -43,6 +44,12 @@ type Item = {
   crm: FunilDoCriativo | null;
   /** Vendas por fonte: as do CRM + o cardápio (compras da Meta), já somadas. */
   fontes: VendasPorFonte;
+  /**
+   * Campanha de VENDAS: o funil é o da compra no site/cardápio (pixel), não o do
+   * CRM. "Leads → Em atendimento → Agendado" num anúncio de vendas do Anota Aí
+   * não diz nada (print do Matheus, Ultimate Nacho: 32 vendas e "Leads 0").
+   */
+  funilCompra: { visitas: number; carrinho: number; checkout: number } | null;
   views3s: number;
   thruplays: number;
 };
@@ -74,6 +81,7 @@ function montarItens(criativos: TopCreative[], crm: FunilDoCriativo[], comCompra
       chave: `meta:${c.adId}`, creative: c, nome: c.adName, campanha: c.campaignName ?? null, plataforma: 'meta',
       gasto: c.spend, impressoes: c.impressions, cliques: c.clicks, leadsPlataforma: c.leads, crm: f,
       fontes: juntarFontes(fontesDoCrm(f), comCompras && (c.compras ?? 0) > 0 ? { cardapio: { vendas: c.compras ?? 0, receita: c.valorCompras ?? 0 } } : null),
+      funilCompra: objetivoDeVenda(c.objective) ? { visitas: c.visitas ?? 0, carrinho: c.carrinho ?? 0, checkout: c.checkout ?? 0 } : null,
       views3s: c.views3s ?? 0, thruplays: c.thruplays ?? 0,
     };
   });
@@ -83,7 +91,7 @@ function montarItens(criativos: TopCreative[], crm: FunilDoCriativo[], comCompra
     if (usados.has(f.chave)) continue;
     itens.push({
       chave: `crm:${f.chave}`, creative: null, nome: f.nome, campanha: f.campanha, plataforma: f.plataforma,
-      gasto: 0, impressoes: 0, cliques: 0, leadsPlataforma: 0, crm: f, fontes: juntarFontes(fontesDoCrm(f)), views3s: 0, thruplays: 0,
+      gasto: 0, impressoes: 0, cliques: 0, leadsPlataforma: 0, crm: f, fontes: juntarFontes(fontesDoCrm(f)), funilCompra: null, views3s: 0, thruplays: 0,
     });
   }
   return itens;
@@ -97,7 +105,7 @@ function fontesDoCrm(f: FunilDoCriativo | null): VendasPorFonte | null {
 const vendasDe = (i: Item) => totalDasFontes(i.fontes).vendas;
 const receitaDe = (i: Item) => totalDasFontes(i.fontes).receita;
 /** Venda pelo cardápio não passa por lead/etapa: a taxa dela é sobre o clique. */
-const vendaPorClique = (i: Item) => (i.fontes.cardapio?.vendas ?? 0) > 0;
+const vendaPorClique = (i: Item) => !!i.funilCompra || (i.fontes.cardapio?.vendas ?? 0) > 0;
 
 export function FunilCriativosPanel({ criativos, crm, loading, onPreview, receitaTotal = null, comCompras = false, etapas = [] }: {
   /** Soma as compras atribuídas pela Meta como fonte "Cardápio digital" — só cliente com cardápio conectado. */
@@ -179,7 +187,7 @@ export function FunilCriativosPanel({ criativos, crm, loading, onPreview, receit
     >
       {loading && itens.length === 0 ? (
         <div className="grid auto-cols-[440px] grid-flow-col grid-rows-2 gap-3 overflow-hidden">
-          {Array.from({ length: 6 }).map((_, i) => <div key={i} className="h-[200px] animate-pulse rounded-xl bg-white/[0.04]" />)}
+          {Array.from({ length: 6 }).map((_, i) => <div key={i} className="h-[218px] animate-pulse rounded-xl bg-white/[0.04]" />)}
         </div>
       ) : (
         <>
@@ -187,7 +195,7 @@ export function FunilCriativosPanel({ criativos, crm, loading, onPreview, receit
           {/* Cada etapa do meio a mais alarga o card: o nome real da coluna ("Visita/reunião", "Em Atendimento") não cabe em 440. */}
           <div className={cn('grid grid-flow-col grid-rows-2 gap-3 overflow-x-auto pb-2', etapas.length >= 3 ? 'auto-cols-[530px]' : etapas.length === 2 ? 'auto-cols-[470px]' : 'auto-cols-[440px]')}>
             {ordenados.map((i, idx) => (
-              <CardFunil key={i.chave} item={i} index={idx} leads={leadsDe(i)} temCrm={temCrm} etapas={etapas} onPreview={onPreview} />
+              <CardFunil key={i.chave} item={i} index={idx} leads={leadsDe(i)} temCrm={temCrm} etapas={etapas} cardapio={comCompras} onPreview={onPreview} />
             ))}
           </div>
           <p className={cn(T.nota, 'mt-2')}>
@@ -246,8 +254,26 @@ const VALOR_DO_POSTO: Record<1 | 2 | 3, (f: FunilDoCriativo | null) => number> =
   3: f => f?.comparecimentos ?? 0,
 };
 
-function CardFunil({ item, index, leads, temCrm, etapas, onPreview }: {
-  item: Item; index: number; leads: number; temCrm: boolean; etapas: EtapaDoCriativo[]; onPreview: (c: TopCreative) => void;
+type EtapaCard = { rotulo: string; valor: number; taxa: number | null; dica: string; nota?: string | null };
+
+/** Clique → abriu o cardápio/site → carrinho → checkout → compra, cada taxa sobre a anterior. */
+function etapasDeCompra(item: Item, vendas: number, cardapio: boolean, fontesDica: string): EtapaCard[] {
+  const fc = item.funilCompra!;
+  const lista: Array<{ rotulo: string; valor: number; dica: string }> = [
+    { rotulo: 'Cliques', valor: item.cliques, dica: 'CTR: cliques ÷ impressões' },
+    { rotulo: cardapio ? 'Abriu o cardápio' : 'Visitas', valor: fc.visitas, dica: `${cardapio ? 'Abriram o cardápio' : 'Visitas na página'} ÷ cliques` },
+    { rotulo: 'Carrinho', valor: fc.carrinho, dica: 'Adicionaram ao carrinho ÷ abriram' },
+    { rotulo: 'Checkout', valor: fc.checkout, dica: 'Iniciaram o checkout ÷ carrinho' },
+    { rotulo: 'Vendas', valor: vendas, dica: `Compras ÷ checkout${fontesDica}` },
+  ];
+  return lista.map((e, i) => ({
+    ...e,
+    taxa: i === 0 ? pct(item.cliques, item.impressoes) : pct(e.valor, lista[i - 1].valor),
+  }));
+}
+
+function CardFunil({ item, index, leads, temCrm, etapas, cardapio, onPreview }: {
+  item: Item; index: number; leads: number; temCrm: boolean; etapas: EtapaDoCriativo[]; cardapio: boolean; onPreview: (c: TopCreative) => void;
 }) {
   const f = item.crm;
   const vendas = vendasDe(item);
@@ -258,7 +284,7 @@ function CardFunil({ item, index, leads, temCrm, etapas, onPreview }: {
   // CRM rastreando menos leads que o Meta reportou (lead que não passou pelo
   // WhatsApp rastreado): em vez de só "0%", mostra o número da plataforma.
   const notaLeads = temCrm && item.leadsPlataforma > leads ? `Meta ${compacto(item.leadsPlataforma)}` : null;
-  const etapasDoCard: Array<{ rotulo: string; valor: number; taxa: number | null; dica: string; nota?: string | null }> = [
+  const etapasDoCard: EtapaCard[] = [
     { rotulo: 'Cliques', valor: item.cliques, taxa: pct(item.cliques, item.impressoes), dica: 'CTR: cliques ÷ impressões' },
     { rotulo: 'Leads', valor: leads, taxa: pct(leads, item.cliques), nota: notaLeads, dica: temCrm ? `Leads no CRM ÷ cliques${item.leadsPlataforma ? ` · o Meta reportou ${fmtInt(item.leadsPlataforma)}` : ''}` : 'Leads reportados pelo Meta ÷ cliques' },
   ];
@@ -278,13 +304,17 @@ function CardFunil({ item, index, leads, temCrm, etapas, onPreview }: {
   etapasDoCard.push(porClique
     ? { rotulo: 'Vendas', valor: vendas, taxa: pct(vendas, item.cliques), dica: `Vendas ÷ cliques (no cardápio a venda não passa por lead)${fontesDica}` }
     : { rotulo: 'Vendas', valor: vendas, taxa: pct(vendas, base.valor), dica: `Vendas ÷ ${base.nome}${fontesDica}` });
+  // Campanha de vendas troca a escada inteira pela da compra.
+  const funil = item.funilCompra ? etapasDeCompra(item, vendas, cardapio, fontesDica) : etapasDoCard;
   const conversao = porClique ? pct(vendas, item.cliques) : pct(vendas, leads);
+  // Funil de compra com só o cardápio de fonte: a linha repetiria o "Vendas".
+  const mostrarFontes = fontes.length > 1 || (fontes.length === 1 && !(item.funilCompra && fontes[0].fonte === 'cardapio'));
   const gancho = pct(item.views3s, item.impressoes);
   const retencao = pct(item.thruplays, item.views3s);
   const roas = item.gasto > 0 && receita > 0 ? receita / item.gasto : null;
 
   return (
-    <div className="flex h-[200px] gap-3 rounded-xl bg-white/[0.03] p-2.5 ring-1 ring-white/[0.05]">
+    <div className="flex h-[218px] gap-3 rounded-xl bg-white/[0.03] p-2.5 ring-1 ring-white/[0.05]">
       <Miniatura item={item} index={index} onPreview={onPreview} />
       <div className="flex min-w-0 flex-1 flex-col">
         <div className="flex items-start justify-between gap-2">
@@ -304,7 +334,7 @@ function CardFunil({ item, index, leads, temCrm, etapas, onPreview }: {
 
         {/* O funil do criativo em uma linha: valor da etapa e, embaixo, quanto passou da anterior. */}
         <div className="mt-2 flex items-stretch">
-          {etapasDoCard.map((e, i) => (
+          {funil.map((e, i) => (
             <div key={e.rotulo} className="flex min-w-0 flex-1 items-stretch">
               {i > 0 && <ChevronRight className="h-3 w-3 shrink-0 self-center text-[#3d474d]" />}
               <div className="min-w-0 flex-1 text-center" title={e.dica}>
@@ -320,7 +350,7 @@ function CardFunil({ item, index, leads, temCrm, etapas, onPreview }: {
         </div>
 
         {/* De onde vieram as vendas — cada fonte com o seu número. */}
-        {fontes.length > 0 && (
+        {mostrarFontes && (
           <p className="mt-1.5 truncate text-[10px] text-[#9aa4aa]" title={origemVendas}>
             {fontes.map((p, i) => (
               <span key={p.fonte}>
@@ -333,10 +363,10 @@ function CardFunil({ item, index, leads, temCrm, etapas, onPreview }: {
         )}
 
         {/* Resultado do criativo: faturamento, conversão e a leitura do vídeo. */}
-        <div className="mt-auto grid grid-cols-[1.3fr_1fr_1fr_1fr] gap-1.5 border-t border-white/[0.06] pt-2">
+        <div className="mt-auto grid grid-cols-[1.15fr_1.1fr_0.9fr_0.95fr] gap-2 border-t border-white/[0.06] pt-2">
           <Kpi rotulo="Faturamento" valor={receita > 0 ? moedaCurta(receita) : '—'} forte={receita > 0}
             nota={roas !== null ? `ROAS ${roas.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}x` : undefined} />
-          <Kpi rotulo="Conversão" valor={fmtPct(conversao)} nota={porClique ? 'clique → venda' : 'lead → venda'} />
+          <Kpi rotulo="Conversão" valor={fmtPct(conversao)} nota={porClique ? 'clique → venda' : 'lead → venda'} dica={porClique ? 'Vendas ÷ cliques' : 'Vendas ÷ leads'} />
           <Kpi rotulo="Gancho" valor={item.views3s > 0 ? fmtPct(gancho) : '—'} nota={item.views3s > 0 ? 'viram 3s' : 'imagem'} />
           <Kpi rotulo="Retenção" valor={item.views3s > 0 ? fmtPct(retencao) : '—'} nota={item.views3s > 0 ? 'até o ThruPlay' : 'imagem'} barra={item.views3s > 0 ? retencao : null} />
         </div>
@@ -345,10 +375,10 @@ function CardFunil({ item, index, leads, temCrm, etapas, onPreview }: {
   );
 }
 
-function Kpi({ rotulo, valor, nota, forte, barra }: { rotulo: string; valor: string; nota?: string; forte?: boolean; barra?: number | null }) {
+function Kpi({ rotulo, valor, nota, forte, barra, dica }: { rotulo: string; valor: string; nota?: string; forte?: boolean; barra?: number | null; dica?: string }) {
   return (
-    <div className="min-w-0">
-      <p className="truncate text-[9px] font-black uppercase tracking-[0.06em] text-[#9aa4aa]">{rotulo}</p>
+    <div className="min-w-0" title={dica}>
+      <p className="truncate text-[9px] font-black uppercase tracking-[0.02em] text-[#9aa4aa]">{rotulo}</p>
       <p className={cn('truncate text-[13px] font-black tabular-nums', forte ? 'text-[#6cff2f]' : 'text-[#f4f7f8]')} title={valor}>{valor}</p>
       {typeof barra === 'number' ? (
         <div className="mt-1 h-1 overflow-hidden rounded-full bg-white/[0.06]">
