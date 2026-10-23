@@ -1,6 +1,8 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { SITUACOES_STAGE, type SituacaoStage } from '@/lib/funil-etapas';
+import { escopoDoCliente } from '@/lib/acesso';
+import { contarGatilhos, realinharGatilhos, rotuloSegueEmUso } from '@/lib/crm-etapa-gatilhos';
 
 // Leads guardam a etapa como TEXTO em crm_leads.status (não por stage_id). Por isso,
 // renomear/excluir uma etapa PRECISA migrar o status dos leads junto — senão eles
@@ -11,9 +13,15 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  const { label, color, position, etapa_funil, situacao } = await req.json().catch(() => ({})) as {
+  const corpo = await req.json().catch(() => ({})) as {
     label?: string; color?: string; position?: number; etapa_funil?: string; situacao?: string;
   };
+  const { label, color, position } = corpo;
+  // Usuário de cliente edita ordem/nome, mas o DEGRAU (funil da dashboard e
+  // metas) é da agência: o editor manda o valor exibido, a rota ignora.
+  const doCliente = escopoDoCliente(req.headers) !== null;
+  const etapa_funil = doCliente ? undefined : corpo.etapa_funil;
+  const situacao = doCliente ? undefined : corpo.situacao;
 
   const pool = makeServerPool();
   try {
@@ -60,6 +68,11 @@ export async function PUT(
           WHERE funnel_id = $2 AND status = $3`,
         [newLabel, before.funnel_id, before.label],
       ).catch(err => console.error('[crm stages] migrate leads on rename', err));
+      // Follow-up e conversão miram o rótulo: seguem a etapa renomeada, salvo se
+      // outra etapa do cliente ainda usa o nome antigo (aí o gatilho é dela).
+      if (!(await rotuloSegueEmUso(pool, before.client_id, before.label, id).catch(() => true))) {
+        await realinharGatilhos(pool, before.client_id, before.label, newLabel);
+      }
     }
 
     return Response.json(stage);
@@ -75,10 +88,21 @@ export async function DELETE(
   const { id } = await params;
   const pool = makeServerPool();
   try {
-    const { rows: [stage] } = await pool.query<{ label: string; funnel_id: string }>(
-      `SELECT label, funnel_id FROM public.crm_stages WHERE id = $1`,
+    const { rows: [stage] } = await pool.query<{ label: string; funnel_id: string; client_id: string }>(
+      `SELECT label, funnel_id, client_id FROM public.crm_stages WHERE id = $1`,
       [id],
     );
+    // Etapa que dispara automação não sai: o gatilho morreria em silêncio
+    // (follow-up que não envia, conversão que não sobe). Desde 2026-10-23 o
+    // cliente também exclui etapa — barrar é mais seguro que adivinhar destino.
+    if (stage && !(await rotuloSegueEmUso(pool, stage.client_id, stage.label, id))) {
+      const gatilhos = await contarGatilhos(pool, stage.client_id, stage.label);
+      if (gatilhos > 0) {
+        return Response.json({
+          error: `A etapa "${stage.label}" dispara ${gatilhos} automação${gatilhos > 1 ? 'ões' : ''} (follow-up ou conversão). Peça à Onmid para mudar o gatilho antes de excluir.`,
+        }, { status: 409 });
+      }
+    }
     await pool.query(`DELETE FROM public.crm_stages WHERE id = $1`, [id]);
 
     // Move os leads da etapa excluída pra primeira etapa restante do funil —

@@ -1,6 +1,7 @@
 import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { classificarEtapa, SITUACOES_STAGE, type EtapaFunil, type SituacaoStage } from '@/lib/funil-etapas';
+import { escopoDoCliente } from '@/lib/acesso';
 
 const ETAPAS_VALIDAS = new Set<string>(['contato', 'qualificado', 'agendamento', 'comparecimento', 'fechamento', 'perdido', 'nao_lead']);
 
@@ -35,14 +36,17 @@ export async function POST(
     label?: string; color?: string; clientId?: string; etapa_funil?: string; situacao?: string; position?: number;
   };
   if (!label?.trim() || !clientId) return Response.json({ error: 'label and clientId required' }, { status: 400 });
+  // Usuário de cliente cria etapa, mas o degrau é da agência: nasce pela
+  // auto-classificação do nome, como qualquer chamador sem degrau explícito.
+  const doCliente = escopoDoCliente(req.headers) !== null;
   // Etapa nova nasce classificada: explícita se o editor mandou, senão pela
   // auto-classificação do rótulo (persistida, pra rename posterior não mudar
   // o funil por baixo de quem já conferiu).
-  const etapa: EtapaFunil = ETAPAS_VALIDAS.has(etapa_funil ?? '')
+  const etapa: EtapaFunil = !doCliente && ETAPAS_VALIDAS.has(etapa_funil ?? '')
     ? (etapa_funil as EtapaFunil)
     : classificarEtapa(label);
   // Situação só quando o editor mandou; outros chamadores deixam NULL (= auto).
-  const sit: SituacaoStage | null = SITUACOES_STAGE.includes(situacao as SituacaoStage) ? (situacao as SituacaoStage) : null;
+  const sit: SituacaoStage | null = !doCliente && SITUACOES_STAGE.includes(situacao as SituacaoStage) ? (situacao as SituacaoStage) : null;
 
   const pool = makeServerPool();
   try {

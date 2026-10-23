@@ -2,6 +2,30 @@
 
 Movido do CLAUDE.md em 2026-10-22 (conteúdo original, sem edição). Entrada nova deste setor entra aqui, no topo, não no CLAUDE.md.
 
+## Cost Odonto — etapa "Pós Avaliação" (2026-10-23)
+
+Pedido do Matheus: coluna para quem **compareceu na avaliação e ainda não tem desfecho** (nem "Negócio concluído" nem perdido). Decisões dele: entram TODOS os que compareceram sem desfecho, inclusive os de "Aguardando Exame"; "Comparecimento" e "Aguardando Exame" continuam como colunas.
+
+- Aplicado direto no banco de produção, numa transação (script `scratchpad/cost-pos-aplicar.cjs` da sessão): etapa na posição 17, entre Aguardando Exame e Negócio concluído, grau `comparecimento`, situação `nenhuma`, cor `#f59e0b`; régua de quem entra = `compareceu IS TRUE AND NOT fechou AND perdido_em IS NULL`. **26 leads movidos** (23 de Aguardando Exame, 2 de Comparecimento, 1 de Agendado), cada um com evento `etapa` em `crm_lead_eventos` (autor "Onmid (etapa Pós Avaliação)"). SQL direto = sem follow-up nem conversão.
+- Daqui para frente a equipe move os leads à mão: nada põe lead novo na coluna sozinho.
+- ⚠️ Achado na leitura, **não corrigido**: o único gatilho de conversão da Cost (`client_conversion_eventos_custom`) mira **"Fechado"**, que não existe no funil — o ganho deles é "Negócio concluído". Venda da Cost não sobe como conversão.
+
+## crm.onmid.app — sol/lua do tema, atendente gere tags e cliente edita as etapas do Kanban (2026-10-23)
+
+Três pedidos do Matheus na mesma rodada (print do CRM da Cost como "Dra Tayná").
+
+- **Tema**: a casca do usuário de cliente (`ClienteShell` em `dashboard-shell.tsx`) nunca recebeu o `ThemeToggle` — só o cabeçalho da equipe tinha. Entrou ao lado do nome (`ThemeToggle` aceita `className`, 32px na barra de 48px). `PATCH /api/auth/tema` já era público no proxy e lê a sessão sozinho, então grava na conta do cliente igual à da equipe. O logo branco já trocava no claro pelo `globals.css`.
+- **Tags**: o atendente passou a criar, renomear, recolorir e apagar (antes só gestor/agência). `POST /api/crm/tags` e `PATCH/DELETE /api/crm/tags/<id>` saíram de `ROTAS_GESTOR` para `ROTAS_CLIENTE`; `podeConfigurarTags` sumiu da tela (todo mundo vê "Configurar tags"). A rota de lote `/tags/<id>/assign` segue fechada.
+- **Etapas do Kanban — decisões do Matheus**: **gestor E atendente** editam; **reordenar, renomear, criar e excluir**; o **degrau** (funil da dashboard/metas) fica com a agência. Criar/excluir FUNIL e modelos também.
+  - Acesso: `PUT /api/crm/funnels/<id>` (o editor salva o nome junto), `GET/POST /api/crm/funnels/<id>/stages`, `PUT/DELETE /api/crm/stages/<id>`. O proxy resolve o dono da etapa por id (`clienteDaEtapa`) e o regex do funil passou a casar também `/funnels/<id>` sem barra.
+  - Degrau: as rotas de etapa **ignoram `etapa_funil`/`situacao` quando `escopoDoCliente(headers) !== null`** (etapa nova nasce pela auto-classificação do nome). Esconder o seletor na tela não basta: o editor manda o valor exibido em todo PUT.
+  - ⚠️ **Gatilhos miram o RÓTULO** (`client_conversion_eventos_custom` / `crm_followup_regras.status_gatilho`, `crm_followup_mensagens.status_destino`, por cliente, sem FK). Antes, renomear etapa — inclusive pela agência — deixava follow-up e conversão mortos em silêncio. Agora (`src/lib/crm-etapa-gatilhos.ts`): **renomear leva os gatilhos** (mesma régua do saneamento); **excluir etapa com gatilho dá 409** com o motivo, e o editor devolve a etapa à lista e mostra o texto. Nos dois casos, se **outra etapa do cliente** (outro funil) ainda tem o rótulo, o gatilho é dela e nada se mexe. Vale para a agência também.
+  - Tela: botão **Etapas** ao lado de **Tags** no modo cliente (o ⋮ é da agência); `FunnelEditorModal` com `useModoCliente()` → título "Etapas do Kanban", sem coluna de degrau e sem Novo/Excluir funil e modelos.
+  - ⚠️ Cliente com funil espelhado de CRM externo (SULTS, Agendor, Datalytics, planilha) tem as etapas reescritas pela sincronização — editar lá não "pega".
+- ✅ 35 asserts novos (`scratchpad/test-crm-etapas.mjs`: atendente e gestor × cada rota, negativos de funil/modelo/saneamento, escopo do degrau, gatilhos com pool stub) + tags 32 (atualizados) + acesso-gestor 69; tsc limpo; eslint em `crm/page.tsx` nos 15 erros pré-existentes. Browser (dev em worktree, `fetch` mockado como atendente): sol/lua troca para claro e manda o PATCH; botões Tags/Etapas; editor simples; renomear + excluir livre + excluir com 409 (etapa volta com o motivo); segundo Salvar grava ordem e o board muda.
+- ⚠️ Não visto: arrastar no editor (código de arraste é o mesmo da agência, intocado) e nada com banco real — conferir em produção com um atendente da Cost.
+- Lição de harness: Turbopack recusa `node_modules` por symlink num worktree ("points out of the filesystem root") — usar `next dev --webpack`. E o mock de `fetch` precisa aceitar `URL`/`Request` (`String(u?.url ?? u)`): o roteador do Next chama `fetch(URL)` e o mock quebrado faz a navegação cair num reload que apaga o próprio mock.
+
 ## Aba Atendimento — ícone "i" com a explicação de cada métrica (2026-10-10)
 
 Pedido do Matheus: "cada descrição ficasse um botão onde passar o mouse… tipo aqueles de 'i' de informação… para que o cliente ou o time, ao apresentar, saiba o que é".

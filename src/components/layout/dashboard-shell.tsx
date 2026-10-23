@@ -15,6 +15,7 @@ import { EvolutionAlertBanner } from '@/components/layout/evolution-alert-banner
 import { AuthGuard } from '@/components/layout/auth-guard';
 import { PaymentProviderWrapper } from '@/components/layout/payment-provider-wrapper';
 import { Button } from '@/components/ui/button';
+import { ThemeToggle } from '@/components/theme-toggle';
 import {
   Sheet,
   SheetContent,
@@ -25,7 +26,7 @@ import {
  * Casca do FUNCIONÁRIO DO CLIENTE (team='cliente'): sem menu da agência, sem
  * alertas de pagamento/instância e sem o cabeçalho com uso de IA e lembretes —
  * tudo isso chama rotas que o servidor recusa para ele, e nada disso é da
- * conta dele. Só o CRM, o nome dele e o botão de sair.
+ * conta dele. Só o CRM, o nome dele, o sol/lua do tema e o botão de sair.
  */
 function ClienteShell({ children }: { children: React.ReactNode }) {
   const sessao = useSessaoLocal();
@@ -48,6 +49,7 @@ function ClienteShell({ children }: { children: React.ReactNode }) {
           </div>
           <div className="flex items-center gap-3 text-xs text-muted-foreground">
             <span className="hidden sm:inline">{nome}</span>
+            <ThemeToggle className="h-8 w-8 [&_svg]:h-4 [&_svg]:w-4" />
             <button
               onClick={() => { clearAuthSession(); window.location.href = '/'; }}
               className="flex items-center gap-1.5 rounded-md border border-border px-2 py-1 font-semibold hover:text-foreground"

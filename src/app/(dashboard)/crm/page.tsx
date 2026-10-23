@@ -2419,11 +2419,13 @@ function AttendanceAuditReport({
 // ── Funnel Editor ────────────────────────────────────────────────────────────
 
 function SortableStageRow({
-  stage, onChange, onDelete,
+  stage, onChange, onDelete, comDegrau = true,
 }: {
   stage: LocalStage;
   onChange: (updates: Partial<CrmStage>) => void;
   onDelete: () => void;
+  /** false = usuário do cliente: o degrau (funil da dashboard) é da agência. */
+  comDegrau?: boolean;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: stage.id });
 
@@ -2460,7 +2462,7 @@ function SortableStageRow({
           COMPOSTO: grau e, onde existe, a situação ("sem resposta" no topo,
           "parou de responder" em qualificado) numa escolha só. Sem escolha
           explícita, vale a auto-classificação pelo nome. */}
-      <select
+      {comDegrau && <select
         value={valorOpcaoEditor(stage.etapa_funil, stage.situacao, stage.label)}
         onChange={e => { const o = opcaoDoValor(e.target.value); onChange({ etapa_funil: o.etapa, situacao: o.situacao }); }}
         title="Em qual degrau do Funil de Performance esta coluna entra — e, se for o caso, a situação (sem resposta / parou de responder)"
@@ -2469,7 +2471,7 @@ function SortableStageRow({
         {OPCOES_EDITOR.map(o => (
           <option key={o.valor} value={o.valor}>{o.rotulo}</option>
         ))}
-      </select>
+      </select>}
 
       <button type="button" onClick={onDelete}
         className="shrink-0 text-muted-foreground hover:text-red-400 transition-colors p-0.5">
@@ -2496,6 +2498,11 @@ function FunnelEditorModal({
   const [localStages, setLocalStages] = useState<LocalStage[]>(initialStages.map(s => ({ ...s })));
   const [deletedIds, setDeletedIds] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
+  const [erroSalvar, setErroSalvar] = useState<string | null>(null);
+  // Usuário do cliente (crm.onmid.app) edita só as ETAPAS: ordem, nome, criar e
+  // excluir (2026-10-23). Degrau, novo/excluir funil e modelos são da agência —
+  // e a rota ignora o degrau que viesse dele.
+  const simples = useModoCliente();
   // "Salvar como modelo": fotografa as etapas que estão NA TELA (não as do
   // banco) — o gestor costuma ajustar e só então decidir guardar o desenho.
   const [aplicarModelo, setAplicarModelo] = useState(false);
@@ -2569,6 +2576,7 @@ function FunnelEditorModal({
 
   async function handleSave() {
     setSaving(true);
+    setErroSalvar(null);
     try {
       const funnelRes = await fetch(`/api/crm/funnels/${funnel.id}`, {
         method: 'PUT',
@@ -2577,7 +2585,28 @@ function FunnelEditorModal({
       });
       const savedFunnel: CrmFunnel = funnelRes.ok ? await funnelRes.json() as CrmFunnel : { ...funnel, name };
 
-      await Promise.all(deletedIds.map(id => fetch(`/api/crm/stages/${id}`, { method: 'DELETE' })));
+      // Exclusão pode ser RECUSADA (409: a etapa dispara follow-up/conversão).
+      // A etapa volta para a lista na posição de antes e nada mais é gravado —
+      // o usuário lê o motivo e decide.
+      const recusas: { id: string; motivo: string }[] = [];
+      await Promise.all(deletedIds.map(async id => {
+        const res = await fetch(`/api/crm/stages/${id}`, { method: 'DELETE' }).catch(() => null);
+        if (!res?.ok) {
+          const d = await res?.json().catch(() => ({})) as { error?: string } | undefined;
+          recusas.push({ id, motivo: d?.error ?? 'Não foi possível excluir a etapa.' });
+        }
+      }));
+      if (recusas.length > 0) {
+        const voltam = initialStages.filter(st => recusas.some(r => r.id === st.id));
+        setDeletedIds([]);
+        setLocalStages(prev => {
+          const lista = [...prev];
+          for (const st of voltam) lista.splice(Math.min(st.position, lista.length), 0, { ...st });
+          return lista;
+        });
+        setErroSalvar(recusas.map(r => r.motivo).join(' '));
+        return;
+      }
 
       const savedStages: CrmStage[] = [];
       for (let i = 0; i < localStages.length; i++) {
@@ -2617,7 +2646,7 @@ function FunnelEditorModal({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={onClose}>
       <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
-          <h2 className="text-sm font-bold flex items-center gap-2"><Layers className="h-4 w-4 text-primary" /> Configurar Funil</h2>
+          <h2 className="text-sm font-bold flex items-center gap-2"><Layers className="h-4 w-4 text-primary" /> {simples ? 'Etapas do Kanban' : 'Configurar Funil'}</h2>
           <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><X className="h-4 w-4" /></button>
         </div>
 
@@ -2642,6 +2671,15 @@ function FunnelEditorModal({
                 cliente com 14 etapas (D1…D7, Lead Morno, Lead Quente…) precisa
                 dizer que todas elas são topo de funil, senão a dashboard conta
                 cada uma como um degrau diferente. */}
+            {simples ? (
+            <div className="mb-2 flex items-start gap-2 rounded-lg border border-border bg-background/40 px-3 py-2">
+              <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
+              <p className="text-[11px] leading-snug text-muted-foreground">
+                Arraste pela alça para mudar a ordem das colunas e clique no nome para
+                renomear. Ao renomear, os leads da coluna vão junto.
+              </p>
+            </div>
+            ) : (<>
             <div className="mb-2 flex items-start gap-2 rounded-lg border border-border bg-background/40 px-3 py-2">
               <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
               <p className="text-[11px] leading-snug text-muted-foreground">
@@ -2660,12 +2698,13 @@ function FunnelEditorModal({
               <span className="w-[118px] shrink-0">Grau no funil</span>
               <span className="w-4 shrink-0" />
             </div>
+            </>)}
 
             <DndContext sensors={editorSensors} onDragEnd={handleStageDragEnd}>
               <SortableContext items={stageIds} strategy={verticalListSortingStrategy}>
                 <div className="space-y-1.5">
                   {localStages.map(stage => (
-                    <SortableStageRow key={stage.id} stage={stage}
+                    <SortableStageRow key={stage.id} stage={stage} comDegrau={!simples}
                       onChange={u => updateStage(stage.id, u)}
                       onDelete={() => deleteStage(stage.id)} />
                   ))}
@@ -2719,7 +2758,12 @@ function FunnelEditorModal({
           </div>
         )}
 
+        {erroSalvar && (
+          <p className="shrink-0 border-t border-red-500/30 bg-red-500/10 px-5 py-2.5 text-xs text-red-400">{erroSalvar}</p>
+        )}
+
         <div className="flex items-center justify-between gap-3 px-5 py-4 border-t border-border shrink-0">
+          {simples ? <span /> : (
           <div className="flex gap-2">
             {funnelCount > 1 && (
               <button onClick={onDeleteFunnel}
@@ -2747,6 +2791,7 @@ function FunnelEditorModal({
               <Layers className="h-3.5 w-3.5" /> Aplicar modelo
             </button>
           </div>
+          )}
           <div className="flex gap-2">
             <button onClick={onClose}
               className="rounded-lg border border-border px-4 py-2 text-sm font-semibold text-muted-foreground hover:text-foreground transition-colors">
@@ -3465,7 +3510,6 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
       notificar(e instanceof Error ? e.message : 'Não foi possível salvar as tags.', 'erro');
     }
   }
-  const podeConfigurarTags = !modoCliente || gestorCliente;
 
   /**
    * Recorte da análise de IA: CLIENTE + PERÍODO, nada mais (instrução do
@@ -4193,7 +4237,7 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
             </span>
           )}
           <div className="ml-auto flex items-center gap-2">
-            {clientId && podeConfigurarTags && (
+            {clientId && (
               <button
                 type="button"
                 onClick={() => setShowTagsConfig(true)}
@@ -4202,6 +4246,19 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
               >
                 <Tag className="h-3.5 w-3.5" />
                 <span className="hidden sm:inline">Tags</span>
+              </button>
+            )}
+            {/* Etapas do Kanban: o usuário do cliente não tem o ⋮ (que é da agência),
+                então a porta dele para reordenar/renomear colunas mora aqui (2026-10-23). */}
+            {clientId && modoCliente && selectedFunnel && (
+              <button
+                type="button"
+                onClick={() => setShowFunnelEditor(true)}
+                title="Mudar a ordem, o nome, criar ou excluir colunas do Kanban"
+                className="flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs font-semibold text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              >
+                <Layers className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Etapas</span>
               </button>
             )}
             {/* Análise de IA sob demanda — recupera o retroativo que a
@@ -4309,7 +4366,7 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
                 onArrasteMudou={v => { arrastandoRef.current = v; }}
                 tags={tags}
                 onSetTags={(lead, ids) => void definirTags(lead, ids)}
-                onConfigurarTags={podeConfigurarTags ? () => setShowTagsConfig(true) : undefined}
+                onConfigurarTags={() => setShowTagsConfig(true)}
               />
           </div>
 
@@ -4353,7 +4410,7 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
           clientId={clientId}
           tags={tags}
           onSetTags={(lead, ids) => void definirTags(lead, ids)}
-          onConfigurarTags={podeConfigurarTags ? () => setShowTagsConfig(true) : undefined}
+          onConfigurarTags={() => setShowTagsConfig(true)}
         />
       )}
 

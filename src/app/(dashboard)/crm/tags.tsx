@@ -11,7 +11,7 @@
  *   no próprio card (para o pointerdown não virar arraste, o botão engole o
  *   evento, como os vizinhos dele já fazem);
  * - `TagsConfigModal`: criar/renomear/recolorir/apagar as tags do cliente —
- *   o gestor da clínica e a agência; o atendente só aplica.
+ *   a agência e qualquer usuário do cliente (gestor ou atendente, desde 23/10).
  *
  * As tags chegam DENTRO do lead (`lead.tags`, montadas no SQL da listagem);
  * o catálogo do cliente vem de `/api/crm/tags?clientId=` via `useTagsDoCliente`.

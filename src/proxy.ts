@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { verifySessionToken, SESSION_COOKIE, isValidInternalToken, INTERNAL_HEADER } from '@/lib/session';
 import {
-  carregarAcesso, clienteDaMidia, clienteDaTag, clienteDoLead, clienteDoFunil, clienteNoCaminho, clientesCitados, leadsCitados, regraCliente, TEAM_CLIENTE,
+  carregarAcesso, clienteDaEtapa, clienteDaMidia, clienteDaTag, clienteDoLead, clienteDoFunil, clienteNoCaminho, clientesCitados, leadsCitados, regraCliente, TEAM_CLIENTE,
   type AcessoUsuario,
 } from '@/lib/acesso';
 import { hostDaRequisicao, hostSoEquipe, MSG_USAR_CRM } from '@/lib/host-acesso';
@@ -198,10 +198,16 @@ async function barrarForaDoCliente(req: NextRequest, acesso: AcessoUsuario): Pro
     if (!dono) return Response.json({ error: 'Tag não encontrada.' }, { status: 404 });
     citados.push(dono);
   }
-  const funil = pathname.match(/^\/api\/crm\/funnels\/([0-9a-f-]{36})\//);
+  const funil = pathname.match(/^\/api\/crm\/funnels\/([0-9a-f-]{36})(\/|$)/);
   if (funil) {
     const dono = await clienteDoFunil(funil[1]);
     if (!dono) return Response.json({ error: 'Funil não encontrado.' }, { status: 404 });
+    citados.push(dono);
+  }
+  const etapa = pathname.match(/^\/api\/crm\/stages\/([0-9a-f-]{36})$/);
+  if (etapa) {
+    const dono = await clienteDaEtapa(etapa[1]);
+    if (!dono) return Response.json({ error: 'Etapa não encontrada.' }, { status: 404 });
     citados.push(dono);
   }
 

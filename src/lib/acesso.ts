@@ -121,12 +121,20 @@ export const ROTAS_CLIENTE: Regra[] = [
   { padrao: new RegExp(`^/api/crm/${UUID}/eventos$`), metodos: ['GET'], exigeCliente: true },
   { padrao: /^\/api\/crm\/equipe$/, metodos: ['GET'], exigeCliente: true },
   { padrao: /^\/api\/crm\/respostas-rapidas$/, metodos: ['GET', 'POST', 'DELETE'], exigeCliente: true },
-  // tags de qualificação: quem atende lê e aplica; criar/renomear/apagar é do gestor
-  { padrao: /^\/api\/crm\/tags$/, metodos: ['GET'], exigeCliente: true },
+  // tags de qualificação: QUALQUER usuário do cliente lê, aplica, cria, renomeia
+  // e apaga (pedido do Matheus, 2026-10-23: o atendente é quem qualifica no dia
+  // a dia). O dono da tag por id é resolvido no proxy (`clienteDaTag`).
+  { padrao: /^\/api\/crm\/tags$/, metodos: ['GET', 'POST'], exigeCliente: true },
+  { padrao: new RegExp(`^/api/crm/tags/${UUID}$`), metodos: ['PATCH', 'DELETE'], exigeCliente: true },
   { padrao: new RegExp(`^/api/crm/${UUID}/tags$`), metodos: ['PUT'], exigeCliente: true },
-  // funil (só leitura — editar funil é da agência)
+  // funil: criar/apagar FUNIL é da agência; as ETAPAS do funil (ordem, nome,
+  // criar, excluir) qualquer usuário do cliente edita (pedido do Matheus,
+  // 2026-10-23). O degrau da etapa (funil da dashboard) a rota ignora para
+  // usuário de cliente. Dono do funil/etapa resolvido pelo id no proxy.
   { padrao: /^\/api\/crm\/funnels$/, metodos: ['GET'], exigeCliente: true },
-  { padrao: new RegExp(`^/api/crm/funnels/${UUID}/stages$`), metodos: ['GET'], exigeCliente: false },
+  { padrao: new RegExp(`^/api/crm/funnels/${UUID}$`), metodos: ['PUT'], exigeCliente: true },
+  { padrao: new RegExp(`^/api/crm/funnels/${UUID}/stages$`), metodos: ['GET', 'POST'], exigeCliente: true },
+  { padrao: new RegExp(`^/api/crm/stages/${UUID}$`), metodos: ['PUT', 'DELETE'], exigeCliente: true },
   // conversas
   { padrao: /^\/api\/crm\/inbox$/, metodos: ['GET', 'POST'], exigeCliente: true },
   { padrao: /^\/api\/crm\/sync-history$/, metodos: ['POST'], exigeCliente: true },
@@ -148,9 +156,6 @@ export const ROTAS_CLIENTE: Regra[] = [
 export const ROTAS_GESTOR: Regra[] = [
   // equipe do próprio cliente
   { padrao: /^\/api\/crm\/equipe-cliente$/, metodos: ['GET', 'POST', 'PATCH'], exigeCliente: true },
-  // catálogo de tags do cliente (o dono da tag é resolvido pelo id no proxy)
-  { padrao: /^\/api\/crm\/tags$/, metodos: ['POST'], exigeCliente: true },
-  { padrao: new RegExp(`^/api/crm/tags/${UUID}$`), metodos: ['PATCH', 'DELETE'], exigeCliente: true },
   // aba Atendimento do CRM (nota, auditoria e o relatório em PDF). Só LEITURA:
   // gerar auditoria nova (POST) gasta IA e é da rotina da agência.
   { padrao: /^\/api\/crm\/attendance$/, metodos: ['GET'], exigeCliente: true },
@@ -211,7 +216,13 @@ export async function clienteDaTag(tagId: string): Promise<string | null> {
   return rows[0]?.client_id ?? null;
 }
 
-/** Dono do funil (para /api/crm/funnels/<id>/stages). */
+/** Dono da etapa (para /api/crm/stages/<id>). */
+export async function clienteDaEtapa(stageId: string): Promise<string | null> {
+  const { rows } = await getPool().query(`SELECT client_id FROM public.crm_stages WHERE id::text = $1 LIMIT 1`, [stageId]);
+  return rows[0]?.client_id ?? null;
+}
+
+/** Dono do funil (para /api/crm/funnels/<id> e /api/crm/funnels/<id>/stages). */
 export async function clienteDoFunil(funnelId: string): Promise<string | null> {
   const { rows } = await getPool().query(`SELECT client_id FROM public.crm_funnels WHERE id::text = $1 LIMIT 1`, [funnelId]);
   return rows[0]?.client_id ?? null;

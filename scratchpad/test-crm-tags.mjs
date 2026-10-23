@@ -58,9 +58,10 @@ function poolStub({ leadDoCliente = true, validas = [] } = {}) {
 // acesso: quem pode o quê
 t('atendente lê catálogo', regraCliente('/api/crm/tags', 'GET', false) !== null);
 t('atendente aplica tag no lead', regraCliente(`/api/crm/${U}/tags`, 'PUT', false) !== null);
-t('atendente NÃO cria tag', regraCliente('/api/crm/tags', 'POST', false) === null);
-t('atendente NÃO renomeia', regraCliente(`/api/crm/tags/${U}`, 'PATCH', false) === null);
-t('atendente NÃO apaga', regraCliente(`/api/crm/tags/${U}`, 'DELETE', false) === null);
+t('atendente cria tag', regraCliente('/api/crm/tags', 'POST', false) !== null);
+t('atendente renomeia', regraCliente(`/api/crm/tags/${U}`, 'PATCH', false) !== null);
+t('atendente apaga', regraCliente(`/api/crm/tags/${U}`, 'DELETE', false) !== null);
+t('atendente NÃO usa a rota de lote', regraCliente(`/api/crm/tags/${U}/assign`, 'POST', false) === null);
 t('gestor cria', regraCliente('/api/crm/tags', 'POST', true) !== null);
 t('gestor renomeia', regraCliente(`/api/crm/tags/${U}`, 'PATCH', true) !== null);
 t('gestor apaga', regraCliente(`/api/crm/tags/${U}`, 'DELETE', true) !== null);
