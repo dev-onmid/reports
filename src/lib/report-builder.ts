@@ -2,7 +2,7 @@ import { makeServerPool } from '@/lib/server-db';
 import { getFreshMetaToken } from '@/lib/meta-token';
 import { RESULT_ACTIONS, NEW_CONTACT_ACTIONS, PURCHASE_ACTIONS, sumActions } from './report-runner';
 import {
-  fetchBairros, fetchMetaData, fetchInstagramData, autoPreviousPeriod, rotuloPeriodo, rotuloVs, mesesCheios, sanitizeJsonValue, comprasReaisGoogle,
+  CAMPANHAS_META_POR_PAGINA, fetchBairros, fetchMetaData, fetchInstagramData, autoPreviousPeriod, rotuloPeriodo, rotuloVs, mesesCheios, sanitizeJsonValue, comprasReaisGoogle,
   sCapa, sVisaoGeral, sFunilComercial, sCanais, sSiteResumo, sSiteAudiencia, sRegioes, sPaidTrafficResumo, sMetaAdsResumo, sMetaAdsCampanhas, sCriativos,
   sGoogleAdsResumo, sGoogleAdsCampanhas, sGoogleAdsPalavrasChave,
   sInstagram, sInstagramCalendar, sInstagramPosts, sInstagramSpotlight,
@@ -730,8 +730,11 @@ export async function buildOmniReport(input: {
   const hasDestaques          = meta !== null && meta.campanhas.length > 0 && en('meta_campanhas');
   const hasGoogleDestaques    = googleDetailed !== null && googleDetailed.campanhas.length > 0 && en('google_campanhas');
   const hasGooglePalavras     = googleDetailed !== null && googleDetailed.palavrasChave.length > 0 && en('google_keywords');
-  const hasCriativos          = creatives.length > 0 && en('criativos');
-  const destaquePages         = hasDestaques ? Math.ceil(meta!.campanhas.length / 4) : 0;
+  // Com criativos por campanha dentro de "Campanhas Veiculadas", a página solta de
+  // "Principais Criativos" sai — ela concentrava tudo numa campanha só (23/10/2026).
+  const criativosNasCampanhas = hasDestaques && meta!.campanhas.some(c => (c.criativos?.length ?? 0) > 0);
+  const hasCriativos          = creatives.length > 0 && en('criativos') && !criativosNasCampanhas;
+  const destaquePages         = hasDestaques ? Math.ceil(meta!.campanhas.length / CAMPANHAS_META_POR_PAGINA) : 0;
   const googleDestaquePages   = hasGoogleDestaques ? Math.ceil(googleDetailed!.campanhas.length / 4) : 0;
   const todosListar           = postsParaListar(ordenarPostsPorData(igPosts));
   const todosConteudosPages   = hasTodosConteudos ? todosListar.paginas : 0;
@@ -804,8 +807,8 @@ export async function buildOmniReport(input: {
   const receitaPlat = receitaPorPlataforma(crm.canais?.origens ?? []);
   if (hasMeta)        slides.push(sMetaAdsResumo(meta!, ++i, total, comercialDaPlataforma(receitaPlat.meta, meta!.investimento), compMeta));
   if (hasDestaques) {
-    for (let start = 0; start < meta!.campanhas.length; start += 4) {
-      slides.push(sMetaAdsCampanhas(meta!, diag, ++i, total, periodo, meta!.campanhas.slice(start, start + 4), compMeta));
+    for (let start = 0; start < meta!.campanhas.length; start += CAMPANHAS_META_POR_PAGINA) {
+      slides.push(sMetaAdsCampanhas(meta!, diag, ++i, total, periodo, meta!.campanhas.slice(start, start + CAMPANHAS_META_POR_PAGINA), compMeta));
     }
   }
   if (hasCriativos)   slides.push(sCriativos(creatives, ++i, total));

@@ -210,7 +210,33 @@ export type CampanhaDetalhada = {
     visitas_pagina: number;       // landing_page_view — pessoas que de fato abriram o cardápio
     iniciaram_checkout: number;   // initiate_checkout
   };
+  /** Melhores criativos DESTA campanha, ranqueados pelo resultado do objetivo dela. */
+  criativos?: CriativoCampanha[];
+  /** Quantos anúncios tiveram entrega na campanha no período. */
+  anuncios?: number;
 };
+
+/** Criativo dentro de uma campanha, já medido pelo resultado do objetivo DELA. */
+export type CriativoCampanha = {
+  ad_id: string;
+  nome: string;
+  investimento: number;
+  /** Resultado no objetivo da campanha: conversas, leads, compras, cliques, alcance ou engajamentos. */
+  resultado: number;
+  /** Valor de venda (só campanha de vendas). */
+  valor: number;
+  impressoes: number;
+  cliques: number;
+  alcance: number;
+  ctr: number;
+  thumbnail_url: string | null;
+  media_url: string | null;
+};
+
+/** Quantas campanhas por página em "Campanhas Veiculadas Meta Ads" (cada uma com os criativos). */
+export const CAMPANHAS_META_POR_PAGINA = 2;
+/** Quantos criativos aparecem por campanha. */
+export const CRIATIVOS_POR_CAMPANHA = 3;
 
 export type MetaBreakdownLevel = 'campaign' | 'adset';
 
@@ -1439,6 +1465,86 @@ function campaignKindFor(c: CampanhaDetalhada): CampaignKind {
 }
 
 // Combined Meta fetch: account totals + campaign details (actions/frequency) + creative thumbnails.
+type AnuncioBruto = {
+  ad_id: string; ad_name: string; spend: number; resultado: number; purchaseValue: number;
+  impressions: number; reach: number; clicks: number; ctr: number;
+  conversas: number; leads: number; compras: number; engajamentos: number;
+};
+
+/** Resultado de um anúncio no objetivo da campanha dele. */
+export function resultadoDoAnuncio(kind: CampaignKind, ad: AnuncioBruto): number {
+  if (kind === 'mensagens') return ad.conversas;
+  if (kind === 'leads') return ad.leads;
+  if (kind === 'vendas') return ad.compras;
+  if (kind === 'trafego') return ad.clicks;
+  if (kind === 'alcance') return ad.reach;
+  return ad.engajamentos;
+}
+
+/**
+ * Ranking dos criativos de UMA campanha pelo resultado do objetivo dela. Mais
+ * resultado primeiro; no empate, o mais barato por resultado. Vendas ordena por
+ * valor de venda. Quem não teve resultado vai para o fim, por investimento.
+ */
+export function rankearCriativosDaCampanha(kind: CampaignKind, lista: AnuncioBruto[]): CriativoCampanha[] {
+  const itens: CriativoCampanha[] = lista.map(ad => ({
+    ad_id: ad.ad_id,
+    nome: ad.ad_name,
+    investimento: ad.spend,
+    resultado: resultadoDoAnuncio(kind, ad),
+    valor: kind === 'vendas' ? ad.purchaseValue : 0,
+    impressoes: ad.impressions,
+    cliques: ad.clicks,
+    alcance: ad.reach,
+    ctr: ad.ctr,
+    thumbnail_url: null,
+    media_url: null,
+  }));
+  const custo = (c: CriativoCampanha) => c.resultado > 0 ? c.investimento / c.resultado : Infinity;
+  return itens.sort((a, b) => {
+    if ((a.resultado > 0) !== (b.resultado > 0)) return a.resultado > 0 ? -1 : 1;
+    if (a.resultado === 0) return b.investimento - a.investimento;
+    if (kind === 'vendas' && b.valor !== a.valor) return b.valor - a.valor;
+    return b.resultado - a.resultado || custo(a) - custo(b);
+  });
+}
+
+/**
+ * Miniatura e mídia de vários anúncios em LOTE (?ids=, 50 por chamada) — antes era
+ * 1 a 2 chamadas por anúncio, o que não escala para "3 criativos por campanha".
+ * Vídeo/Reels: picture (capa estável) e source (mp4 que toca no clique).
+ */
+async function resolverMidiasDosAnuncios(adIds: string[], token: string): Promise<Map<string, { thumbnail_url: string | null; media_url: string | null }>> {
+  type Cr = { image_url?: string; thumbnail_url?: string; video_id?: string; object_story_spec?: { video_data?: { video_id?: string; image_url?: string } } };
+  const out = new Map<string, { thumbnail_url: string | null; media_url: string | null }>();
+  const criativos = new Map<string, Cr>();
+  const lotes = (ids: string[]) => Array.from({ length: Math.ceil(ids.length / 50) }, (_, k) => ids.slice(k * 50, k * 50 + 50));
+  await Promise.all(lotes(adIds).map(async lote => {
+    const url = `https://graph.facebook.com/v21.0/?ids=${lote.join(',')}&fields=creative{image_url,thumbnail_url,video_id,object_story_spec{video_data{video_id,image_url}}}&access_token=${token}`;
+    const res = await fetch(url, { signal: AbortSignal.timeout(15000) }).catch(() => null);
+    if (!res?.ok) return;
+    const j = await res.json() as Record<string, { creative?: Cr }>;
+    for (const [id, v] of Object.entries(j)) if (v?.creative) criativos.set(id, v.creative);
+  }));
+  const videoDe = (cr: Cr) => cr.video_id ?? cr.object_story_spec?.video_data?.video_id ?? null;
+  const videoIds = [...new Set([...criativos.values()].map(videoDe).filter((v): v is string => !!v))];
+  const videos = new Map<string, { picture?: string; source?: string }>();
+  await Promise.all(lotes(videoIds).map(async lote => {
+    const res = await fetch(`https://graph.facebook.com/v21.0/?ids=${lote.join(',')}&fields=picture,source&access_token=${token}`, { signal: AbortSignal.timeout(15000) }).catch(() => null);
+    if (!res?.ok) return;
+    const j = await res.json() as Record<string, { picture?: string; source?: string }>;
+    for (const [id, v] of Object.entries(j)) videos.set(id, v);
+  }));
+  for (const [id, cr] of criativos) {
+    const vid = videoDe(cr);
+    const v = vid ? videos.get(vid) : undefined;
+    const thumbnail_url = v?.picture ?? cr.object_story_spec?.video_data?.image_url ?? cr.image_url ?? cr.thumbnail_url ?? null;
+    const media_url = v?.source ?? cr.image_url ?? thumbnail_url;
+    out.set(id, { thumbnail_url, media_url });
+  }
+  return out;
+}
+
 export async function fetchMetaData(
   connectionId: string | null | undefined,
   accountIds: string[],
@@ -1480,6 +1586,10 @@ export async function fetchMetaData(
     reach: number;
     clicks: number;
     ctr: number;
+    conversas: number;
+    leads: number;
+    compras: number;
+    engajamentos: number;
   }> = [];
 
   await Promise.allSettled(accountIds.map(async (accountId) => {
@@ -1584,11 +1694,18 @@ export async function fetchMetaData(
     urlAd.searchParams.set('fields', 'ad_id,ad_name,campaign_name,adset_name,objective,spend,impressions,reach,clicks,ctr,actions,conversions,action_values,cost_per_action_type,purchase_roas');
     urlAd.searchParams.set('time_range', timeRange);
     urlAd.searchParams.set('level', 'ad');
-    urlAd.searchParams.set('limit', '20');
+    // ⚠️ Era limit=20 da CONTA INTEIRA, sem ordem: os 20 que a Meta devolvia primeiro
+    // costumavam ser todos da mesma campanha, e os "principais criativos" saíam de uma
+    // campanha só (Matheus, 23/10/2026). Agora: todos os anúncios com entrega, paginando.
+    urlAd.searchParams.set('limit', '500');
+    urlAd.searchParams.set('filtering', JSON.stringify([{ field: 'spend', operator: 'GREATER_THAN', value: 0 }]));
     urlAd.searchParams.set('access_token', token);
-    const resAd = await fetch(urlAd.toString(), { signal: AbortSignal.timeout(15000) }).catch(() => null);
-    if (resAd?.ok) {
-      const j = await resAd.json() as { data?: Record<string, unknown>[] };
+    let proximaPagina: string | null = urlAd.toString();
+    for (let pagina = 0; proximaPagina && pagina < 6; pagina++) {
+      const resAd = await fetch(proximaPagina, { signal: AbortSignal.timeout(20000) }).catch(() => null);
+      if (!resAd?.ok) break;
+      const j = await resAd.json() as { data?: Record<string, unknown>[]; paging?: { next?: string } };
+      proximaPagina = j.paging?.next ?? null;
       for (const row of j.data ?? []) {
         const actMap: Record<string, number> = {};
         const valueMap: Record<string, number> = {};
@@ -1622,6 +1739,10 @@ export async function fetchMetaData(
           reach:         parseInt(String(row.reach || '0'), 10),
           clicks:        parseInt(String(row.clicks || '0'), 10),
           ctr:           parseFloat(String(row.ctr || '0')),
+          conversas:     firstActionValue(actMap, MESSAGE_ACTION_KEYS),
+          leads:         firstActionValue(actMap, LEAD_ACTION_KEYS),
+          compras:       actMap['offsite_conversion.fb_pixel_purchase'] || actMap['purchase'] || actMap['omni_purchase'] || 0,
+          engajamentos:  firstActionValue(actMap, ['post_engagement', 'page_engagement']),
         });
       }
     }
@@ -1642,6 +1763,22 @@ export async function fetchMetaData(
   };
 
   if (opts.semCriativos) return { meta, creatives: [] };
+
+  // Criativos POR CAMPANHA, cada um medido pelo resultado do objetivo da campanha
+  // (campaignKindFor — a mesma régua do card da campanha). Assim uma campanha de
+  // "engajamento" que na verdade é de WhatsApp ranqueia por conversa, não por curtida.
+  const chaveDoAnuncio = (ad: (typeof adInsights)[number]) => chaveCampanha(breakdownLevel === 'adset' ? ad.adset_name : ad.campaign_name);
+  const anunciosPorCampanha = new Map<string, typeof adInsights>();
+  for (const ad of adInsights) {
+    const k = chaveDoAnuncio(ad);
+    if (!anunciosPorCampanha.has(k)) anunciosPorCampanha.set(k, []);
+    anunciosPorCampanha.get(k)!.push(ad);
+  }
+  for (const c of meta.campanhas) {
+    const lista = anunciosPorCampanha.get(chaveCampanha(c.nome)) ?? [];
+    c.anuncios = lista.length;
+    c.criativos = rankearCriativosDaCampanha(campaignKindFor(c), lista).slice(0, CRIATIVOS_POR_CAMPANHA);
+  }
 
   // Pick top creatives PER OBJECTIVE CATEGORY (Vendas/Leads/Mensagens/Tráfego/Engajamento/
   // Alcance), not one flat ranking by raw volume — a global "highest resultado" sort lets
@@ -1678,54 +1815,22 @@ export async function fetchMetaData(
     .sort((a, b) => b[1].reduce((s, x) => s + x.spend, 0) - a[1].reduce((s, x) => s + x.spend, 0));
   const topByCategory = orderedCategories.flatMap(([cat, list]) => rankWithinCategory(cat, list).slice(0, PER_CATEGORY_CAP)).slice(0, 6);
 
-  const creatives: Creative[] = await Promise.all(topByCategory.map(async (ad) => {
-    if (!ad.ad_id) return { nome: ad.ad_name, spend: ad.spend, resultado: ad.resultado, purchaseValue: ad.purchaseValue, campaign_name: ad.campaign_name, adset_name: ad.adset_name, objective: ad.objective, impressions: ad.impressions, reach: ad.reach, clicks: ad.clicks, ctr: ad.ctr, thumbnail_url: null, media_url: null };
-    // Fetch creative fields needed to resolve the best thumbnail.
-    // video_id is the direct reference used by Reels/video ads; image_url is for static ads.
-    // creative.thumbnail_url has an oe= expiry param — we prefer video.picture when possible.
-    const creativeFields = 'image_url,thumbnail_url,video_id,object_story_spec{video_data{video_id,image_url}}';
-    const url = `https://graph.facebook.com/v21.0/${ad.ad_id}?fields=creative{${creativeFields}}&access_token=${token}`;
-    const res = await fetch(url, { signal: AbortSignal.timeout(8000) }).catch(() => null);
-    let thumbnail_url: string | null = null;
-    let media_url: string | null = null;
-    if (res?.ok) {
-      const j = await res.json() as {
-        creative?: {
-          image_url?: string;
-          thumbnail_url?: string;
-          video_id?: string;
-          object_story_spec?: { video_data?: { video_id?: string; image_url?: string } };
-        };
-      };
-      const cr = j.creative ?? {};
-      const videoId = cr.video_id ?? cr.object_story_spec?.video_data?.video_id ?? null;
-
-      // For video/Reels ads, fetch the video object's picture (stable CDN thumbnail) and
-      // source (the playable mp4 file) — `source` is what we link to so the click actually
-      // plays the ad, not just shows the cover frame.
-      if (videoId) {
-        const vRes = await fetch(
-          `https://graph.facebook.com/v21.0/${videoId}?fields=picture,source&access_token=${token}`,
-          { signal: AbortSignal.timeout(6000) },
-        ).catch(() => null);
-        if (vRes?.ok) {
-          const vj = await vRes.json() as { picture?: string; source?: string };
-          thumbnail_url = vj.picture ?? null;
-          media_url = vj.source ?? null;
-        }
-        // Fallback: image_url set at ad creation time (explicit thumbnail in video_data)
-        if (!thumbnail_url) {
-          thumbnail_url = cr.object_story_spec?.video_data?.image_url ?? null;
-        }
-      }
-      // Static image ad or last resort — the full-size image is itself the click target.
-      if (!thumbnail_url) {
-        thumbnail_url = cr.image_url ?? cr.thumbnail_url ?? null;
-      }
-      if (!media_url) {
-        media_url = cr.image_url ?? thumbnail_url ?? null;
-      }
+  // Miniaturas de TODOS os criativos que vão aparecer (por campanha + a lista geral
+  // usada pelos relatórios de delivery/social), numa leva só e em lote.
+  const idsParaMidia = [...new Set([
+    ...meta.campanhas.flatMap(c => (c.criativos ?? []).map(x => x.ad_id)),
+    ...topByCategory.map(ad => ad.ad_id),
+  ].filter(Boolean))];
+  const midias = await resolverMidiasDosAnuncios(idsParaMidia, token);
+  for (const c of meta.campanhas) {
+    for (const cr of c.criativos ?? []) {
+      const m = midias.get(cr.ad_id);
+      if (m) { cr.thumbnail_url = m.thumbnail_url; cr.media_url = m.media_url; }
     }
+  }
+
+  const creatives: Creative[] = topByCategory.map(ad => {
+    const m = midias.get(ad.ad_id);
     return {
       nome: ad.ad_name,
       spend: ad.spend,
@@ -1738,10 +1843,10 @@ export async function fetchMetaData(
       reach: ad.reach,
       clicks: ad.clicks,
       ctr: ad.ctr,
-      thumbnail_url,
-      media_url,
+      thumbnail_url: m?.thumbnail_url ?? null,
+      media_url: m?.media_url ?? null,
     };
-  }));
+  });
 
   return { meta, creatives };
 }
@@ -4875,6 +4980,28 @@ export function sCriativos(creatives: Creative[], idx: number, total: number): s
 
 // ── Expanded slides ───────────────────────────────────────────────────────────
 
+/** Como chamar o resultado de cada tipo de campanha (singular, plural, custo). */
+const UNIDADE_DO_RESULTADO: Record<CampaignKind, { um: string; varios: string; custo: string }> = {
+  mensagens:   { um: 'conversa', varios: 'conversas', custo: 'por conversa' },
+  leads:       { um: 'lead', varios: 'leads', custo: 'por lead' },
+  vendas:      { um: 'compra', varios: 'compras', custo: 'por compra' },
+  trafego:     { um: 'clique', varios: 'cliques', custo: 'por clique' },
+  alcance:     { um: 'pessoa alcançada', varios: 'pessoas alcançadas', custo: 'por mil' },
+  engajamento: { um: 'engajamento', varios: 'engajamentos', custo: 'por engajamento' },
+};
+
+/** Nome do anúncio legível: sem colchetes de nomenclatura, por code point (emoji inteiro). */
+function nomeDoCriativo(nome: string): string {
+  const limpo = (nome || '').replace(/\[[^\]]*\]/g, ' ').replace(/\s+/g, ' ').trim() || nome || 'Criativo';
+  return escapeHtmlTexto(truncateCaptionText(limpo, 34));
+}
+function escapeHtmlTexto(t: string): string {
+  return t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+function escapeAttr(t: string): string {
+  return escapeHtmlTexto(t || '').replace(/"/g, '&quot;');
+}
+
 export function sMetaAdsCampanhas(meta: MetaAdsFull, diag: DiagJson, idx: number, total: number, periodo = 'Maio/2026', campanhas = meta.campanhas, comparativo?: ComparativoAds<MetaAdsFull> | null): string {
   const campaignKind = campaignKindFor;
 
@@ -5031,38 +5158,94 @@ export function sMetaAdsCampanhas(meta: MetaAdsFull, diag: DiagJson, idx: number
       ].join('');
     }
 
-    return `<div style="background:${style.bg};border:1px solid ${style.border};border-left:5px solid ${style.accent};border-radius:18px;box-shadow:0 12px 28px rgba(15,23,42,.052);padding:20px 22px;box-sizing:border-box;display:flex;flex-direction:column;min-height:200px">
-      <div style="display:flex;align-items:flex-start;gap:16px;padding-bottom:14px">
-        <div style="width:52px;height:52px;border-radius:50%;background:${style.iconBg};display:flex;align-items:center;justify-content:center;flex-shrink:0">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="${style.accent}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${icoPath}</svg>
+    // ── O que aconteceu na campanha, em uma frase ──
+    const top = c.criativos?.[0];
+    const unidade = UNIDADE_DO_RESULTADO[kind];
+    const resultadoCamp = kind === 'mensagens' ? m.conversas : kind === 'leads' ? m.leads : kind === 'vendas' ? m.compras
+      : kind === 'trafego' ? m.cliques : kind === 'alcance' ? m.alcance : 0;
+    const custoCamp = resultadoCamp > 0 && m.investimento > 0 ? m.investimento / resultadoCamp : 0;
+    const fraseCampanha = kind === 'alcance'
+      ? `${brlOrDash(m.investimento)} investidos alcançaram ${numOrDash(m.alcance)} pessoas, com frequência de ${m.frequencia > 0 ? m.frequencia.toFixed(2).replace('.', ',') : '—'}.`
+      : kind === 'engajamento'
+      ? `${brlOrDash(m.investimento)} investidos em engajamento, com ${numOrDash(m.alcance)} pessoas alcançadas.`
+      : resultadoCamp > 0
+      ? `${brlOrDash(m.investimento)} investidos geraram ${num(Math.round(resultadoCamp))} ${resultadoCamp === 1 ? unidade.um : unidade.varios}, a ${brlPrecise(custoCamp)} cada${kind === 'vendas' && m.valor_compras > 0 ? `, somando ${brl(m.valor_compras)} em vendas` : ''}.`
+      : `${brlOrDash(m.investimento)} investidos sem ${unidade.varios} registrados no período.`;
+    const fraseCriativo = top && top.resultado > 0 && (c.anuncios ?? 0) > 1
+      ? ` O criativo que mais trouxe resultado foi "${nomeDoCriativo(top.nome)}", com ${num(Math.round(top.resultado))} ${top.resultado === 1 ? unidade.um : unidade.varios}.`
+      : '';
+
+    // ── Melhores criativos desta campanha ──
+    const criativos = c.criativos ?? [];
+    const cardCriativo = (cr: CriativoCampanha, pos: number) => {
+      const custo = cr.resultado > 0 && cr.investimento > 0 ? cr.investimento / cr.resultado : 0;
+      const linhaResultado = cr.resultado > 0
+        ? `${num(Math.round(cr.resultado))} ${cr.resultado === 1 ? unidade.um : unidade.varios}`
+        : `sem ${unidade.varios}`;
+      const linhaCusto = kind === 'vendas' && cr.valor > 0
+        ? `${brl(cr.valor)} em vendas`
+        : kind === 'alcance'
+        ? (cr.impressoes > 0 ? `CPM ${brlPrecise(cr.investimento / (cr.impressoes / 1000))}` : brlOrDash(cr.investimento))
+        : custo > 0 ? `${brlPrecise(custo)} ${unidade.custo}` : `${brlOrDash(cr.investimento)} investidos`;
+      const capa = cr.thumbnail_url
+        ? `<img src="${cr.thumbnail_url}" alt="" style="width:100%;height:100%;object-fit:cover;display:block" onerror="this.remove()" />`
+        : `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-family:${INTER};font-size:11px;font-weight:700;color:${MUTED}">sem prévia</div>`;
+      const abre = cr.media_url ? `<a href="${cr.media_url}" target="_blank" rel="noopener noreferrer" style="display:block;position:relative;height:148px;border-radius:10px;overflow:hidden;background:${ROW};border:1px solid #E8EDF4">` : `<div style="position:relative;height:148px;border-radius:10px;overflow:hidden;background:${ROW};border:1px solid #E8EDF4">`;
+      return `<div style="min-width:0;display:flex;flex-direction:column;gap:7px">
+        ${abre}
+          ${capa}
+          <span style="position:absolute;top:7px;left:7px;font-family:${INTER};font-size:11px;font-weight:900;color:#FFFFFF;background:${pos === 0 ? style.accent : 'rgba(15,23,42,.72)'};border-radius:999px;padding:2px 8px">${pos + 1}º</span>
+        ${cr.media_url ? '</a>' : '</div>'}
+        <p style="font-family:${INTER};font-size:11px;font-weight:700;color:#475569;margin:0;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${escapeAttr(cr.nome)}">${nomeDoCriativo(cr.nome)}</p>
+        <p style="font-family:${INTER};font-size:16px;font-weight:900;color:${cr.resultado > 0 ? style.accent : MUTED};margin:0;line-height:1.1;white-space:nowrap">${linhaResultado}</p>
+        <p style="font-family:${INTER};font-size:11px;font-weight:700;color:#163461;margin:0;line-height:1.2;white-space:nowrap">${linhaCusto}</p>
+      </div>`;
+    };
+    const tituloCriativos = (c.anuncios ?? 0) > CRIATIVOS_POR_CAMPANHA
+      ? `Melhores criativos · ${criativos.length} de ${c.anuncios} por ${unidade.varios}`
+      : `Criativos · por ${unidade.varios}`;
+    const blocoCriativos = criativos.length > 0
+      ? `<div style="min-width:0;display:flex;flex-direction:column;gap:10px">
+          <p style="font-family:${INTER};font-size:11px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:${style.accent};margin:0">${tituloCriativos}</p>
+          <div style="display:grid;grid-template-columns:repeat(${CRIATIVOS_POR_CAMPANHA},minmax(0,1fr));gap:12px">${criativos.map(cardCriativo).join('')}</div>
+        </div>`
+      : `<div style="min-width:0;display:flex;align-items:center;justify-content:center;border:1px dashed ${style.border};border-radius:12px;padding:18px">
+          <p style="font-family:${INTER};font-size:13px;font-weight:600;color:${MUTED};margin:0;text-align:center">Nenhum anúncio desta ${meta.nivel === 'adset' ? 'conjunto' : 'campanha'} veio com entrega no período.</p>
+        </div>`;
+
+    return `<div style="background:${style.bg};border:1px solid ${style.border};border-left:5px solid ${style.accent};border-radius:18px;box-shadow:0 12px 28px rgba(15,23,42,.052);padding:16px 22px;box-sizing:border-box;display:grid;grid-template-columns:minmax(0,1.12fr) minmax(0,1fr);gap:26px;min-height:0">
+      <div style="min-width:0;display:flex;flex-direction:column">
+        <div style="display:flex;align-items:flex-start;gap:14px;padding-bottom:10px">
+          <div style="width:44px;height:44px;border-radius:50%;background:${style.iconBg};display:flex;align-items:center;justify-content:center;flex-shrink:0">
+            <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="${style.accent}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${icoPath}</svg>
+          </div>
+          <div style="min-width:0">
+            <p style="font-size:18px;font-weight:800;color:${FG};font-family:${INTER};margin:0 0 3px;line-height:1.2">${name}${chipNova}</p>
+            <p style="font-size:12.5px;font-weight:500;color:#163461;font-family:${INTER};margin:0;line-height:1.4">${fraseCampanha}${fraseCriativo}</p>
+          </div>
         </div>
-        <div style="min-width:0">
-          <p style="font-size:19px;font-weight:800;color:${FG};font-family:${INTER};margin:0 0 4px;line-height:1.25">${name}${chipNova}</p>
-          <p style="font-size:13px;font-weight:500;color:#163461;font-family:${INTER};margin:0;line-height:1.45;max-width:320px">${descriptionFor(c)}</p>
+        <div style="border-top:1px solid #EEF2F7"></div>
+        <div style="padding:12px 0 0;display:flex;flex-direction:column;gap:12px">
+          <div style="display:flex;gap:12px">${row1}</div>
+          <div style="display:flex;gap:12px">${row2}</div>
         </div>
       </div>
-
-      <div style="border-top:1px solid #EEF2F7"></div>
-
-      <div style="padding:14px 0 2px;display:flex;flex-direction:column;gap:12px">
-        <div style="display:flex;gap:12px">${row1}</div>
-        <div style="display:flex;gap:12px">${row2}</div>
-      </div>
+      ${blocoCriativos}
     </div>`;
   }
 
   const month = periodo.split('/')[0]?.toLowerCase() || periodo.toLowerCase();
   const campGrid = campanhas.length > 0
-    ? `<div style="display:grid;grid-template-columns:${campanhas.length === 1 ? '1fr' : '1fr 1fr'};gap:18px 22px">${campanhas.map(campBlock).join('')}</div>`
+    ? `<div style="display:flex;flex-direction:column;gap:16px">${campanhas.map(campBlock).join('')}</div>`
     : '';
 
   const body = `<div data-slide-index="${idx}" data-slide-total="${total}" style="width:1440px;min-height:810px;background:${BG};border:1px solid ${BORDER};margin:0 auto 20px;overflow:hidden;box-sizing:border-box;page-break-after:always;display:flex;flex-direction:column;position:relative">
   <div style="position:absolute;right:80px;top:-120px;width:560px;height:500px;border-radius:50%;background:linear-gradient(135deg,rgba(219,234,254,.5),${PRIMARY}14,rgba(255,255,255,.1));opacity:.75;pointer-events:none"></div>
 
   <div style="position:relative;z-index:1;flex:1;padding:52px 48px 0;display:flex;flex-direction:column">
-    <div style="flex-shrink:0;margin-bottom:28px">
+    <div style="flex-shrink:0;margin-bottom:18px">
       <h1 style="font-family:${INTER};font-size:52px;font-weight:900;color:${FG};line-height:1.05;margin:0 0 8px;letter-spacing:-0.03em">${reportTitle(meta.nivel === 'adset' ? 'Conjuntos de Anúncios Veiculados Meta Ads' : 'Campanhas Veiculadas Meta Ads')}</h1>
-      <p data-conclusion="1" style="font-size:16px;font-weight:500;color:#163461;font-family:${INTER};margin:0">Desempenho ${meta.nivel === 'adset' ? 'dos conjuntos de anúncios Meta Ads' : 'das campanhas Meta Ads'} em ${month}</p>
+      <p data-conclusion="1" style="font-size:16px;font-weight:500;color:#163461;font-family:${INTER};margin:0">Desempenho ${meta.nivel === 'adset' ? 'de cada conjunto de anúncios' : 'de cada campanha'} em ${month} e os criativos que mais trouxeram resultado</p>
     </div>
 
     <div style="flex:1;min-height:0">
@@ -5614,7 +5797,7 @@ export async function buildDeliveryReport(opts: {
   const hasInstagramSpotlight = hasInstagramPosts && en('melhor_conteudo');
   const hasDestaques         = meta !== null && meta.campanhas.length > 0 && en('meta_campanhas');
   const hasCriativos         = creatives.length > 0 && en('criativos');
-  const destaquePages        = hasDestaques ? Math.ceil(meta!.campanhas.length / 4) : 0;
+  const destaquePages        = hasDestaques ? Math.ceil(meta!.campanhas.length / CAMPANHAS_META_POR_PAGINA) : 0;
   const todosListar          = postsParaListar(ordenarPostsPorData(igPosts));
   const todosConteudosPages  = hasTodosConteudos ? todosListar.paginas : 0;
 
@@ -5651,8 +5834,8 @@ export async function buildDeliveryReport(opts: {
   // ── Bloco: tráfego pago (Meta Ads) ─────────────────────────────────────────
   if (hasMeta)        slides.push(sMetaAdsResumo(meta!, ++i, total));
   if (hasDestaques) {
-    for (let start = 0; start < meta!.campanhas.length; start += 4) {
-      slides.push(sMetaAdsCampanhas(meta!, diag, ++i, total, periodo, meta!.campanhas.slice(start, start + 4)));
+    for (let start = 0; start < meta!.campanhas.length; start += CAMPANHAS_META_POR_PAGINA) {
+      slides.push(sMetaAdsCampanhas(meta!, diag, ++i, total, periodo, meta!.campanhas.slice(start, start + CAMPANHAS_META_POR_PAGINA)));
     }
   }
   if (hasCriativos)   slides.push(sCriativos(creatives, ++i, total));
@@ -5891,7 +6074,7 @@ export function __devPreviewFullReport(): string {
   const hasMeta = true, hasInstagram = true, hasInstagramPosts = true, hasInstagramSpotlight = true;
   const hasDestaques = true, hasCriativos = true;
   const instagramCalendarMonths = monthsBetweenInclusive(new Date(2026, 2, 1, 12), new Date(2026, 4, 31, 12));
-  const destaquePages = Math.ceil(meta.campanhas.length / 4);
+  const destaquePages = Math.ceil(meta.campanhas.length / CAMPANHAS_META_POR_PAGINA);
 
   const total = 11 + instagramCalendarMonths.length + destaquePages; // cover + non-calendar sections + one calendar per month
   const slides: string[] = [];
@@ -5907,8 +6090,8 @@ export function __devPreviewFullReport(): string {
   // ── Bloco: tráfego pago (Meta Ads) ─────────────────────────────────────────
   if (hasMeta)               slides.push(sMetaAdsResumo(meta, ++i, total));
   if (hasDestaques) {
-    for (let start = 0; start < meta.campanhas.length; start += 4) {
-      slides.push(sMetaAdsCampanhas(meta, diag, ++i, total, periodo, meta.campanhas.slice(start, start + 4)));
+    for (let start = 0; start < meta.campanhas.length; start += CAMPANHAS_META_POR_PAGINA) {
+      slides.push(sMetaAdsCampanhas(meta, diag, ++i, total, periodo, meta.campanhas.slice(start, start + CAMPANHAS_META_POR_PAGINA)));
     }
   }
   if (hasCriativos)          slides.push(sCriativos(creatives, ++i, total));

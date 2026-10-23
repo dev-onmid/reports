@@ -4,7 +4,7 @@
 //     --packages=external --tsconfig=tsconfig.json --outfile=scratchpad/build/relatorio-crm.mjs
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { ehMesCheio, degrausDoFunil, sFunilComercial, sCanais, sVisaoGeral, sInstagram, sInstagramCalendar, sGoogleAdsResumo, sGoogleAdsCampanhas, sMetaAdsResumo, sMetaAdsCampanhas, rotuloVs, chaveCampanha, sPaidTrafficResumo, sSiteResumo, sSiteAudiencia, agruparSerieDiaria, seletorContatos, categorizeGoogleCampaign, comprasReaisGoogle, rotuloPeriodo, mesesCheios, autoPreviousPeriod, postsParaListar, sInstagramPosts, sInstagramSpotlight, sInstagramTodosConteudos, TODOS_CONTEUDOS_MAX_PAGINAS, plataformaDoCanal, receitaPorPlataforma, comercialDaPlataforma, ganhoNoPeriodo, serieDaResposta, CRM_PERIODO_SQL } from './build/relatorio-crm.mjs';
+import { ehMesCheio, degrausDoFunil, sFunilComercial, sCanais, sVisaoGeral, sInstagram, sInstagramCalendar, sGoogleAdsResumo, sGoogleAdsCampanhas, sMetaAdsResumo, sMetaAdsCampanhas, rotuloVs, chaveCampanha, rankearCriativosDaCampanha, resultadoDoAnuncio, CAMPANHAS_META_POR_PAGINA, sPaidTrafficResumo, sSiteResumo, sSiteAudiencia, agruparSerieDiaria, seletorContatos, categorizeGoogleCampaign, comprasReaisGoogle, rotuloPeriodo, mesesCheios, autoPreviousPeriod, postsParaListar, sInstagramPosts, sInstagramSpotlight, sInstagramTodosConteudos, TODOS_CONTEUDOS_MAX_PAGINAS, plataformaDoCanal, receitaPorPlataforma, comercialDaPlataforma, ganhoNoPeriodo, serieDaResposta, CRM_PERIODO_SQL } from './build/relatorio-crm.mjs';
 
 let n = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); n++; };
@@ -301,5 +301,29 @@ ok(gCom.includes(`${((ccAtual - ccAnt) / ccAnt * 100).toFixed(1).replace('.', ',
 ok(!sGoogleAdsResumo(gLeads, 8, 18, null).includes('data-delta'), 'Google sem comparativo fica como era');
 const gCamp = sGoogleAdsCampanhas(gLeads, 9, 18, 'Setembro/2026', gLeads.campanhas, { anterior: gAnt, vs: 'Agosto' });
 ok(gCamp.includes('vs Agosto') && gCamp.includes('Nova em Setembro') === false, 'campanhas Google com o mesmo nome "c" casam e comparam');
+
+// ── Criativos POR CAMPANHA, medidos pelo objetivo dela (23/10) ──────────────────
+const ad = (id, o) => ({ ad_id: id, ad_name: 'AD ' + id, spend: 100, resultado: 0, purchaseValue: 0, impressions: 5000, reach: 3000, clicks: 80, ctr: 1.6, conversas: 0, leads: 0, compras: 0, engajamentos: 0, ...o });
+const adsWa = [ad('a', { conversas: 10, engajamentos: 900 }), ad('b', { conversas: 40, engajamentos: 50, spend: 200 }), ad('c', { conversas: 40, engajamentos: 10, spend: 120 }), ad('d', { spend: 300, engajamentos: 2000 })];
+const rkWa = rankearCriativosDaCampanha('mensagens', adsWa);
+ok(rkWa.map(x => x.ad_id).join('') === 'cbad', 'campanha de WhatsApp ranqueia por CONVERSA (não por engajamento); empate vai para o mais barato; sem resultado no fim');
+ok(rkWa[0].resultado === 40 && rkWa[3].resultado === 0, 'resultado do criativo = conversas');
+ok(resultadoDoAnuncio('engajamento', adsWa[0]) === 900 && resultadoDoAnuncio('trafego', adsWa[0]) === 80 && resultadoDoAnuncio('alcance', adsWa[0]) === 3000, 'cada objetivo mede o seu resultado');
+const rkV = rankearCriativosDaCampanha('vendas', [ad('x', { compras: 10, purchaseValue: 500 }), ad('y', { compras: 4, purchaseValue: 2000 })]);
+ok(rkV[0].ad_id === 'y' && rkV[0].valor === 2000, 'vendas ordena por valor de venda');
+ok(CAMPANHAS_META_POR_PAGINA === 2, '2 campanhas por página, com os criativos');
+const cr = (id, res, extra = {}) => ({ ad_id: id, nome: '[ON] [WA] Vídeo Depoimento ' + id, investimento: 100, resultado: res, valor: 0, impressoes: 5000, cliques: 80, alcance: 3000, ctr: 1.6, thumbnail_url: 'https://x/' + id + '.jpg', media_url: 'https://x/' + id + '.mp4', ...extra });
+const metaCr = { ...metaAtual, campanhas: [
+  { ...metaAtual.campanhas[0], criativos: [cr('1', 60), cr('2', 30), cr('3', 0)], anuncios: 7 },
+  { ...metaAtual.campanhas[1], criativos: [], anuncios: 0 },
+] };
+const pg = sMetaAdsCampanhas(metaCr, { insight_campanha_conversa: '', insight_campanha_conversao: '' }, 6, 20, 'Setembro/2026', metaCr.campanhas);
+ok(pg.includes('Melhores criativos · 3 de 7 por conversas'), 'título diz quantos de quantos e por qual resultado');
+ok(pg.includes('>1º<') && pg.includes('>2º<') && pg.includes('>3º<'), 'ranking 1º/2º/3º');
+ok(pg.includes('60 conversas') && /R\$\s1,67 por conversa/.test(pg) && pg.includes('sem conversas'), 'resultado e custo por resultado de cada criativo');
+ok(pg.includes('Vídeo Depoimento 1') && !pg.replace(/title="[^"]*"/g, '').includes('[ON]'), 'nome do criativo sem os colchetes de nomenclatura');
+ok(pg.includes('geraram 300 conversas') && pg.includes('O criativo que mais trouxe resultado foi "Vídeo Depoimento 1", com 60 conversas.'), 'frase do que aconteceu na campanha');
+ok(pg.includes('Nenhum anúncio desta campanha veio com entrega'), 'campanha sem criativo explica em vez de ficar vazia');
+ok(pg.includes('href="https://x/1.mp4"') && pg.includes('src="https://x/1.jpg"'), 'capa e link para o anúncio');
 
 console.log(`OK — ${n} asserts`);

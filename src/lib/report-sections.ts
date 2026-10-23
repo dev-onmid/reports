@@ -26,8 +26,8 @@ const CONTEUDO_SECTIONS: ReportSectionDef[] = [
 
 const META_SECTIONS: ReportSectionDef[] = [
   { key: 'meta_resumo',    label: 'Meta Ads — resumo',    desc: 'Investimento, resultados e custo por resultado' },
-  { key: 'meta_campanhas', label: 'Meta Ads — campanhas', desc: 'Cards por campanha (ou conjunto)' },
-  { key: 'criativos',      label: 'Criativos em destaque', desc: 'Os melhores anúncios do período' },
+  { key: 'meta_campanhas', label: 'Meta Ads — campanhas', desc: 'Cada campanha (ou conjunto) com métricas e os melhores criativos dela' },
+  { key: 'criativos',      label: 'Criativos em destaque', desc: 'Página geral de criativos (no relatório de performance eles já aparecem dentro de cada campanha)' },
 ];
 
 export const REPORT_SECTIONS: Record<ReportTemplateKey, ReportSectionDef[]> = {

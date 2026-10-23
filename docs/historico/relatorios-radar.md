@@ -2,6 +2,18 @@
 
 Movido do CLAUDE.md em 2026-10-22 (conteúdo original, sem edição). Entrada nova deste setor entra aqui, no topo, não no CLAUDE.md.
 
+## Relatório — "Campanhas Veiculadas Meta Ads" com os melhores criativos DE CADA campanha (2026-10-23)
+
+Pedido do Matheus: "os principais criativos tá puxando muito para uma campanha só… tinha que ser os principais criativos de cada campanha… um ranking de criativos pelo resultado do objetivo daquela campanha".
+
+- **Causa real**: `fetchMetaData` pedia `level=ad` com **`limit=20` da conta inteira, sem ordem**. Os 20 que a Meta devolvia primeiro costumavam ser todos da mesma campanha, e o ranking por categoria de objetivo trabalhava em cima disso. Agora: `limit=500` + filtro `spend > 0` + paginação (`paging.next`, até 6 páginas).
+- **Ranking por campanha pelo objetivo DELA**: o anúncio herda o tipo da campanha via `campaignKindFor` (a mesma régua do card), e `resultadoDoAnuncio` mede conversas / leads / compras / cliques / alcance / engajamentos conforme o tipo. ⚠️ Isso resolve o "mérito engajamento": campanha `OUTCOME_ENGAGEMENT` de WhatsApp ranqueia por **conversa**, não por curtida (pela categoria do objetivo do anúncio cairia em engajamento). `rankearCriativosDaCampanha`: mais resultado primeiro, empate vai para o mais barato por resultado, vendas por valor de venda, sem resultado no fim por investimento. Casamento anúncio → campanha por `chaveCampanha` do nome (`adset_name` quando o relatório é por conjunto).
+- **Miniaturas em LOTE** (`resolverMidiasDosAnuncios`, `?ids=` de 50 em 50, uma leva para criativos e outra para vídeos): antes eram 1–2 chamadas por anúncio, o que não escalava para 3 por campanha. A lista geral `creatives` (usada pelos relatórios de delivery/social) passou a usar o mesmo mapa.
+- **Página nova**: 2 campanhas por página (`CAMPANHAS_META_POR_PAGINA`, usada nos 3 geradores), cada uma num bloco com nome, **frase do que aconteceu** ("R$ 749 investidos geraram 147 conversas, a R$ 5,09 cada. O criativo que mais trouxe resultado foi …"), as métricas com o comparativo "vs mês anterior" e, à direita, os 3 melhores criativos (`CRIATIVOS_POR_CAMPANHA`) com capa clicável, posição 1º/2º/3º, resultado e custo por resultado. Título diz "3 de 15 por conversas". Campanha sem anúncio com entrega mostra a explicação em vez de ficar vazia.
+- **A página solta "Principais Criativos Meta Ads" sai do relatório de performance** quando alguma campanha tem criativos (`criativosNasCampanhas`). Nos relatórios de delivery/social ela continua.
+- ✅ Verificado: 167 asserts (12 novos); tsc limpo; relatório da Cinfel/set gerado em produção: 5 campanhas com criativos próprios (15, 2, 4, 14 e 8 anúncios avaliados, por conversa, lead ou clique), 14 capas, 0 imagens quebradas, 20 páginas em 810px.
+- ⚠️ As capas são URLs do fbcdn, que expiram em dias — mesmo comportamento da página antiga. Relatório aberto semanas depois pode mostrar "sem prévia".
+
 ## Relatório — comparativo "vs Agosto" nos resumos e nas campanhas de Meta/Google (2026-10-09)
 
 Pedido do Matheus (print do Resumo Meta Ads): "comparativos em relação ao mês anterior. Nas campanhas também".
