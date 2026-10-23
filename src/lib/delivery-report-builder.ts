@@ -5182,9 +5182,9 @@ export function sMetaAdsCampanhas(meta: MetaAdsFull, diag: DiagJson, idx: number
       const linhaResultado = cr.resultado > 0
         ? `${num(Math.round(cr.resultado))} ${cr.resultado === 1 ? unidade.um : unidade.varios}`
         : `sem ${unidade.varios}`;
-      const linhaCusto = kind === 'vendas' && cr.valor > 0
-        ? `${brl(cr.valor)} em vendas`
-        : kind === 'alcance'
+      // Vendas mostra o custo por compra E o valor vendido (linha extra abaixo).
+      const linhaVendas = kind === 'vendas' && cr.valor > 0 ? `${brl(cr.valor)} em vendas` : '';
+      const linhaCusto = kind === 'alcance'
         ? (cr.impressoes > 0 ? `CPM ${brlPrecise(cr.investimento / (cr.impressoes / 1000))}` : brlOrDash(cr.investimento))
         : custo > 0 ? `${brlPrecise(custo)} ${unidade.custo}` : `${brlOrDash(cr.investimento)} investidos`;
       const capa = cr.thumbnail_url
@@ -5199,6 +5199,7 @@ export function sMetaAdsCampanhas(meta: MetaAdsFull, diag: DiagJson, idx: number
         <p style="font-family:${INTER};font-size:11px;font-weight:700;color:#475569;margin:0;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${escapeAttr(cr.nome)}">${nomeDoCriativo(cr.nome)}</p>
         <p style="font-family:${INTER};font-size:16px;font-weight:900;color:${cr.resultado > 0 ? style.accent : MUTED};margin:0;line-height:1.1;white-space:nowrap">${linhaResultado}</p>
         <p style="font-family:${INTER};font-size:11px;font-weight:700;color:#163461;margin:0;line-height:1.2;white-space:nowrap">${linhaCusto}</p>
+        ${linhaVendas ? `<p style="font-family:${INTER};font-size:11px;font-weight:700;color:#163461;margin:0;line-height:1.2;white-space:nowrap">${linhaVendas}</p>` : ''}
       </div>`;
     };
     const tituloCriativos = (c.anuncios ?? 0) > CRIATIVOS_POR_CAMPANHA
