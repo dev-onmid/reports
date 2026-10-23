@@ -1,4 +1,5 @@
 import type { NextRequest } from 'next/server';
+import { janelaComparativo } from '@/lib/comparativo-periodo';
 import { makeServerPool } from '@/lib/server-db';
 import { getSession, unauthorized } from '@/lib/api-auth';
 import { ensureCardapioWebSchema, getConnection } from '@/lib/cardapioweb';
@@ -10,7 +11,7 @@ import type { OptimizerPeriodKey } from '@/lib/otimizador-legado';
 import {
   agruparPorCliente, agregarFunil, sugerirRegua, normalizarRegua, normalizarTelefoneBR,
   resumoPeriodo, agregarCupons, variacao, funilEm, limitesBRT, noPeriodo,
-  serieDiaria, heatmapPedidos, distribuicaoFrequencia,
+  serieDiaria, serieNovosClientes, heatmapPedidos, distribuicaoFrequencia,
   type ClienteDelivery, type Periodo,
 } from '@/lib/cardapioweb-recorrencia';
 
@@ -71,7 +72,13 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
     // `autoPreviousPeriod` sabe que mês-calendário compara com o mês anterior
     // inteiro (julho → junho), e não com "31 dias atrás" — a correção do bug
     // que rotulava o comparativo de julho como "Maio".
-    const anterior = autoPreviousPeriod(periodo.de, periodo.ate);
+    // …e `janelaComparativo` corta nos mesmos dias decorridos quando o período
+    // está em curso (ou usa a janela que o usuário escolheu para comparar).
+    const anterior = janelaComparativo(
+      periodo.de, periodo.ate, autoPreviousPeriod(periodo.de, periodo.ate),
+      new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' }),
+      { de: req.nextUrl.searchParams.get('compararDe'), ate: req.nextUrl.searchParams.get('compararAte') },
+    );
 
     // Uma leitura só para as duas plataformas — ver delivery-orders.ts.
     const { pedidos, fontes } = await lerPedidosDelivery(pool, clientId);
@@ -140,7 +147,13 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
       // Séries derivadas dos pedidos do período (sparkline + mapa de horários) e
       // distribuição da base por frequência (retenção). Tudo BRT, calculado nas
       // funções puras de cardapioweb-recorrencia.
-      serie: serieDiaria(pedidos, periodo),
+      // Novos por dia junto da série: é o que dá gráfico ao card "Novos clientes".
+      serie: (() => {
+        const novos = serieNovosClientes(pedidos, periodo);
+        const serie = serieDiaria(pedidos, periodo).map(d => ({ ...d, novos: novos[d.data] ?? 0 }));
+        for (const [data, n] of Object.entries(novos)) if (!serie.some(d => d.data === data)) serie.push({ data, receita: 0, pedidos: 0, novos: n });
+        return serie.sort((a, b) => a.data.localeCompare(b.data));
+      })(),
       heatmap: heatmapPedidos(pedidos, periodo),
       // Frequência é sobre o estado de HOJE (base inteira), como o funil de ação.
       frequencia: distribuicaoFrequencia(clientesHoje),

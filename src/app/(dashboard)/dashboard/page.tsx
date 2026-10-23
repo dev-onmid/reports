@@ -67,6 +67,7 @@ import { FunilCriativosPanel } from '@/components/dashboard/funil-criativos';
 import { CampanhasMetaCartoes } from '@/components/dashboard/campanhas-meta-cartoes';
 import type { EtapaDoCriativo, FunilDoCriativo } from '@/app/api/crm/funil-criativos/route';
 import type { VendasPorAnuncio } from '@/app/api/crm/vendas-por-anuncio/route';
+import type { FaturamentoCanalDelivery } from '@/app/api/delivery/faturamento-canal/route';
 import { descreverFontes, juntarFontes, totalDasFontes } from '@/lib/fonte-venda';
 import { VendedoresCard, CategoriasCard, type LinhaVendedor, type LinhaCategoria } from '@/components/dashboard/desempenho-comercial';
 import type { TopCreative } from '@/app/api/meta/top-creatives/route';
@@ -4181,7 +4182,7 @@ type FatiaCanal = { label: string; valor: number; nota?: string };
  * tratamento do "sem canal" são os mesmos, e duplicar o componente faria os
  * dois divergirem na primeira mudança.
  */
-function CanalDonutCard({ titulo, fatiasBrutas, total, semCanal, formato, aviso }: {
+function CanalDonutCard({ titulo, fatiasBrutas, total, semCanal, formato, aviso, rodape }: {
   titulo: string;
   fatiasBrutas: FatiaCanal[];
   total: number;
@@ -4189,6 +4190,8 @@ function CanalDonutCard({ titulo, fatiasBrutas, total, semCanal, formato, aviso 
   formato: PremiumMetricFormat;
   /** Texto do rodapé quando a fatia sem canal é grande. */
   aviso: string;
+  /** Nota fixa de método (de onde sai cada fatia), sempre visível. */
+  rodape?: string;
 }) {
   const pctSemCanal = total > 0 ? (semCanal / total) * 100 : 0;
   // Lista de barras horizontais ORDENADA no lugar do donut: comparar ângulos de
@@ -4271,6 +4274,9 @@ function CanalDonutCard({ titulo, fatiasBrutas, total, semCanal, formato, aviso 
           {pctSemCanal >= 99.5 ? 'Tudo' : `${pctSemCanal.toFixed(0)}%`} do período está{' '}
           <strong>sem canal registrado</strong> no CRM. {aviso}
         </p>
+      )}
+      {fatias.length > 0 && rodape && (
+        <p className={cn('mt-3 border-t border-white/[0.07] pt-2.5 leading-snug', T.nota)}>{rodape}</p>
       )}
     </PremiumPanel>
   );
@@ -5891,6 +5897,22 @@ export default function GeneralDashboard() {
     return () => { cancelado = true; };
   }, [selectedIds, period, customDateFrom, customDateTo, customReady, faixaSel.from, faixaSel.to]);
 
+  // Faturamento por canal de quem vende no CARDÁPIO: pedidos (iFood × cardápio),
+  // a parte que a Meta atribuiu a anúncio por plataforma e o CRM pela fonte.
+  // Sem cardápio a rota devolve vazio e o card segue no CRM (porCanal).
+  const [fatDelivery, setFatDelivery] = useState<FaturamentoCanalDelivery | null>(null);
+  useEffect(() => {
+    let cancelado = false;
+    setFatDelivery(null);
+    const ids = [...selectedIds];
+    if (ids.length === 0 || !customReady || !ids.every(id => deliveryFlags[id])) return () => { cancelado = true; };
+    fetch(`/api/delivery/faturamento-canal?${new URLSearchParams({ clientIds: ids.join(','), from: faixaSel.from, to: faixaSel.to })}`)
+      .then(r => (r.ok ? r.json() as Promise<FaturamentoCanalDelivery> : null))
+      .then(j => { if (!cancelado) setFatDelivery(j?.ok ? j : null); })
+      .catch(() => { if (!cancelado) setFatDelivery(null); });
+    return () => { cancelado = true; };
+  }, [selectedIds, deliveryFlags, customReady, faixaSel.from, faixaSel.to]);
+
   // Funil por região do lead — irmã do summary (mesma régua). Cliente sem
   // região nos leads devolve listas vazias e a tabela nem aparece.
   useEffect(() => {
@@ -7016,9 +7038,24 @@ export default function GeneralDashboard() {
                 CUSTO por canal (investimento, leads, CPL) e este mostra o
                 RETORNO. Em food só aparece quando há venda com valor no CRM —
                 a receita de delivery já tem painel próprio na grade. */}
-            {!leadsNaLinhaKpi && (!modoFood || porCanal.origens.length > 0 || porCanal.leads.length > 0) && (
+            {!leadsNaLinhaKpi && (!modoFood || porCanal.origens.length > 0 || porCanal.leads.length > 0 || (fatDelivery?.origens.length ?? 0) > 0) && (
               <div className="grid gap-4 xl:grid-cols-2">
-                {comReceita && (
+                {comReceita && fatDelivery && fatDelivery.origens.length > 0 ? (
+                <CanalDonutCard
+                  titulo="Faturamento por Canal"
+                  fatiasBrutas={fatDelivery.origens.map(o => ({
+                    label: o.label,
+                    valor: o.receita,
+                    nota: `${o.vendas} ${o.vendas === 1 ? 'pedido' : 'pedidos'}`
+                      + (o.ticket !== null ? ` · ${premiumValue(o.ticket, 'currency')}` : ''),
+                  }))}
+                  total={fatDelivery.total}
+                  semCanal={0}
+                  formato="currency"
+                  aviso=""
+                  rodape="Pedidos do cardápio pelo canal de venda. A parte que veio de anúncio é a que a Meta atribuiu (clique e visualização), por plataforma; o resto do cardápio é orgânico, direto ou recompra. As linhas “· CRM” são vendas ganhas no CRM."
+                />
+                ) : comReceita && (
                 <CanalDonutCard
                   titulo="Faturamento por Canal"
                   fatiasBrutas={porCanal.origens.map(o => ({

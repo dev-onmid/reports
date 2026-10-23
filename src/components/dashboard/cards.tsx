@@ -29,10 +29,32 @@ export type KpiCardProps = {
   estilo?: EstiloElemento;
   superficie?: Superficie;
   className?: string;
+  /**
+   * Número grande em cima e o gráfico EMBAIXO, ocupando a largura e a sobra da
+   * altura da caixa. Para a linha de Vendas do delivery (pedido do Matheus,
+   * 2026-10-23: número pequeno e gráfico espremido ao lado deixavam meia caixa vazia).
+   */
+  empilhado?: boolean;
 };
 
 /** KPI principal: valor grande e sparkline dividindo a linha. */
-export function KpiCard({ icon, tom = 'primary', label, valor, delta, menorMelhor, spark, sub, estilo = VAZIO, superficie, className }: KpiCardProps) {
+export function KpiCard({ icon, tom = 'primary', label, valor, delta, menorMelhor, spark, sub, estilo = VAZIO, superficie, className, empilhado }: KpiCardProps) {
+  if (empilhado) {
+    return (
+      <InnerCard superficie={superficie} className={cn('flex flex-col', className)} style={styleFundo(estilo)}>
+        <div className="flex items-center gap-2.5">
+          <IconTile icon={icon} tom={tom} size={estilo.tamanhoIcone ?? 30} cor={estilo.corIcone} />
+          <Label style={styleTexto(estilo)} className="min-w-0 flex-1 truncate">{estilo.texto ?? label}</Label>
+          {delta !== undefined && <Delta valor={delta} menorMelhor={menorMelhor} small />}
+        </div>
+        <p className="mt-3 font-heading text-[38px] leading-none text-foreground" style={styleValor(estilo)}>{valor}</p>
+        {sub && <p className="mt-1.5 truncate text-[11.5px] text-[#9aa4aa]">{sub}</p>}
+        {spark && spark.length > 1 && (
+          <div className="mt-auto -mx-1 pt-2"><Spark dados={spark} tom={tom} altura={56} /></div>
+        )}
+      </InnerCard>
+    );
+  }
   return (
     <InnerCard superficie={superficie} className={className} style={styleFundo(estilo)}>
       <div className="flex items-start gap-3">

@@ -97,33 +97,38 @@ export const ELEMENTOS: DefinicaoElemento[] = [
 
   // Vendas
   { id: 'vendas.titulo',          bloco: 'vendas',        rotulo: 'Vendas',             suporta: CABECALHO, x: 0,  y: 5,  w: 12, h: 1, minW: 2, minH: 1 },
-  { id: 'vendas.receita',         bloco: 'vendas',        rotulo: 'Receita',            suporta: TUDO, x: 0,  y: 6,  w: 3,  h: 2, minW: 2, minH: 1 },
-  { id: 'vendas.pedidos',         bloco: 'vendas',        rotulo: 'Pedidos',            suporta: TUDO, x: 3,  y: 6,  w: 3,  h: 2, minW: 2, minH: 1 },
-  { id: 'vendas.ticket',          bloco: 'vendas',        rotulo: 'Ticket médio',       suporta: TUDO, x: 6,  y: 6,  w: 3,  h: 2, minW: 2, minH: 1 },
-  { id: 'vendas.novos',           bloco: 'vendas',        rotulo: 'Novos clientes',     suporta: TUDO, x: 9,  y: 6,  w: 3,  h: 2, minW: 2, minH: 1 },
+  { id: 'vendas.receita',         bloco: 'vendas',        rotulo: 'Receita',            suporta: TUDO, x: 0,  y: 6,  w: 3,  h: 3, minW: 2, minH: 1 },
+  { id: 'vendas.pedidos',         bloco: 'vendas',        rotulo: 'Pedidos',            suporta: TUDO, x: 3,  y: 6,  w: 3,  h: 3, minW: 2, minH: 1 },
+  { id: 'vendas.ticket',          bloco: 'vendas',        rotulo: 'Ticket médio',       suporta: TUDO, x: 6,  y: 6,  w: 3,  h: 3, minW: 2, minH: 1 },
+  { id: 'vendas.novos',           bloco: 'vendas',        rotulo: 'Novos clientes',     suporta: TUDO, x: 9,  y: 6,  w: 3,  h: 3, minW: 2, minH: 1 },
 
   // Quando vendem
-  { id: 'quando_vendem.titulo',   bloco: 'quando_vendem', rotulo: 'Quando vendem',      suporta: CABECALHO, x: 0, y: 8,  w: 7,  h: 1, minW: 2, minH: 1 },
-  { id: 'quando_vendem.mapa',     bloco: 'quando_vendem', rotulo: 'Mapa de horários',   suporta: ['corFundo', 'visivel'], x: 0, y: 9, w: 7, h: 4, minW: 4, minH: 3 },
+  { id: 'quando_vendem.titulo',   bloco: 'quando_vendem', rotulo: 'Quando vendem',      suporta: CABECALHO, x: 0, y: 9,  w: 7,  h: 1, minW: 2, minH: 1 },
+  { id: 'quando_vendem.mapa',     bloco: 'quando_vendem', rotulo: 'Mapa de horários',   suporta: ['corFundo', 'visivel'], x: 0, y: 10, w: 7, h: 4, minW: 4, minH: 3 },
 
   // Ritmo
-  { id: 'ritmo.titulo',           bloco: 'ritmo',         rotulo: 'Ritmo',              suporta: CABECALHO, x: 7, y: 8,  w: 5,  h: 1, minW: 2, minH: 1 },
-  { id: 'ritmo.receita_dia',      bloco: 'ritmo',         rotulo: 'Receita/dia',        suporta: TUDO, x: 7,  y: 9,  w: 5,  h: 1, minW: 2, minH: 1 },
-  { id: 'ritmo.pedidos_dia',      bloco: 'ritmo',         rotulo: 'Pedidos/dia',        suporta: TUDO, x: 7,  y: 10, w: 5,  h: 1, minW: 2, minH: 1 },
-  { id: 'ritmo.saldos',           bloco: 'ritmo',         rotulo: 'Saldo das contas',   suporta: ['corFundo', 'visivel'], x: 7, y: 11, w: 5, h: 2, minW: 2, minH: 1 },
+  { id: 'ritmo.titulo',           bloco: 'ritmo',         rotulo: 'Ritmo',              suporta: CABECALHO, x: 7, y: 9,  w: 5,  h: 1, minW: 2, minH: 1 },
+  { id: 'ritmo.receita_dia',      bloco: 'ritmo',         rotulo: 'Receita/dia',        suporta: TUDO, x: 7,  y: 10, w: 5,  h: 1, minW: 2, minH: 1 },
+  { id: 'ritmo.pedidos_dia',      bloco: 'ritmo',         rotulo: 'Pedidos/dia',        suporta: TUDO, x: 7,  y: 11, w: 5,  h: 1, minW: 2, minH: 1 },
+  // 4 linhas no total: o Ritmo fecha na mesma altura do mapa de horários (h: 4).
+  { id: 'ritmo.projecao',         bloco: 'ritmo',         rotulo: 'Projeção do mês',    suporta: TUDO, x: 7,  y: 12, w: 5,  h: 1, minW: 2, minH: 1 },
+  { id: 'ritmo.pico',             bloco: 'ritmo',         rotulo: 'Pico de vendas',     suporta: TUDO, x: 7,  y: 13, w: 5,  h: 1, minW: 2, minH: 1 },
+  // Saldo das contas saiu da coluna do Ritmo (só aparece com conta vinculada e
+  // abria um buraco quando não tinha): linha própria no fim.
+  { id: 'ritmo.saldos',           bloco: 'ritmo',         rotulo: 'Saldo das contas',   suporta: ['corFundo', 'visivel'], x: 0, y: 19, w: 12, h: 2, minW: 2, minH: 1 },
 
   // Situação da base
-  { id: 'base_clientes.titulo',   bloco: 'base_clientes', rotulo: 'Situação da base',   suporta: CABECALHO, x: 0, y: 13, w: 5, h: 1, minW: 2, minH: 1 },
-  { id: 'base_clientes.gauge',    bloco: 'base_clientes', rotulo: 'Medidor de ativos',  suporta: ['corFundo', 'visivel'], x: 0, y: 14, w: 2, h: 4, minW: 2, minH: 2 },
-  { id: 'base_clientes.ativos',   bloco: 'base_clientes', rotulo: 'Ativos',             suporta: TUDO, x: 2,  y: 14, w: 3,  h: 1, minW: 2, minH: 1 },
-  { id: 'base_clientes.risco',    bloco: 'base_clientes', rotulo: 'Em risco',           suporta: TUDO, x: 2,  y: 15, w: 3,  h: 1, minW: 2, minH: 1 },
-  { id: 'base_clientes.inativos', bloco: 'base_clientes', rotulo: 'Inativos',           suporta: TUDO, x: 2,  y: 16, w: 3,  h: 1, minW: 2, minH: 1 },
+  { id: 'base_clientes.titulo',   bloco: 'base_clientes', rotulo: 'Situação da base',   suporta: CABECALHO, x: 0, y: 14, w: 5, h: 1, minW: 2, minH: 1 },
+  { id: 'base_clientes.gauge',    bloco: 'base_clientes', rotulo: 'Medidor de ativos',  suporta: ['corFundo', 'visivel'], x: 0, y: 15, w: 2, h: 4, minW: 2, minH: 2 },
+  { id: 'base_clientes.ativos',   bloco: 'base_clientes', rotulo: 'Ativos',             suporta: TUDO, x: 2,  y: 15, w: 3,  h: 1, minW: 2, minH: 1 },
+  { id: 'base_clientes.risco',    bloco: 'base_clientes', rotulo: 'Em risco',           suporta: TUDO, x: 2,  y: 16, w: 3,  h: 1, minW: 2, minH: 1 },
+  { id: 'base_clientes.inativos', bloco: 'base_clientes', rotulo: 'Inativos',           suporta: TUDO, x: 2,  y: 17, w: 3,  h: 1, minW: 2, minH: 1 },
   // 4ª linha: fecha o bloco na mesma altura da Recorrência (h: 4).
-  { id: 'base_clientes.total',    bloco: 'base_clientes', rotulo: 'Base total',         suporta: TUDO, x: 2,  y: 17, w: 3,  h: 1, minW: 2, minH: 1 },
+  { id: 'base_clientes.total',    bloco: 'base_clientes', rotulo: 'Base total',         suporta: TUDO, x: 2,  y: 18, w: 3,  h: 1, minW: 2, minH: 1 },
 
   // Recorrência
-  { id: 'recorrencia.titulo',     bloco: 'recorrencia',   rotulo: 'Recorrência',        suporta: CABECALHO, x: 5, y: 13, w: 7, h: 1, minW: 2, minH: 1 },
-  { id: 'recorrencia.barras',     bloco: 'recorrencia',   rotulo: 'Barras e anéis',     suporta: ['corValor', 'corIcone', 'corFundo', 'tamanhoIcone', 'visivel'], x: 5, y: 14, w: 7, h: 4, minW: 4, minH: 3 },
+  { id: 'recorrencia.titulo',     bloco: 'recorrencia',   rotulo: 'Recorrência',        suporta: CABECALHO, x: 5, y: 14, w: 7, h: 1, minW: 2, minH: 1 },
+  { id: 'recorrencia.barras',     bloco: 'recorrencia',   rotulo: 'Barras e anéis',     suporta: ['corValor', 'corIcone', 'corFundo', 'tamanhoIcone', 'visivel'], x: 5, y: 15, w: 7, h: 4, minW: 4, minH: 3 },
 ];
 
 export function definicaoElemento(id: ElementoId): DefinicaoElemento | null {

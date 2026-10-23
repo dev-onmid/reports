@@ -358,6 +358,30 @@ export function resumoPeriodo(pedidos: PedidoAgrupavel[], p: Periodo): ResumoPer
   };
 }
 
+/**
+ * Clientes NOVOS por dia (BRT) — quem fez a primeira compra da história naquele
+ * dia. Mesma régua de `resumoPeriodo` (varre TUDO para achar a 1ª compra), então
+ * a soma da série bate com `clientesNovos`. Dia sem novo não entra.
+ */
+export function serieNovosClientes(pedidos: PedidoAgrupavel[], p: Periodo): Record<string, number> {
+  const primeira = new Map<string, string>();
+  for (const o of pedidos) {
+    if (!pedidoValido(o)) continue;
+    const chave = chaveCliente(o);
+    if (!chave) continue;
+    const iso = paraIso(o.created_at);
+    const atual = primeira.get(chave);
+    if (!atual || iso < atual) primeira.set(chave, iso);
+  }
+  const porDia: Record<string, number> = {};
+  for (const iso of primeira.values()) {
+    if (!noPeriodo(iso, p)) continue;
+    const dia = new Date(Date.parse(iso) - 3 * 3600000).toISOString().slice(0, 10);
+    porDia[dia] = (porDia[dia] ?? 0) + 1;
+  }
+  return porDia;
+}
+
 /** Identidade do cliente: telefone normalizado, senão o id da plataforma. */
 function chaveCliente(o: PedidoAgrupavel): string | null {
   const fone = normalizarTelefoneBR(o.customer_phone);

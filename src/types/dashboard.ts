@@ -166,9 +166,9 @@ export type DadosDelivery = {
   fonte: EstadoFonte;
   vendas: VendasAgregado;
   /** Agregado do período ANTERIOR — sustenta os comparativos de custo/pedido e ROAS. `null` sem base. */
-  anterior: { receita: number; pedidos: number } | null;
+  anterior: { receita: number; pedidos: number; novos?: number; dias?: number } | null;
   /** Variação vs período anterior de MESMA duração. `null` sem base anterior. */
-  variacao: { receita: number | null; pedidos: number | null; ticket: number | null };
+  variacao: { receita: number | null; pedidos: number | null; ticket: number | null; novos?: number | null };
   serie: PontoSerie[];
   funil: FunilCatalogo;
   heatmap: Heatmap;

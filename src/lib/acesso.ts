@@ -173,6 +173,7 @@ export const ROTAS_GESTOR: Regra[] = [
   { padrao: /^\/api\/clients\/(avatars|delivery-flags)$/, metodos: ['GET'], exigeCliente: false },
   { padrao: /^\/api\/crm\/summary$/, metodos: ['GET'], exigeCliente: false },
   { padrao: /^\/api\/crm\/(por-canal|desempenho|funil|funil-leads)$/, metodos: ['GET'], exigeCliente: true },
+  { padrao: /^\/api\/delivery\/faturamento-canal$/, metodos: ['GET'], exigeCliente: true }, // clientIds; o handler ainda corta pelo escopo
   { padrao: /^\/api\/(campaigns|audience)$/, metodos: ['GET'], exigeCliente: true },
   { padrao: /^\/api\/google\/keywords$/, metodos: ['GET'], exigeCliente: true },
   { padrao: /^\/api\/meta\/(top-creatives|page-insights|ig-posts)$/, metodos: ['GET'], exigeCliente: true },

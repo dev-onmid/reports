@@ -20,14 +20,16 @@ type RespostaCardapio = {
   kpis?: {
     atual: ResumoKpi;
     anterior: ResumoKpi;
-    variacao: { receita: number | null; pedidos: number | null; ticketMedio: number | null };
+    variacao: { receita: number | null; pedidos: number | null; ticketMedio: number | null; clientesNovos?: number | null };
   };
   // O funil vem como FOTO por etapa: { etapas: { novo: {clientes,receita}, ... }, totalClientes }.
   funil?: { periodo?: { etapas?: Record<string, { clientes: number; receita: number }> } };
-  serie?: Array<{ data: string; receita: number; pedidos: number }>;
+  serie?: Array<{ data: string; receita: number; pedidos: number; novos?: number }>;
   heatmap?: { faixas: string[]; matriz: number[][]; max: number };
   frequencia?: Array<{ chave: string; nome: string; clientes: number }>;
   sincronizacao?: { ultima_sync_em?: string | null };
+  /** Janela do comparativo (a rota escolhe: mês cheio → mês anterior; senão mesma duração). */
+  anterior?: { de: string; ate: string };
 };
 
 /** Cor de cada faixa de frequência — mais pedidos = melhor = tom mais "vivo". */
@@ -143,12 +145,16 @@ export function useDadosDelivery(
         dias,
       },
       anterior: bruto.kpis?.anterior
-        ? { receita: bruto.kpis.anterior.receita, pedidos: bruto.kpis.anterior.pedidos }
+        ? {
+          receita: bruto.kpis.anterior.receita, pedidos: bruto.kpis.anterior.pedidos, novos: bruto.kpis.anterior.clientesNovos ?? 0,
+          dias: bruto.anterior ? Math.max(1, Math.round((Date.parse(bruto.anterior.ate) - Date.parse(bruto.anterior.de)) / 86_400_000) + 1) : dias,
+        }
         : null,
       variacao: {
         receita: v?.receita ?? null,
         pedidos: v?.pedidos ?? null,
         ticket: v?.ticketMedio ?? null,
+        novos: v?.clientesNovos ?? null,
       },
       serie: (bruto.serie ?? []).map((p) => ({
         data: p.data,
@@ -156,7 +162,7 @@ export function useDadosDelivery(
         label: p.data.split('-').reverse().slice(0, 2).join('/'),
         receita: p.receita,
         pedidos: p.pedidos,
-        novos: 0,
+        novos: p.novos ?? 0,
         investimento: 0,
       })),
       // ⚠️ Só o último degrau (pedidos) tem fonte. Acessos → carrinho → checkout

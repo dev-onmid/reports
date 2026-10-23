@@ -10,7 +10,7 @@
 // espaço reservado e a tela publicada o omite.
 
 import {
-  BarChart3, Users, Wallet, ShoppingBag, Receipt, UserPlus, Repeat, Clock, Target,
+  BarChart3, Users, Wallet, ShoppingBag, Receipt, UserPlus, Repeat, Clock, Target, TrendingUp,
   type LucideIcon,
 } from 'lucide-react';
 import { KpiCard, Mini, Gauge, Ring, Heatmap, InnerCard, Chapter, BlocoVazio, fmt } from '@/components/dashboard';
@@ -18,6 +18,7 @@ import { iconePorNome } from './controles-elemento';
 import type { ElementoId } from '@/lib/dashboard-elementos';
 import { estiloDe, type EstiloElemento, type EstilosPorElemento } from '@/lib/dashboard-elementos';
 import { CLASSE_FUNDO, type DadosDelivery } from '@/types/dashboard';
+import { ritmoDoPeriodo } from '@/lib/ritmo-delivery';
 import { cn } from '@/lib/utils';
 
 const ROTULO_CANAL: Record<string, string> = {
@@ -55,6 +56,12 @@ export function elementosDelivery(
 
   const serieReceita = serie.map((p) => p.receita);
   const seriePedidos = serie.map((p) => p.pedidos);
+  const serieTicket = serie.map((p) => (p.pedidos > 0 ? p.receita / p.pedidos : 0));
+  const serieNovos = serie.map((p) => p.novos);
+  const ant = dados.anterior;
+  /** "vs R$ 111.300 no período anterior" — o número de base do delta, não só a %. */
+  const vs = (valor: string | null) => (valor ? `vs ${valor} no período anterior` : undefined);
+  const ritmo = ritmoDoPeriodo(dados);
   const baseTotal = clientes.ativos + clientes.emRisco + clientes.inativos;
   const totalRecorrencia = clientes.recorrencia.reduce((s, f) => s + f.clientes, 0);
   const periodo = `${dados.periodo.de.split('-').reverse().join('/')} a ${dados.periodo.ate.split('-').reverse().join('/')} · ${vendas.dias} dias`;
@@ -84,15 +91,20 @@ export function elementosDelivery(
     'vendas.titulo': <Titulo estilo={e('vendas.titulo')} padraoIcone={BarChart3} padraoTexto="Vendas" sub={periodo} />,
     'vendas.receita': kpi('vendas.receita', {
       icon: Wallet, label: 'Receita', valor: fmt.brl(vendas.receita), delta: variacao.receita, spark: serieReceita,
+      sub: vs(ant ? fmt.brl(ant.receita) : null), empilhado: true,
     }),
     'vendas.pedidos': kpi('vendas.pedidos', {
       icon: ShoppingBag, tom: 'blue', label: 'Pedidos', valor: fmt.int(vendas.pedidos), delta: variacao.pedidos, spark: seriePedidos,
+      sub: vs(ant ? fmt.int(ant.pedidos) : null), empilhado: true,
     }),
     'vendas.ticket': kpi('vendas.ticket', {
-      icon: Receipt, tom: 'orange', label: 'Ticket médio', valor: fmt.brl(vendas.ticket), delta: variacao.ticket,
+      icon: Receipt, tom: 'orange', label: 'Ticket médio', valor: fmt.brl(vendas.ticket), delta: variacao.ticket, spark: serieTicket,
+      sub: vs(ant && ant.pedidos > 0 ? fmt.brl(ant.receita / ant.pedidos) : null), empilhado: true,
     }),
     'vendas.novos': kpi('vendas.novos', {
       icon: UserPlus, tom: 'secondary', label: 'Novos clientes', valor: fmt.int(vendas.novosClientes),
+      delta: variacao.novos ?? null, spark: serieNovos,
+      sub: vs(ant?.novos != null ? fmt.int(ant.novos) : null), empilhado: true,
     }),
 
     'quando_vendem.titulo': (
@@ -107,11 +119,19 @@ export function elementosDelivery(
 
     'ritmo.titulo': <Titulo estilo={e('ritmo.titulo')} padraoIcone={Target} padraoTexto="Ritmo" sub="Média diária no período" />,
     'ritmo.receita_dia': mini('ritmo.receita_dia', {
-      label: 'Receita/dia', icon: Wallet, valor: fmt.brl(vendas.dias ? vendas.receita / vendas.dias : null),
+      subAoLado: true, label: 'Receita/dia', icon: Wallet, valor: fmt.brl(ritmo.receitaDia), sub: ritmo.subReceita,
     }),
     'ritmo.pedidos_dia': mini('ritmo.pedidos_dia', {
-      label: 'Pedidos/dia', icon: ShoppingBag, tom: 'blue',
-      valor: fmt.int(vendas.dias ? Math.round(vendas.pedidos / vendas.dias) : null),
+      subAoLado: true, label: 'Pedidos/dia', icon: ShoppingBag, tom: 'blue',
+      valor: fmt.int(ritmo.pedidosDia !== null ? Math.round(ritmo.pedidosDia) : null), sub: ritmo.subPedidos,
+    }),
+    'ritmo.projecao': mini('ritmo.projecao', {
+      subAoLado: true, label: ritmo.projecao ? 'Projeção do mês' : 'Melhor dia', icon: TrendingUp, tom: 'secondary',
+      valor: ritmo.projecao ? fmt.brl(ritmo.projecao.valor) : ritmo.melhorDia ? fmt.brl(ritmo.melhorDia.receita) : '—',
+      sub: ritmo.projecao?.sub ?? ritmo.melhorDia?.sub,
+    }),
+    'ritmo.pico': mini('ritmo.pico', {
+      subAoLado: true, label: 'Pico de vendas', icon: Clock, tom: 'orange', valor: ritmo.pico?.valor ?? '—', sub: ritmo.pico?.sub,
     }),
 
     'base_clientes.titulo': <Titulo estilo={e('base_clientes.titulo')} padraoIcone={Users} padraoTexto="Situação da base" />,
