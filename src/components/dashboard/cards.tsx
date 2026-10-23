@@ -65,10 +65,29 @@ export type MiniProps = {
   className?: string;
   estilo?: EstiloElemento;
   superficie?: Superficie;
+  /**
+   * Descrição AO LADO do número, não embaixo: rótulo + valor numa coluna à
+   * esquerda e o "o que é isso" à direita, os dois centrados na altura. Para
+   * caixa alta e larga (Situação da base), onde o sub embaixo apertava o texto
+   * contra a borda e sobrava espaço vazio na lateral.
+   */
+  subAoLado?: boolean;
 };
 
 /** Bloco pequeno reaproveitado DENTRO dos cards — é o que evita card vazio. */
-export function Mini({ label, valor, sub, icon, tom = 'primary', grande, className, estilo = VAZIO, superficie = 'inner' }: MiniProps) {
+export function Mini({ label, valor, sub, icon, tom = 'primary', grande, className, estilo = VAZIO, superficie = 'inner', subAoLado }: MiniProps) {
+  if (subAoLado) {
+    return (
+      <div className={cn('flex items-center gap-4 px-4 py-2.5', CLASSE_SUPERFICIE[superficie], className)} style={styleFundo(estilo)}>
+        {icon && <IconTile icon={icon} tom={tom} size={estilo.tamanhoIcone ?? 30} cor={estilo.corIcone} />}
+        <div className="w-[38%] min-w-[84px] shrink-0">
+          <Label style={styleTexto(estilo)}>{estilo.texto ?? label}</Label>
+          <p className="mt-1 font-heading text-[26px] leading-none text-foreground" style={styleValor(estilo)}>{valor}</p>
+        </div>
+        {sub && <p className="min-w-0 flex-1 border-l border-white/[0.08] pl-4 text-[12px] leading-snug text-[#9aa4aa]">{sub}</p>}
+      </div>
+    );
+  }
   return (
     <div
       className={cn(

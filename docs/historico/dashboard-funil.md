@@ -2,6 +2,13 @@
 
 Movido do CLAUDE.md em 2026-10-22 (conteúdo original, sem edição). Entrada nova deste setor entra aqui, no topo, não no CLAUDE.md.
 
+## Campanhas Meta em cartões (formato do relatório), "Quando vendem" hora a hora e Situação da base (2026-10-23)
+
+- **Campanhas Meta Ads viraram cartões em TODOS os dashboards** (pedido do Matheus: a tabela "está poluída"; "igual quando a gente imprime um relatório"). `src/components/dashboard/campanhas-meta-cartoes.tsx` + régua pura `src/lib/campanha-cartao.ts`, cópia pequena da do slide `sMetaAdsCampanhas` (delivery-report-builder é server-side e enorme): tipo pelo objetivo DECLARADO (engajamento desempata por conversa/lead), frase do que aconteceu + o criativo que mais trouxe resultado, métricas do objetivo (mensagens: conversas/custo; vendas: compras/custo/valor/ROAS; tráfego: cliques/CPC; alcance: pessoas/CPM/frequência), 3 melhores criativos ranqueados pelo resultado (vendas por valor). Vendas/faturamento/ROAS somando as fontes quando o dashboard tem receita. Cabeçalho com tipo, Ativa/Pausada, verba e **"desde dd/mm/aaaa · N dias"** (`start_time`). ⚠️ Se mudar a régua num, mude no outro. A tabela (conjuntos e anúncios) segue atrás de "Ver conjuntos e anúncios". Sem comparativo com o período anterior por enquanto (o relatório tem).
+- `/api/campaigns` (Meta) ganhou `conversas`/`leadsFormulario` (as duas famílias de `countMetaResults` separadas), `alcance`, `frequencia`, `objetivoMeta`, `inicio`.
+- **"Quando vendem" hora a hora** (`heatmapPedidos`): as faixas fixas de 4h diziam o óbvio ("18–22h" para quem só abre à noite) e gastavam 5 linhas vazias. Agora linhas de 1h, da primeira à última hora com ≥ 1% dos pedidos (`PISO_HORA_HEATMAP`), contínuas; coluna Total com o peso da hora e o pico em verde. Medido: PicoLocos 18h–22h (pico 20h, 31%), Tokiomaki 12h–23h (pico 20h, 26%). `FAIXAS_HEATMAP` saiu; teste `scratchpad/test-delivery-food.mjs` refeito.
+- **Situação da base**: `Gauge preencher` (ocupa a caixa) e `Mini subAoLado` (rótulo+número à esquerda, centrados na altura, descrição ao lado com divisória).
+
 ## Mídia paga — compras da Meta somadas às vendas do CRM + Verba/dia de orçamento total (2026-10-23)
 
 Print do Matheus (PicoLocos Guanabara, "este mês"): Funil de criativos e tabela "Campanhas Meta Ads" sem vendas/faturamento, com R$ 9,1 mil de vendas no Gerenciador; "verba/dia, investido, vendas, faturamento e ROAS errados".

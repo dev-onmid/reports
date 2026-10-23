@@ -97,7 +97,7 @@ export function elementosDelivery(
 
     'quando_vendem.titulo': (
       <Titulo estilo={e('quando_vendem.titulo')} padraoIcone={Clock} padraoTexto="Quando vendem"
-        sub="Pedidos por dia da semana e faixa de horário" />
+        sub="Pedidos por dia da semana e hora · só o horário em que há venda" />
     ),
     'quando_vendem.mapa': (
       <InnerCard superficie="card" className="h-full overflow-auto" style={{ ...(e('quando_vendem.mapa').corFundo ? { backgroundColor: e('quando_vendem.mapa').corFundo! } : {}) }}>
@@ -115,16 +115,16 @@ export function elementosDelivery(
     }),
 
     'base_clientes.titulo': <Titulo estilo={e('base_clientes.titulo')} padraoIcone={Users} padraoTexto="Situação da base" />,
-    'base_clientes.ativos': mini('base_clientes.ativos', {
+    'base_clientes.ativos': mini('base_clientes.ativos', { subAoLado: true,
       label: 'Ativos', valor: fmt.int(clientes.ativos), sub: 'pediram nos últimos 30 dias',
     }),
-    'base_clientes.risco': mini('base_clientes.risco', {
+    'base_clientes.risco': mini('base_clientes.risco', { subAoLado: true,
       label: 'Em risco', tom: 'orange', valor: fmt.int(clientes.emRisco), sub: 'sem pedir há 30–60 dias',
     }),
-    'base_clientes.inativos': mini('base_clientes.inativos', {
+    'base_clientes.inativos': mini('base_clientes.inativos', { subAoLado: true,
       label: 'Inativos', tom: 'destructive', valor: fmt.int(clientes.inativos), sub: 'há mais de 60 dias',
     }),
-    'base_clientes.total': mini('base_clientes.total', {
+    'base_clientes.total': mini('base_clientes.total', { subAoLado: true,
       label: 'Base total', tom: 'muted', valor: fmt.int(baseTotal || null), sub: 'clientes com pedido na base',
     }),
 
@@ -152,7 +152,7 @@ export function elementosDelivery(
   if (baseTotal > 0) {
     mapa['base_clientes.gauge'] = (
       <InnerCard superficie="card" className="flex h-full items-center justify-center" style={{ ...(e('base_clientes.gauge').corFundo ? { backgroundColor: e('base_clientes.gauge').corFundo! } : {}) }}>
-        <Gauge valor={clientes.ativos} max={baseTotal} unidade={fmt.compacto(clientes.ativos)} legenda="ATIVOS" />
+        <Gauge valor={clientes.ativos} max={baseTotal} unidade={fmt.compacto(clientes.ativos)} legenda="ATIVOS" preencher />
       </InnerCard>
     );
   }

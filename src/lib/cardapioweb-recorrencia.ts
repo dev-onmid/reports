@@ -530,35 +530,45 @@ export function serieDiaria(pedidos: PedidoLite[], p: Periodo): PontoSerieDia[] 
     .sort((a, b) => a.data.localeCompare(b.data));
 }
 
-/** Faixas de horário do mapa de calor — recorte de delivery (almoço 10–14, jantar 18–22). */
-export const FAIXAS_HEATMAP = [
-  { label: '00–06h', min: 0, max: 5 },
-  { label: '06–10h', min: 6, max: 9 },
-  { label: '10–14h', min: 10, max: 13 },
-  { label: '14–18h', min: 14, max: 17 },
-  { label: '18–22h', min: 18, max: 21 },
-  { label: '22–24h', min: 22, max: 23 },
-] as const;
-
 export type HeatmapPedidos = { faixas: string[]; matriz: number[][]; max: number };
 
 /**
- * Pedidos por dia da semana × faixa de horário, em BRT. `matriz[faixa][dow]`,
- * dow 0=domingo (convenção de `Date.getDay()`, casada com `DIAS_SEMANA` da UI).
+ * Hora com menos pedidos que isto (fração do total) não abre linha no mapa —
+ * é pedido solto (madrugada, teste), não horário de operação.
+ */
+export const PISO_HORA_HEATMAP = 0.01;
+
+/**
+ * Pedidos por dia da semana × HORA, em BRT. `matriz[linha][dow]`, dow 0=domingo
+ * (convenção de `Date.getDay()`, casada com `DIAS_SEMANA` da UI).
+ *
+ * Hora a hora e só no horário em que o cliente vende de fato (pedido do Matheus,
+ * 2026-10-23): as faixas fixas de 4h (00–06, 06–10, 10–14…) diziam o óbvio —
+ * "18–22h" para quem só abre à noite — e gastavam 5 linhas vazias. Agora as
+ * linhas vão da primeira à última hora com volume real (≥ 1% dos pedidos),
+ * sem buraco no meio, então pizzaria mostra 18h…23h e restaurante de almoço
+ * mostra 11h…15h + a noite, se tiver.
  */
 export function heatmapPedidos(pedidos: PedidoLite[], p: Periodo): HeatmapPedidos {
-  const matriz = FAIXAS_HEATMAP.map(() => new Array<number>(7).fill(0));
-  let max = 0;
+  const porHora = Array.from({ length: 24 }, () => new Array<number>(7).fill(0));
+  let total = 0;
   for (const o of pedidos) {
     if (!pedidoValido(o) || !noPeriodo(o.created_at, p)) continue;
     const parte = parteBRT(o.created_at);
     if (!parte) continue;
-    const fi = FAIXAS_HEATMAP.findIndex(f => parte.hora >= f.min && parte.hora <= f.max);
-    if (fi < 0) continue;
-    const v = (matriz[fi][parte.dow] += 1);
-    if (v > max) max = v;
+    porHora[parte.hora][parte.dow] += 1;
+    total += 1;
   }
-  return { faixas: FAIXAS_HEATMAP.map(f => f.label), matriz, max };
+  if (total === 0) return { faixas: [], matriz: [], max: 0 };
+  const piso = Math.max(1, total * PISO_HORA_HEATMAP);
+  const somaHora = porHora.map(l => l.reduce((a, b) => a + b, 0));
+  const primeira = somaHora.findIndex(v => v >= piso);
+  const ultima = 23 - [...somaHora].reverse().findIndex(v => v >= piso);
+  if (primeira < 0) return { faixas: [], matriz: [], max: 0 };
+  const matriz = porHora.slice(primeira, ultima + 1);
+  const faixas = matriz.map((_, i) => `${String(primeira + i).padStart(2, '0')}h`);
+  const max = Math.max(...matriz.flat());
+  return { faixas, matriz, max };
 }
 
 export type FaixaFrequencia = { chave: '1' | '2-4' | '5-9' | '10+'; nome: string; clientes: number };

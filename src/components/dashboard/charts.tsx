@@ -20,9 +20,11 @@ import { cn } from '@/lib/utils';
 
 // ───────────────────────────────────────────────────────────── Gauge
 
-export function Gauge({ valor, max, tom = 'primary', unidade, legenda, size = 132 }: {
+export function Gauge({ valor, max, tom = 'primary', unidade, legenda, size = 132, preencher }: {
   valor: number | null; max: number; tom?: TomGrafico;
   unidade: string; legenda: string; size?: number;
+  /** Ocupa a caixa inteira (mantendo a proporção) em vez dos `size` px fixos. */
+  preencher?: boolean;
 }) {
   const p = valor === null || max <= 0 ? 0 : Math.max(0, Math.min(1, valor / max));
   const A0 = Math.PI * 0.78;
@@ -35,7 +37,7 @@ export function Gauge({ valor, max, tom = 'primary', unidade, legenda, size = 13
     return `M${x0} ${y0} A${r} ${r} 0 ${a1 - a0 > Math.PI ? 1 : 0} 1 ${x1} ${y1}`;
   };
   return (
-    <svg viewBox={`0 0 ${size} ${size}`} style={{ width: size, height: size, flexShrink: 0 }} className={CLASSE_TEXTO[tom]}>
+    <svg viewBox={`0 0 ${size} ${size}`} style={preencher ? { width: '100%', height: '100%' } : { width: size, height: size, flexShrink: 0 }} className={CLASSE_TEXTO[tom]}>
       <path d={arc(A0, A1)} fill="none" strokeWidth="9" className="stroke-border" />
       {p > 0 && <path d={arc(A0, A0 + (A1 - A0) * p)} fill="none" stroke="currentColor" strokeWidth="9" />}
       {[0.25, 0.5, 0.75].map((t) => {
@@ -157,9 +159,17 @@ export function Funnel({ funil, alto }: { funil: FunilCatalogo; alto?: boolean }
 
 // ─────────────────────────────────────────────────────────── Heatmap
 
-/** Pedidos por dia da semana × faixa de horário. Único componente com estado. */
+/**
+ * Pedidos por dia da semana × hora (só as horas em que o cliente vende — ver
+ * heatmapPedidos). As linhas dividem a altura da caixa; a última coluna diz
+ * quanto de todos os pedidos cai naquela hora, que é a leitura que importa
+ * ("19h é o pico"). Único componente com estado.
+ */
 export function Heatmap({ dados }: { dados: HeatmapDados }) {
   const [hover, setHover] = useState<[number, number] | null>(null);
+  const totalHora = dados.matriz.map((l) => l.reduce((a, b) => a + b, 0));
+  const total = totalHora.reduce((a, b) => a + b, 0);
+  const picoHora = Math.max(0, ...totalHora);
 
   if (!dados.faixas.length || dados.max <= 0) {
     return (
@@ -171,17 +181,21 @@ export function Heatmap({ dados }: { dados: HeatmapDados }) {
   }
 
   return (
-    <div>
-      <div className="grid gap-1" style={{ gridTemplateColumns: '44px repeat(7,1fr)' }}>
+    <div className="flex h-full min-h-[180px] flex-col">
+      <div
+        className="grid flex-1 gap-1"
+        style={{ gridTemplateColumns: '36px repeat(7,1fr) 46px', gridTemplateRows: `auto repeat(${dados.faixas.length}, minmax(14px, 1fr))` }}
+      >
         <div />
         {DIAS_SEMANA.map((d) => (
           <div key={d} className="text-center text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
             {d}
           </div>
         ))}
+        <div className="text-right text-[10px] font-bold uppercase tracking-widest text-muted-foreground" title="Parte de todos os pedidos que cai nesta hora">Total</div>
         {dados.faixas.map((faixa, fi) => (
           <Fragment key={faixa}>
-            <div className="flex items-center justify-end pr-1 text-[10px] text-muted-foreground">{faixa}</div>
+            <div className="flex items-center justify-end pr-1 text-[10px] font-semibold tabular-nums text-muted-foreground">{faixa}</div>
             {DIAS_SEMANA.map((_, di) => {
               const v = dados.matriz[fi]?.[di] ?? 0;
               const intensidade = v / dados.max;
@@ -193,7 +207,7 @@ export function Heatmap({ dados }: { dados: HeatmapDados }) {
                   onMouseLeave={() => setHover(null)}
                   title={`${DIAS_SEMANA[di]} ${faixa}: ${fmt.int(v)} pedidos`}
                   className={cn(
-                    'relative h-8 cursor-pointer rounded-[var(--radius)] border transition-transform',
+                    'relative min-h-[14px] cursor-pointer rounded-[var(--radius)] border transition-transform',
                     ativo ? 'scale-105 border-primary' : 'border-transparent',
                   )}
                   style={{ backgroundColor: `color-mix(in srgb, var(--primary) ${(6 + intensidade * 90).toFixed(0)}%, transparent)` }}
@@ -209,6 +223,13 @@ export function Heatmap({ dados }: { dados: HeatmapDados }) {
                 </div>
               );
             })}
+            {/* Peso da hora no total — o pico fica destacado. */}
+            <div
+              className={cn('flex items-center justify-end text-[11px] font-bold tabular-nums', totalHora[fi] === picoHora ? 'text-primary' : 'text-muted-foreground')}
+              title={`${faixa}: ${fmt.int(totalHora[fi])} pedidos no período`}
+            >
+              {total > 0 ? `${Math.round((totalHora[fi] / total) * 100)}%` : '—'}
+            </div>
           </Fragment>
         ))}
       </div>

@@ -11,7 +11,7 @@
 
 import assert from 'node:assert';
 import {
-  serieDiaria, heatmapPedidos, distribuicaoFrequencia, FAIXAS_HEATMAP,
+  serieDiaria, heatmapPedidos, distribuicaoFrequencia,
 } from './build/cardapioweb-recorrencia.mjs';
 
 let n = 0;
@@ -47,18 +47,24 @@ ok(!serie.some(p => p.pedidos === 0), 'nenhum dia zerado entra na série');
 
 // ───────────────────────────────────────────── heatmap
 const hm = heatmapPedidos(pedidos, P);
-eq(hm.faixas, FAIXAS_HEATMAP.map(f => f.label), 'faixas na ordem do catálogo');
-eq(hm.matriz.length, 6, '6 faixas de horário');
+// 5 pedidos válidos (12h, 13h, 20h, 23h, 23h): linhas hora a hora da 1ª à última
+// hora com volume, sem buraco — 12h…23h.
+eq(hm.faixas[0], '12h', 'começa na primeira hora com pedido');
+eq(hm.faixas[hm.faixas.length - 1], '23h', 'termina na última hora com pedido');
+eq(hm.faixas.length, 12, '12h a 23h, contínuo (horas vazias do meio ficam)');
 eq(hm.matriz[0].length, 7, '7 dias da semana');
 const totalCelulas = hm.matriz.flat().reduce((s, v) => s + v, 0);
 eq(totalCelulas, 5, 'soma das células = pedidos válidos no período (cancelado e fora fora)');
-eq(hm.max, 2, 'célula mais quente = 2 (os dois pedidos das 10–14 de sexta)');
-// A faixa 10–14 (índice 2) no dia da semana do pedido das 13h deve valer 2.
 const dowDia10 = brtDow('2026-07-10T16:00:00Z');
-eq(hm.matriz[2][dowDia10], 2, 'faixa 10–14 no dia 10 acumula os 2 pedidos');
+eq(hm.matriz[hm.faixas.indexOf('13h')][dowDia10], 1, 'pedido das 13h na linha 13h');
 // O pedido UTC 07-31T02:00 mora no dia da semana de 30/jul (BRT), não 31.
 const dow30 = brtDow('2026-07-31T02:00:00Z');
-eq(hm.matriz[5][dow30], 1, 'pedido de madrugada UTC cai no dia BRT anterior');
+eq(hm.matriz[hm.faixas.indexOf('23h')][dow30], 1, 'pedido de madrugada UTC cai no dia BRT anterior');
+eq(hm.max, 1, 'célula mais quente = 1');
+// Pedido solto de madrugada (< 1% do total) não abre linha.
+const muitos = Array.from({ length: 200 }, (_, i) => ped(`2026-07-${String(1 + (i % 28)).padStart(2, '0')}T22:00:00Z`, 10)); // BRT 19h
+const comSolto = heatmapPedidos([...muitos, ped('2026-07-05T06:00:00Z', 10)], P); // BRT 03h
+eq(comSolto.faixas, ['19h'], 'pedido solto das 3h (0,5%) não abre linha; só a hora de operação');
 
 // heatmap vazio → max 0 (a UI mostra BlocoVazio)
 const vazio = heatmapPedidos([], P);

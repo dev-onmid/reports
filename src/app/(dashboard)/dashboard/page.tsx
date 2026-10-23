@@ -64,6 +64,7 @@ import { T } from '@/lib/dashboard-tipografia';
 import { ClientAvatar } from '@/components/client-avatar';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { FunilCriativosPanel } from '@/components/dashboard/funil-criativos';
+import { CampanhasMetaCartoes } from '@/components/dashboard/campanhas-meta-cartoes';
 import type { EtapaDoCriativo, FunilDoCriativo } from '@/app/api/crm/funil-criativos/route';
 import type { VendasPorAnuncio } from '@/app/api/crm/vendas-por-anuncio/route';
 import { descreverFontes, juntarFontes, totalDasFontes } from '@/lib/fonte-venda';
@@ -7065,22 +7066,40 @@ export default function GeneralDashboard() {
               <Superficie
                 titulo="Campanhas Meta Ads"
                 icone={<MetaAdsMark className="h-5 w-5 text-[#168BFF]" />}
-                sub="com veiculação no período · clique para abrir conjuntos e anúncios"
+                sub="com veiculação no período · o que aconteceu em cada campanha e os criativos que mais trouxeram resultado"
                 vazio={!campaignsLoading && metaCampaigns.length === 0}
                 avisoVazio="Nenhuma campanha Meta Ads com veiculação no período."
               >
-                <CampaignPerformanceTable
-                  campaigns={metaCampaigns}
-                  loading={campaignsLoading}
-                  period={period}
-                  dateFrom={customDateFrom}
-                  dateTo={customDateTo}
-                  metaCpl={comMetas ? cplMetaSel : 0}
-                  abrirTudo
-                  alturaMax={560}
-                  vendas={comReceita ? vendasAnuncio : null}
-                  comprasMeta={comReceita && vendeNoCardapio}
-                />
+                {/* Cartões no formato do relatório impresso (pedido do Matheus,
+                    2026-10-23: a tabela "está poluída"). A tabela segue a um
+                    clique, para descer a conjuntos e anúncios. */}
+                {campaignsLoading && metaCampaigns.length === 0 ? (
+                  <div className="flex flex-col gap-3">
+                    {Array.from({ length: 2 }).map((_, i) => <div key={i} className="h-[230px] animate-pulse rounded-[14px] bg-white/[0.04]" />)}
+                  </div>
+                ) : (
+                  <CampanhasMetaCartoes
+                    campanhas={metaCampaigns}
+                    criativos={criativosTodos}
+                    vendas={comReceita ? vendasAnuncio : null}
+                    comprasMeta={comReceita && vendeNoCardapio}
+                    onPreview={setPreviewCreative}
+                    tabela={(
+                      <CampaignPerformanceTable
+                        campaigns={metaCampaigns}
+                        loading={campaignsLoading}
+                        period={period}
+                        dateFrom={customDateFrom}
+                        dateTo={customDateTo}
+                        metaCpl={comMetas ? cplMetaSel : 0}
+                        abrirTudo
+                        alturaMax={560}
+                        vendas={comReceita ? vendasAnuncio : null}
+                        comprasMeta={comReceita && vendeNoCardapio}
+                      />
+                    )}
+                  />
+                )}
                 {comReceita && <VendasSemVeiculacao vendas={vendasAnuncio} campanhas={campaigns} />}
               </Superficie>
 

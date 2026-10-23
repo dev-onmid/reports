@@ -3,7 +3,7 @@ import { google } from 'googleapis';
 import { makeServerPool } from '@/lib/server-db';
 import { resolveMetaPeriod, resolveGaqlPeriod, applyMetaDateToUrl } from '@/lib/period-utils';
 import { getFreshMetaToken } from '@/lib/meta-token';
-import { countMetaResults, metaPurchases, type MetaAction } from '@/lib/meta-results';
+import { META_RESULT_FAMILIES, countMetaResults, metaPurchases, type MetaAction } from '@/lib/meta-results';
 import { verbaMeta, somarVerbas, type VerbaMeta } from '@/lib/meta-verba';
 
 type SortKey = 'spend' | 'leads' | 'impressions' | 'clicks' | 'cpl' | 'ctr';
@@ -39,6 +39,14 @@ export type CampaignPerformance = {
   /** Meta: compras atribuídas (pixel/CAPI — no delivery, o pedido do cardápio digital) e o valor. */
   compras?: number;
   valorCompras?: number;
+  /** Meta: o que compõe `leads` — conversas de mensagem e leads de formulário/pixel, separados. */
+  conversas?: number;
+  leadsFormulario?: number;
+  alcance?: number;
+  frequencia?: number;
+  /** Meta: objetivo cru (OUTCOME_SALES…) e quando a campanha começou a rodar (ISO). */
+  objetivoMeta?: string;
+  inicio?: string;
   searchImprShare?: number;
   searchBudgetLostIS?: number;
   searchAbsTopIS?: number;
@@ -265,13 +273,13 @@ export async function GET(request: NextRequest) {
 
           // Fetch campaign statuses in parallel with insights
           const statusUrl = new URL(`https://graph.facebook.com/v21.0/${acctNode}/campaigns`);
-          statusUrl.searchParams.set('fields', 'id,effective_status,daily_budget,lifetime_budget,budget_remaining,stop_time,objective');
+          statusUrl.searchParams.set('fields', 'id,effective_status,daily_budget,lifetime_budget,budget_remaining,stop_time,start_time,objective');
           statusUrl.searchParams.set('limit', '200');
           statusUrl.searchParams.set('access_token', token);
 
           const url = new URL(`https://graph.facebook.com/v21.0/${acctNode}/insights`);
           url.searchParams.set('level', 'campaign');
-          url.searchParams.set('fields', 'campaign_id,campaign_name,spend,impressions,clicks,actions,action_values');
+          url.searchParams.set('fields', 'campaign_id,campaign_name,spend,impressions,clicks,reach,frequency,actions,action_values');
           applyMetaDateToUrl(url, metaPeriod);
           url.searchParams.set('sort', 'spend_descending');
           url.searchParams.set('limit', String(limit));
@@ -301,7 +309,7 @@ export async function GET(request: NextRequest) {
               verbaConjuntos.set(s.campaign_id, lista);
             }
           }
-          const statusData: Record<string, { status: string; verba: VerbaMeta; nosConjuntos: boolean; objective?: string }> = {};
+          const statusData: Record<string, { status: string; verba: VerbaMeta; nosConjuntos: boolean; objective?: string; inicio?: string }> = {};
           if (statusRes.ok) {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const sd = await statusRes.json() as { data?: any[] };
@@ -315,6 +323,7 @@ export async function GET(request: NextRequest) {
                 verba: nosConjuntos ? somarVerbas(verbaConjuntos.get(c.id) ?? []) : propria,
                 nosConjuntos,
                 objective: c.objective ?? undefined,
+                inicio: c.start_time ?? undefined,
               };
             }
           }
@@ -352,6 +361,12 @@ export async function GET(request: NextRequest) {
               cpl: leads > 0 ? spend / leads : 0,
               compras: compra.compras,
               valorCompras: compra.valor,
+              conversas: countMetaResults((row.actions ?? []).filter((a: MetaAction) => META_RESULT_FAMILIES[0].includes(a.action_type))),
+              leadsFormulario: countMetaResults((row.actions ?? []).filter((a: MetaAction) => META_RESULT_FAMILIES[1].includes(a.action_type))),
+              alcance: parseInt(row.reach || '0', 10) || undefined,
+              frequencia: parseFloat(row.frequency || '0') || undefined,
+              objetivoMeta: st?.objective,
+              inicio: st?.inicio,
             });
           }
         }),
