@@ -4,6 +4,7 @@ import { parseRecorte, filtroRegiaoSql } from '@/lib/regiao-recorte';
 import { leadContaSql } from '@/lib/lead-contagem';
 import { makeServerPool } from '@/lib/server-db';
 import { parseIsoDateRange } from '@/lib/optimizer-period-range';
+import { ehFonte, fonteVendaSql, somarNaFonte, type FonteVenda, type VendasPorFonte } from '@/lib/fonte-venda';
 
 /**
  * Vendas e faturamento por ANÚNCIO — criativo, conjunto e campanha que
@@ -39,14 +40,16 @@ export type VendaPorCriativo = {
   vendas: number;
   receita: number;
   leads: number;
+  /** As mesmas vendas/receita, quebradas por quem trouxe o dado (ver fonte-venda). */
+  fontes: VendasPorFonte;
 };
 export type VendaPorConjunto = {
   chave: string; nome: string; campanha: string | null; plataforma: Plataforma;
-  vendas: number; receita: number; leads: number;
+  vendas: number; receita: number; leads: number; fontes: VendasPorFonte;
 };
 export type VendaPorCampanha = {
   chave: string; nome: string; plataforma: Plataforma;
-  vendas: number; receita: number; leads: number;
+  vendas: number; receita: number; leads: number; fontes: VendasPorFonte;
 };
 export type VendasPorAnuncio = {
   ok: boolean;
@@ -87,6 +90,7 @@ type Linha = {
   conjunto: string | null;
   campanha: string | null;
   plataforma: Plataforma;
+  fonte: FonteVenda | null;
   receita: number;
   leads: number;
 };
@@ -117,13 +121,14 @@ export async function GET(req: NextRequest) {
       // nível é feita aqui embaixo com Sets.
       pool.query<Linha>(
         `SELECT COALESCE(origem_lead_id::text, id::text) AS comprador, ${DIMS},
+                ${fonteVendaSql('crm_leads')} AS fonte,
                 COALESCE(SUM(${VALOR}), 0)::float AS receita, 0 AS leads
            ${BASE} AND ${JANELA_GANHO} AND ${VENDEU} AND ${TEM_ATRIBUICAO}
-          GROUP BY 1, 2, 3, 4, 5, 6`,
+          GROUP BY 1, 2, 3, 4, 5, 6, 7`,
         params,
       ),
       pool.query<Linha>(
-        `SELECT NULL AS comprador, ${DIMS}, 0 AS receita, COUNT(*)::int AS leads
+        `SELECT NULL AS comprador, ${DIMS}, NULL AS fonte, 0 AS receita, COUNT(*)::int AS leads
            ${BASE} AND ${JANELA_LEAD} AND ${TEM_ATRIBUICAO}
             AND COALESCE(registro_tipo, 'hibrido') <> 'venda'
           GROUP BY 2, 3, 4, 5, 6`,
@@ -135,7 +140,14 @@ export async function GET(req: NextRequest) {
       ),
     ]);
 
-    type Acc = { base: Omit<VendaPorCriativo, 'vendas' | 'receita' | 'leads'>; compradores: Set<string>; receita: number; leads: number };
+    // Por comprador guarda a fonte da linha de MAIOR valor: o lead do WhatsApp
+    // (valor 0) que virou linha de venda da planilha conta como planilha — é ela
+    // que trouxe a venda. Assim a soma das fontes bate com o total do anúncio.
+    type Acc = {
+      base: Omit<VendaPorCriativo, 'vendas' | 'receita' | 'leads' | 'fontes'>;
+      compradores: Map<string, { fonte: FonteVenda; receita: number }>;
+      receitaFonte: VendasPorFonte; receita: number; leads: number;
+    };
     const cri = new Map<string, Acc>();
     const con = new Map<string, Acc>();
     const cam = new Map<string, Acc>();
@@ -144,11 +156,17 @@ export async function GET(req: NextRequest) {
 
     const somar = (mapa: Map<string, Acc>, chave: string, base: Acc['base'], l: Linha) => {
       let a = mapa.get(chave);
-      if (!a) { a = { base, compradores: new Set(), receita: 0, leads: 0 }; mapa.set(chave, a); }
+      if (!a) { a = { base, compradores: new Map(), receitaFonte: {}, receita: 0, leads: 0 }; mapa.set(chave, a); }
       // Plataforma: Google vence "outro", Meta vence "outro" — o nome sozinho não diz.
       if (a.base.plataforma === 'outro' && l.plataforma !== 'outro') a.base.plataforma = l.plataforma;
-      if (l.comprador) a.compradores.add(l.comprador);
-      a.receita += Number(l.receita) || 0;
+      const receita = Number(l.receita) || 0;
+      if (l.comprador) {
+        const fonte: FonteVenda = ehFonte(l.fonte) ? l.fonte : 'crm';
+        const atual = a.compradores.get(l.comprador);
+        if (!atual || receita > atual.receita) a.compradores.set(l.comprador, { fonte, receita });
+        somarNaFonte(a.receitaFonte, fonte, 0, receita);
+      }
+      a.receita += receita;
       a.leads += Number(l.leads) || 0;
     };
 
@@ -177,9 +195,15 @@ export async function GET(req: NextRequest) {
     }
 
     // Só entra no ranking quem VENDEU; ordenado por faturamento (desempate: vendas).
+    const fontesDe = (a: Acc): VendasPorFonte => {
+      const f: VendasPorFonte = {};
+      for (const [k, p] of Object.entries(a.receitaFonte) as Array<[FonteVenda, { receita: number }]>) somarNaFonte(f, k, 0, p.receita);
+      for (const { fonte } of a.compradores.values()) somarNaFonte(f, fonte, 1, 0);
+      return f;
+    };
     const ranking = (m: Map<string, Acc>, n: number) => [...m.values()]
       .filter((a) => a.receita > 0 || a.compradores.size > 0)
-      .map((a) => ({ ...a.base, vendas: a.compradores.size, receita: a.receita, leads: a.leads }))
+      .map((a) => ({ ...a.base, vendas: a.compradores.size, receita: a.receita, leads: a.leads, fontes: fontesDe(a) }))
       .sort((a, b) => b.receita - a.receita || b.vendas - a.vendas)
       .slice(0, n);
 
@@ -191,11 +215,11 @@ export async function GET(req: NextRequest) {
       criativos: ranking(cri, 24),
       conjuntos: ranking(con, 30).map((r) => ({
         chave: r.chave, nome: r.nome, campanha: r.campanha, plataforma: r.plataforma,
-        vendas: r.vendas, receita: r.receita, leads: r.leads,
+        vendas: r.vendas, receita: r.receita, leads: r.leads, fontes: r.fontes,
       })),
       campanhas: ranking(cam, 30).map((r) => ({
         chave: r.chave, nome: r.nome, plataforma: r.plataforma,
-        vendas: r.vendas, receita: r.receita, leads: r.leads,
+        vendas: r.vendas, receita: r.receita, leads: r.leads, fontes: r.fontes,
       })),
     };
     return Response.json(body);

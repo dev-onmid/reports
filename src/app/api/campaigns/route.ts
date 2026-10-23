@@ -3,7 +3,8 @@ import { google } from 'googleapis';
 import { makeServerPool } from '@/lib/server-db';
 import { resolveMetaPeriod, resolveGaqlPeriod, applyMetaDateToUrl } from '@/lib/period-utils';
 import { getFreshMetaToken } from '@/lib/meta-token';
-import { countMetaResults } from '@/lib/meta-results';
+import { countMetaResults, metaPurchases, type MetaAction } from '@/lib/meta-results';
+import { verbaMeta, somarVerbas, type VerbaMeta } from '@/lib/meta-verba';
 
 type SortKey = 'spend' | 'leads' | 'impressions' | 'clicks' | 'cpl' | 'ctr';
 
@@ -17,7 +18,16 @@ export type CampaignPerformance = {
   loginCustomerId?: string;
   status: string;
   objective?: string;
+  /**
+   * Verba por dia. Meta: a diária, ou o ritmo do orçamento total (restante ÷
+   * dias até o fim); sem orçamento na campanha (ABO), a soma dos conjuntos ativos.
+   */
   dailyBudget?: number;
+  /** Meta: orçamento total (vitalício) e o fim dele, quando é esse o tipo. */
+  lifetimeBudget?: number;
+  budgetEnd?: string;
+  /** Meta: a verba vem dos conjuntos (campanha sem orçamento próprio). */
+  budgetNosConjuntos?: boolean;
   budgetResourceName?: string;
   spend: number;
   impressions: number;
@@ -26,6 +36,9 @@ export type CampaignPerformance = {
   ctr: number;
   cpc: number;
   cpl: number;
+  /** Meta: compras atribuídas (pixel/CAPI — no delivery, o pedido do cardápio digital) e o valor. */
+  compras?: number;
+  valorCompras?: number;
   searchImprShare?: number;
   searchBudgetLostIS?: number;
   searchAbsTopIS?: number;
@@ -252,30 +265,55 @@ export async function GET(request: NextRequest) {
 
           // Fetch campaign statuses in parallel with insights
           const statusUrl = new URL(`https://graph.facebook.com/v21.0/${acctNode}/campaigns`);
-          statusUrl.searchParams.set('fields', 'id,effective_status,daily_budget,lifetime_budget,objective');
+          statusUrl.searchParams.set('fields', 'id,effective_status,daily_budget,lifetime_budget,budget_remaining,stop_time,objective');
           statusUrl.searchParams.set('limit', '200');
           statusUrl.searchParams.set('access_token', token);
 
           const url = new URL(`https://graph.facebook.com/v21.0/${acctNode}/insights`);
           url.searchParams.set('level', 'campaign');
-          url.searchParams.set('fields', 'campaign_id,campaign_name,spend,impressions,clicks,actions');
+          url.searchParams.set('fields', 'campaign_id,campaign_name,spend,impressions,clicks,actions,action_values');
           applyMetaDateToUrl(url, metaPeriod);
           url.searchParams.set('sort', 'spend_descending');
           url.searchParams.set('limit', String(limit));
           url.searchParams.set('access_token', token);
 
-          const [insightsRes, statusRes] = await Promise.all([fetch(url.toString()), fetch(statusUrl.toString())]);
+          // Campanha sem orçamento próprio (ABO) tem a verba nos conjuntos — sem
+          // isto a coluna Verba/dia ficava "—" (caso PicoLocos Aniversário).
+          const adsetsUrl = new URL(`https://graph.facebook.com/v21.0/${acctNode}/adsets`);
+          adsetsUrl.searchParams.set('fields', 'campaign_id,daily_budget,lifetime_budget,budget_remaining,end_time');
+          adsetsUrl.searchParams.set('effective_status', JSON.stringify(['ACTIVE']));
+          adsetsUrl.searchParams.set('limit', '500');
+          adsetsUrl.searchParams.set('access_token', token);
+
+          const [insightsRes, statusRes, adsetsRes] = await Promise.all([
+            fetch(url.toString()), fetch(statusUrl.toString()), fetch(adsetsUrl.toString()).catch(() => null),
+          ]);
           if (!insightsRes.ok) return;
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const insightsData = await insightsRes.json() as { data?: any[] };
-          const statusData: Record<string, { status: string; dailyBudget?: number; objective?: string }> = {};
+          const verbaConjuntos = new Map<string, VerbaMeta[]>();
+          if (adsetsRes?.ok) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const ad = await adsetsRes.json() as { data?: any[] };
+            for (const s of ad.data ?? []) {
+              const lista = verbaConjuntos.get(s.campaign_id) ?? [];
+              lista.push(verbaMeta(s));
+              verbaConjuntos.set(s.campaign_id, lista);
+            }
+          }
+          const statusData: Record<string, { status: string; verba: VerbaMeta; nosConjuntos: boolean; objective?: string }> = {};
           if (statusRes.ok) {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const sd = await statusRes.json() as { data?: any[] };
             for (const c of sd.data ?? []) {
+              // lifetime_budget é o TOTAL até o fim, não o diário (antes ia direto
+              // para "Verba/dia": R$ 4.695,97/dia numa campanha de ~R$ 25/dia).
+              const propria = verbaMeta(c);
+              const nosConjuntos = propria.porDia == null && propria.total == null;
               statusData[c.id] = {
                 status: c.effective_status ?? 'ACTIVE',
-                dailyBudget: c.daily_budget ? Number(c.daily_budget) / 100 : (c.lifetime_budget ? Number(c.lifetime_budget) / 100 : undefined),
+                verba: nosConjuntos ? somarVerbas(verbaConjuntos.get(c.id) ?? []) : propria,
+                nosConjuntos,
                 objective: c.objective ?? undefined,
               };
             }
@@ -290,6 +328,8 @@ export async function GET(request: NextRequest) {
             // uma lista inteira de action_types, o que triplicava conversas de WhatsApp (a mesma
             // conversa vinha em 3 action_types) e dobrava leads de formulário.
             const leads = countMetaResults((row.actions ?? []) as { action_type: string; value: string }[]);
+            const compra = metaPurchases(row.actions as MetaAction[] | undefined, row.action_values as MetaAction[] | undefined);
+            const st = statusData[row.campaign_id];
             campaigns.push({
               id: row.campaign_id,
               name: row.campaign_name ?? `Campanha ${row.campaign_id}`,
@@ -299,7 +339,10 @@ export async function GET(request: NextRequest) {
               connectionId: conn.id,
               status: statusData[row.campaign_id]?.status ?? 'ACTIVE',
               objective: normalizeMetaObjective(statusData[row.campaign_id]?.objective) ?? undefined,
-              dailyBudget: statusData[row.campaign_id]?.dailyBudget,
+              dailyBudget: st?.verba.porDia,
+              lifetimeBudget: st?.verba.total,
+              budgetEnd: st?.verba.fim,
+              budgetNosConjuntos: st?.nosConjuntos || undefined,
               spend,
               impressions,
               clicks,
@@ -307,6 +350,8 @@ export async function GET(request: NextRequest) {
               ctr: impressions > 0 ? (clicks / impressions) * 100 : 0,
               cpc: clicks > 0 ? spend / clicks : 0,
               cpl: leads > 0 ? spend / leads : 0,
+              compras: compra.compras,
+              valorCompras: compra.valor,
             });
           }
         }),

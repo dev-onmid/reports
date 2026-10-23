@@ -2,7 +2,7 @@ import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { resolveMetaPeriod, applyMetaDateToUrl } from '@/lib/period-utils';
 import { getFreshMetaToken } from '@/lib/meta-token';
-import { countMetaResults, type MetaAction } from '@/lib/meta-results';
+import { countMetaResults, metaPurchases, type MetaAction } from '@/lib/meta-results';
 
 // Leads/conversas pela contagem CANÔNICA (lib/meta-results): uma prioridade por
 // família, nunca somando aliases. A lista local antiga somava `lead` +
@@ -60,6 +60,9 @@ export type TopCreative = {
   leads: number;
   ctr: number;
   cpl: number;
+  /** Compras que a Meta atribuiu ao anúncio (pixel/CAPI) e o valor delas — ver metaPurchases. */
+  compras?: number;
+  valorCompras?: number;
   /** Vídeo: reproduções de 3s (o "gancho") — `actions.video_view`. */
   views3s?: number;
   /** Vídeo: ThruPlays (15s ou até o fim) — a "retenção". */
@@ -226,7 +229,7 @@ export async function GET(request: NextRequest) {
           // Fetch top ads insights sorted by spend
           const insightsUrl = new URL(`https://graph.facebook.com/v21.0/${toMetaAccountNodeId(account.id)}/insights`);
           insightsUrl.searchParams.set('level', 'ad');
-          insightsUrl.searchParams.set('fields', 'ad_id,ad_name,campaign_id,campaign_name,adset_id,adset_name,spend,impressions,clicks,actions,video_thruplay_watched_actions,video_p25_watched_actions,video_p50_watched_actions,video_p75_watched_actions,video_p100_watched_actions');
+          insightsUrl.searchParams.set('fields', 'ad_id,ad_name,campaign_id,campaign_name,adset_id,adset_name,spend,impressions,clicks,actions,action_values,video_thruplay_watched_actions,video_p25_watched_actions,video_p50_watched_actions,video_p75_watched_actions,video_p100_watched_actions');
           applyMetaDateToUrl(insightsUrl, metaPeriod);
           insightsUrl.searchParams.set('sort', 'spend_descending');
           insightsUrl.searchParams.set('limit', String(adIdsMode ? 50 : limit));
@@ -373,6 +376,7 @@ export async function GET(request: NextRequest) {
             const mediaType = detectMediaType(creative);
 
             const leads = countMetaResults(insight.actions as MetaAction[] | undefined);
+            const compra = metaPurchases(insight.actions as MetaAction[] | undefined, insight.action_values as MetaAction[] | undefined);
             const spend = parseFloat(insight.spend || '0');
             const clicks = parseInt(insight.clicks || '0', 10);
             const impressions = parseInt(insight.impressions || '0', 10);
@@ -413,6 +417,8 @@ export async function GET(request: NextRequest) {
               leads,
               ctr: impressions > 0 ? clicks / impressions * 100 : 0,
               cpl: leads > 0 ? spend / leads : 0,
+              compras: compra.compras,
+              valorCompras: compra.valor,
               views3s: ((insight.actions ?? []) as Array<{ action_type?: string; value?: string }>)
                 .filter(a => a.action_type === 'video_view')
                 .reduce((s, a) => s + (parseFloat(a.value ?? '0') || 0), 0),

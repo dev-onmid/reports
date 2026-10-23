@@ -4,9 +4,10 @@ import { leadContaSql, rastroPagoSql } from '@/lib/lead-contagem';
 import { makeServerPool } from '@/lib/server-db';
 import { parseIsoDateRange } from '@/lib/optimizer-period-range';
 import {
-  construirMapaEtapas, etapaDoLead,
-  type EtapaDeStage, type EtapaFunil, type LeadParaFunil, type MapaEtapas,
+  construirLadder, construirMapaEtapas, etapaDoLead, postoDaEtapa,
+  type EtapaDeStage, type EtapaFunil, type LeadParaFunil, type MapaEtapas, type StageKanban,
 } from '@/lib/funil-etapas';
+import { ehFonte, fonteVendaSql, somarNaFonte, type VendasPorFonte } from '@/lib/fonte-venda';
 
 /**
  * Funil do CRIATIVO — o que acontece com os leads de cada anúncio até o
@@ -37,7 +38,18 @@ export type FunilDoCriativo = {
   comparecimentos: number;
   vendas: number;
   receita: number;
+  /** Vendas/receita do CRM por quem trouxe o dado (WhatsApp, planilha, Agendor…). */
+  fontes: VendasPorFonte;
 };
+
+/**
+ * Etapa INTERMEDIÁRIA do funil real do cliente (entre o lead e a venda), com o
+ * nome da coluna do Kanban. `posto` 1..3 = qualificado/agendamento/comparecimento
+ * — os mesmos postos que preenchem engajados/agendamentos/comparecimentos.
+ * Cliente sem agendamento no funil não recebe a etapa (antes era fixo
+ * "Agend. → Compar." para todo mundo, inclusive delivery e vendas).
+ */
+export type EtapaDoCriativo = { posto: 1 | 2 | 3; rotulo: string };
 
 const t = (v: unknown) => String(v ?? '').trim();
 const PLATAFORMA_SQL = `CASE
@@ -79,6 +91,7 @@ export async function GET(req: NextRequest) {
         `SELECT ${CHAVE_SQL} AS chave, NULLIF(btrim(l.source_id), '') AS source_id,
                 ${ANUNCIO_SQL} AS anuncio, NULLIF(btrim(l.campaign_name), '') AS campanha,
                 ${PLATAFORMA_SQL} AS plataforma,
+                ${fonteVendaSql('l')} AS fonte,
                 COUNT(DISTINCT COALESCE(l.origem_lead_id::text, l.id::text))::int AS vendas,
                 COALESCE(SUM(${VALOR}), 0)::float AS receita
            FROM public.crm_leads l
@@ -86,18 +99,25 @@ export async function GET(req: NextRequest) {
             AND (${VALOR} > 0 OR l.fechou = TRUE OR ${statusFechouSql('l')})
             AND (COALESCE(l.fechado_em, l.lead_date, l.data) IS NULL
                  OR COALESCE(l.fechado_em, l.lead_date, l.data) BETWEEN $2 AND $3)
-          GROUP BY 1, 2, 3, 4, 5`,
+          GROUP BY 1, 2, 3, 4, 5, 6`,
         params,
       ),
       pool.query(
-        `SELECT client_id, funnel_id, label, etapa_funil, situacao FROM public.crm_stages WHERE client_id = ANY($1)`,
+        `SELECT client_id, funnel_id, label, etapa_funil, situacao, position FROM public.crm_stages WHERE client_id = ANY($1)`,
         [clientIds],
       ).catch(() => ({ rows: [] as Array<Record<string, unknown>> })),
     ]);
 
     // Mapa de etapas POR CLIENTE — o mesmo status significa coisas diferentes em funis diferentes.
     const stagesPorCliente = new Map<string, EtapaDeStage[]>();
+    const kanbanPorCliente = new Map<string, StageKanban[]>();
     for (const s of stagesRes.rows) {
+      const k = kanbanPorCliente.get(t(s.client_id)) ?? [];
+      k.push({
+        funnelId: t(s.funnel_id), label: t(s.label), position: Number(s.position) || 0,
+        etapa: (s.etapa_funil ?? null) as EtapaFunil | null,
+      });
+      kanbanPorCliente.set(t(s.client_id), k);
       const cid = t(s.client_id);
       const lista = stagesPorCliente.get(cid) ?? [];
       lista.push({
@@ -125,7 +145,7 @@ export async function GET(req: NextRequest) {
           nome: t(r.anuncio) || 'Anúncio sem nome',
           campanha: t(r.campanha) || null,
           plataforma: (t(r.plataforma) || 'outro') as FunilDoCriativo['plataforma'],
-          leads: 0, engajados: 0, agendamentos: 0, comparecimentos: 0, vendas: 0, receita: 0,
+          leads: 0, engajados: 0, agendamentos: 0, comparecimentos: 0, vendas: 0, receita: 0, fontes: {},
         };
         porChave.set(chave, c);
       }
@@ -136,6 +156,7 @@ export async function GET(req: NextRequest) {
       return c;
     };
 
+    const leadsPorCliente = new Map<string, LeadParaFunil[]>();
     for (const r of leadsRes.rows) {
       const lead: LeadParaFunil = {
         status: r.status ?? null,
@@ -149,6 +170,9 @@ export async function GET(req: NextRequest) {
         receita: Number(r.valor) || 0,
         rastreado: r.rastreado === true,
       };
+      const lista = leadsPorCliente.get(t(r.client_id)) ?? [];
+      lista.push(lead);
+      leadsPorCliente.set(t(r.client_id), lista);
       const posto = etapaDoLead(lead, mapaDe(t(r.client_id)));
       if (posto.naoLead) continue;
       const c = garantir(r);
@@ -159,11 +183,35 @@ export async function GET(req: NextRequest) {
     }
     for (const r of vendasRes.rows) {
       const c = garantir(r);
-      c.vendas += Number(r.vendas) || 0;
-      c.receita += Number(r.receita) || 0;
+      const vendas = Number(r.vendas) || 0;
+      const receita = Number(r.receita) || 0;
+      c.vendas += vendas;
+      c.receita += receita;
+      somarNaFonte(c.fontes, ehFonte(r.fonte) ? r.fonte : 'crm', vendas, receita);
     }
 
-    return Response.json({ ok: true, criativos: [...porChave.values()] });
+    // Escada real: as etapas do funil dominante de cada cliente (a mesma escolha
+    // do Funil de Performance). Vários clientes selecionados → etapa entra se
+    // algum funil a tem; o nome é o da coluna quando todos concordam, senão o genérico.
+    const GENERICO: Record<1 | 2 | 3, string> = { 1: 'Qualificado', 2: 'Agendamento', 3: 'Comparecimento' };
+    const nomes = new Map<1 | 2 | 3, Set<string>>();
+    for (const cid of clientIds) {
+      const stages = kanbanPorCliente.get(cid) ?? [];
+      if (stages.length === 0) continue;
+      for (const d of construirLadder(stages, leadsPorCliente.get(cid) ?? []).degraus) {
+        const p = postoDaEtapa(d.etapa);
+        if (p < 1 || p > 3) continue;
+        const posto = p as 1 | 2 | 3;
+        const set = nomes.get(posto) ?? new Set<string>();
+        set.add(d.label);
+        nomes.set(posto, set);
+      }
+    }
+    const etapas: EtapaDoCriativo[] = ([1, 2, 3] as const)
+      .filter((p) => nomes.has(p))
+      .map((p) => ({ posto: p, rotulo: nomes.get(p)!.size === 1 ? [...nomes.get(p)!][0] : GENERICO[p] }));
+
+    return Response.json({ ok: true, criativos: [...porChave.values()], etapas });
   } catch (err) {
     console.error('[funil-criativos]', err);
     return Response.json({ ok: false, criativos: [] });

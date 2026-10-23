@@ -64,8 +64,9 @@ import { T } from '@/lib/dashboard-tipografia';
 import { ClientAvatar } from '@/components/client-avatar';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { FunilCriativosPanel } from '@/components/dashboard/funil-criativos';
-import type { FunilDoCriativo } from '@/app/api/crm/funil-criativos/route';
+import type { EtapaDoCriativo, FunilDoCriativo } from '@/app/api/crm/funil-criativos/route';
 import type { VendasPorAnuncio } from '@/app/api/crm/vendas-por-anuncio/route';
+import { descreverFontes, juntarFontes, totalDasFontes } from '@/lib/fonte-venda';
 import { VendedoresCard, CategoriasCard, type LinhaVendedor, type LinhaCategoria } from '@/components/dashboard/desempenho-comercial';
 import type { TopCreative } from '@/app/api/meta/top-creatives/route';
 import type { PageInsightsResult, InstagramPageData } from '@/app/api/meta/page-insights/route';
@@ -1744,6 +1745,7 @@ function CampaignPerformanceTable({
   preencher = false,
   alturaMax = 288,
   vendas = null,
+  comprasMeta = false,
 }: {
   /**
    * Vendas e faturamento do CRM por campanha, conjunto e anúncio (rastreio do
@@ -1751,6 +1753,14 @@ function CampaignPerformanceTable({
    * substitui a antiga caixa "Vendas e faturamento por campanha" (30/09).
    */
   vendas?: VendasPorAnuncio | null;
+  /**
+   * Soma às vendas do CRM as COMPRAS que a Meta atribuiu (pixel), como fonte
+   * "Cardápio digital". Só para quem tem cardápio conectado: lá a venda acontece
+   * fora do CRM (PicoLocos via "1 venda, sem valor" numa campanha com 88 compras
+   * e R$ 9,1 mil no Gerenciador, out/2026). Nos outros clientes a compra da Meta
+   * é eco do CRM (o sistema manda Purchase no ganho) e não pode somar.
+   */
+  comprasMeta?: boolean;
   campaigns: CampaignPerformance[];
   loading: boolean;
   period: string;
@@ -1775,7 +1785,7 @@ function CampaignPerformanceTable({
   // Só CONSULTA (pedido do Matheus, 2026-09-24): pausar/ativar, editar verba e
   // otimizar saíram da dashboard — ação em campanha é no gerenciador/CRM, não
   // num painel de leitura onde um clique errado pausa a conta do cliente.
-  const mostrarVendas = !!vendas;
+  const mostrarVendas = !!vendas || (comprasMeta && campaigns.some(c => (c.compras ?? 0) > 0));
   const totalColunas = (mostrarIS ? 10 : 7) + (mostrarPlataforma ? 1 : 0) + (mostrarVendas ? 3 : 0);
   // Casamento pelas MESMAS chaves que a rota grava: nome da campanha em
   // minúsculas (ou o id, quando o rastreio do Google guardou {campaignid}),
@@ -1965,6 +1975,8 @@ function CampaignPerformanceTable({
     let displayName: string;
     let spend = 0, impressions = 0, clicks = 0, leads = 0, ctr = 0, cpl = 0;
     let dailyBudget: number | undefined;
+    let verbaDica: string | undefined;
+    let compras = 0, valorCompras = 0;
     let isActive: boolean;
 
     if (row.kind === 'campaign') {
@@ -1977,6 +1989,12 @@ function CampaignPerformanceTable({
       ctr = row.data.ctr;
       cpl = row.data.cpl;
       dailyBudget = row.data.dailyBudget;
+      compras = row.data.compras ?? 0;
+      valorCompras = row.data.valorCompras ?? 0;
+      const fim = row.data.budgetEnd ? new Date(row.data.budgetEnd).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' }) : null;
+      verbaDica = row.data.lifetimeBudget
+        ? `Orçamento total de ${formatCurrencyBRL(row.data.lifetimeBudget)}${fim ? ` até ${fim}` : ''}${dailyBudget != null ? ' · por dia = o que sobra ÷ dias até o fim' : ''}`
+        : row.data.budgetNosConjuntos && dailyBudget != null ? 'Soma da verba dos conjuntos ativos' : undefined;
     } else if (row.kind === 'adset') {
       displayStatus = row.data.status;
       displayName = row.data.name;
@@ -1986,7 +2004,10 @@ function CampaignPerformanceTable({
       leads = row.data.leads;
       ctr = row.data.ctr;
       cpl = row.data.cpl;
-      dailyBudget = row.data.daily_budget;
+      dailyBudget = row.data.verba_dia ?? row.data.daily_budget;
+      compras = row.data.compras ?? 0;
+      valorCompras = row.data.valorCompras ?? 0;
+      if (row.data.lifetime_budget) verbaDica = `Orçamento total de ${formatCurrencyBRL(row.data.lifetime_budget)}`;
     } else if (row.kind === 'meta-ad') {
       displayStatus = row.data.status;
       displayName = row.data.name;
@@ -1996,6 +2017,8 @@ function CampaignPerformanceTable({
       leads = row.data.leads;
       ctr = row.data.ctr;
       cpl = row.data.cpl;
+      compras = row.data.compras ?? 0;
+      valorCompras = row.data.valorCompras ?? 0;
     } else if (row.kind === 'adgroup') {
       displayStatus = row.data.status;
       displayName = row.data.name;
@@ -2099,8 +2122,10 @@ function CampaignPerformanceTable({
         )}
 
         {/* Verba/dia — só leitura */}
-        <td className="whitespace-nowrap px-2 py-2.5 text-right text-xs font-semibold">
-          {dailyBudget != null ? formatCurrencyBRL(dailyBudget) : <span className="text-muted-foreground/40">—</span>}
+        <td className="whitespace-nowrap px-2 py-2.5 text-right text-xs font-semibold" title={verbaDica}>
+          {dailyBudget != null ? <>{verbaDica ? '~' : ''}{formatCurrencyBRL(dailyBudget)}</>
+            : row.kind === 'campaign' && row.data.lifetimeBudget ? <span className="text-muted-foreground">{formatCurrencyBRL(row.data.lifetimeBudget)} total</span>
+            : <span className="text-muted-foreground/40">—</span>}
         </td>
 
         {/* Metrics */}
@@ -2115,20 +2140,29 @@ function CampaignPerformanceTable({
         <td className="px-2 py-2.5 text-right text-xs text-muted-foreground">{impressions > 0 ? impressions.toLocaleString('pt-BR') : <span className="opacity-40">—</span>}</td>
         <td className="px-2 py-2.5 text-right text-xs text-muted-foreground">{ctr > 0 ? `${ctr.toFixed(2).replace('.', ',')}%` : <span className="opacity-40">—</span>}</td>
 
-        {/* Vendas · Faturamento · ROAS — do CRM, pelo anúncio que trouxe o lead */}
+        {/* Vendas · Faturamento · ROAS — CRM (pelo anúncio que trouxe o lead) + compras da Meta */}
         {mostrarVendas && (() => {
           const { k, camp, conj, ad } = vendasIdx;
           const v = row.kind === 'campaign' ? (camp.get(k(row.data.name)) ?? camp.get(k(row.data.id)))
             : row.kind === 'adset' || row.kind === 'adgroup' ? conj.get(`${k(row.campaign.name)}|${k(row.data.name)}`)
             : row.kind === 'meta-ad' ? ad.get(row.data.id)
             : undefined;
-          const roas = v && v.receita > 0 && spend > 0 ? v.receita / spend : null;
+          // Fontes que se SOMAM, cada uma identificada: o CRM (WhatsApp, planilha,
+          // Datalytics, Agendor, SULTS…) e, para quem tem cardápio conectado, o
+          // pedido do cardápio que a Meta atribuiu ao anúncio. Ver comprasMeta.
+          const fontes = juntarFontes(
+            v?.fontes ?? (v && (v.vendas > 0 || v.receita > 0) ? { crm: { vendas: v.vendas, receita: v.receita } } : null),
+            comprasMeta && compras > 0 ? { cardapio: { vendas: compras, receita: valorCompras } } : null,
+          );
+          const { vendas: totVendas, receita: totReceita } = totalDasFontes(fontes);
+          const origem = descreverFontes(fontes);
+          const roas = totReceita > 0 && spend > 0 ? totReceita / spend : null;
           return (
             <>
-              <td className="px-2 py-2.5 text-right text-xs font-semibold">{v && v.vendas > 0 ? v.vendas : <span className="opacity-40">—</span>}</td>
-              <td className="whitespace-nowrap px-2 py-2.5 text-right text-xs font-bold">
-                {v && v.receita > 0 ? <span className="text-[#6cff2f]">{formatCurrencyBRL(v.receita)}</span>
-                  : v && v.vendas > 0 ? <span className="text-[10px] font-semibold text-muted-foreground" title="Venda fechada no CRM sem valor lançado">sem valor</span>
+              <td className="px-2 py-2.5 text-right text-xs font-semibold" title={origem}>{totVendas > 0 ? totVendas.toLocaleString('pt-BR') : <span className="opacity-40">—</span>}</td>
+              <td className="whitespace-nowrap px-2 py-2.5 text-right text-xs font-bold" title={origem}>
+                {totReceita > 0 ? <span className="text-[#6cff2f]">{formatCurrencyBRL(totReceita)}</span>
+                  : totVendas > 0 ? <span className="text-[10px] font-semibold text-muted-foreground" title="Venda fechada no CRM sem valor lançado">sem valor</span>
                   : <span className="opacity-40">—</span>}
               </td>
               <td className="whitespace-nowrap px-2 py-2.5 text-right text-xs font-bold">
@@ -2190,8 +2224,8 @@ function CampaignPerformanceTable({
                 <th className="px-2 py-2.5 text-right">CTR</th>
                 {mostrarVendas && (
                   <>
-                    <th className="px-2 py-2.5 text-right" title="Clientes que compraram vindos deste anúncio (CRM)">Vendas</th>
-                    <th className="px-2 py-2.5 text-right" title="Faturamento das vendas rastreadas até este anúncio, pela data do ganho">Faturam.</th>
+                    <th className="px-2 py-2.5 text-right" title="Vendas vindas deste anúncio, somando as fontes (WhatsApp, planilha, integrações e, no delivery, o cardápio digital). Passe o mouse na célula para ver cada fonte.">Vendas</th>
+                    <th className="px-2 py-2.5 text-right" title="Faturamento das vendas, somando as fontes (CRM pela data do ganho; cardápio pelo que a Meta atribuiu). Passe o mouse na célula para ver cada fonte.">Faturam.</th>
                     <th className="px-2 py-2.5 text-right" title="Faturamento ÷ investido">ROAS</th>
                   </>
                 )}
@@ -5333,6 +5367,7 @@ export default function GeneralDashboard() {
   /** Funil de criativos: TODOS os anúncios que veicularam + o funil de cada um no CRM. */
   const [criativosTodos, setCriativosTodos] = useState<TopCreative[]>([]);
   const [funilCriativos, setFunilCriativos] = useState<FunilDoCriativo[]>([]);
+  const [etapasCriativos, setEtapasCriativos] = useState<EtapaDoCriativo[]>([]);
   const [funilCriativosLoading, setFunilCriativosLoading] = useState(false);
   // "Melhores criativos" saiu (30/09): o Funil de criativos já traz TODOS os
   // anúncios. Quem ainda precisa da lista (contagem, altura dos painéis) lê dela.
@@ -6349,6 +6384,11 @@ export default function GeneralDashboard() {
   // pedidos com funil de leads num agregado não faz sentido).
   const deliverySoloId = selectedIds.size === 1 && deliveryFlags[[...selectedIds][0]]
     ? [...selectedIds][0] : null;
+  // Compra atribuída pela Meta só é FONTE de venda para quem tem cardápio
+  // conectado (a venda acontece lá, fora do CRM). Nos outros clientes ela é eco
+  // do CRM — o próprio sistema manda Purchase quando o lead é ganho — e somar
+  // contaria a mesma venda duas vezes. Ver lib/fonte-venda.ts.
+  const vendeNoCardapio = selectedIds.size > 0 && [...selectedIds].every(id => deliveryFlags[id]);
 
   // Período em ISO — usado pelo resumo de delivery E pelo modal de leads do
   // funil. ⚠️ O modal PRECISA usar exatamente esta janela: é a mesma que
@@ -6410,12 +6450,13 @@ export default function GeneralDashboard() {
     const pMeta = fetch(`/api/meta/top-creatives?${buildPeriodParams({ clientIds, all: '1' }).toString()}`)
       .then(r => (r.ok ? r.json() as Promise<TopCreative[]> : [])).catch(() => [] as TopCreative[]);
     const pCrm = fetch(`/api/crm/funil-criativos?${new URLSearchParams({ clientIds, from: faixaSel.from, to: faixaSel.to })}`)
-      .then(r => (r.ok ? r.json() as Promise<{ criativos?: FunilDoCriativo[] }> : { criativos: [] }))
-      .catch(() => ({ criativos: [] as FunilDoCriativo[] }));
+      .then(r => (r.ok ? r.json() as Promise<{ criativos?: FunilDoCriativo[]; etapas?: EtapaDoCriativo[] }> : { criativos: [] }))
+      .catch(() => ({ criativos: [] as FunilDoCriativo[], etapas: [] as EtapaDoCriativo[] }));
     Promise.all([pMeta, pCrm]).then(([meta, crm]) => {
       if (cancelado) return;
       setCriativosTodos(Array.isArray(meta) ? meta : []);
       setFunilCriativos(crm.criativos ?? []);
+      setEtapasCriativos('etapas' in crm ? crm.etapas ?? [] : []);
     }).finally(() => { if (!cancelado) setFunilCriativosLoading(false); });
     return () => { cancelado = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -7038,6 +7079,7 @@ export default function GeneralDashboard() {
                   abrirTudo
                   alturaMax={560}
                   vendas={comReceita ? vendasAnuncio : null}
+                  comprasMeta={comReceita && vendeNoCardapio}
                 />
                 {comReceita && <VendasSemVeiculacao vendas={vendasAnuncio} campanhas={campaigns} />}
               </Superficie>
@@ -7052,6 +7094,8 @@ export default function GeneralDashboard() {
       criativos={criativosTodos}
       crm={funilCriativos}
       receitaTotal={comReceita ? vendasAnuncio?.receitaTotal ?? null : null}
+      comCompras={comReceita && vendeNoCardapio}
+      etapas={etapasCriativos}
       loading={funilCriativosLoading}
       onPreview={setPreviewCreative}
     />

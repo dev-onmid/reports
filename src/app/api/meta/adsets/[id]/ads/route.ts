@@ -2,7 +2,7 @@ import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { getFreshMetaToken } from '@/lib/meta-token';
 import { resolveMetaPeriod } from '@/lib/period-utils';
-import { countMetaResults } from '@/lib/meta-results';
+import { countMetaResults, metaPurchases, type MetaAction } from '@/lib/meta-results';
 
 export type MetaAdWithMetrics = {
   id: string;
@@ -18,6 +18,9 @@ export type MetaAdWithMetrics = {
   leads: number;
   ctr: number;
   cpl: number;
+  /** Compras atribuídas pela Meta (pixel/CAPI) e o valor delas. */
+  compras: number;
+  valorCompras: number;
 };
 
 export async function GET(
@@ -56,7 +59,7 @@ export async function GET(
 
   const metaPeriod = resolveMetaPeriod(period, dateFrom, dateTo);
   const [, since, until] = metaPeriod.split(':');
-  const insightField = `insights.time_range(${JSON.stringify({ since, until })}){spend,impressions,clicks,actions}`;
+  const insightField = `insights.time_range(${JSON.stringify({ since, until })}){spend,impressions,clicks,actions,action_values}`;
 
   const url = new URL(`https://graph.facebook.com/v21.0/${adsetId}/ads`);
   url.searchParams.set('fields', `id,name,status,effective_status,creative{id,body,title,image_url,thumbnail_url},${insightField}`);
@@ -80,6 +83,7 @@ export async function GET(
     const impressions = parseInt(insightRow.impressions ?? '0', 10);
     const clicks = parseInt(insightRow.clicks ?? '0', 10);
     const leads = countMetaResults((insightRow.actions ?? []) as { action_type: string; value: string }[]);
+    const compra = metaPurchases(insightRow.actions as MetaAction[] | undefined, insightRow.action_values as MetaAction[] | undefined);
 
     return {
       id: ad.id,
@@ -95,6 +99,8 @@ export async function GET(
       leads,
       ctr: impressions > 0 ? (clicks / impressions) * 100 : 0,
       cpl: leads > 0 ? spend / leads : 0,
+      compras: compra.compras,
+      valorCompras: compra.valor,
     };
   });
 

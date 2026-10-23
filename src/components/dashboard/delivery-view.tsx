@@ -115,12 +115,17 @@ export function elementosDelivery(
     }),
 
     'base_clientes.titulo': <Titulo estilo={e('base_clientes.titulo')} padraoIcone={Users} padraoTexto="Situação da base" />,
-    'base_clientes.ativos': mini('base_clientes.ativos', { label: 'Ativos', valor: fmt.int(clientes.ativos) }),
+    'base_clientes.ativos': mini('base_clientes.ativos', {
+      label: 'Ativos', valor: fmt.int(clientes.ativos), sub: 'pediram nos últimos 30 dias',
+    }),
     'base_clientes.risco': mini('base_clientes.risco', {
       label: 'Em risco', tom: 'orange', valor: fmt.int(clientes.emRisco), sub: 'sem pedir há 30–60 dias',
     }),
     'base_clientes.inativos': mini('base_clientes.inativos', {
       label: 'Inativos', tom: 'destructive', valor: fmt.int(clientes.inativos), sub: 'há mais de 60 dias',
+    }),
+    'base_clientes.total': mini('base_clientes.total', {
+      label: 'Base total', tom: 'muted', valor: fmt.int(baseTotal || null), sub: 'clientes com pedido na base',
     }),
 
     'recorrencia.titulo': (

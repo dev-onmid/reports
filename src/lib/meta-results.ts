@@ -62,3 +62,30 @@ export function countMetaResults(actions: MetaAction[] | undefined | null): numb
   }
   return total;
 }
+
+// Compras que a Meta atribuiu ao anúncio (pixel/CAPI — no delivery é o pedido do
+// cardápio digital, ex. Anota Aí). Mesma regra de família: a compra aparece em
+// omni_purchase, purchase, fb_pixel_purchase, onsite_web_purchase… todas com o
+// MESMO número; conta só a primeira presente. omni_purchase é o "Compras" do
+// Gerenciador. O valor sai de `action_values` pelo mesmo action_type escolhido.
+export const META_PURCHASE_FAMILY = [
+  'omni_purchase',
+  'purchase',
+  'offsite_conversion.fb_pixel_purchase',
+  'onsite_web_purchase',
+  'onsite_web_app_purchase',
+];
+
+export function metaPurchases(
+  actions: MetaAction[] | undefined | null,
+  actionValues: MetaAction[] | undefined | null,
+): { compras: number; valor: number } {
+  const pega = (lista: MetaAction[] | undefined | null, tipo: string) =>
+    Array.isArray(lista) ? lista.find((a) => a?.action_type === tipo) : undefined;
+  for (const tipo of META_PURCHASE_FAMILY) {
+    const a = pega(actions, tipo);
+    if (!a) continue;
+    return { compras: Number(a.value) || 0, valor: Number(pega(actionValues, tipo)?.value) || 0 };
+  }
+  return { compras: 0, valor: 0 };
+}

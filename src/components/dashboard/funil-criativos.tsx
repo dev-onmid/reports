@@ -7,7 +7,8 @@ import { T } from '@/lib/dashboard-tipografia';
 import { GoogleAdsMark } from '@/components/platform-logos';
 import { Superficie } from './superficie';
 import type { TopCreative } from '@/app/api/meta/top-creatives/route';
-import type { FunilDoCriativo } from '@/app/api/crm/funil-criativos/route';
+import type { EtapaDoCriativo, FunilDoCriativo } from '@/app/api/crm/funil-criativos/route';
+import { descreverFontes, fontesPresentes, juntarFontes, totalDasFontes, type VendasPorFonte } from '@/lib/fonte-venda';
 
 /**
  * Funil de criativos — TODOS os anúncios, cada um com a prévia e o que
@@ -17,6 +18,14 @@ import type { FunilDoCriativo } from '@/app/api/crm/funil-criativos/route';
  * Os números de plataforma (gasto, impressões, cliques, vídeo) vêm do Meta; os
  * do funil vêm do CRM pelo id do anúncio que ficou gravado no lead. Anúncio que
  * só existe no CRM (Google, ou só o nome no rastreio) entra sem prévia.
+ *
+ * As etapas do meio são as do FUNIL REAL do cliente (nome da coluna do Kanban),
+ * não um "Agend. → Compar." fixo: delivery e vendas não têm agendamento.
+ *
+ * Vendas e faturamento SOMAM as fontes, cada uma identificada (lib/fonte-venda):
+ * o CRM (WhatsApp, planilha, Datalytics, Agendor, SULTS…) e, para quem tem
+ * cardápio conectado, o pedido do cardápio que a Meta atribuiu ao anúncio
+ * (PicoLocos, out/2026: R$ 9,1 mil na Meta, "—" aqui quando só o CRM contava).
  */
 
 const VERDE = '#6cff2f';
@@ -32,6 +41,8 @@ type Item = {
   cliques: number;
   leadsPlataforma: number;
   crm: FunilDoCriativo | null;
+  /** Vendas por fonte: as do CRM + o cardápio (compras da Meta), já somadas. */
+  fontes: VendasPorFonte;
   views3s: number;
   thruplays: number;
 };
@@ -53,7 +64,7 @@ const pct = (a: number, b: number): number | null => (b > 0 ? (a / b) * 100 : nu
 const moedaCurta = (n: number) => `R$ ${Math.round(n).toLocaleString('pt-BR')}`;
 const compacto = (n: number) => (n >= 10_000 ? `${(n / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mil` : fmtInt(n));
 
-function montarItens(criativos: TopCreative[], crm: FunilDoCriativo[]): Item[] {
+function montarItens(criativos: TopCreative[], crm: FunilDoCriativo[], comCompras: boolean): Item[] {
   const porAd = new Map(crm.filter(c => c.adId).map(c => [c.adId as string, c]));
   const usados = new Set<string>();
   const itens: Item[] = criativos.map(c => {
@@ -62,6 +73,7 @@ function montarItens(criativos: TopCreative[], crm: FunilDoCriativo[]): Item[] {
     return {
       chave: `meta:${c.adId}`, creative: c, nome: c.adName, campanha: c.campaignName ?? null, plataforma: 'meta',
       gasto: c.spend, impressoes: c.impressions, cliques: c.clicks, leadsPlataforma: c.leads, crm: f,
+      fontes: juntarFontes(fontesDoCrm(f), comCompras && (c.compras ?? 0) > 0 ? { cardapio: { vendas: c.compras ?? 0, receita: c.valorCompras ?? 0 } } : null),
       views3s: c.views3s ?? 0, thruplays: c.thruplays ?? 0,
     };
   });
@@ -71,13 +83,27 @@ function montarItens(criativos: TopCreative[], crm: FunilDoCriativo[]): Item[] {
     if (usados.has(f.chave)) continue;
     itens.push({
       chave: `crm:${f.chave}`, creative: null, nome: f.nome, campanha: f.campanha, plataforma: f.plataforma,
-      gasto: 0, impressoes: 0, cliques: 0, leadsPlataforma: 0, crm: f, views3s: 0, thruplays: 0,
+      gasto: 0, impressoes: 0, cliques: 0, leadsPlataforma: 0, crm: f, fontes: juntarFontes(fontesDoCrm(f)), views3s: 0, thruplays: 0,
     });
   }
   return itens;
 }
 
-export function FunilCriativosPanel({ criativos, crm, loading, onPreview, receitaTotal = null }: {
+/** Rota antiga (sem `fontes`) cai inteira em "CRM". */
+function fontesDoCrm(f: FunilDoCriativo | null): VendasPorFonte | null {
+  if (!f) return null;
+  return f.fontes ?? (f.vendas > 0 || f.receita > 0 ? { crm: { vendas: f.vendas, receita: f.receita } } : null);
+}
+const vendasDe = (i: Item) => totalDasFontes(i.fontes).vendas;
+const receitaDe = (i: Item) => totalDasFontes(i.fontes).receita;
+/** Venda pelo cardápio não passa por lead/etapa: a taxa dela é sobre o clique. */
+const vendaPorClique = (i: Item) => (i.fontes.cardapio?.vendas ?? 0) > 0;
+
+export function FunilCriativosPanel({ criativos, crm, loading, onPreview, receitaTotal = null, comCompras = false, etapas = [] }: {
+  /** Soma as compras atribuídas pela Meta como fonte "Cardápio digital" — só cliente com cardápio conectado. */
+  comCompras?: boolean;
+  /** Etapas do meio do funil real do cliente (rota /api/crm/funil-criativos). */
+  etapas?: EtapaDoCriativo[];
   /** Faturamento do período inteiro — o cabeçalho diz quanto dele veio de anúncio. */
   receitaTotal?: number | null;
   criativos: TopCreative[];
@@ -86,7 +112,7 @@ export function FunilCriativosPanel({ criativos, crm, loading, onPreview, receit
   onPreview: (c: TopCreative) => void;
 }) {
   const [ordem, setOrdem] = useState<Ordem>('gasto');
-  const itens = useMemo(() => montarItens(criativos, crm), [criativos, crm]);
+  const itens = useMemo(() => montarItens(criativos, crm, comCompras), [criativos, crm, comCompras]);
   // Com rastreio no CRM, o lead que vale é o do CRM (é dele que o funil segue);
   // sem nenhum, cai no número da plataforma, com o rótulo dizendo isso.
   const temCrm = crm.some(c => c.leads > 0 || c.vendas > 0);
@@ -96,9 +122,9 @@ export function FunilCriativosPanel({ criativos, crm, loading, onPreview, receit
     const valor = (i: Item): number => {
       switch (ordem) {
         case 'leads': return leadsDe(i);
-        case 'vendas': return i.crm?.vendas ?? 0;
-        case 'receita': return i.crm?.receita ?? 0;
-        case 'conversao': return pct(i.crm?.vendas ?? 0, leadsDe(i)) ?? -1;
+        case 'vendas': return vendasDe(i);
+        case 'receita': return receitaDe(i);
+        case 'conversao': return pct(vendasDe(i), vendaPorClique(i) ? i.cliques : leadsDe(i)) ?? -1;
         case 'retencao': return pct(i.thruplays, i.views3s) ?? -1;
         default: return i.gasto;
       }
@@ -114,8 +140,9 @@ export function FunilCriativosPanel({ criativos, crm, loading, onPreview, receit
   }
 
   const tot = itens.reduce((s, i) => ({
-    leads: s.leads + leadsDe(i), vendas: s.vendas + (i.crm?.vendas ?? 0), receita: s.receita + (i.crm?.receita ?? 0),
+    leads: s.leads + leadsDe(i), vendas: s.vendas + vendasDe(i), receita: s.receita + receitaDe(i),
   }), { leads: 0, vendas: 0, receita: 0 });
+  const comVendas = temCrm || tot.vendas > 0;
 
   return (
     <Superficie
@@ -124,8 +151,10 @@ export function FunilCriativosPanel({ criativos, crm, loading, onPreview, receit
       sub={loading && itens.length === 0 ? 'carregando os criativos…' : (
         <>
           {itens.length} criativos · {fmtInt(tot.leads)} leads{temCrm ? '' : ' (Meta)'}
-          {temCrm && <> · {fmtInt(tot.vendas)} vendas · {formatCurrencyBRL(tot.receita)}</>}
-          {temCrm && receitaTotal !== null && receitaTotal > 0 && (
+          {comVendas && <> · {fmtInt(tot.vendas)} vendas · {formatCurrencyBRL(tot.receita)}</>}
+          {/* Com as compras da Meta a soma pode passar do faturamento do CRM (a
+              venda do cardápio não está nele): aí a % não diz nada e some. */}
+          {comVendas && receitaTotal !== null && receitaTotal > 0 && tot.receita <= receitaTotal && (
             <> ({fmtPct((tot.receita / receitaTotal) * 100)} do faturamento de {formatCurrencyBRL(receitaTotal)})</>
           )}
         </>
@@ -155,13 +184,14 @@ export function FunilCriativosPanel({ criativos, crm, loading, onPreview, receit
       ) : (
         <>
           {/* Duas linhas fixas, rolando para o LADO — mesmo padrão dos "Melhores criativos". */}
-          <div className="grid auto-cols-[440px] grid-flow-col grid-rows-2 gap-3 overflow-x-auto pb-2">
+          {/* Cada etapa do meio a mais alarga o card: o nome real da coluna ("Visita/reunião", "Em Atendimento") não cabe em 440. */}
+          <div className={cn('grid grid-flow-col grid-rows-2 gap-3 overflow-x-auto pb-2', etapas.length >= 3 ? 'auto-cols-[530px]' : etapas.length === 2 ? 'auto-cols-[470px]' : 'auto-cols-[440px]')}>
             {ordenados.map((i, idx) => (
-              <CardFunil key={i.chave} item={i} index={idx} leads={leadsDe(i)} temCrm={temCrm} onPreview={onPreview} />
+              <CardFunil key={i.chave} item={i} index={idx} leads={leadsDe(i)} temCrm={temCrm} etapas={etapas} onPreview={onPreview} />
             ))}
           </div>
           <p className={cn(T.nota, 'mt-2')}>
-            Funil pelos leads criados no período (mesma régua do Funil de Performance); vendas e faturamento pela data do ganho.
+            Funil pelos leads criados no período (mesma régua do Funil de Performance); vendas e faturamento somam as fontes, cada uma identificada no card (CRM pela data do ganho; no delivery, o pedido do cardápio que a Meta atribuiu ao anúncio).
             Gancho = quem assistiu 3s ÷ impressões · Retenção = ThruPlay ÷ quem assistiu 3s (só vídeo).
           </p>
         </>
@@ -210,23 +240,45 @@ function Miniatura({ item, index, onPreview }: { item: Item; index: number; onPr
   );
 }
 
-function CardFunil({ item, index, leads, temCrm, onPreview }: {
-  item: Item; index: number; leads: number; temCrm: boolean; onPreview: (c: TopCreative) => void;
+const VALOR_DO_POSTO: Record<1 | 2 | 3, (f: FunilDoCriativo | null) => number> = {
+  1: f => f?.engajados ?? 0,
+  2: f => f?.agendamentos ?? 0,
+  3: f => f?.comparecimentos ?? 0,
+};
+
+function CardFunil({ item, index, leads, temCrm, etapas, onPreview }: {
+  item: Item; index: number; leads: number; temCrm: boolean; etapas: EtapaDoCriativo[]; onPreview: (c: TopCreative) => void;
 }) {
   const f = item.crm;
-  const vendas = f?.vendas ?? 0;
-  const receita = f?.receita ?? 0;
+  const vendas = vendasDe(item);
+  const receita = receitaDe(item);
+  const porClique = vendaPorClique(item);
+  const origemVendas = descreverFontes(item.fontes);
+  const fontes = fontesPresentes(item.fontes);
   // CRM rastreando menos leads que o Meta reportou (lead que não passou pelo
   // WhatsApp rastreado): em vez de só "0%", mostra o número da plataforma.
   const notaLeads = temCrm && item.leadsPlataforma > leads ? `Meta ${compacto(item.leadsPlataforma)}` : null;
-  const etapas: Array<{ rotulo: string; valor: number; taxa: number | null; dica: string; nota?: string | null }> = [
+  const etapasDoCard: Array<{ rotulo: string; valor: number; taxa: number | null; dica: string; nota?: string | null }> = [
     { rotulo: 'Cliques', valor: item.cliques, taxa: pct(item.cliques, item.impressoes), dica: 'CTR: cliques ÷ impressões' },
     { rotulo: 'Leads', valor: leads, taxa: pct(leads, item.cliques), nota: notaLeads, dica: temCrm ? `Leads no CRM ÷ cliques${item.leadsPlataforma ? ` · o Meta reportou ${fmtInt(item.leadsPlataforma)}` : ''}` : 'Leads reportados pelo Meta ÷ cliques' },
-    { rotulo: 'Agend.', valor: f?.agendamentos ?? 0, taxa: pct(f?.agendamentos ?? 0, leads), dica: 'Agendamentos ÷ leads' },
-    { rotulo: 'Compar.', valor: f?.comparecimentos ?? 0, taxa: pct(f?.comparecimentos ?? 0, f?.agendamentos ?? 0), dica: 'Comparecimentos ÷ agendamentos' },
-    { rotulo: 'Vendas', valor: vendas, taxa: pct(vendas, f?.comparecimentos || leads), dica: f?.comparecimentos ? 'Vendas ÷ comparecimentos' : 'Vendas ÷ leads' },
   ];
-  const conversao = pct(vendas, leads);
+  // Etapas do meio: só as que existem no funil do cliente, com o nome da coluna.
+  // A taxa de cada uma é sobre a etapa anterior que aparece no card.
+  let anterior = { valor: leads, nome: 'leads' };
+  const meio: Array<{ valor: number; nome: string }> = [];
+  for (const e of etapas) {
+    const valor = VALOR_DO_POSTO[e.posto](f);
+    etapasDoCard.push({ rotulo: e.rotulo, valor, taxa: pct(valor, anterior.valor), dica: `${e.rotulo} ÷ ${anterior.nome}` });
+    anterior = { valor, nome: e.rotulo };
+    meio.push(anterior);
+  }
+  // Venda sobre a última etapa do meio que teve gente (sem nenhuma: sobre os leads).
+  const base = [...meio].reverse().find(m => m.valor > 0) ?? { valor: leads, nome: 'leads' };
+  const fontesDica = origemVendas ? `\n${origemVendas}` : '';
+  etapasDoCard.push(porClique
+    ? { rotulo: 'Vendas', valor: vendas, taxa: pct(vendas, item.cliques), dica: `Vendas ÷ cliques (no cardápio a venda não passa por lead)${fontesDica}` }
+    : { rotulo: 'Vendas', valor: vendas, taxa: pct(vendas, base.valor), dica: `Vendas ÷ ${base.nome}${fontesDica}` });
+  const conversao = porClique ? pct(vendas, item.cliques) : pct(vendas, leads);
   const gancho = pct(item.views3s, item.impressoes);
   const retencao = pct(item.thruplays, item.views3s);
   const roas = item.gasto > 0 && receita > 0 ? receita / item.gasto : null;
@@ -252,12 +304,13 @@ function CardFunil({ item, index, leads, temCrm, onPreview }: {
 
         {/* O funil do criativo em uma linha: valor da etapa e, embaixo, quanto passou da anterior. */}
         <div className="mt-2 flex items-stretch">
-          {etapas.map((e, i) => (
+          {etapasDoCard.map((e, i) => (
             <div key={e.rotulo} className="flex min-w-0 flex-1 items-stretch">
               {i > 0 && <ChevronRight className="h-3 w-3 shrink-0 self-center text-[#3d474d]" />}
               <div className="min-w-0 flex-1 text-center" title={e.dica}>
                 <p className={cn('font-heading text-[18px] leading-none tabular-nums', e.valor > 0 ? 'text-[#f4f7f8]' : 'text-[#4a545a]')}>{compacto(e.valor)}</p>
-                <p className="mt-0.5 truncate text-[9px] font-black uppercase tracking-[0.04em] text-[#9aa4aa]">{e.rotulo}</p>
+                {/* Nome real da coluna do cliente: quebra em 2 linhas em vez de virar "ENGA…". */}
+                <p className="mt-0.5 line-clamp-2 min-h-[2.2em] text-[9.5px] font-bold leading-[1.1] [overflow-wrap:normal] text-[#9aa4aa]">{e.rotulo}</p>
                 {e.nota
                   ? <p className="truncate text-[10px] font-bold tabular-nums text-[#a7b0b6]">{e.nota}</p>
                   : <p className={cn('text-[10px] font-bold tabular-nums', e.taxa !== null && e.valor > 0 ? 'text-[#6cff2f]/85' : 'text-[#4a545a]')}>{fmtPct(e.taxa)}</p>}
@@ -266,11 +319,24 @@ function CardFunil({ item, index, leads, temCrm, onPreview }: {
           ))}
         </div>
 
+        {/* De onde vieram as vendas — cada fonte com o seu número. */}
+        {fontes.length > 0 && (
+          <p className="mt-1.5 truncate text-[10px] text-[#9aa4aa]" title={origemVendas}>
+            {fontes.map((p, i) => (
+              <span key={p.fonte}>
+                {i > 0 && <span className="text-[#3d474d]"> · </span>}
+                {p.rotulo} <span className="font-bold tabular-nums text-[#dce4e8]">{fmtInt(p.vendas)}</span>
+                {p.receita > 0 && <span className="tabular-nums"> ({moedaCurta(p.receita)})</span>}
+              </span>
+            ))}
+          </p>
+        )}
+
         {/* Resultado do criativo: faturamento, conversão e a leitura do vídeo. */}
         <div className="mt-auto grid grid-cols-[1.3fr_1fr_1fr_1fr] gap-1.5 border-t border-white/[0.06] pt-2">
           <Kpi rotulo="Faturamento" valor={receita > 0 ? moedaCurta(receita) : '—'} forte={receita > 0}
             nota={roas !== null ? `ROAS ${roas.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}x` : undefined} />
-          <Kpi rotulo="Conversão" valor={fmtPct(conversao)} nota="lead → venda" />
+          <Kpi rotulo="Conversão" valor={fmtPct(conversao)} nota={porClique ? 'clique → venda' : 'lead → venda'} />
           <Kpi rotulo="Gancho" valor={item.views3s > 0 ? fmtPct(gancho) : '—'} nota={item.views3s > 0 ? 'viram 3s' : 'imagem'} />
           <Kpi rotulo="Retenção" valor={item.views3s > 0 ? fmtPct(retencao) : '—'} nota={item.views3s > 0 ? 'até o ThruPlay' : 'imagem'} barra={item.views3s > 0 ? retencao : null} />
         </div>

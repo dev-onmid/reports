@@ -2,7 +2,8 @@ import type { NextRequest } from 'next/server';
 import { makeServerPool } from '@/lib/server-db';
 import { getFreshMetaToken } from '@/lib/meta-token';
 import { resolveMetaPeriod } from '@/lib/period-utils';
-import { countMetaResults } from '@/lib/meta-results';
+import { countMetaResults, metaPurchases, type MetaAction } from '@/lib/meta-results';
+import { verbaMeta } from '@/lib/meta-verba';
 
 export type AdSetTargeting = {
   age_min?: number;
@@ -25,6 +26,8 @@ export type AdSet = {
   status: string;
   daily_budget?: number;
   lifetime_budget?: number;
+  /** Verba/dia de verdade: a diária, ou o ritmo do orçamento total (ver meta-verba). */
+  verba_dia?: number;
   targeting: AdSetTargeting;
 };
 
@@ -35,6 +38,9 @@ export type AdSetWithMetrics = AdSet & {
   leads: number;
   ctr: number;
   cpl: number;
+  /** Compras atribuídas pela Meta (pixel/CAPI) e o valor delas. */
+  compras: number;
+  valorCompras: number;
 };
 
 export async function GET(
@@ -73,10 +79,10 @@ export async function GET(
 
   const metaPeriod = resolveMetaPeriod(period, dateFrom, dateTo);
   const [, since, until] = metaPeriod.split(':');
-  const insightField = `insights.time_range(${JSON.stringify({ since, until })}){spend,impressions,clicks,actions}`;
+  const insightField = `insights.time_range(${JSON.stringify({ since, until })}){spend,impressions,clicks,actions,action_values}`;
 
   const url = new URL(`https://graph.facebook.com/v21.0/${campaignId}/adsets`);
-  url.searchParams.set('fields', `id,name,status,effective_status,daily_budget,lifetime_budget,targeting,${insightField}`);
+  url.searchParams.set('fields', `id,name,status,effective_status,daily_budget,lifetime_budget,budget_remaining,end_time,targeting,${insightField}`);
   url.searchParams.set('limit', '50');
   url.searchParams.set('access_token', token);
 
@@ -95,12 +101,14 @@ export async function GET(
     const impressions = parseInt(insightRow.impressions ?? '0', 10);
     const clicks = parseInt(insightRow.clicks ?? '0', 10);
     const leads = countMetaResults((insightRow.actions ?? []) as { action_type: string; value: string }[]);
+    const compra = metaPurchases(insightRow.actions as MetaAction[] | undefined, insightRow.action_values as MetaAction[] | undefined);
     return {
       id: s.id,
       name: s.name,
       status: s.effective_status ?? s.status ?? 'ACTIVE',
       daily_budget: s.daily_budget ? Number(s.daily_budget) / 100 : undefined,
       lifetime_budget: s.lifetime_budget ? Number(s.lifetime_budget) / 100 : undefined,
+      verba_dia: verbaMeta(s).porDia,
       targeting: s.targeting ?? {},
       spend,
       impressions,
@@ -108,6 +116,8 @@ export async function GET(
       leads,
       ctr: impressions > 0 ? (clicks / impressions) * 100 : 0,
       cpl: leads > 0 ? spend / leads : 0,
+      compras: compra.compras,
+      valorCompras: compra.valor,
     };
   });
 

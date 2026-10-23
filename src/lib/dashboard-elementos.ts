@@ -114,10 +114,12 @@ export const ELEMENTOS: DefinicaoElemento[] = [
 
   // Situação da base
   { id: 'base_clientes.titulo',   bloco: 'base_clientes', rotulo: 'Situação da base',   suporta: CABECALHO, x: 0, y: 13, w: 5, h: 1, minW: 2, minH: 1 },
-  { id: 'base_clientes.gauge',    bloco: 'base_clientes', rotulo: 'Medidor de ativos',  suporta: ['corFundo', 'visivel'], x: 0, y: 14, w: 2, h: 3, minW: 2, minH: 2 },
+  { id: 'base_clientes.gauge',    bloco: 'base_clientes', rotulo: 'Medidor de ativos',  suporta: ['corFundo', 'visivel'], x: 0, y: 14, w: 2, h: 4, minW: 2, minH: 2 },
   { id: 'base_clientes.ativos',   bloco: 'base_clientes', rotulo: 'Ativos',             suporta: TUDO, x: 2,  y: 14, w: 3,  h: 1, minW: 2, minH: 1 },
   { id: 'base_clientes.risco',    bloco: 'base_clientes', rotulo: 'Em risco',           suporta: TUDO, x: 2,  y: 15, w: 3,  h: 1, minW: 2, minH: 1 },
   { id: 'base_clientes.inativos', bloco: 'base_clientes', rotulo: 'Inativos',           suporta: TUDO, x: 2,  y: 16, w: 3,  h: 1, minW: 2, minH: 1 },
+  // 4ª linha: fecha o bloco na mesma altura da Recorrência (h: 4).
+  { id: 'base_clientes.total',    bloco: 'base_clientes', rotulo: 'Base total',         suporta: TUDO, x: 2,  y: 17, w: 3,  h: 1, minW: 2, minH: 1 },
 
   // Recorrência
   { id: 'recorrencia.titulo',     bloco: 'recorrencia',   rotulo: 'Recorrência',        suporta: CABECALHO, x: 5, y: 13, w: 7, h: 1, minW: 2, minH: 1 },
