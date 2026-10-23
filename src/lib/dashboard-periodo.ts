@@ -164,6 +164,53 @@ export function rotuloComparacao(period: PeriodoDashboard, anterior: Faixa | nul
   }
 }
 
+// ───────────────────────────────────────────── Comparativo escolhido
+
+/**
+ * Com o que comparar — escolha do usuário no cabeçalho do dashboard (pedido do
+ * Matheus, 2026-10-23: "quero clicar e falar com qual mês comparar").
+ *  • auto         → `faixaAnterior` (a regra de cada período, como sempre foi);
+ *  • mes_anterior → a MESMA janela um mês antes (1–23/out → 1–23/set);
+ *  • ano_anterior → a mesma janela um ano antes (1–23/out/26 → 1–23/out/25);
+ *  • datas        → as datas que o usuário escolheu.
+ * Todos os "vs" do dashboard saem desta faixa — e o delivery recebe a mesma.
+ */
+export type ModoComparacao = 'auto' | 'mes_anterior' | 'ano_anterior' | 'datas';
+
+export const OPCOES_COMPARACAO: Array<{ valor: ModoComparacao; rotulo: string }> = [
+  { valor: 'auto', rotulo: 'Período anterior' },
+  { valor: 'mes_anterior', rotulo: 'Mesmo período do mês anterior' },
+  { valor: 'ano_anterior', rotulo: 'Mesmo período do ano passado' },
+  { valor: 'datas', rotulo: 'Escolher datas' },
+];
+
+export function faixaComparacao(
+  modo: ModoComparacao,
+  period: PeriodoDashboard,
+  atual: Faixa,
+  datas?: { from?: string; to?: string },
+): Faixa | null {
+  if (modo === 'mes_anterior') return deslocarMeses(atual, 1);
+  if (modo === 'ano_anterior') return deslocarMeses(atual, 12);
+  if (modo === 'datas') {
+    const f = datas?.from, t = datas?.to;
+    if (f && t && ISO.test(f) && ISO.test(t)) return f <= t ? { from: f, to: t } : { from: t, to: f };
+    return faixaAnterior(period, atual); // datas incompletas: segue no automático
+  }
+  return faixaAnterior(period, atual);
+}
+
+/** Rótulo curto dos deltas ("vs 1–23/set", "vs out/25"…), conforme o modo. */
+export function rotuloComparacaoModo(modo: ModoComparacao, period: PeriodoDashboard, anterior: Faixa | null): string {
+  if (!anterior) return '';
+  if (modo === 'auto') return rotuloComparacao(period, anterior);
+  const a = partes(anterior.from);
+  const b = partes(anterior.to);
+  const mesmoMes = a.y === b.y && a.m === b.m;
+  if (mesmoMes) return `vs ${a.d}–${b.d}/${MESES[b.m - 1]}${modo === 'ano_anterior' ? `/${String(b.y).slice(2)}` : ''}`;
+  return `vs ${ddmm(anterior.from)}/${String(a.y).slice(2)}–${ddmm(anterior.to)}/${String(b.y).slice(2)}`;
+}
+
 /**
  * Fração da meta MENSAL que vale para a janela.
  *  - this_month → pró-rata até hoje (dia de hoje ÷ dias do mês);

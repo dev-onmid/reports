@@ -82,8 +82,8 @@ export function ritmoDoPeriodo(d: DadosDelivery, hojeIso: string = new Date().to
   return {
     receitaDia,
     pedidosDia,
-    subReceita: vR ? `${vR} vs ${brl(recAntDia)}/dia no período anterior` : undefined,
-    subPedidos: vP ? `${vP} vs ${Math.round(pedAntDia).toLocaleString('pt-BR')}/dia no período anterior` : undefined,
+    subReceita: vR ? `${vR} vs ${brl(recAntDia)}/dia no período comparado` : undefined,
+    subPedidos: vP ? `${vP} vs ${Math.round(pedAntDia).toLocaleString('pt-BR')}/dia no período comparado` : undefined,
     projecao,
     melhorDia,
     pico,

@@ -2,6 +2,13 @@
 
 Movido do CLAUDE.md em 2026-10-22 (conteúdo original, sem edição). Entrada nova deste setor entra aqui, no topo, não no CLAUDE.md.
 
+## Dashboard — seletor "Comparar com" (todos os dashboards) (2026-10-23)
+
+- Pedido do Matheus: "quero clicar no botão e escolher com qual mês comparar", em qualquer dashboard. Cabeçalho ganhou **"Comparar com"** (ao lado dos períodos; some em "Todo período"): **Período anterior** (o automático de sempre, `faixaAnterior`), **Mesmo período do mês anterior**, **Mesmo período do ano passado** e **Escolher datas** (abre "Comparar de / até" embaixo, começando na janela que estava valendo). Escolha lembrada no navegador (`localStorage dashboard:comparar`, estado inicializado no `useState` como o resto da página — efeito com setState quebra o lint).
+- `faixaComparacao` + `rotuloComparacaoModo` em `src/lib/dashboard-periodo.ts` (10 asserts novos em `scratchpad/test-dashboard-periodo.mjs`, 39 no total). **`faixaPrev` continua sendo a fonte única** dos "vs" da tela (métricas anteriores, Instagram, canais) — só passou a sair do modo escolhido.
+- ⚠️ **O delivery escolhia o comparativo SOZINHO** (`autoPreviousPeriod` na rota do cardápio: "este mês" × os 23 dias imediatamente antes, 8–30/09), enquanto o resto do dashboard comparava com os mesmos dias do mês anterior (1–23/09). Agora `useDadosDelivery` e `DeliveryResumoCard` mandam `compararDe/compararAte = faixaPrev`, e os dois blocos comparam com a MESMA janela. Efeito visível: os "vs" do delivery no automático mudam de base (passam a 1–23/09). Textos viraram "no período comparado".
+- Não verificado na tela com login (dev sem banco); a regra está coberta pelos testes e a rota do cardápio aceita a janela (testada no container).
+
 ## Delivery — cards de Vendas empilhados, Novos clientes com comparativo e Ritmo com 4 leituras (2026-10-23)
 
 - **Cards de Vendas** (`KpiCard empilhado`): número grande (38px) em cima, "vs X no período anterior" (o número-base do delta, não só a %), gráfico embaixo na largura toda. Linha de Vendas passou de h: 2 para h: 3 e tudo abaixo desceu 1 linha em `ELEMENTOS` (nenhum modelo salvo em produção).

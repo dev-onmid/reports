@@ -60,7 +60,7 @@ export function elementosDelivery(
   const serieNovos = serie.map((p) => p.novos);
   const ant = dados.anterior;
   /** "vs R$ 111.300 no período anterior" — o número de base do delta, não só a %. */
-  const vs = (valor: string | null) => (valor ? `vs ${valor} no período anterior` : undefined);
+  const vs = (valor: string | null) => (valor ? `vs ${valor} no período comparado` : undefined);
   const ritmo = ritmoDoPeriodo(dados);
   const baseTotal = clientes.ativos + clientes.emRisco + clientes.inativos;
   const totalRecorrencia = clientes.recorrencia.reduce((s, f) => s + f.clientes, 0);

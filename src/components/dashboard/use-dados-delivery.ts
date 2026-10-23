@@ -50,20 +50,25 @@ export function useDadosDelivery(
   clientId: string | null,
   de: string,
   ate: string,
+  /** Janela do comparativo escolhida no cabeçalho — a mesma dos outros "vs" da tela. */
+  comparar: { from: string; to: string } | null,
   trafego: EntradaTrafego,
 ): DadosDelivery | null {
   const [bruto, setBruto] = useState<RespostaCardapio | null>(null);
+  const cmpDe = comparar?.from ?? '';
+  const cmpAte = comparar?.to ?? '';
 
   useEffect(() => {
     if (!clientId) { setBruto(null); return; }
     let vivo = true;
     setBruto(null);
-    fetch(`/api/clients/${clientId}/cardapioweb?from=${de}&to=${ate}`)
+    const cmp = cmpDe && cmpAte ? `&compararDe=${cmpDe}&compararAte=${cmpAte}` : '';
+    fetch(`/api/clients/${clientId}/cardapioweb?from=${de}&to=${ate}${cmp}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => { if (vivo) setBruto(d); })
       .catch(() => { if (vivo) setBruto(null); });
     return () => { vivo = false; };
-  }, [clientId, de, ate]);
+  }, [clientId, de, ate, cmpDe, cmpAte]);
 
   return useMemo<DadosDelivery | null>(() => {
     if (!bruto) return null;

@@ -41,7 +41,7 @@ import {
   Bell, DollarSign, Tag, TrendingUp, Calendar, BarChart3, Zap, Target, Briefcase,
   Wallet, MousePointerClick, CreditCard, PiggyBank, Clock, Info, Lightbulb, UserPlus, CheckCircle2, Receipt,
   Eye, Heart, Monitor, ExternalLink, Bookmark, MessageCircle, Repeat,
-  Funnel, CircleCheck, CircleArrowUp, CircleAlert, CircleMinus,
+  Funnel, CircleCheck, CircleArrowUp, CircleAlert, CircleMinus, ArrowLeftRight,
 } from 'lucide-react';
 import { getAuthSession } from '@/lib/auth-store';
 import type { AdSetWithMetrics } from '@/app/api/meta/campaigns/[id]/adsets/route';
@@ -106,7 +106,8 @@ import {
   formatarMetrica, custoPorPedido, roas as roasFood,
 } from '@/lib/metricas-food';
 import {
-  faixaAtual, faixaAnterior, rotuloComparacao, metaParcialDoPeriodo, rotuloMetaParcial, diasNoMes, datasDaFaixa, fimDoMesIso,
+  faixaAtual, metaParcialDoPeriodo, rotuloMetaParcial, diasNoMes, datasDaFaixa, fimDoMesIso,
+  faixaComparacao, rotuloComparacaoModo, OPCOES_COMPARACAO, type ModoComparacao,
 } from '@/lib/dashboard-periodo';
 import { statusCpl, statusCplComGasto, ROTULO_STATUS_CPL, CLASSE_STATUS_CPL, TEXTO_STATUS_CPL, type StatusCpl } from '@/lib/dashboard-metas';
 import { Donut } from '@/components/dashboard/donut';
@@ -4614,20 +4615,21 @@ type DeliveryResumo = {
   funil?: { periodo: Record<string, number> };
 };
 
-function DeliveryResumoCard({ clientId, from, to }: { clientId: string; from: string; to: string }) {
+function DeliveryResumoCard({ clientId, from, to, comparar }: { clientId: string; from: string; to: string; comparar: { from: string; to: string } | null }) {
   const [data, setData] = useState<DeliveryResumo | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let vivo = true;
     setLoading(true);
-    fetch(`/api/clients/${clientId}/cardapioweb?from=${from}&to=${to}`)
+    const cmp = comparar ? `&compararDe=${comparar.from}&compararAte=${comparar.to}` : '';
+    fetch(`/api/clients/${clientId}/cardapioweb?from=${from}&to=${to}${cmp}`)
       .then(r => r.ok ? r.json() as Promise<DeliveryResumo> : null)
       .then(d => { if (vivo) setData(d); })
       .catch(() => { if (vivo) setData(null); })
       .finally(() => { if (vivo) setLoading(false); });
     return () => { vivo = false; };
-  }, [clientId, from, to]);
+  }, [clientId, from, to, comparar?.from, comparar?.to]);
 
   const varPct = (v: number | null | undefined) => {
     if (v === null || v === undefined || !isFinite(v)) return null;
@@ -5336,6 +5338,23 @@ export default function GeneralDashboard() {
   const [period, setPeriod] = useState<Period>('this_month');
   const [customDateFrom, setCustomDateFrom] = useState('');
   const [customDateTo, setCustomDateTo] = useState('');
+  // Com o que comparar (pedido do Matheus, 2026-10-23). Lembrado neste
+  // navegador — é preferência de quem olha, não dado do cliente.
+  const [compSalvo] = useState<{ modo: ModoComparacao; de: string; ate: string }>(() => {
+    const padrao = { modo: 'auto' as ModoComparacao, de: '', ate: '' };
+    if (typeof window === 'undefined') return padrao;
+    try {
+      const salvo = JSON.parse(localStorage.getItem('dashboard:comparar') ?? 'null') as { modo?: ModoComparacao; de?: string; ate?: string } | null;
+      if (salvo?.modo && OPCOES_COMPARACAO.some(o => o.valor === salvo.modo)) return { modo: salvo.modo, de: salvo.de ?? '', ate: salvo.ate ?? '' };
+    } catch { /* sem storage: fica no automático */ }
+    return padrao;
+  });
+  const [modoComp, setModoComp] = useState<ModoComparacao>(compSalvo.modo);
+  const [compDe, setCompDe] = useState(compSalvo.de);
+  const [compAte, setCompAte] = useState(compSalvo.ate);
+  useEffect(() => {
+    try { localStorage.setItem('dashboard:comparar', JSON.stringify({ modo: modoComp, de: compDe, ate: compAte })); } catch { /* ignore */ }
+  }, [modoComp, compDe, compAte]);
   const [metricsByClient, setMetricsByClient] = useState<Record<string, ApiMetrics>>({});
   // Landing page (GA4) por cliente — null = sem propriedade vinculada
   const [ga4ByClient, setGa4ByClient] = useState<Record<string, { ga4: Ga4Consolidado | null; aviso?: string }>>({});
@@ -5662,8 +5681,10 @@ export default function GeneralDashboard() {
 
   // Janela atual e de comparação — mesma régua do servidor (dashboard-periodo.ts).
   const faixaSel = faixaAtual(period, customDateFrom, customDateTo);
-  const faixaPrev = faixaAnterior(period, faixaSel);
-  const rotuloComp = rotuloComparacao(period, faixaPrev);
+  // UMA janela de comparação para a tela inteira — métricas, Instagram, canais e
+  // o delivery (que antes escolhia a dele e comparava "este mês" com outra janela).
+  const faixaPrev = faixaComparacao(modoComp, period, faixaSel, { from: compDe, to: compAte });
+  const rotuloComp = rotuloComparacaoModo(modoComp, period, faixaPrev);
 
   // Skip fetching when custom period but dates not yet filled
   const customReady = period !== 'custom' || (customDateFrom.length === 10 && customDateTo.length === 10);
@@ -6525,7 +6546,7 @@ export default function GeneralDashboard() {
       engajamento: alcance > 0 ? interacoes / alcance : null,
     };
   })();
-  const dadosFood = useDadosDelivery(foodSoloId, periodoISO.from, periodoISO.to, {
+  const dadosFood = useDadosDelivery(foodSoloId, periodoISO.from, periodoISO.to, faixaPrev, {
     metaSpend, metaImpressions, metaClicks,
     googleCost, googleImpressions, googleClicks,
     metaSaldo: metaBalance > 0 ? metaBalance : null,
@@ -7391,6 +7412,28 @@ export default function GeneralDashboard() {
               </button>
             ))}
           </div>
+          {/* Com o que comparar — vale para todos os "vs" da tela (pedido do Matheus, 2026-10-23). */}
+          {period !== 'all_time' && (
+            <label
+              className="flex h-10 shrink-0 items-center gap-2 rounded-[10px] border border-white/[0.08] bg-[#0b1216] pl-3 pr-1 text-xs font-bold text-[#a7b0b6]"
+              title={faixaPrev ? `Comparando com ${dataLonga(faixaPrev.from)} – ${dataLonga(faixaPrev.to)}` : undefined}
+            >
+              <ArrowLeftRight className="h-4 w-4 text-[#6cff2f]" />
+              <span className="whitespace-nowrap">Comparar com</span>
+              <select
+                value={modoComp}
+                onChange={e => {
+                  const modo = e.target.value as ModoComparacao;
+                  // "Escolher datas" começa na janela que já estava valendo.
+                  if (modo === 'datas' && !(compDe && compAte) && faixaPrev) { setCompDe(faixaPrev.from); setCompAte(faixaPrev.to); }
+                  setModoComp(modo);
+                }}
+                className="h-8 rounded-md bg-transparent px-1 text-xs font-bold text-[#f4f7f8] outline-none [color-scheme:dark]"
+              >
+                {OPCOES_COMPARACAO.map(o => <option key={o.valor} value={o.valor}>{o.rotulo}</option>)}
+              </select>
+            </label>
+          )}
           {/* Bloco 1 da seção 6: header mantido, só ganha o badge do segmento ativo. */}
           {perfilAtivo.segmento !== 'leads' && (
             <span className="inline-flex items-center gap-1.5 rounded-[10px] border border-[#6cff2f]/30 bg-[#6cff2f]/10 px-3 py-2 text-xs font-bold text-[#6cff2f]">
@@ -7447,6 +7490,26 @@ export default function GeneralDashboard() {
             </AvatarFallback>
           </Avatar>
         </div>
+        {modoComp === 'datas' && period !== 'all_time' && (() => {
+          const campoComp = 'h-10 w-[160px] rounded-[10px] border border-white/[0.10] bg-[#0b1216] px-3 text-sm font-semibold text-[#f4f7f8] outline-none [color-scheme:dark] focus:border-[#6cff2f]';
+          return (
+            <div className="mt-3 flex flex-wrap items-end gap-3">
+              <label className="flex flex-col gap-1">
+                <span className={T.miniRotulo}>Comparar de</span>
+                <input type="date" value={compDe} max={compAte || undefined} onChange={e => setCompDe(e.target.value)} className={campoComp} />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className={T.miniRotulo}>até</span>
+                <input type="date" value={compAte} min={compDe || undefined} onChange={e => setCompAte(e.target.value)} className={campoComp} />
+              </label>
+              {faixaPrev && (
+                <p className={cn('pb-2.5', T.nota)}>
+                  {dataLonga(faixaSel.from)} – {dataLonga(faixaSel.to)} comparado com {dataLonga(faixaPrev.from)} – {dataLonga(faixaPrev.to)}
+                </p>
+              )}
+            </div>
+          );
+        })()}
         {period === 'custom' && (() => {
           const hoje = toInputDate(new Date());
           const faixa = periodToDateRange('custom', customDateFrom, customDateTo);
@@ -7705,7 +7768,7 @@ export default function GeneralDashboard() {
                     {modoBranding ? null : (
                     <div className="grid gap-4 xl:grid-cols-[1.08fr_0.92fr]">
                       {deliverySoloId ? (
-                        <DeliveryResumoCard clientId={deliverySoloId} from={deliveryRange.from} to={deliveryRange.to} />
+                        <DeliveryResumoCard clientId={deliverySoloId} from={deliveryRange.from} to={deliveryRange.to} comparar={faixaPrev} />
                       ) : (
                         <SimpleFunnel steps={funnelStepsNew} totalRate={funnelTaxaFinal > 0 ? premiumValue(funnelTaxaFinal, 'percent') : '—'} fonteLabel={usaFunilPlanilha ? 'fonte: planilha do cliente' : usaStageFunil ? 'fonte: CRM' : fonteTopoLabel} onStageClick={usaFunilPlanilha ? undefined : setFunilStageIdx} todosClicaveis={usaStageFunil} semiDegraus={funnelSemiDegraus} porCanal={mostraFunilCanal || usaFunilPlanilha ? undefined : funilPorCanal} rastreadosForaDoCrm={rastreadosForaDoCrm} onVerForaDoCrm={() => setVerForaDoCrm(true)} />
                       )}
