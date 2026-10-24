@@ -232,7 +232,9 @@ function CardPublicacao({ p, onAbrir }: { p: Publicacao; onAbrir: () => void }) 
       tabIndex={0}
       onClick={onAbrir}
       onKeyDown={e => { if (e.key === 'Enter') onAbrir(); }}
-      className="cursor-pointer rounded-lg border border-border bg-card p-3 text-left transition-colors hover:border-muted-foreground/40"
+      // `min-w-0`: item de grade com `1fr` aceitava a largura do texto sem quebra
+      // ("toda seg, ter, qua…") e o card passava da tela (433px num celular de 375).
+      className="min-w-0 cursor-pointer rounded-lg border border-border bg-card p-3 text-left transition-colors hover:border-muted-foreground/40"
     >
       <div className="flex gap-3">
         {p.midia_token ? (

@@ -2,6 +2,14 @@
 
 Movido do CLAUDE.md em 2026-10-22 (conteúdo original, sem edição). Entrada nova deste setor entra aqui, no topo, não no CLAUDE.md.
 
+## Celular — lote 4: restos de arrasto, Radar e o aviso de instâncias no topo (2026-10-24)
+
+- Medição pós-deploy pegou o que sobrou: **Publicações** (card de post 433px — item de grade `1fr` sem `min-w-0` aceitava a largura de "toda seg, ter, qua…") e **Configurações** (botões "Como funciona?/Adicionar integração" presos com `shrink-0`). Corrigidos.
+- **Radar**: lista sem a caixa `max-h-[65vh]` no celular (rolava dentro da página); célula Funil vira bloco (rótulo em cima, funil embaixo); selects do filtro na largura toda.
+- **Aviso de instâncias (celular)**: a faixa foi para o TOPO (`top-[64px]`) e some sozinha em 8s — no rodapé cobria a caixa de digitar da Luna e do chat.
+- ⚠️ Deploy de `8bc61ecc` falhou em "Publicar na VPS" (GitHub sem SSH na porta 22, build ok); `gh run rerun <id> --failed` publicou. Conferir a imagem no ar antes de dar como publicado.
+- Visto e ok no celular sem mudança: Início, Otimizações, Luna, Discador, Cofre, Biblioteca Meta, Formatos de Criativos, Sorteador.
+
 ## Celular — lote 3: tabelas viram cards com `.tabela-celular` (2026-10-24)
 
 - Classe global em `globals.css` (fora de `@layer`): abaixo do `md` a `<table>` vira lista de cards — `<tr>` = card, `<td>` = linha "rótulo · valor" com o rótulo de `data-label`; `data-principal` = título do card; célula sem `data-label` (ações) alinha à direita; `colspan` (vazio/carregando) centraliza; anula o `min-w-*` do desktop. Para usar numa tabela nova: `className="tabela-celular …"` + `data-label` nas células. ⚠️ Isto REVERTE a decisão de 19/10 ("tabela larga = rolagem lateral no bloco") a pedido do Matheus em 24/10 ("adaptar de verdade, não dar jeitinho").

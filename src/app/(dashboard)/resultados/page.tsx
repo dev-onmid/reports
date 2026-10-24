@@ -654,7 +654,7 @@ export default function ResultadosPage() {
           <SlidersHorizontal className="h-3.5 w-3.5" /> Filtrar
         </span>
 
-        <label className="flex items-center gap-2 text-xs text-muted-foreground">
+        <label className="flex items-center gap-2 text-xs text-muted-foreground max-md:w-full max-md:[&>select]:min-w-0 max-md:[&>select]:flex-1">
           Categoria
           <select
             value={categoria}
@@ -670,7 +670,7 @@ export default function ResultadosPage() {
           </select>
         </label>
 
-        <label className="flex items-center gap-2 text-xs text-muted-foreground">
+        <label className="flex items-center gap-2 text-xs text-muted-foreground max-md:w-full max-md:[&>select]:min-w-0 max-md:[&>select]:flex-1">
           Métrica
           <select
             value={metrica}
@@ -681,7 +681,7 @@ export default function ResultadosPage() {
           </select>
         </label>
 
-        <label className="flex items-center gap-2 text-xs text-muted-foreground">
+        <label className="flex items-center gap-2 text-xs text-muted-foreground max-md:w-full max-md:[&>select]:min-w-0 max-md:[&>select]:flex-1">
           Situação
           <select
             value={situacao}
@@ -727,7 +727,8 @@ export default function ResultadosPage() {
           força overflow-y:auto também e quebra o sticky do thead contra o scroll
           da página (o header "gruda" num scroll-container que nunca rola de fato). */}
       <div className="bg-card border border-border rounded-[var(--radius)] overflow-hidden">
-        <div className="max-h-[65vh] overflow-auto">
+        {/* Celular: sem caixa de altura fixa — a lista de cards rola com a página. */}
+        <div className="max-h-[65vh] overflow-auto max-md:max-h-none max-md:overflow-visible">
           <table className="tabela-celular w-full md:min-w-[1100px]">
             <thead>
               <tr className="border-b border-border">
@@ -860,8 +861,9 @@ export default function ResultadosPage() {
                     <td data-label="CAC" className="px-4 py-3">
                       <MetricCell value={row.cac} pct={row.pctCac} loading={row.metricaEstado === 'carregando'} />
                     </td>
-                    <td data-label="Funil" className="px-4 py-3">
-                      <div className="flex items-center gap-0.5">
+                    {/* Celular: funil numa linha própria, abaixo do rótulo (ao lado não cabia). */}
+                    <td data-label="Funil" className="px-4 py-3 max-md:!block max-md:!text-left">
+                      <div className="flex items-center gap-0.5 max-md:mt-1.5 max-md:justify-between">
                         {FUNNEL_KEYS.map((key, idx) => {
                           const FunnelIcon = FUNNEL_ICONS[idx];
                           const c = pctColors(row.funnelPcts[idx]);

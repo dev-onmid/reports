@@ -2660,7 +2660,7 @@ export function IntegrationsPanel() {
                 Conecte suas ferramentas e centralize seus dados no ONMID.
               </p>
             </div>
-            <div className="flex shrink-0 items-center gap-3">
+            <div className="flex shrink-0 flex-wrap items-center gap-3 max-md:w-full max-md:shrink">
               <button
                 type="button"
                 onClick={() => setComoFunciona((v) => !v)}

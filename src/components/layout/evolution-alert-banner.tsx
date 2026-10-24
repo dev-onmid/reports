@@ -29,6 +29,14 @@ export function EvolutionAlertBanner() {
   // Celular: começa como faixa de uma linha; o painel completo cobria 1/4 da
   // tela o tempo todo (print do Matheus na dashboard, 2026-10-24).
   const [abertoMobile, setAbertoMobile] = useState(false);
+  // …e some sozinha depois de 8s: no rodapé ela cobria a caixa de digitar da
+  // Luna e do chat. Volta na próxima vez que a tela abrir (não é "dispensar").
+  const [faixaSumiu, setFaixaSumiu] = useState(false);
+  useEffect(() => {
+    if (alerts.length === 0) return;
+    const t = setTimeout(() => setFaixaSumiu(true), 8000);
+    return () => clearTimeout(t);
+  }, [alerts.length]);
 
   async function check() {
     try {
@@ -81,8 +89,8 @@ export function EvolutionAlertBanner() {
 
   return (
     <>
-    {!abertoMobile && (
-      <div className="fixed inset-x-3 bottom-3 z-50 flex items-center gap-2 rounded-full border border-red-500/40 bg-card py-1.5 pl-3 pr-1.5 shadow-2xl md:hidden">
+    {!abertoMobile && !faixaSumiu && (
+      <div className="fixed inset-x-3 top-[64px] z-50 flex items-center gap-2 rounded-full border border-red-500/40 bg-card py-1.5 pl-3 pr-1.5 shadow-2xl md:hidden">
         <AlertTriangle className="h-4 w-4 shrink-0 text-red-400" />
         <button type="button" onClick={() => setAbertoMobile(true)} className="min-h-[36px] min-w-0 flex-1 truncate text-left text-[13px] font-bold text-foreground">
           {titulo} <span className="font-semibold text-red-300">· ver</span>
