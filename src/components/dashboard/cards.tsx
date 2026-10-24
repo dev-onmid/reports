@@ -100,13 +100,17 @@ export type MiniProps = {
 export function Mini({ label, valor, sub, icon, tom = 'primary', grande, className, estilo = VAZIO, superficie = 'inner', subAoLado }: MiniProps) {
   if (subAoLado) {
     return (
-      <div className={cn('flex items-center gap-4 px-4 py-2.5', CLASSE_SUPERFICIE[superficie], className)} style={styleFundo(estilo)}>
+      <div className={cn('flex items-center gap-4 px-4 py-2.5 max-sm:gap-3 max-sm:py-3', CLASSE_SUPERFICIE[superficie], className)} style={styleFundo(estilo)}>
         {icon && <IconTile icon={icon} tom={tom} size={estilo.tamanhoIcone ?? 30} cor={estilo.corIcone} />}
-        <div className="w-[38%] min-w-[84px] shrink-0">
-          <Label style={styleTexto(estilo)}>{estilo.texto ?? label}</Label>
-          <p className="mt-1 font-heading text-[26px] leading-none text-foreground" style={styleValor(estilo)}>{valor}</p>
+        {/* Celular: a descrição desce para baixo do número (ao lado, numa coluna
+            de 120px, quebrava em 4 linhas). */}
+        <div className="flex min-w-0 flex-1 items-center gap-4 max-sm:flex-col max-sm:items-start max-sm:gap-1.5">
+          <div className="w-[38%] min-w-[84px] shrink-0 max-sm:w-auto">
+            <Label style={styleTexto(estilo)}>{estilo.texto ?? label}</Label>
+            <p className="mt-1 font-heading text-[26px] leading-none text-foreground" style={styleValor(estilo)}>{valor}</p>
+          </div>
+          {sub && <p className="min-w-0 flex-1 border-l border-white/[0.08] pl-4 text-[12px] leading-snug text-[#9aa4aa] max-sm:border-l-0 max-sm:pl-0">{sub}</p>}
         </div>
-        {sub && <p className="min-w-0 flex-1 border-l border-white/[0.08] pl-4 text-[12px] leading-snug text-[#9aa4aa]">{sub}</p>}
       </div>
     );
   }

@@ -194,8 +194,30 @@ export function ModeloEditor({ modelo, render, editando, onSair, onSalvou }: Pro
 
   // Fora do modo edição em mobile o RGL empilha; manter o grid ali só
   // atrapalharia, então renderiza a pilha simples.
+  //
+  // ⚠️ Pilha POR BLOCO, não por linha da grade: blocos lado a lado no desktop
+  // ("Quando vendem" | "Ritmo") têm o mesmo y, e ordenar só por y,x punha os
+  // dois TÍTULOS seguidos e os conteúdos depois (medido em produção,
+  // 2026-10-24). Cada bloco entra inteiro, na ordem de onde começa.
+  // KPIs pequenos vão de 2 em 2 (meia largura) em vez de um por tela.
   if (!editando && isMobile) {
-    return <div className="space-y-4">{naGrade.map((e) => <div key={e.id}>{conteudo(e)}</div>)}</div>;
+    const inicio = new Map<string, [number, number]>();
+    for (const e of naGrade) {
+      const b = definicaoElemento(e.id)?.bloco ?? e.id;
+      const atual = inicio.get(b);
+      if (!atual || e.y < atual[0] || (e.y === atual[0] && e.x < atual[1])) inicio.set(b, [e.y, e.x]);
+    }
+    const blocoDe = (e: ElementoNoModelo) => definicaoElemento(e.id)?.bloco ?? e.id;
+    const ordem = [...naGrade].sort((a, b) => {
+      const ia = inicio.get(blocoDe(a))!, ib = inicio.get(blocoDe(b))!;
+      return ia[0] - ib[0] || ia[1] - ib[1] || a.y - b.y || a.x - b.x;
+    });
+    const meia = (e: ElementoNoModelo) => blocoDe(e) === 'kpis';
+    return (
+      <div className="grid grid-cols-2 gap-3">
+        {ordem.map((e) => <div key={e.id} className={cn('min-w-0', meia(e) ? 'col-span-1' : 'col-span-2')}>{conteudo(e)}</div>)}
+      </div>
+    );
   }
 
   return (

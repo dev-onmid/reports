@@ -26,6 +26,9 @@ export function EvolutionAlertBanner() {
   const [alerts, setAlerts] = useState<DisconnectedAlert[]>([]);
   const [visible, setVisible] = useState(false);
   const [loading, setLoading] = useState(false);
+  // Celular: começa como faixa de uma linha; o painel completo cobria 1/4 da
+  // tela o tempo todo (print do Matheus na dashboard, 2026-10-24).
+  const [abertoMobile, setAbertoMobile] = useState(false);
 
   async function check() {
     try {
@@ -74,19 +77,29 @@ export function EvolutionAlertBanner() {
   const shown = alerts.slice(0, 5);
   const extra = alerts.length - shown.length;
 
+  const titulo = alerts.length === 1 ? '1 instância WhatsApp desconectada' : `${alerts.length} instâncias WhatsApp desconectadas`;
+
   return (
-    <div className="fixed bottom-4 right-4 z-50 w-[360px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-[var(--radius)] border border-red-500/40 bg-card shadow-2xl">
+    <>
+    {!abertoMobile && (
+      <div className="fixed inset-x-3 bottom-3 z-50 flex items-center gap-2 rounded-full border border-red-500/40 bg-card py-1.5 pl-3 pr-1.5 shadow-2xl md:hidden">
+        <AlertTriangle className="h-4 w-4 shrink-0 text-red-400" />
+        <button type="button" onClick={() => setAbertoMobile(true)} className="min-h-[36px] min-w-0 flex-1 truncate text-left text-[13px] font-bold text-foreground">
+          {titulo} <span className="font-semibold text-red-300">· ver</span>
+        </button>
+        <button type="button" onClick={dismiss} title="Fechar" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-muted-foreground">
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+    )}
+    <div className={`fixed bottom-4 right-4 z-50 w-[360px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-[var(--radius)] border border-red-500/40 bg-card shadow-2xl ${abertoMobile ? '' : 'max-md:hidden'}`}>
       <div className="absolute inset-x-0 top-0 h-0.5 bg-red-500" />
       <div className="flex items-start gap-3 p-4">
         <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-red-500/15">
           <AlertTriangle className="h-4.5 w-4.5 text-red-400" />
         </div>
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-bold text-foreground">
-            {alerts.length === 1
-              ? '1 instância WhatsApp desconectada'
-              : `${alerts.length} instâncias WhatsApp desconectadas`}
-          </p>
+          <p className="text-sm font-bold text-foreground">{titulo}</p>
           <div className="mt-1.5 space-y-0.5">
             {shown.map((a) => (
               <p key={a.name} className="flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -123,7 +136,7 @@ export function EvolutionAlertBanner() {
           </div>
         </div>
         <button
-          onClick={dismiss}
+          onClick={() => { if (abertoMobile) setAbertoMobile(false); else dismiss(); }}
           title="Fechar (volta a avisar se a situação mudar)"
           className="shrink-0 rounded p-1 text-muted-foreground hover:text-foreground transition-colors"
         >
@@ -131,5 +144,6 @@ export function EvolutionAlertBanner() {
         </button>
       </div>
     </div>
+    </>
   );
 }

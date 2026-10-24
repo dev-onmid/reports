@@ -195,7 +195,13 @@ export function FunilCriativosPanel({ criativos, crm, loading, onPreview, receit
           {/* Cada etapa do meio a mais alarga o card: o nome real da coluna ("Visita/reunião", "Em Atendimento") não cabe em 440. */}
           {/* Largura com folga (2026-10-23, "as box estão muito apertadas"): o rodapé
               cortava "FATURAME…" e "clique → v…" em 440px. Cresce com as etapas do funil. */}
-          <div className={cn('grid grid-flow-col grid-rows-2 gap-4 overflow-x-auto pb-2', etapas.length >= 3 ? 'auto-cols-[620px]' : etapas.length === 2 ? 'auto-cols-[580px]' : 'auto-cols-[540px]')}>
+          {/* Celular: UMA linha, um card por tela (largura da tela − margens), com
+              encaixe ao deslizar. Duas linhas de 580px eram mais largas que o
+              aparelho e cortavam o card ao meio (print do Matheus, 2026-10-24). */}
+          <div className={cn(
+            'grid grid-flow-col gap-4 overflow-x-auto pb-2 max-md:snap-x max-md:snap-mandatory max-md:grid-rows-1 max-md:auto-cols-[calc(100vw-80px)] md:grid-rows-2',
+            etapas.length >= 3 ? 'md:auto-cols-[620px]' : etapas.length === 2 ? 'md:auto-cols-[580px]' : 'md:auto-cols-[540px]',
+          )}>
             {ordenados.map((i, idx) => (
               <CardFunil key={i.chave} item={i} index={idx} leads={leadsDe(i)} temCrm={temCrm} etapas={etapas} cardapio={comCompras} onPreview={onPreview} />
             ))}
@@ -221,7 +227,7 @@ function Miniatura({ item, index, onPreview }: { item: Item; index: number; onPr
       type="button"
       disabled={!c}
       onClick={() => c && onPreview(c)}
-      className="group relative h-full w-[124px] shrink-0 overflow-hidden rounded-lg bg-[#071014] disabled:cursor-default"
+      className="group relative h-full w-[124px] shrink-0 overflow-hidden rounded-lg bg-[#071014] disabled:cursor-default max-md:h-[150px] max-md:w-full"
       title={c ? 'Ver o criativo' : undefined}
     >
       {url && etapa !== 'erro' ? (
@@ -316,7 +322,7 @@ function CardFunil({ item, index, leads, temCrm, etapas, cardapio, onPreview }: 
   const roas = item.gasto > 0 && receita > 0 ? receita / item.gasto : null;
 
   return (
-    <div className="flex h-[236px] gap-4 rounded-xl bg-white/[0.03] p-3 ring-1 ring-white/[0.05]">
+    <div className="flex gap-4 rounded-xl bg-white/[0.03] p-3 ring-1 ring-white/[0.05] max-md:snap-start max-md:flex-col max-md:gap-3 md:h-[236px]">
       <Miniatura item={item} index={index} onPreview={onPreview} />
       <div className="flex min-w-0 flex-1 flex-col">
         <div className="flex items-start justify-between gap-2">
@@ -335,10 +341,11 @@ function CardFunil({ item, index, leads, temCrm, etapas, cardapio, onPreview }: 
         </div>
 
         {/* O funil do criativo em uma linha: valor da etapa e, embaixo, quanto passou da anterior. */}
-        <div className="mt-2 flex items-stretch">
+        {/* Celular: etapas em grade de 3 (2 linhas quando há 4–6 etapas), sem as setas. */}
+        <div className="mt-2 flex items-stretch max-md:grid max-md:grid-cols-3 max-md:gap-y-3">
           {funil.map((e, i) => (
             <div key={e.rotulo} className="flex min-w-0 flex-1 items-stretch">
-              {i > 0 && <ChevronRight className="h-3 w-3 shrink-0 self-center text-[#3d474d]" />}
+              {i > 0 && <ChevronRight className="h-3 w-3 shrink-0 self-center text-[#3d474d] max-md:hidden" />}
               <div className="min-w-0 flex-1 text-center" title={e.dica}>
                 <p className={cn('font-heading text-[22px] leading-none tabular-nums', e.valor > 0 ? 'text-[#f4f7f8]' : 'text-[#4a545a]')}>{compacto(e.valor)}</p>
                 {/* Nome real da coluna do cliente: quebra em 2 linhas em vez de virar "ENGA…". */}
@@ -365,7 +372,7 @@ function CardFunil({ item, index, leads, temCrm, etapas, cardapio, onPreview }: 
         )}
 
         {/* Resultado do criativo: faturamento, conversão e a leitura do vídeo. */}
-        <div className="mt-auto grid grid-cols-4 gap-3 border-t border-white/[0.06] pt-2.5">
+        <div className="mt-auto grid grid-cols-4 gap-3 border-t border-white/[0.06] pt-2.5 max-md:mt-3 max-md:grid-cols-2 max-md:gap-y-3">
           <Kpi rotulo="Faturamento" valor={receita > 0 ? moedaCurta(receita) : '—'} forte={receita > 0}
             nota={roas !== null ? `ROAS ${roas.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}x` : undefined} />
           <Kpi rotulo="Conversão" valor={fmtPct(conversao)} nota={porClique ? 'clique → venda' : 'lead → venda'} dica={porClique ? 'Vendas ÷ cliques' : 'Vendas ÷ leads'} />

@@ -1200,10 +1200,10 @@ function ClientSelector({
       <button
         ref={buttonRef}
         onClick={handleToggleOpen}
-        className="flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-sm font-semibold hover:bg-muted/50 transition-colors"
+        className="flex min-h-[44px] items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-sm font-semibold transition-colors hover:bg-muted/50 max-md:w-full"
       >
         {selected.size === 1 && (() => { const c = clients.find(cl => selected.has(cl.id)); return c ? <ClientAvatar clientId={c.id} name={c.name} size="sm" /> : null; })()}
-        {label}
+        <span className="min-w-0 flex-1 truncate text-left">{label}</span>
         <ChevronDown className={cn('w-3.5 h-3.5 text-muted-foreground transition-transform', open && 'rotate-180')} />
       </button>
       {open && createPortal(dropdown, document.body)}
@@ -3920,7 +3920,7 @@ function GoalProgressCard({
   const escuro = progress >= 52 && visual.textoEscuro;
   const iconSize = estilo.tamanhoIcone ?? 40;
   return (
-    <PremiumPanel className={cn('relative overflow-hidden p-5', className)}>
+    <PremiumPanel className={cn('relative overflow-hidden p-5 max-sm:p-4', className)}>
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_8%_0%,rgba(108,255,47,0.16),transparent_32%),linear-gradient(135deg,rgba(108,255,47,0.05),rgba(22,139,255,0.02))]" />
       <div className="relative flex items-start gap-4">
         <span
@@ -3931,13 +3931,14 @@ function GoalProgressCard({
         </span>
         <div className="min-w-0 flex-1">
           <h2 className="text-sm font-black uppercase tracking-[0.07em] text-[#f4f7f8]" style={styleTexto(estilo)}>{estilo.texto ?? title}</h2>
-          <div className="mt-5 grid grid-cols-3 gap-3">
+          {/* Celular: Realizado primeiro e na linha inteira; Meta e Meta Parcial embaixo. */}
+          <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3">
             {[
               ['Meta', target],
               ['Meta Parcial', partial],
               ['Realizado', value],
             ].map(([label, amount]) => (
-              <div key={String(label)} className="min-w-0">
+              <div key={String(label)} className={cn('min-w-0', label === 'Realizado' && 'order-first col-span-2 sm:order-none sm:col-span-1')}>
                 <p className="truncate font-heading text-2xl leading-none text-[#f4f7f8]" style={styleValor(estilo)}>{Number(amount) > 0 ? premiumValue(Number(amount), format) : '—'}</p>
                 <p className="mt-1.5 text-xs font-medium text-[#a7b0b6]">{label}</p>
               </div>
@@ -4003,7 +4004,7 @@ function HeroStatCard({ title, icon: Icon, value, change, sub, estilo = ESTILO_V
   const positive = hasChange && change >= 0;
   const iconSize = estilo.tamanhoIcone ?? 40;
   return (
-    <PremiumPanel className={cn('relative overflow-hidden p-5', className)}>
+    <PremiumPanel className={cn('relative overflow-hidden p-5 max-sm:p-4', className)}>
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_8%_0%,rgba(108,255,47,0.16),transparent_32%),linear-gradient(135deg,rgba(108,255,47,0.05),rgba(22,139,255,0.02))]" />
       <div className="relative flex items-start gap-4">
         <span
@@ -4261,7 +4262,7 @@ function CanalDonutCard({ titulo, fatiasBrutas, total, semCanal, formato, aviso,
                     <span className="h-3 w-3 shrink-0 self-center rounded-sm" style={{ backgroundColor: cor }} />
                   )}
                   {/* Maior que o padrão de lista: a legenda tem altura de sobra ao lado da rosca (pedido do Matheus, 2026-10-23). */}
-                  <span className="min-w-0 flex-1 truncate text-[14px] font-semibold text-[#e6ecef]">{o.label}</span>
+                  <span className="min-w-0 flex-1 truncate text-[14px] font-semibold text-[#e6ecef] max-sm:line-clamp-2 max-sm:whitespace-normal">{o.label}</span>
                   <span className="w-14 shrink-0 text-right text-[12.5px] tabular-nums text-[#9aa4aa]">{pctTotal.toFixed(1).replace('.', ',')}%</span>
                   <span className="shrink-0 whitespace-nowrap text-right text-[15px] font-extrabold tabular-nums text-[#f4f7f8]">{premiumValue(o.valor, formato)}</span>
                 </div>
@@ -4793,9 +4794,29 @@ function ChannelSummaryTable({ rows, total, metaCpl, comparacao }: {
           <p className={cn('mt-1', T.cardSub)}>Meta Ads, Google Ads e o total no período{comparacao ? ` · variação ${comparacao}` : ''}.</p>
         </div>
       </div>
+      {/* CELULAR: um card por canal. A matriz métrica × canal pedia 440px. */}
+      <div className="flex flex-col gap-3 md:hidden">
+        {colunas.map(c => (
+          <div key={c.channel} className="rounded-[12px] border border-white/[0.07] bg-white/[0.02] p-3.5">
+            <div className="flex items-center justify-between gap-2">
+              <span className="inline-flex items-center gap-2 text-[13px] font-black uppercase tracking-[0.06em] text-[#dce4e8]">{c.logo}{c.channel}</span>
+              <span className={cn('text-[12px] font-bold', TEXTO_STATUS_CPL[c.status])}>{ROTULO_STATUS_CPL[c.status]}</span>
+            </div>
+            <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2.5">
+              {metricas.map(m => (
+                <div key={m.rotulo} className="min-w-0">
+                  <p className="text-[11.5px] text-[#9aa4aa]">{m.rotulo}</p>
+                  <p className="truncate text-[15px] font-bold tabular-nums text-[#f4f7f8]">{m.valor(c)}<Delta v={c.variacao?.[m.chave]} sentido={m.sentido} /></p>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+        {metaCpl > 0 && <p className="text-[12px] text-[#7c868c]">Meta de CPL: {premiumValue(metaCpl, 'currency')}</p>}
+      </div>
       {/* A tabela ocupa a altura da caixa (o card vizinho é mais alto): as linhas
           se espaçam em vez de deixar um vão vazio embaixo (pedido do Matheus, 2026-10-23). */}
-      <div className="flex flex-1 flex-col overflow-x-auto">
+      <div className="flex flex-1 flex-col overflow-x-auto max-md:hidden">
         <table className="h-full w-full min-w-[440px] text-left text-[14.5px] tabular-nums">
           <thead>
             <tr className="bg-white/[0.04] text-[11px] font-black uppercase tracking-[0.08em] text-[#a7b0b6]">
@@ -5036,9 +5057,49 @@ function TabelaFunilCanal({ linhas, investimento, semReceita = false }: {
     <PremiumPanel className="p-5">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <h3 className={cn('flex items-center gap-3', T.cardTitulo)}><IconeBadge icone={Funnel} />Funil por canal</h3>
-        <span className={T.cardSub}>canal de origem do lead no CRM · investimento só nos canais pagos · clique no cabeçalho para ordenar</span>
+        <span className={T.cardSub}>canal de origem do lead no CRM · investimento só nos canais pagos<span className="max-md:hidden"> · clique no cabeçalho para ordenar</span></span>
       </div>
-      <div className="-mx-2">
+      {/* CELULAR: um item por canal — a tabela tem 11 colunas e 980px de largura.
+          O que decide (leads, vendas, conversão, CPL, faturamento) fica em cima;
+          as etapas do meio numa linha menor embaixo. */}
+      <div className="flex flex-col gap-2.5 md:hidden">
+        {visiveis.map(l => {
+          const inv = invDe(l);
+          const marca = marcaDoCanal(l.canal);
+          const temVenda = l.receita > 0 || l.fechamentos > 0;
+          return (
+            <div key={l.canal} className={cn('rounded-[12px] border border-white/[0.07] bg-white/[0.02] p-3.5', temVenda && !l.semCanal && 'border-[#6cff2f]/25 bg-[#6cff2f]/[0.05]')}>
+              <div className="flex items-center gap-2">
+                {marca ? <span className="flex h-5 w-5 shrink-0 items-center justify-center">{marca.logo}</span> : null}
+                <span className={cn('min-w-0 flex-1 truncate text-[14px] font-bold', l.semCanal ? 'text-[#9aa4aa]' : 'text-[#f4f7f8]')}>{l.canal}</span>
+                <span className="text-[14px] font-black tabular-nums text-[#f4f7f8]">{n(l.leads)}<span className="ml-1 text-[11px] font-semibold text-[#9aa4aa]">leads</span></span>
+              </div>
+              <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+                {[
+                  ['Vendas', n(l.fechamentos)],
+                  ['Conversão', pct(l.fechamentos, l.leads)],
+                  [semReceita ? 'CPL' : 'Faturamento', semReceita ? razao(inv, l.leads) : moeda(l.receita)],
+                ].map(([rot, val]) => (
+                  <div key={rot} className="rounded-[8px] bg-black/20 px-1 py-2">
+                    <p className="text-[11px] text-[#9aa4aa]">{rot}</p>
+                    <p className="mt-0.5 truncate text-[14px] font-black tabular-nums text-[#f4f7f8]">{val}</p>
+                  </div>
+                ))}
+              </div>
+              <p className="mt-2.5 text-[12px] leading-relaxed text-[#9aa4aa]">
+                {n(l.engajados)} engajados · {n(l.agendamentos)} agend. · {n(l.comparecimentos)} compar.
+                {inv !== null && inv > 0 && <> · investido {moeda(inv)} · CPL {razao(inv, l.leads)}</>}
+              </p>
+            </div>
+          );
+        })}
+        {linhas.length > LIMITE && (
+          <button type="button" onClick={() => setExpandido(v => !v)} className="min-h-[44px] rounded-[10px] border border-white/[0.08] text-[13px] font-bold text-[#c9d1d6]">
+            {expandido ? 'Mostrar menos' : `Ver todos os ${linhas.length} canais`}
+          </button>
+        )}
+      </div>
+      <div className="-mx-2 max-md:hidden">
         <div className="overflow-auto transition-all duration-300" style={{ maxHeight: expandido ? '9999px' : '330px' }}>
           <table className={cn('w-full min-w-[980px] text-left tabular-nums', T.tabelaCel)}>
             <thead className={cn('sticky top-0 z-10 bg-[#0d1519]', T.tabelaCab)}>
@@ -7296,7 +7357,9 @@ export default function GeneralDashboard() {
   const temGraficoCpl = comMetas && diasSel.length >= 2 && gastoDia.some(v => v > 0) && leadsDia.some(v => v > 0);
 
   return (
-    <div className="-my-3 min-h-full bg-[#05090B] text-[#f4f7f8] sm:-my-6">
+    // `overflow-x-clip` (não `hidden`): corta qualquer coisa que tente alargar
+    // a página sem criar outra área de rolagem — o cabeçalho segue `sticky`.
+    <div className="-my-3 min-h-full overflow-x-clip bg-[#05090B] text-[#f4f7f8] sm:-my-6">
       {customizerOpen && (
         <MetricConfigPanel
           prefs={dashboardPrefs}
@@ -7384,15 +7447,34 @@ export default function GeneralDashboard() {
       })()}
 
       <div className="sticky top-0 z-20 border-b border-white/[0.08] bg-[#060a0d]/92 px-4 py-3 backdrop-blur-xl xl:px-6">
-        <div className="flex items-center gap-3 overflow-x-auto">
+        {/* ⚠️ `relative`: o texto `sr-only` (absoluto) de botões desta faixa
+            escapava da rolagem e alargava a PÁGINA inteira para 1.402px no
+            celular (medido em produção, 2026-10-24) — o "arrasta para o lado". */}
+        <div className="relative flex flex-wrap items-center gap-3 md:flex-nowrap md:overflow-x-auto">
           {modoCliente ? (
-            <div className="flex h-10 shrink-0 items-center gap-2 rounded-[10px] border border-white/[0.08] bg-[#0b1216] px-3 text-sm font-bold text-[#f4f7f8]">
-              {clients[0]?.name ?? 'Carregando…'}
+            <div className="flex h-10 min-w-0 shrink-0 items-center gap-2 rounded-[10px] border border-white/[0.08] bg-[#0b1216] px-3 text-sm font-bold text-[#f4f7f8] max-md:flex-1">
+              <span className="truncate">{clients[0]?.name ?? 'Carregando…'}</span>
             </div>
           ) : (
-            <ClientSelector clients={clients} selected={selectedIds} onChange={setSelectedIds} />
+            <div className="min-w-0 max-md:flex-1"><ClientSelector clients={clients} selected={selectedIds} onChange={setSelectedIds} /></div>
           )}
-          <div className="flex items-center rounded-[10px] border border-white/[0.08] bg-[#0b1216] p-1">
+          {/* CELULAR: período e comparativo num botão só, que abre o modal com os
+              atalhos. A fileira de 10 botões não cabe e cortava "Este mês". */}
+          <button
+            type="button"
+            onClick={() => setModalPeriodo(true)}
+            className="order-last flex min-h-[44px] w-full items-center gap-2.5 rounded-[10px] border border-white/[0.08] bg-[#0b1216] px-3 text-left md:hidden"
+          >
+            <Calendar className="h-4 w-4 shrink-0 text-[#6cff2f]" />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-[13px] font-bold text-[#f4f7f8]">
+                {period === 'custom' ? `${dataLonga(faixaSel.from)} – ${dataLonga(faixaSel.to)}` : PERIODS.find(p => p.value === period)?.label}
+              </span>
+              {faixaPrev && <span className="block truncate text-[11.5px] text-[#9aa4aa]">{rotuloComp}</span>}
+            </span>
+            <ChevronDown className="h-4 w-4 shrink-0 text-[#9aa4aa]" />
+          </button>
+          <div className="hidden items-center rounded-[10px] border border-white/[0.08] bg-[#0b1216] p-1 md:flex">
             {PERIODS.filter(p => p.value !== 'yesterday').map((p) => (
               <button
                 key={p.value}
@@ -7421,7 +7503,7 @@ export default function GeneralDashboard() {
             <button
               type="button"
               onClick={() => setModalPeriodo(true)}
-              className="flex h-10 shrink-0 items-center gap-2 rounded-[10px] border border-white/[0.08] bg-[#0b1216] px-3 text-xs font-bold text-[#a7b0b6] transition-colors hover:text-white"
+              className="hidden h-10 shrink-0 items-center gap-2 rounded-[10px] border border-white/[0.08] bg-[#0b1216] px-3 text-xs font-bold text-[#a7b0b6] transition-colors hover:text-white md:flex"
               title={`Comparando com ${dataLonga(faixaPrev.from)} – ${dataLonga(faixaPrev.to)}`}
             >
               <ArrowLeftRight className="h-4 w-4 text-[#6cff2f]" />
@@ -7439,7 +7521,9 @@ export default function GeneralDashboard() {
               compDe={compDe}
               compAte={compAte}
               hoje={toInputDate(new Date())}
+              atalhos={PERIODS.filter(p => p.value !== 'yesterday' && p.value !== 'custom') as Array<{ value: typeof period; label: string }>}
               onAplicar={(e) => {
+                if (e.atalho) setPeriod(e.atalho);
                 if (e.periodo) { setCustomDateFrom(e.periodo.de); setCustomDateTo(e.periodo.ate); setPeriod('custom'); }
                 setModoComp(e.modo); setCompDe(e.compDe); setCompAte(e.compAte);
                 setModalPeriodo(false);
@@ -7448,11 +7532,12 @@ export default function GeneralDashboard() {
           )}
           {/* Bloco 1 da seção 6: header mantido, só ganha o badge do segmento ativo. */}
           {perfilAtivo.segmento !== 'leads' && (
-            <span className="inline-flex items-center gap-1.5 rounded-[10px] border border-[#6cff2f]/30 bg-[#6cff2f]/10 px-3 py-2 text-xs font-bold text-[#6cff2f]">
+            <span className="hidden items-center gap-1.5 rounded-[10px] border border-[#6cff2f]/30 bg-[#6cff2f]/10 px-3 py-2 text-xs font-bold text-[#6cff2f] md:inline-flex">
               Modo {perfilAtivo.rotuloSegmento}
             </span>
           )}
-          <div className="ml-auto flex items-center gap-2">
+          {/* Frescor e saldos: informação de operação da agência, fica no computador. */}
+          <div className="ml-auto hidden items-center gap-2 md:flex">
           {/* Frescor por fonte (pedido do Matheus): há quanto tempo a tela
               buscou Meta/Google e quando o CRM recebeu o último lead. Discreto,
               no padrão do selo de saldos ao lado. Meta e Google vêm na MESMA
@@ -7496,7 +7581,7 @@ export default function GeneralDashboard() {
               então o botão de tema precisa existir também neste cabeçalho —
               senão quem está na dashboard não tem como trocar claro/escuro. */}
           <ThemeToggle />
-          <Avatar className="h-9 w-9 border border-white/[0.08]">
+          <Avatar className="hidden h-9 w-9 border border-white/[0.08] md:flex">
             <AvatarFallback className="bg-[#78d957] text-sm font-black text-black">
               {(session?.name ?? 'M').slice(0, 1).toUpperCase()}
             </AvatarFallback>

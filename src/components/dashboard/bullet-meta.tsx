@@ -76,10 +76,10 @@ export function BulletMetaCard({
   if (!temMeta) {
     const variacao = variacaoAnterior && Number.isFinite(variacaoAnterior.pct) ? variacaoAnterior.pct : null;
     return (
-      <section className={cn(SUPERFICIE, 'relative h-full overflow-hidden p-5')}>
+      <section className={cn(SUPERFICIE, 'relative h-full overflow-hidden p-5 max-sm:p-4')}>
         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_8%_0%,rgba(108,255,47,0.16),transparent_32%),linear-gradient(135deg,rgba(108,255,47,0.05),rgba(22,139,255,0.02))]" />
         <div className="relative flex h-full items-start gap-4">
-          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[#55f52f]/20 bg-[#55f52f]/10 text-[#55f52f]">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[#55f52f]/20 bg-[#55f52f]/10 text-[#55f52f] max-sm:h-8 max-sm:w-8">
             <Icon className="h-5 w-5" />
           </span>
           <div className="flex min-w-0 flex-1 flex-col self-stretch">
@@ -110,10 +110,10 @@ export function BulletMetaCard({
   }
 
   return (
-    <section className={cn(SUPERFICIE, 'relative h-full overflow-hidden p-5')}>
+    <section className={cn(SUPERFICIE, 'relative h-full overflow-hidden p-5 max-sm:p-4')}>
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_8%_0%,rgba(108,255,47,0.16),transparent_32%),linear-gradient(135deg,rgba(108,255,47,0.05),rgba(22,139,255,0.02))]" />
-      <div className="relative flex items-start gap-4">
-        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[#55f52f]/20 bg-[#55f52f]/10 text-[#55f52f]">
+      <div className="relative flex items-start gap-4 max-sm:gap-3">
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[#55f52f]/20 bg-[#55f52f]/10 text-[#55f52f] max-sm:h-8 max-sm:w-8">
           <Icon className="h-5 w-5" />
         </span>
         <div className="min-w-0 flex-1">
@@ -127,8 +127,10 @@ export function BulletMetaCard({
             </span>
           </div>
 
-          <div className="mt-4 grid grid-cols-3 gap-3">
-            <div className="min-w-0">
+          <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
+            {/* Celular: Realizado na linha inteira, os outros dois embaixo — 3 valores
+                lado a lado em 375px viravam "R$ 23.22…". */}
+            <div className="col-span-2 min-w-0 sm:col-span-1">
               <p className={cn('truncate', T.kpiValor)}>
                 {realizado > 0 ? formatar(realizado) : '—'}
               </p>
@@ -141,7 +143,7 @@ export function BulletMetaCard({
                   <span className="inline-block h-3 w-0.5 bg-[#f4f7f8]" /> {rotuloEsperado}
                 </p>
               </div>
-            ) : <div />}
+            ) : <div className="max-sm:hidden" />}
             <div className="min-w-0">
               <p className={cn('truncate', T.kpiValorSec)}>{temMeta ? formatar(metaMes) : '—'}</p>
               <p className={cn('mt-1.5', T.valorRotulo)}>Meta do mês</p>
@@ -243,10 +245,10 @@ export function CustoMetaCard({
   const diffMeta = temMeta ? (razao - 1) * 100 : null;
 
   return (
-    <section className={cn(SUPERFICIE, 'relative h-full overflow-hidden p-5')}>
+    <section className={cn(SUPERFICIE, 'relative h-full overflow-hidden p-5 max-sm:p-4')}>
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_8%_0%,rgba(108,255,47,0.16),transparent_32%),linear-gradient(135deg,rgba(108,255,47,0.05),rgba(22,139,255,0.02))]" />
-      <div className="relative flex items-start gap-4">
-        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[#55f52f]/20 bg-[#55f52f]/10 text-[#55f52f]">
+      <div className="relative flex items-start gap-4 max-sm:gap-3">
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[#55f52f]/20 bg-[#55f52f]/10 text-[#55f52f] max-sm:h-8 max-sm:w-8">
           <Icon className="h-5 w-5" />
         </span>
         <div className="min-w-0 flex-1">
@@ -255,8 +257,8 @@ export function CustoMetaCard({
             <span className="rounded-[4px] bg-[#172027] px-1.5 py-0.5 text-[10px] font-semibold text-[#87929B]" title={fonteTitulo}>{fonte}</span>
           </div>
 
-          <div className="mt-4 grid grid-cols-3 gap-3">
-            <div className="min-w-0">
+          <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
+            <div className="col-span-2 min-w-0 sm:col-span-1">
               <p className={cn('truncate', T.kpiValor)}>{realizado > 0 ? formatar(realizado) : '—'}</p>
               <p className={cn('mt-1.5', T.valorRotulo)}>Realizado</p>
             </div>

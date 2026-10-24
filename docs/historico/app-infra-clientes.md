@@ -2,6 +2,22 @@
 
 Movido do CLAUDE.md em 2026-10-22 (conteúdo original, sem edição). Entrada nova deste setor entra aqui, no topo, não no CLAUDE.md.
 
+## Dashboard no celular — adaptação de verdade, medida em produção (2026-10-24)
+
+Prints do Matheus no iPhone: "o reports é totalmente inapto para mobile… adaptar de verdade, não dar jeitinho". Auditoria na dashboard de PRODUÇÃO no navegador do Claude (sessão já logada) a 375px:
+
+- **A página inteira rolava 1.027px para o lado.** Causa achada pela cadeia de `scrollWidth`: um `sr-only` (absoluto) dentro da faixa de botões do cabeçalho escapava do `overflow-x-auto` — absoluto não é cortado por scroller sem `position`, e o bloco posicionado mais próximo era o cabeçalho `sticky`, que esticava o container do shell até 1.402px. Correções: `relative` na faixa e **`overflow-x-clip` na raiz da dashboard** (clip, não hidden: não cria área de rolagem e não quebra o `sticky`). ⚠️ Lição: para achar arrasto, medir `scrollWidth` descendo pelos filhos; varrer `getBoundingClientRect` não acha (o `sr-only` tem 1px).
+- **Cabeçalho**: no celular, cliente na linha inteira + UM botão "período · comparativo" (44px) que abre o modal; os atalhos (7 dias…Todo período) foram para dentro do modal (`PeriodoModal atalhos`). Frescor, saldos, selo de segmento e avatar ficam só no computador.
+- **Pilha da grade (`ModeloEditor` no celular) por BLOCO**: ordenar só por y,x punha "QUANDO VENDEM" e "RITMO" (mesmo y) seguidos e os conteúdos depois. Agora cada bloco entra inteiro, na ordem de onde começa; KPIs (`bloco === 'kpis'`) vão de 2 em 2.
+- **Cards de meta** (GoalProgressCard, BulletMeta, CustoMeta): Realizado na linha inteira, os outros 2 valores embaixo (3 lado a lado viravam "R$ 150.…").
+- **Mini `subAoLado`** (Ritmo, Situação da base): descrição desce para baixo do número no celular.
+- **Funil de criativos**: 1 linha, um card por tela (`calc(100vw-80px)`) com snap; imagem no topo, etapas em grade de 3, rodapé 2×2.
+- **Cartões de campanha**: métricas 2 colunas; criativos em faixa deslizante; `grid-cols-[minmax(0,1fr)]` (a coluna única crescia até a largura da faixa de criativos — mesma família do laço `1fr` × Recharts).
+- **Tabelas largas viram lista no celular** (decisão aqui: consulta no celular = cartão, não arrastar): "Funil por canal" (11 colunas/980px) → um item por canal com leads, vendas, conversão, faturamento/CPL e as etapas numa linha; "Resumo por canal" → um card por canal. Desktop intacto (`max-md:hidden`/`md:hidden`).
+- **Aviso de instâncias WhatsApp**: no celular vira faixa de uma linha ("· ver" abre o painel); cobria 1/4 da tela.
+- Legenda dos cards de canal quebra em 2 linhas no celular em vez de cortar.
+- ✅ Harness em 375px com dados reais da PicoLocos: funil, campanhas, delivery (ordem dos blocos, 0 de rolagem, 0 textos cortados) e modal; 1440px conferido igual ao anterior. ⚠️ O cabeçalho e as tabelas da página principal só são verificáveis em produção (dependem de login): medir `scrollWidth` do container do shell depois do deploy.
+
 ## Tema claro por usuário + avisos de tráfego num grupo só (2026-10-21/22)
 
 Pedido do Matheus, a partir de reclamação de cliente ("fundo escuro cansa"): uma versão clara **sem perder a essência** — títulos em cinza chumbo padrão, só detalhes em cor — e que **fique salva por usuário** ("se clicou no sol, abre claro sempre; se clicou no dark, fica dark"). Na sequência, duas rodadas de correção depois de ele olhar e eu olhar página por página.

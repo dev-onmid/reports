@@ -147,7 +147,7 @@ function CartaoCampanha({ c, anuncios, vendasCrm, comReceita, comprasMeta, onPre
   if (tipo === 'mensagens' || tipo === 'leads') {
     linha1 = [
       investimento,
-      { icone: MessageCircle, rotulo: tipo === 'leads' ? 'Leads' : 'Conversas iniciadas', valor: int(resultado) },
+      { icone: MessageCircle, rotulo: tipo === 'leads' ? 'Leads' : 'Conversas', valor: int(resultado), dica: tipo === 'leads' ? undefined : 'Conversas iniciadas por mensagem' },
       { icone: Target, rotulo: tipo === 'leads' ? 'Custo por lead' : 'Custo/conversa', valor: brl(custo) },
     ];
     linha2 = vendasMetricas.length ? vendasMetricas : [
@@ -158,7 +158,7 @@ function CartaoCampanha({ c, anuncios, vendasCrm, comReceita, comprasMeta, onPre
   } else if (tipo === 'vendas') {
     linha1 = [
       investimento,
-      { icone: ShoppingCart, rotulo: 'Compras registradas', valor: int(n.compras) },
+      { icone: ShoppingCart, rotulo: 'Compras', valor: int(n.compras), dica: 'Compras registradas pela Meta' },
       { icone: Target, rotulo: 'Custo por compra', valor: brl(custo) },
     ];
     linha2 = vendasMetricas.length ? vendasMetricas : [
@@ -186,7 +186,9 @@ function CartaoCampanha({ c, anuncios, vendasCrm, comReceita, comprasMeta, onPre
 
   return (
     <div
-      className="grid gap-5 rounded-[14px] border border-white/[0.07] bg-[#0d1519] p-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]"
+      // `minmax(0,1fr)` explícito: sem ele a coluna única do celular crescia até a
+      // largura da faixa de criativos (rolagem lateral) e empurrava o card para fora.
+      className="grid grid-cols-[minmax(0,1fr)] gap-5 rounded-[14px] border border-white/[0.07] bg-[#0d1519] p-4 max-sm:gap-4 max-sm:p-3.5 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]"
       style={{ borderLeft: `4px solid ${est.cor}` }}
     >
       <div className="min-w-0">
@@ -209,7 +211,8 @@ function CartaoCampanha({ c, anuncios, vendasCrm, comReceita, comprasMeta, onPre
         </div>
         {/* Métricas em caixinhas do mesmo tamanho, número grande (pedido do Matheus:
             "distribuir melhor e aumentar essas infos"). */}
-        <div className="mt-4 grid grid-cols-3 gap-2.5">
+        {/* 2 colunas no celular: em 3, "R$ 1.253,89" virava "R$ 1.2…" (print de 2026-10-24). */}
+        <div className="mt-4 grid grid-cols-2 gap-2.5 sm:grid-cols-3">
           {[...linha1, ...linha2].map((m) => <MetricaItem key={m.rotulo} m={m} cor={est.cor} />)}
         </div>
       </div>
@@ -219,7 +222,7 @@ function CartaoCampanha({ c, anuncios, vendasCrm, comReceita, comprasMeta, onPre
           {lista.length > CRIATIVOS_POR_CAMPANHA ? `Melhores criativos · ${top.length} de ${lista.length} por ${u.varios}` : `Criativos · por ${u.varios}`}
         </p>
         {top.length > 0 ? (
-          <div className="mt-2 grid grid-cols-3 gap-3">
+          <div className="mt-2 grid grid-cols-3 gap-3 max-sm:flex max-sm:snap-x max-sm:snap-mandatory max-sm:overflow-x-auto max-sm:pb-1 max-sm:[&>*]:w-[44%] max-sm:[&>*]:shrink-0 max-sm:[&>*]:snap-start">
             {top.map((a, i) => <CardCriativo key={a.id} a={a} pos={i} tipo={tipo} cor={est.cor} onPreview={onPreview} />)}
           </div>
         ) : (
