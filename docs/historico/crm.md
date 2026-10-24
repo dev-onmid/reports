@@ -2,6 +2,16 @@
 
 Movido do CLAUDE.md em 2026-10-22 (conteúdo original, sem edição). Entrada nova deste setor entra aqui, no topo, não no CLAUDE.md.
 
+## CRM no celular — Kanban uma etapa por vez, filtros recolhidos, lead em tela cheia (2026-10-24)
+
+Pedido do Matheus ("o sistema inteiro tem que funcionar de verdade no celular"). Medido em produção a 375px: os filtros ocupavam meia tela antes do primeiro lead e o Kanban mostrava uma coluna de 232px com fatias das vizinhas.
+
+- **Kanban no celular** (`KanbanView`, `useIsMobile`): chips das etapas com a contagem (deslizam, `snap`) e a etapa escolhida na largura toda (`KanbanColumn cheia`); começa na 1ª etapa com lead. **Arraste desligado no celular** (sensor com distância inalcançável): não há onde soltar e o toque de rolar virava arraste. Etapa muda pelo Status no lead.
+- **Barra**: abas em faixa única que desliza; cliente e busca na largura toda (busca vai para o topo da barra); período, origem e tag atrás do botão **Filtros** (`filtrosAbertos`, wrapper `contents` + `max-md:hidden`).
+- **Faixa de números**: grade 2×2 no celular, ações em linha própria com 40px de altura.
+- **Lead (`QuickEditModal`)**: folha em tela cheia no celular (`100dvh`, sem margem/borda); botão fechar 36px.
+- **Global (`globals.css`)**: campos de digitação com 16px abaixo do `md` — no iPhone, fonte < 16px num campo faz o Safari dar zoom na página ao tocar (todos os campos eram 14px).
+
 ## Cost Odonto — etapa "Pós Avaliação" (2026-10-23)
 
 Pedido do Matheus: coluna para quem **compareceu na avaliação e ainda não tem desfecho** (nem "Negócio concluído" nem perdido). Decisões dele: entram TODOS os que compareceram sem desfecho, inclusive os de "Aguardando Exame"; "Comparecimento" e "Aguardando Exame" continuam como colunas.

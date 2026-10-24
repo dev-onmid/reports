@@ -7633,7 +7633,8 @@ export default function GeneralDashboard() {
                     <button
                       type="button"
                       onClick={() => setEditandoModelo(true)}
-                      className="inline-flex items-center gap-1.5 rounded-[var(--radius)] border border-border px-2.5 py-1 text-[11px] font-semibold text-muted-foreground hover:border-primary/40 hover:text-foreground"
+                      // Arrumar a grade é tarefa de tela grande: no celular a grade vira pilha.
+                      className="inline-flex items-center gap-1.5 rounded-[var(--radius)] border border-border px-2.5 py-1 text-[11px] font-semibold text-muted-foreground hover:border-primary/40 hover:text-foreground max-md:hidden"
                     >
                       <LayoutTemplate className="h-3.5 w-3.5" /> Editar modelo
                     </button>

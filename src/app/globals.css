@@ -487,3 +487,18 @@
   /* barra de meta estourada: sem listras no claro (sobre branco viram ruído) */
   & .meta-estourada { background-image: none !important; }
 }
+
+/* ── Celular: campo de texto com 16px ───────────────────────────────────────
+   No iPhone, tocar num campo com fonte < 16px faz o Safari dar zoom na página
+   inteira (e não volta sozinho). O sistema usa 14px nos campos: busca do CRM,
+   lead, filtros… todos davam zoom (2026-10-24). Só abaixo do `md`, só campos
+   que recebem digitação — botões e selects estilizados não mudam. Fora de
+   `@layer` de propósito, para vencer `text-sm`/`text-xs` sem disputa (mesma
+   técnica do piso de fonte acima). */
+@media (max-width: 767px) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}

@@ -17,6 +17,7 @@ import {
   BarChart3, UserRound, MessageCircle, X, Send, GripVertical, Layers, WifiOff, Link2,
   Clapperboard, Info, MapPin, ClipboardList, BadgeCheck, BookmarkPlus, Check, Star, Tag } from 'lucide-react';
 import { ChatView } from './chat-view';
+import { useIsMobile } from '@/lib/use-is-mobile';
 import { ConectarWhatsappModal } from './conectar-whatsapp';
 import { LeadChatPanel } from './lead-chat-panel';
 import { CamposAtendimento, HistoricoLead, NovoLeadModal, opcoesDeOrigem } from './lead-operacao';
@@ -849,9 +850,11 @@ function QuickEditModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={onClose}>
+    // Celular: folha em tela cheia (a janela com margem deixava o formulário em
+    // 90% da altura e a conversa escondida).
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 max-md:p-0" onClick={onClose}>
       <div className={cn(
-        'bg-card border border-border rounded-2xl shadow-2xl w-full max-h-[90vh] flex flex-col overflow-hidden',
+        'bg-card border border-border rounded-2xl shadow-2xl w-full max-h-[90vh] flex flex-col overflow-hidden max-md:h-[100dvh] max-md:max-h-none max-md:max-w-none max-md:rounded-none max-md:border-0',
         showChat ? 'max-w-lg lg:max-w-5xl lg:h-[88vh]' : 'max-w-lg',
       )} onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
@@ -868,7 +871,7 @@ function QuickEditModal({
             >
               <MessageCircle className="h-3.5 w-3.5" /> Conversa
             </button>
-            <button onClick={onClose} className="ml-1 text-muted-foreground hover:text-foreground"><X className="h-4 w-4" /></button>
+            <button onClick={onClose} aria-label="Fechar" className="ml-1 flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground hover:text-foreground"><X className="h-4 w-4 max-md:h-5 max-md:w-5" /></button>
           </div>
         </div>
         <div className="flex flex-1 min-h-0">
@@ -1325,8 +1328,10 @@ function rotuloProximaAcao(lead: CrmLead): { texto: string; titulo: string; clas
 const CARDS_POR_COLUNA = 50;
 
 function KanbanColumn({
-  status, color, leads, onEdit, onDelete, onToggleInternal, onToggleQualificado, activeLead, activeFollowupIds, tags, onSetTags, onConfigurarTags,
+  status, color, leads, onEdit, onDelete, onToggleInternal, onToggleQualificado, activeLead, activeFollowupIds, tags, onSetTags, onConfigurarTags, cheia = false,
 }: {
+  /** Celular: a coluna ocupa a largura toda (uma etapa por vez). */
+  cheia?: boolean;
   status: string;
   color: string;
   leads: CrmLead[];
@@ -1348,7 +1353,7 @@ function KanbanColumn({
   // as vazias comiam a largura do board e empurravam pra fora da tela justo as
   // que têm lead. Clicar abre de novo — a coluna não some, só encolhe.
   const [expandida, setExpandida] = useState(false);
-  const recolhida = leads.length === 0 && !expandida;
+  const recolhida = leads.length === 0 && !expandida && !cheia;
   // ⚠️ Coluna com milhares de leads (Entrada da Atmos: 3.446) desenhava todos os
   // cards, cada um arrastável — pegar um card fazia o dnd-kit mexer em milhares.
   // Mostra 50 por vez; o número da coluna continua sendo o total.
@@ -1387,7 +1392,7 @@ function KanbanColumn({
   }
 
   return (
-    <div className="flex max-h-full w-[232px] shrink-0 flex-col">
+    <div className={cn('flex max-h-full shrink-0 flex-col', cheia ? 'w-full' : 'w-[232px]')}>
       <div className="shrink-0 rounded-t-lg border border-b-0 border-border bg-card px-2.5 py-1.5" style={{ borderTop: `3px solid ${color}` }}>
         <div className="flex items-center gap-1.5">
           <span className="min-w-0 truncate text-[11px] font-bold uppercase tracking-wide text-foreground leading-tight" title={status}>{status}</span>
@@ -1472,8 +1477,12 @@ function KanbanView({
   onConfigurarTags?: () => void;
 }) {
   const [activeLead, setActiveLead] = useState<CrmLead | null>(null);
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
+  const isMobile = useIsMobile();
+  // Celular: sem arraste (uma coluna por vez — não há para onde soltar, e o
+  // toque para rolar a lista virava arraste). Etapa muda pelo próprio lead.
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: isMobile ? { distance: 100000 } : { distance: 8 } }));
   const statusOptions = stages.map(s => s.label);
+  const [etapaMobile, setEtapaMobile] = useState<string | null>(null);
 
   const grouped = useMemo(() => {
     const map = new Map<string, CrmLead[]>();
@@ -1501,6 +1510,61 @@ function KanbanView({
     if (statusOptions.includes(targetStatus)) {
       onStatusChange(String(active.id), targetStatus);
     }
+  }
+
+  // CELULAR: uma etapa por vez. Chips com a contagem no topo (deslizam) e a
+  // etapa escolhida na largura toda — antes eram colunas de 232px com fatias das
+  // vizinhas aparecendo (print de produção, 2026-10-24). Começa na 1ª com lead.
+  if (isMobile) {
+    const atual = etapaMobile && grouped.has(etapaMobile)
+      ? etapaMobile
+      : (stages.find(s => (grouped.get(s.label)?.length ?? 0) > 0) ?? stages[0])?.label ?? '';
+    const stage = stages.find(s => s.label === atual);
+    return (
+      <DndContext sensors={sensors}>
+        <div className="flex min-h-0 flex-1 flex-col gap-2.5">
+          <div className="-mx-1 flex shrink-0 snap-x gap-1.5 overflow-x-auto px-1 pb-1">
+            {stages.map(s => {
+              const n = grouped.get(s.label)?.length ?? 0;
+              const cor = corDaEtapa(s.etapa_funil, s.label);
+              const ativo = s.label === atual;
+              return (
+                <button
+                  key={s.label}
+                  type="button"
+                  onClick={() => setEtapaMobile(s.label)}
+                  className={cn('flex min-h-[40px] shrink-0 snap-start items-center gap-2 rounded-full border px-3.5 text-[13px] font-semibold transition-colors',
+                    ativo ? 'text-foreground' : 'border-border bg-card text-muted-foreground')}
+                  style={ativo ? { borderColor: cor, background: `${cor}22` } : undefined}
+                >
+                  <span className="h-2 w-2 rounded-full" style={{ background: cor }} />
+                  {s.label}
+                  <span className={cn('rounded-full px-1.5 text-[11px] font-bold', n > 0 ? '' : 'opacity-50')} style={{ background: `${cor}25`, color: cor }}>{n}</span>
+                </button>
+              );
+            })}
+          </div>
+          {stage && (
+            <KanbanColumn
+              key={stage.label}
+              cheia
+              status={stage.label}
+              color={corDaEtapa(stage.etapa_funil, stage.label)}
+              leads={grouped.get(stage.label) ?? []}
+              onEdit={onEdit}
+              onDelete={onDelete}
+              onToggleInternal={onToggleInternal}
+              onToggleQualificado={onToggleQualificado}
+              activeLead={null}
+              activeFollowupIds={activeFollowupIds}
+              tags={tags}
+              onSetTags={onSetTags}
+              onConfigurarTags={onConfigurarTags}
+            />
+          )}
+        </div>
+      </DndContext>
+    );
   }
 
   return (
@@ -3207,6 +3271,9 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
   const origemChave = origem === 'trafego' ? 'trafego' : `${origem}|${dateFromFilter}|${dateToFilter}`;
   const [funnelMenuOpen, setFunnelMenuOpen] = useState(false);
   const [dateMenuOpen, setDateMenuOpen] = useState(false);
+  // Celular: período, origem e tag ficam recolhidos num botão "Filtros" — abertos,
+  // ocupavam meia tela antes do primeiro lead (medido em produção, 2026-10-24).
+  const [filtrosAbertos, setFiltrosAbertos] = useState(false);
   const [saving, setSaving]         = useState(false);
   const dateMenuRef = useRef<HTMLDivElement>(null);
   const [chatFocusLeadId, setChatFocusLeadId] = useState<string | null>(() => {
@@ -3915,7 +3982,7 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
           </div>
         ) : (
           <IconSelect icon={Users} value={clientId} onChange={openClientCrm}
-            placeholder="Selecionar cliente..." className="w-44">
+            placeholder="Selecionar cliente..." className="w-44 max-md:min-w-0 max-md:flex-1">
             {activeClients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
           </IconSelect>
         )}
@@ -3984,8 +4051,8 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
           </div>
         )}
 
-        {/* Leads / Chat / Follow up toggle */}
-        <div className="flex flex-wrap overflow-hidden rounded-lg border border-border bg-card p-0.5">
+        {/* Leads / Chat / Follow up toggle — no celular, faixa única que desliza. */}
+        <div className="flex flex-wrap overflow-hidden rounded-lg border border-border bg-card p-0.5 max-md:w-full max-md:flex-nowrap max-md:overflow-x-auto max-md:[&>button]:shrink-0">
           <button type="button" onClick={() => setCrmView('leads')}
             className={cn('flex items-center gap-1.5 h-8 px-3 rounded-md text-xs font-semibold transition-colors',
               crmView === 'leads' ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground')}>
@@ -4050,6 +4117,18 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
 
         {clientId && (crmView === 'leads' || crmView === 'attendance') && (
           <>
+            {/* CELULAR: um botão abre/fecha o bloco de filtros (abaixo). */}
+            <button
+              type="button"
+              onClick={() => setFiltrosAbertos(v => !v)}
+              className={cn('flex h-10 items-center gap-2 rounded-lg border px-3 text-sm font-semibold md:hidden',
+                filtrosAbertos ? 'border-primary/50 bg-primary/10 text-primary' : 'border-border bg-card text-muted-foreground')}
+            >
+              <SlidersHorizontal className="h-4 w-4" />
+              Filtros
+              <span className="text-xs font-medium opacity-80">· {periodLabel(datePreset, dateFromFilter, dateToFilter)}</span>
+            </button>
+            <div className={cn('contents', !filtrosAbertos && 'max-md:hidden')}>
             {/* ⚠️ Filtros de status e temperatura removidos a pedido: o Kanban
                 JÁ é a visão por status (cada coluna é um), então filtrar por
                 status é filtrar a única coisa que o board existe para mostrar.
@@ -4149,12 +4228,13 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
             )}
 
             {crmView === 'leads' && <FiltroTag tags={tags} valor={tagFilter} onChange={setTagFilter} />}
+            </div>
 
             {crmView === 'leads' && (
               <>
                 {/* A busca cresce e come a sobra da linha: espaço vazio numa
                     barra de ferramentas não é respiro, é desperdício. */}
-                <div className="relative min-w-[160px] max-w-[260px] flex-1">
+                <div className="relative min-w-[160px] max-w-[260px] flex-1 max-md:order-first max-md:max-w-none max-md:basis-full">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
                   <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar por nome ou número..."
                     className={cn('w-full pl-8 py-2 rounded-lg border border-border bg-card text-sm focus:outline-none focus:ring-1 focus:ring-primary', search && (monthFilter || dateFromFilter || dateToFilter) ? 'pr-36' : 'pr-3')} />
@@ -4213,7 +4293,8 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
           tinha metade da largura vazia. A faixa aparece mesmo com zero leads no
           recorte: sem ela os dois botões sumiriam junto. */}
       {clientId && !loading && crmView === 'leads' && (
-        <div className="shrink-0 flex flex-wrap items-center gap-x-6 gap-y-2 rounded-xl border border-border bg-card px-5 py-2.5">
+        // Celular: grade 2×2 (número em cima, rótulo embaixo) e ações numa linha própria.
+        <div className="shrink-0 flex flex-wrap items-center gap-x-6 gap-y-2 rounded-xl border border-border bg-card px-5 py-2.5 max-md:grid max-md:grid-cols-2 max-md:gap-3 max-md:px-3.5 max-md:py-3">
           {([
             { label: 'leads no funil', value: stats.total.toLocaleString('pt-BR'), Icon: Users, color: '#8b5cf6' },
             { label: 'qualificados', value: stats.qualificados.toLocaleString('pt-BR'), Icon: BadgeCheck, color: '#55f52f' },
@@ -4224,19 +4305,19 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
               <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg" style={{ background: `${color}20` }}>
                 <Icon className="h-4 w-4" style={{ color }} />
               </div>
-              <div className="flex items-baseline gap-1.5">
-                <span className="font-heading text-2xl leading-none">{value}</span>
+              <div className="flex min-w-0 items-baseline gap-1.5 max-md:flex-col max-md:items-start max-md:gap-0.5">
+                <span className="truncate font-heading text-2xl leading-none max-md:max-w-full">{value}</span>
                 <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{label}</span>
               </div>
             </div>
           ))}
           {stats.foraDaConta > 0 && (
-            <span className="text-[11px] text-muted-foreground"
+            <span className="text-[11px] text-muted-foreground max-md:col-span-2"
               title="Conversas que não vieram de anúncio, leads criados à mão, pacientes e equipe aparecem no quadro, mas não entram nos números acima nem no dashboard.">
               + {stats.foraDaConta.toLocaleString('pt-BR')} no quadro fora da conta
             </span>
           )}
-          <div className="ml-auto flex items-center gap-2">
+          <div className="ml-auto flex items-center gap-2 max-md:col-span-2 max-md:ml-0 max-md:justify-end max-md:[&>button]:min-h-[40px]">
             {clientId && (
               <button
                 type="button"
