@@ -11,6 +11,7 @@ Pedido do Matheus ("o sistema inteiro tem que funcionar de verdade no celular").
 - **Faixa de números**: grade 2×2 no celular, ações em linha própria com 40px de altura.
 - **Lead (`QuickEditModal`)**: folha em tela cheia no celular (`100dvh`, sem margem/borda); botão fechar 36px.
 - **Global (`globals.css`)**: campos de digitação com 16px abaixo do `md` — no iPhone, fonte < 16px num campo faz o Safari dar zoom na página ao tocar (todos os campos eram 14px).
+- **2ª passada, medida em produção depois do deploy**: (1) a página do CRM tinha ALTURA FIXA da tela — no celular a barra + números comiam ~550px e a lista rolava numa caixinha. Na aba Leads, abaixo do `md`, a página tem altura natural e a lista cresce (coluna `cheia` sem `overflow-y-auto`): rola a página, sem rolagem dentro de rolagem. O Chat continua em altura fixa. (2) **Conversa em tela cheia no celular** (`max-md:fixed inset-0 z-[60]`): dentro da página ficava com ~60% da altura e a caixa de digitar no rodapé, embaixo do aviso de instâncias. Ações (tags/etapa) numa linha que desliza; "Ao vivo" some; composer com `env(safe-area-inset-bottom)` — exigiu `export const viewport = { viewportFit: 'cover' }` no `app/layout.tsx`. (3) Busca ao lado de "Filtros" (não acima do título); faixa de abas com degradê na borda indicando que desliza.
 
 ## Cost Odonto — etapa "Pós Avaliação" (2026-10-23)
 

@@ -1392,7 +1392,7 @@ function KanbanColumn({
   }
 
   return (
-    <div className={cn('flex max-h-full shrink-0 flex-col', cheia ? 'w-full' : 'w-[232px]')}>
+    <div className={cn('flex shrink-0 flex-col', cheia ? 'w-full' : 'max-h-full w-[232px]')}>
       <div className="shrink-0 rounded-t-lg border border-b-0 border-border bg-card px-2.5 py-1.5" style={{ borderTop: `3px solid ${color}` }}>
         <div className="flex items-center gap-1.5">
           <span className="min-w-0 truncate text-[11px] font-bold uppercase tracking-wide text-foreground leading-tight" title={status}>{status}</span>
@@ -1420,7 +1420,9 @@ function KanbanColumn({
       <div
         ref={setNodeRef}
         className={cn(
-          "flex flex-1 min-h-[90px] flex-col gap-1.5 rounded-b-lg border border-t-0 border-border bg-muted/10 p-1.5 overflow-y-auto transition-colors",
+          "flex flex-1 min-h-[90px] flex-col gap-1.5 rounded-b-lg border border-t-0 border-border bg-muted/10 p-1.5 transition-colors",
+          // Celular (coluna cheia): a lista cresce e a página rola — sem rolagem dentro de rolagem.
+          !cheia && 'overflow-y-auto',
           isOver && "bg-primary/5 border-primary/30",
         )}
       >
@@ -3802,6 +3804,10 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
       // (~55) + espaçamentos. Descontar mais do que existe é o que fazia o
       // board parecer espremido com espaço sobrando embaixo.
       embedded ? 'h-[calc(100vh-200px)] min-h-[520px]' : 'h-full',
+      // Celular, aba Leads: a PÁGINA rola (altura natural). Com altura fixa, a
+      // barra e os números comiam ~550px e a lista rolava numa caixinha dentro
+      // da página (medido em produção, 2026-10-24). O Chat segue em altura fixa.
+      crmView === 'leads' && 'max-md:h-auto max-md:min-h-0 max-md:overflow-visible',
     )}>
 
       {/* ── PAGE HEADER ─────────────────────────────────────────────────
@@ -4052,7 +4058,7 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
         )}
 
         {/* Leads / Chat / Follow up toggle — no celular, faixa única que desliza. */}
-        <div className="flex flex-wrap overflow-hidden rounded-lg border border-border bg-card p-0.5 max-md:w-full max-md:flex-nowrap max-md:overflow-x-auto max-md:[&>button]:shrink-0">
+        <div className="flex flex-wrap overflow-hidden rounded-lg border border-border bg-card p-0.5 max-md:w-full max-md:flex-nowrap max-md:overflow-x-auto max-md:[&>button]:shrink-0 max-md:[mask-image:linear-gradient(to_right,black_82%,transparent)]">
           <button type="button" onClick={() => setCrmView('leads')}
             className={cn('flex items-center gap-1.5 h-8 px-3 rounded-md text-xs font-semibold transition-colors',
               crmView === 'leads' ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground')}>
@@ -4234,7 +4240,7 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
               <>
                 {/* A busca cresce e come a sobra da linha: espaço vazio numa
                     barra de ferramentas não é respiro, é desperdício. */}
-                <div className="relative min-w-[160px] max-w-[260px] flex-1 max-md:order-first max-md:max-w-none max-md:basis-full">
+                <div className="relative min-w-[160px] max-w-[260px] flex-1 max-md:max-w-none">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
                   <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar por nome ou número..."
                     className={cn('w-full pl-8 py-2 rounded-lg border border-border bg-card text-sm focus:outline-none focus:ring-1 focus:ring-primary', search && (monthFilter || dateFromFilter || dateToFilter) ? 'pr-36' : 'pr-3')} />
@@ -4418,7 +4424,7 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
 
       {/* ── TABLE / KANBAN ──────────────────────────────────────────── */}
       {clientId && !loading && crmView === 'leads' && (
-        <div className="flex flex-col flex-1 min-h-0 rounded-[var(--radius)] border border-border bg-card overflow-hidden">
+        <div className="flex flex-col flex-1 min-h-0 rounded-[var(--radius)] border border-border bg-card overflow-hidden max-md:flex-none max-md:overflow-visible">
 
           {/* Erro de carregamento — distinto de "nenhum lead". */}
           {leadsErro && (
@@ -4434,7 +4440,7 @@ export default function CrmPage({ lockedClientId, embedded = false, acaoConfig =
           )}
 
           {/* Kanban view — as colunas ocupam toda a altura; o scroll vertical é POR coluna */}
-          <div className="flex flex-1 min-h-0 flex-col overflow-hidden p-2.5">
+          <div className="flex flex-1 min-h-0 flex-col overflow-hidden p-2.5 max-md:flex-none max-md:overflow-visible">
               <KanbanView
                 leads={kanbanLeads}
                 stages={stages}

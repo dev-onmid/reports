@@ -1668,7 +1668,7 @@ export function ChatView({
             (e a conversa tem botão de voltar). Do md para cima, lado a lado. */}
         <div className={cn('flex w-full md:w-[340px] shrink-0 flex-col border-r border-border bg-card min-h-0', selectedLead && 'max-md:hidden')}>
           {/* Header */}
-          <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
+          <div className="flex flex-wrap items-center justify-between gap-y-2 px-4 py-3 border-b border-border shrink-0">
             {selectMode ? (
               <>
                 <div className="flex items-center gap-2">
@@ -1934,7 +1934,10 @@ export function ChatView({
         </div>
 
         {/* ── Right: Conversation ── */}
-        <div className={cn('relative flex min-w-0 min-h-0 flex-1 flex-col bg-background/50', !selectedLead && 'max-md:hidden')}>
+        {/* Celular: conversa aberta em TELA CHEIA (por cima do cabeçalho do app e
+            do CRM). Dentro da página ela ficava com ~60% da altura e a caixa de
+            digitar no rodapé, embaixo do aviso de instâncias (2026-10-24). */}
+        <div className={cn('relative flex min-w-0 min-h-0 flex-1 flex-col bg-background/50', !selectedLead && 'max-md:hidden', selectedLead && 'max-md:fixed max-md:inset-0 max-md:z-[60] max-md:bg-background')}>
           {recordingAudio && (
             <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center">
               <div
@@ -1961,7 +1964,7 @@ export function ChatView({
               {/* Conversation header */}
               <div className="flex flex-wrap items-center gap-3 border-b border-border bg-card px-4 py-3 shrink-0">
                 <button type="button" onClick={() => setSelectedId(null)} aria-label="Voltar para as conversas"
-                  className="md:hidden -ml-1 flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted">
+                  className="md:hidden -ml-1 flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground hover:bg-muted">
                   <ChevronLeftIcon />
                 </button>
                 <ContactAvatar lead={selectedLead} size="md" avatarOverride={selectedAvatar} />
@@ -1976,7 +1979,8 @@ export function ChatView({
                   <p className="text-xs text-muted-foreground">{formatPhoneBR(selectedLead.numero) || 'Sem número'}</p>
                   <TagChips tags={selectedLead.tags} max={4} className="mt-0.5" />
                 </div>
-                <div className="flex items-center gap-2 shrink-0">
+                {/* Celular: as ações descem para uma linha própria que desliza. */}
+                <div className="flex items-center gap-2 shrink-0 max-md:w-full max-md:overflow-x-auto max-md:pb-0.5">
                   <BotaoTags
                     compacto={false}
                     tags={catalogoTags}
@@ -2005,7 +2009,7 @@ export function ChatView({
                   )}
                   {/* Toda conversa aberta atualiza em tempo real agora — o badge
                       "Arquivado" (conversas >3d sem poll) deixou de existir */}
-                  <span className="flex items-center gap-1 rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-xs font-semibold text-primary">
+                  <span className="flex items-center gap-1 rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-xs font-semibold text-primary max-md:hidden">
                     <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
                     Ao vivo
                   </span>
@@ -2197,7 +2201,8 @@ export function ChatView({
                   </div>
                 )}
 
-                <div className="flex items-end gap-3 px-3 py-3">
+                {/* pb com a área segura do iPhone (barra de gestos) no celular. */}
+                <div className="flex items-end gap-3 px-3 py-3 max-md:gap-2 max-md:pb-[max(12px,env(safe-area-inset-bottom))]">
                   {/* Attachment button */}
                   <div className="relative shrink-0">
                     <button

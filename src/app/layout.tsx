@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Inter, Bebas_Neue } from "next/font/google";
 import "./globals.css";
 
@@ -12,6 +12,10 @@ const bebas = Bebas_Neue({
   weight: "400",
   subsets: ["latin"],
 });
+
+// `viewport-fit=cover` libera `env(safe-area-inset-*)` no iPhone (caixa de
+// digitar do chat acima da barra de gestos). Sem zoom travado: acessibilidade.
+export const viewport: Viewport = { width: 'device-width', initialScale: 1, viewportFit: 'cover' };
 
 export const metadata: Metadata = {
   title: "ONMID Reports",
