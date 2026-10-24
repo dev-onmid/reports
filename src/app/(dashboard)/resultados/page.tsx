@@ -728,7 +728,7 @@ export default function ResultadosPage() {
           da página (o header "gruda" num scroll-container que nunca rola de fato). */}
       <div className="bg-card border border-border rounded-[var(--radius)] overflow-hidden">
         <div className="max-h-[65vh] overflow-auto">
-          <table className="min-w-[1100px] w-full">
+          <table className="tabela-celular w-full md:min-w-[1100px]">
             <thead>
               <tr className="border-b border-border">
                 {([
@@ -789,7 +789,7 @@ export default function ResultadosPage() {
                 const semMetaResultado = situacaoDaMeta(row.pctResult) === 'sem_meta';
                 return (
                   <tr key={row.client.id} className={cn('border-l-[3px] hover:bg-muted/20 transition-colors', resultC.border)}>
-                    <td className="px-4 py-3">
+                    <td data-principal className="px-4 py-3">
                       <Link href={`/clientes/${row.client.id}`} className="flex items-center gap-3 hover:opacity-80 transition-opacity">
                         <ClientAvatar clientId={row.client.id} name={row.client.name} size="sm" />
                         <div>
@@ -806,7 +806,7 @@ export default function ResultadosPage() {
                         </div>
                       </Link>
                     </td>
-                    <td className="px-4 py-3 text-sm font-semibold whitespace-nowrap">
+                    <td data-label="Meta" className="px-4 py-3 text-sm font-semibold whitespace-nowrap">
                       {row.metaTarget > 0
                         ? (row.ehSocial
                             ? <>{row.metaTarget.toLocaleString('pt-BR')} <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">seguidores</span></>
@@ -821,7 +821,7 @@ export default function ResultadosPage() {
                     {/* ⚠️ Sem meta ≠ falhou. Sem meta o valor aparece em cinza (só
                         performance) e o % vira "—" neutro — antes ia vermelho, o que
                         acusava de reprovado quem ninguém tinha medido. */}
-                    <td className="px-4 py-3 whitespace-nowrap">
+                    <td data-label="Resultado" className="px-4 py-3 whitespace-nowrap">
                       <p className={cn(
                         'text-sm font-bold',
                         row.resultado > 0 ? (semMetaResultado ? 'text-foreground' : resultC.text) : 'text-muted-foreground/40',
@@ -839,14 +839,14 @@ export default function ResultadosPage() {
                         </p>
                       )}
                     </td>
-                    <td className="px-4 py-3">
+                    <td data-label="% da meta" className="px-4 py-3">
                       {semMetaResultado ? (
                         <span className="text-sm font-bold text-muted-foreground/40" title="Sem meta definida no planejamento do cliente">—</span>
                       ) : (
                         <span className={cn('text-sm font-bold', resultC.text)}>{row.pctResult}%</span>
                       )}
                     </td>
-                    <td
+                    <td data-label="Leads"
                       className={cn('px-4 py-3 text-sm font-bold', row.pctLeads === null ? 'text-blue-400' : leadsC.text)}
                       title={row.metaLeads > 0 ? `Meta: ${fmtLeads(row.metaLeads)} leads` : undefined}
                     >
@@ -854,13 +854,13 @@ export default function ResultadosPage() {
                         {row.leads > 0 ? fmtLeads(row.leads) : '0'}
                       </ValorMetrica>
                     </td>
-                    <td className="px-4 py-3">
+                    <td data-label="CPL" className="px-4 py-3">
                       <MetricCell value={row.cpl} pct={row.pctCpl} loading={row.metricaEstado === 'carregando'} />
                     </td>
-                    <td className="px-4 py-3">
+                    <td data-label="CAC" className="px-4 py-3">
                       <MetricCell value={row.cac} pct={row.pctCac} loading={row.metricaEstado === 'carregando'} />
                     </td>
-                    <td className="px-4 py-3">
+                    <td data-label="Funil" className="px-4 py-3">
                       <div className="flex items-center gap-0.5">
                         {FUNNEL_KEYS.map((key, idx) => {
                           const FunnelIcon = FUNNEL_ICONS[idx];
@@ -890,7 +890,7 @@ export default function ResultadosPage() {
                         })}
                       </div>
                     </td>
-                    <td className="px-4 py-3">
+                    <td data-label="Investimento" className="px-4 py-3">
                       <p className="text-sm font-bold whitespace-nowrap">
                         <ValorMetrica estado={row.metricaEstado} onRetry={() => void carregarMetricas([row.client])}>
                           {formatCurrencyBRL(row.totalInvest)}

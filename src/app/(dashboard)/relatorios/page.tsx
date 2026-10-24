@@ -747,7 +747,7 @@ export default function RelatoriosPage() {
           {/* Table */}
           <div className="bg-card border border-border rounded-[var(--radius)] overflow-hidden">
             <div className="overflow-x-auto">
-            <table className="w-full text-sm text-left max-md:min-w-[720px]">
+            <table className="tabela-celular w-full text-sm text-left md:min-w-0">
               <thead className="border-b border-border">
                 <tr>
                   <th className="w-10 px-5 py-3">
@@ -790,7 +790,7 @@ export default function RelatoriosPage() {
                   const isSelected = selectedReportIds.includes(row.id);
                   return (
                     <tr key={row.id} className={cn('hover:bg-muted/40 transition-colors group', isSelected && 'bg-violet-500/8')}>
-                      <td className="px-5 py-3.5">
+                      <td className="px-5 py-3.5 max-md:hidden">
                         <input
                           type="checkbox"
                           aria-label={`Selecionar ${displayTitle(row)}`}
@@ -799,7 +799,7 @@ export default function RelatoriosPage() {
                           className="h-4 w-4 rounded border-border bg-background text-violet-500 accent-violet-600"
                         />
                       </td>
-                      <td className="px-5 py-3.5">
+                      <td data-principal className="px-5 py-3.5">
                         <div className="flex items-center gap-3">
                           <div className="w-8 h-8 rounded-md bg-emerald-500/15 border border-emerald-500/25 flex items-center justify-center shrink-0">
                             <ArrowUpRight className="w-4 h-4 text-emerald-400" />
@@ -810,15 +810,15 @@ export default function RelatoriosPage() {
                           </div>
                         </div>
                       </td>
-                      <td className="px-5 py-3.5">{renderClient(row.client_name, row.client_id)}</td>
-                      <td className="px-5 py-3.5 text-xs text-muted-foreground whitespace-nowrap">
+                      <td data-label="Cliente" className="px-5 py-3.5">{renderClient(row.client_name, row.client_id)}</td>
+                      <td data-label="Período" className="px-5 py-3.5 text-xs text-muted-foreground whitespace-nowrap">
                         {fmtDate(row.period_from)} – {fmtDate(row.period_to)}
                       </td>
-                      <td className="px-5 py-3.5">
+                      <td data-label="Gerado em" className="px-5 py-3.5">
                         <p className="text-xs text-foreground">{dt.date}</p>
                         <p className="text-[10px] text-muted-foreground">{dt.time}</p>
                       </td>
-                      <td className="px-5 py-3.5">
+                      <td data-label="Origem" className="px-5 py-3.5">
                         <span className={cn(
                           'inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold border',
                           isAuto
@@ -1147,7 +1147,7 @@ export default function RelatoriosPage() {
 
           <div className="bg-card border border-border rounded-[var(--radius)] overflow-hidden">
             <div className="overflow-x-auto">
-            <table className="w-full text-sm text-left max-md:min-w-[720px]">
+            <table className="tabela-celular w-full text-sm text-left md:min-w-0">
               <thead className="border-b border-border">
                 <tr>
                   <th className="px-5 py-3 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Cliente</th>
@@ -1176,11 +1176,11 @@ export default function RelatoriosPage() {
                 )}
                 {visibleConfigs.map(cfg => (
                   <tr key={cfg.id} className="hover:bg-muted/40 transition-colors group">
-                    <td className="px-5 py-3.5">
+                    <td data-principal className="px-5 py-3.5">
                       <p className="font-medium text-foreground text-sm">{cfg.client_name}</p>
                       <p className="text-[11px] text-muted-foreground">{cfg.name}</p>
                     </td>
-                    <td className="px-5 py-3.5">
+                    <td data-label="Template" className="px-5 py-3.5">
                       <span className={cn(
                         'inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold border',
                         cfg.template === 'delivery'
@@ -1192,21 +1192,21 @@ export default function RelatoriosPage() {
                         {cfg.template === 'delivery' ? 'Delivery' : cfg.template === 'social' ? 'Social' : 'Performance'}
                       </span>
                     </td>
-                    <td className="px-5 py-3.5">
+                    <td data-label="Grupo" className="px-5 py-3.5">
                       {cfg.whatsapp_group
                         ? <span className="text-xs text-foreground font-mono truncate block max-w-[160px]">{cfg.whatsapp_group}</span>
                         : <span className="text-xs text-muted-foreground/50">–</span>}
                     </td>
-                    <td className="px-5 py-3.5 text-xs text-foreground">
+                    <td data-label="Z-API" className="px-5 py-3.5 text-xs text-foreground">
                       {cfg.zapi_name ?? <span className="text-muted-foreground/50">–</span>}
                     </td>
-                    <td className="px-5 py-3.5">
+                    <td data-label="Dia" className="px-5 py-3.5">
                       <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-violet-500/15 text-violet-300 border border-violet-400/30 text-[11px] font-semibold">
                         Dia {cfg.send_day}
                       </span>
                     </td>
-                    <td className="px-5 py-3.5 text-xs text-foreground">{cfg.report_count ?? 0}</td>
-                    <td className="px-5 py-3.5 text-xs text-muted-foreground">{cfg.last_run_at ? fmtDate(cfg.last_run_at) : '–'}</td>
+                    <td data-label="Relatórios" className="px-5 py-3.5 text-xs text-foreground">{cfg.report_count ?? 0}</td>
+                    <td data-label="Último envio" className="px-5 py-3.5 text-xs text-muted-foreground">{cfg.last_run_at ? fmtDate(cfg.last_run_at) : '–'}</td>
                     <td className="px-5 py-3.5">
                       <div className="flex items-center justify-end gap-1">
                         <button

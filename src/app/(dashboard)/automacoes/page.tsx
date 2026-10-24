@@ -426,8 +426,9 @@ export default function AutomacoesPage() {
             </div>
           </div>
 
-          <div className="overflow-x-auto"><div className="min-w-[900px]">
-          <div className="grid grid-cols-[minmax(320px,1fr)_160px_130px_170px_120px] border-b border-white/8 bg-white/[0.025] px-6 py-3 text-xs text-slate-500">
+          {/* Celular: cabeçalho some e cada linha vira card (grade de 900px antes). */}
+          <div className="overflow-x-auto"><div className="md:min-w-[900px]">
+          <div className="grid grid-cols-[minmax(320px,1fr)_160px_130px_170px_120px] border-b border-white/8 bg-white/[0.025] px-6 py-3 text-xs text-slate-500 max-md:hidden">
             <span>Webhook</span><span>Status</span><span>Execuções</span><span>Criado em</span><span className="text-right">Ações</span>
           </div>
           <div className="divide-y divide-white/8">
@@ -444,8 +445,8 @@ export default function AutomacoesPage() {
               const copied = copiedId === cfg.id;
               const active = row.status === 'Ativa';
               return (
-                <div key={row.id} className="grid grid-cols-[minmax(320px,1fr)_160px_130px_170px_120px] items-center px-6 py-3 transition-colors hover:bg-white/[0.025]">
-                  <div className="flex min-w-0 items-center gap-4">
+                <div key={row.id} className="grid grid-cols-[minmax(320px,1fr)_160px_130px_170px_120px] items-center px-6 py-3 transition-colors hover:bg-white/[0.025] max-md:grid-cols-2 max-md:gap-x-3 max-md:gap-y-2.5 max-md:px-4 max-md:py-4">
+                  <div className="flex min-w-0 items-center gap-4 max-md:col-span-2">
                     <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white/8">
                       <Code2 className="h-5 w-5 text-slate-400" />
                     </div>
@@ -465,7 +466,7 @@ export default function AutomacoesPage() {
                   <div>
                     <p className="text-sm text-slate-300">{row.date}</p>
                   </div>
-                  <div className="flex items-center justify-end gap-2">
+                  <div className="flex items-center justify-end gap-2 max-md:col-span-2 max-md:justify-start">
                     <button type="button" onClick={() => copyUrl(cfg)} title={copied ? 'Copiado' : 'Copiar URL'} className="flex h-10 w-10 items-center justify-center rounded-lg bg-white/5 text-slate-300 hover:text-primary">
                       {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
                     </button>

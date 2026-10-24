@@ -1121,7 +1121,7 @@ function ClientesTab() {
             ) : (
               <>
                 <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
+                  <table className="tabela-celular w-full text-sm">
                     <thead>
                       <tr className="border-b border-border/60 text-[11px] text-muted-foreground uppercase tracking-wider">
                         <th className="py-2.5 px-4 text-left font-semibold">Instância</th>
@@ -1142,7 +1142,7 @@ function ClientesTab() {
                         const iconBg   = isFirst ? 'rgba(34,197,94,0.15)' : 'rgba(168,85,247,0.15)';
                         return (
                           <tr key={c.id} className="border-b border-border/30 hover:bg-muted/20 transition-colors">
-                            <td className="py-3 px-4">
+                            <td data-principal className="py-3 px-4">
                               <div className="flex items-center gap-3">
                                 <div className="flex h-10 w-10 items-center justify-center rounded-xl shrink-0" style={{ background: iconBg }}>
                                   <Users className="h-4.5 w-4.5" style={{ color: iconColor }} />
@@ -1161,7 +1161,7 @@ function ClientesTab() {
                                 </div>
                               </div>
                             </td>
-                            <td className="py-3 px-4">
+                            <td data-label="Status" className="py-3 px-4">
                               <div className="flex items-center gap-1.5">
                                 <span className={cn('h-2 w-2 rounded-full shrink-0', isOnline ? 'bg-emerald-400' : result ? 'bg-red-400' : 'bg-gray-500')}
                                   style={isOnline ? { boxShadow: '0 0 6px rgba(34,197,94,0.7)' } : undefined} />
@@ -1170,7 +1170,7 @@ function ClientesTab() {
                                 </span>
                               </div>
                             </td>
-                            <td className="py-3 px-4">
+                            <td data-label="Instance ID" className="py-3 px-4">
                               <div className="flex items-center gap-1.5">
                                 <span className="font-mono text-xs text-muted-foreground">{c.instance_id.length > 12 ? `${c.instance_id.slice(0,8)}...${c.instance_id.slice(-4)}` : c.instance_id}</span>
                                 <button type="button" onClick={() => copyId(c.instance_id)}
@@ -1180,7 +1180,7 @@ function ClientesTab() {
                                 <span className="text-[10px] text-muted-foreground/40 font-mono">{c.provider === 'evolution' ? 'Evolution' : 'Z-API'}</span>
                               </div>
                             </td>
-                            <td className="py-3 px-4">
+                            <td data-label="Última sincronização" className="py-3 px-4">
                               {result?.testedAt ? (
                                 <div>
                                   <p className="text-xs font-medium">{result.testedAt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</p>
@@ -1193,7 +1193,7 @@ function ClientesTab() {
                                 <span className="text-xs text-muted-foreground">Nunca testado</span>
                               )}
                             </td>
-                            <td className="py-3 px-4 text-center">
+                            <td data-label="Saúde" className="py-3 px-4 text-center">
                               <CircularHealth pct={health} size={44} />
                             </td>
                             <td className="py-3 px-4">
@@ -2648,7 +2648,7 @@ function DashboardTab({ onReuse, onNewCampaign, onManageInstances, onEdit }: {
             ) : (
               <>
                 <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
+                  <table className="tabela-celular w-full text-sm">
                     <thead>
                       <tr className="border-b border-border text-[11px] text-muted-foreground">
                         <th className="py-2.5 px-4 text-left font-semibold">Campanha</th>
@@ -2666,16 +2666,16 @@ function DashboardTab({ onReuse, onNewCampaign, onManageInstances, onEdit }: {
                         return (
                           <>
                             <tr key={c.id} className="border-b border-border/40 hover:bg-muted/20 transition-colors">
-                              <td className="py-2.5 px-4">
+                              <td data-principal className="py-2.5 px-4">
                                 <p className="font-medium text-sm truncate max-w-[200px]">{c.name}</p>
                                 <p className="text-[10px] text-muted-foreground font-mono mt-0.5">ID: {c.id.slice(0,8)}-...-{c.id.slice(-4)}</p>
                               </td>
-                              <td className="py-2.5 px-4">
+                              <td data-label="Cliente" className="py-2.5 px-4">
                                 <span className="rounded-full bg-emerald-500/12 text-emerald-400 border border-emerald-500/25 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide">{c.client_name}</span>
                               </td>
-                              <td className="py-2.5 px-4"><StatusBadge status={c.status} /></td>
-                              <td className="py-2.5 px-4 text-right font-semibold tabular-nums">{c.sent.toLocaleString('pt-BR')}</td>
-                              <td className="py-2.5 px-4">
+                              <td data-label="Status" className="py-2.5 px-4"><StatusBadge status={c.status} /></td>
+                              <td data-label="Enviados" className="py-2.5 px-4 text-right font-semibold tabular-nums">{c.sent.toLocaleString('pt-BR')}</td>
+                              <td data-label="Agendado / Concluído" className="py-2.5 px-4">
                                 <p className="text-[11px] text-muted-foreground">{fmtDateTime(c.starts_at)}</p>
                                 {c.ends_at && (
                                   <p className="text-[11px] text-muted-foreground flex items-center gap-1 mt-0.5">

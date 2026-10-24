@@ -2,6 +2,11 @@
 
 Movido do CLAUDE.md em 2026-10-22 (conteúdo original, sem edição). Entrada nova deste setor entra aqui, no topo, não no CLAUDE.md.
 
+## Celular — lote 3: tabelas viram cards com `.tabela-celular` (2026-10-24)
+
+- Classe global em `globals.css` (fora de `@layer`): abaixo do `md` a `<table>` vira lista de cards — `<tr>` = card, `<td>` = linha "rótulo · valor" com o rótulo de `data-label`; `data-principal` = título do card; célula sem `data-label` (ações) alinha à direita; `colspan` (vazio/carregando) centraliza; anula o `min-w-*` do desktop. Para usar numa tabela nova: `className="tabela-celular …"` + `data-label` nas células. ⚠️ Isto REVERTE a decisão de 19/10 ("tabela larga = rolagem lateral no bloco") a pedido do Matheus em 24/10 ("adaptar de verdade, não dar jeitinho").
+- Aplicada em Relatórios (relatórios gerados; envios automáticos — checkbox de seleção some no celular), Disparos (instâncias; campanhas), Radar (1100px, 10 colunas). Automações é grade de `div` (não tabela): cabeçalho some e cada linha vira card de 2 colunas no celular.
+
 ## Celular — lote 2: Configurações, Publicações, Clientes, página do cliente e Pagamentos (2026-10-24)
 
 Varredura das 18 telas a 375px em produção (navegador do Claude logado; medição = `scrollWidth` do container do shell, textos com `ellipsis` cortados, scrollers internos, alvos < 32px).

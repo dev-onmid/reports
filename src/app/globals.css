@@ -502,3 +502,39 @@
     font-size: 16px;
   }
 }
+
+/* ── Celular: tabela vira lista de cards (`.tabela-celular`) ─────────────────
+   Uma regra para o sistema todo (2026-10-24): abaixo do `md` cada <tr> vira um
+   card e cada <td> uma linha "rótulo · valor", com o rótulo vindo de
+   `data-label`. Tabela de 7–11 colunas rolando de lado no celular é o jeito
+   mais rápido de a pessoa desistir da tela. No computador nada muda.
+   - `data-principal` na célula que identifica a linha (nome): vira o título do card.
+   - célula sem `data-label` (checkbox, ações) entra sem rótulo, alinhada à direita.
+   - a tabela pode ter `min-w-*` para o desktop: aqui ele é anulado. */
+@media (max-width: 767px) {
+  .tabela-celular { display: block; width: 100%; min-width: 0 !important; }
+  .tabela-celular thead { display: none; }
+  .tabela-celular tbody { display: flex; flex-direction: column; gap: 10px; padding: 10px; }
+  .tabela-celular tr {
+    display: block; border: 1px solid var(--border); border-radius: 12px;
+    background: color-mix(in srgb, var(--card) 92%, white 3%); padding: 10px 12px;
+  }
+  .tabela-celular td {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding: 5px 0 !important; border: 0 !important; text-align: right; min-width: 0;
+  }
+  .tabela-celular td::before {
+    content: attr(data-label); flex-shrink: 0; text-align: left;
+    font-size: 12px; font-weight: 500; color: var(--muted-foreground);
+  }
+  .tabela-celular td:not([data-label])::before { content: none; }
+  .tabela-celular td:not([data-label]) { justify-content: flex-end; }
+  .tabela-celular td[data-principal] {
+    display: block; text-align: left; padding: 2px 0 8px !important; margin-bottom: 4px;
+    border-bottom: 1px solid var(--border) !important;
+  }
+  .tabela-celular td[data-principal]::before { content: none; }
+  /* linha de "vazio"/carregando que ocupa a tabela toda */
+  .tabela-celular td[colspan] { display: block; text-align: center; }
+  .tabela-celular td[colspan]::before { content: none; }
+}
