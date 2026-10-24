@@ -123,7 +123,9 @@ export function PlatformIconButton({
       type="button"
       title={label}
       onClick={onClick}
-      className={`${isBrandLogo ? logoDim : dim} ${isBrandLogo ? 'rounded-md bg-transparent p-0.5' : 'rounded-full'} flex items-center justify-center transition-all hover:scale-110 hover:shadow-md active:scale-95 shadow-sm shrink-0`}
+      // `after:-inset-1` no celular: a área de toque passa de 24 para 32px sem
+      // mudar o desenho do ícone (fileira de conexões do card do cliente).
+      className={`${isBrandLogo ? logoDim : dim} ${isBrandLogo ? 'rounded-md bg-transparent p-0.5' : 'rounded-full'} relative flex items-center justify-center transition-all hover:scale-110 hover:shadow-md active:scale-95 shadow-sm shrink-0 max-md:after:absolute max-md:after:-inset-1 max-md:after:content-['']`}
       style={isBrandLogo ? undefined : { backgroundColor: bg }}
     >
       {ICONS[platform]}

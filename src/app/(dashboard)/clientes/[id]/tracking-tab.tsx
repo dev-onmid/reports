@@ -632,7 +632,7 @@ export function ClientTrackingTab({ clientId }: { clientId: string }) {
     <div className="space-y-5 pt-2">
 
       {/* Sub-tab navigation */}
-      <div className="flex flex-wrap items-center gap-0.5 rounded-xl border border-border bg-card p-1 w-fit">
+      <div className="flex flex-wrap items-center gap-0.5 rounded-xl border border-border bg-card p-1 w-fit max-md:w-full max-md:flex-nowrap max-md:overflow-x-auto max-md:[&>button]:shrink-0">
         {([
           { id: 'whatsapp'  as const, label: 'WhatsApp',   icon: Wifi },
           { id: 'captura' as const, label: 'Fontes de Captura', icon: Link2 },

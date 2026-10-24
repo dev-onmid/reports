@@ -122,7 +122,7 @@ export default function PublicacoesPage() {
   const comConta = contas.filter(c => c.igId).length;
 
   return (
-    <div className="p-6 space-y-5">
+    <div className="p-6 space-y-5 max-md:p-0">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="font-bebas text-3xl uppercase tracking-wide">Publicações</h1>
@@ -131,14 +131,16 @@ export default function PublicacoesPage() {
             {' '}<span className="text-foreground">{comConta} contas</span> disponíveis.
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        {/* Celular: os botões quebram — "Nova publicação" (a ação principal) ia
+            para fora da tela, 144px de arrasto (2026-10-24). */}
+        <div className="flex flex-wrap items-center gap-2 max-md:w-full">
           <Button variant="outline" size="sm" onClick={() => void carregar()} disabled={carregando}>
             <RefreshCw className={cn('w-4 h-4', carregando && 'animate-spin')} />
           </Button>
           <Button variant="outline" size="sm" onClick={() => setConectando(true)}>
             <Link2 className="w-4 h-4 mr-1" /> Conectar IG sem Página
           </Button>
-          <Button size="sm" onClick={() => setCriando(true)}>
+          <Button size="sm" onClick={() => setCriando(true)} className="max-md:order-first max-md:h-11 max-md:w-full">
             <Plus className="w-4 h-4 mr-1" /> Nova publicação
           </Button>
         </div>

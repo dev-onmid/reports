@@ -2866,7 +2866,7 @@ export function IntegrationsPanel() {
         </div>
 
         {/* ── RODAPÉ: contas conectadas ───────────────────────────────────────── */}
-        <div className="flex flex-wrap items-center justify-between gap-5 rounded-2xl border border-border bg-card px-6 py-5">
+        <div className="flex flex-wrap items-center justify-between gap-5 rounded-2xl border border-border bg-card px-6 py-5 max-md:gap-4 max-md:px-4">
           <div className="flex items-center gap-4">
             <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-border bg-background/60 text-muted-foreground">
               <Users className="h-5 w-5" />
@@ -2878,22 +2878,23 @@ export function IntegrationsPanel() {
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-5">
-            <div className="flex items-center gap-2">
+          {/* Celular: logos, total e botão quebram em vez de passar da tela (157px de arrasto, 2026-10-24). */}
+          <div className="flex flex-wrap items-center gap-5 max-md:w-full max-md:gap-3">
+            <div className="flex flex-wrap items-center gap-2">
               {BASE_INTEGRATIONS.filter((i) => accountsFor(i.id).length > 0).map((i) => (
                 <span key={i.id} className="flex h-8 w-8 items-center justify-center" title={i.name}>
                   {i.logo}
                 </span>
               ))}
             </div>
-            <div className="text-right">
+            <div className="text-right max-md:text-left">
               <p className="text-sm font-bold text-foreground">{totalContas} conta{totalContas === 1 ? '' : 's'} ativa{totalContas === 1 ? '' : 's'}</p>
               <p className="text-xs text-muted-foreground">em {integracoesComConta} integraç{integracoesComConta === 1 ? 'ão' : 'ões'}</p>
             </div>
             <button
               type="button"
               onClick={() => setVerTodas((v) => !v)}
-              className="flex h-11 items-center gap-2 rounded-xl border border-border bg-background/40 px-5 text-sm font-bold text-foreground transition-colors hover:border-primary/40"
+              className="flex h-11 items-center gap-2 rounded-xl border border-border bg-background/40 px-5 text-sm font-bold text-foreground transition-colors hover:border-primary/40 max-md:ml-auto"
             >
               {verTodas ? 'Ocultar' : 'Ver todas'}
               <ArrowRight className="h-4 w-4 text-muted-foreground" />

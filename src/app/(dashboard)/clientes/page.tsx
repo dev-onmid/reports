@@ -600,7 +600,8 @@ export default function ClientesPage() {
                               type="button"
                               onClick={e => { e.preventDefault(); startEditingName(cliente); }}
                               title="Editar nome"
-                              className="shrink-0 rounded p-1 text-muted-foreground/50 opacity-0 transition-opacity hover:bg-primary/10 hover:text-primary group-hover:opacity-100"
+                              // Só aparece no hover: no celular (sem hover) era um botão invisível.
+                              className="shrink-0 rounded p-1 text-muted-foreground/50 opacity-0 transition-opacity hover:bg-primary/10 hover:text-primary group-hover:opacity-100 max-md:hidden"
                             >
                               <Pencil className="h-3 w-3" />
                             </button>

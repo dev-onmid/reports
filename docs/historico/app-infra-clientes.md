@@ -2,6 +2,16 @@
 
 Movido do CLAUDE.md em 2026-10-22 (conteúdo original, sem edição). Entrada nova deste setor entra aqui, no topo, não no CLAUDE.md.
 
+## Celular — lote 2: Configurações, Publicações, Clientes, página do cliente e Pagamentos (2026-10-24)
+
+Varredura das 18 telas a 375px em produção (navegador do Claude logado; medição = `scrollWidth` do container do shell, textos com `ellipsis` cortados, scrollers internos, alvos < 32px).
+- **Configurações** arrastava 157px: rodapé "Contas conectadas" (`integrations-panel.tsx`) com logos + total + "Ver todas" numa linha sem quebra. Agora quebra.
+- **Publicações** arrastava 144px: fileira de 3 botões sem `flex-wrap` jogava "Nova publicação" para fora. Quebra, e no celular "Nova publicação" vem primeiro, na largura toda.
+- **Clientes**: ícones de conexão do card (24px) ganharam área de toque de 32px por `after:-inset-1` (sem mudar o desenho); "Editar nome" (só aparece no hover) some no celular — era botão invisível.
+- **Página do cliente**: os dois níveis de abas (Planejamento…Histórico; WhatsApp…Log) viram faixas que deslizam — em grade comiam meia tela.
+- **Pagamentos**: no celular, mês e semana viram **agenda** (`AgendaPagamentosMobile`: só dias com pagamento, total do dia, os mesmos `WeekPaymentCard` com status/editar/excluir) no lugar das grades de 7 colunas de 900px; totais em 2×2 (sem ícone e sparkline no celular).
+- CRM: ações do card de lead com alvo de 32px no celular.
+
 ## Dashboard no celular — adaptação de verdade, medida em produção (2026-10-24)
 
 Prints do Matheus no iPhone: "o reports é totalmente inapto para mobile… adaptar de verdade, não dar jeitinho". Auditoria na dashboard de PRODUÇÃO no navegador do Claude (sessão já logada) a 375px:

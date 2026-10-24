@@ -2604,7 +2604,9 @@ export default function ClientPage({ params }: { params: Promise<{ id: string }>
             ~1500px as abas quebram para baixo sozinhas (flex-wrap), que era o
             desenho anterior. */}
         <div className="flex min-w-0 flex-wrap items-center gap-3 md:justify-end">
-        <div className="flex gap-1 bg-card border border-border p-1 rounded-xl w-fit flex-wrap">
+        {/* Celular: faixa única que desliza — em grade, os dois níveis de abas
+            comiam meia tela antes do conteúdo (2026-10-24). */}
+        <div className="flex gap-1 bg-card border border-border p-1 rounded-xl w-fit flex-wrap max-md:w-full max-md:flex-nowrap max-md:overflow-x-auto max-md:[&>button]:shrink-0">
           {[...PRIMARY_TABS, ...(clientFidelidade ? (['fidelidade'] as Tab[]) : []), 'historico' as Tab].map((t) => (
             <button key={t} onClick={() => setTab(t)}
               className={cn(

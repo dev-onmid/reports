@@ -1167,7 +1167,7 @@ function PaymentMetricCard({
     >
       <div className="flex items-start gap-3">
         <span
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full"
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full max-sm:hidden"
           style={{ background: `${color}22`, boxShadow: `0 0 22px ${color}28` }}
         >
           <Icon className="h-4 w-4" style={{ color }} />
@@ -1180,7 +1180,7 @@ function PaymentMetricCard({
           <div className="mt-1.5 text-[11px] font-bold leading-none">{sub}</div>
         </div>
       </div>
-      <div className="absolute bottom-3 right-3">
+      <div className="absolute bottom-3 right-3 max-sm:hidden">
         <PagSparkline data={trend} color={color} />
       </div>
     </div>
@@ -1814,6 +1814,38 @@ type OpcaoCliente = { id: string; nome: string; quantidade: number };
  * propósito e o que se digita na busca se perde — medido no browser em
  * 2026-08-31 (ver `client-switcher.tsx`).
  */
+/**
+ * CELULAR: agenda no lugar das grades de 7 colunas (mês e semana pediam 900px e
+ * cortavam o nome dos clientes nos dias — 2026-10-24). Só os dias com pagamento,
+ * em ordem, cada um com o total e os MESMOS cards/ações da semana.
+ */
+function AgendaPagamentosMobile({ payments, todayStr, render }: {
+  payments: InvestmentPayment[];
+  todayStr: string;
+  render: (payment: InvestmentPayment, index: number) => ReactNode;
+}) {
+  const dias = Array.from(new Set(payments.map((p) => p.date))).sort();
+  if (dias.length === 0) return <p className="px-4 py-8 text-center text-sm text-muted-foreground md:hidden">Nenhum pagamento neste período.</p>;
+  const nome = (iso: string) => parseDate(iso).toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit' }).replace('.', '');
+  return (
+    <div className="divide-y divide-border/70 md:hidden">
+      {dias.map((d) => {
+        const doDia = payments.filter((p) => p.date === d);
+        const total = doDia.reduce((s, p) => s + p.amount, 0);
+        return (
+          <section key={d} className="space-y-2.5 px-3.5 py-3.5">
+            <div className="flex items-baseline justify-between gap-2">
+              <p className={cn('text-[13px] font-bold capitalize', d === todayStr ? 'text-primary' : 'text-foreground')}>{nome(d)}{d === todayStr ? ' · hoje' : ''}</p>
+              <p className="font-heading text-base tabular-nums text-foreground">{formatCurrencyBRL(total)}</p>
+            </div>
+            {doDia.map((p, i) => render(p, i))}
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
 function FiltroCliente({
   opcoes,
   valor,
@@ -2385,7 +2417,8 @@ export default function PagamentosPage() {
 
       {showAlertConfigModal && <BalanceAlertSettings onClose={() => setShowAlertConfigModal(false)} />}
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+      {/* Celular: 2 por linha (um por linha gastava uma tela inteira com 4 totais). */}
+      <div className="grid grid-cols-2 gap-4 max-sm:gap-2.5 lg:grid-cols-3 xl:grid-cols-5">
         {viewMode === 'dia' ? (
           <>
             <DayMetricCard label="Total do dia" value={totalDay} color="#a855f7" glow="rgba(168,85,247,0.18)" icon={WalletCards} count={`${selectedScopePayments.length} pagamentos`} />
@@ -2727,7 +2760,8 @@ export default function PagamentosPage() {
               })()}
             </div>
           </div>
-          <div className="overflow-x-auto">
+          <AgendaPagamentosMobile payments={filteredPayments} todayStr={todayStr} render={(payment, index) => <WeekPaymentCard key={payment.id} payment={payment} index={index} onStatusChange={(status) => updatePaymentStatus(payment.id, status)} onDelete={() => { if (window.confirm('Excluir este pagamento? Isso não pode ser desfeito.')) void deletePayment(payment.id); }} onToggleExtra={() => togglePaymentExtra(payment.id)} onEdit={() => setEditingPayment(payment)} />} />
+          <div className="overflow-x-auto max-md:hidden">
           <div className="min-w-[900px]">
           <div className={cn('grid border-b border-border/70', MONTH_GRID_COLS)}>
             {[
@@ -3054,7 +3088,8 @@ export default function PagamentosPage() {
         return (
           <div className="space-y-4">
             <div className="overflow-hidden rounded-[var(--radius)] border border-border bg-card shadow-[0_0_34px_rgba(15,23,42,0.28)]">
-              <div className="overflow-x-auto">
+              <AgendaPagamentosMobile payments={filteredPayments} todayStr={todayStr} render={(payment, index) => <WeekPaymentCard key={payment.id} payment={payment} index={index} onStatusChange={(status) => updatePaymentStatus(payment.id, status)} onDelete={() => { if (window.confirm('Excluir este pagamento? Isso não pode ser desfeito.')) void deletePayment(payment.id); }} onToggleExtra={() => togglePaymentExtra(payment.id)} onEdit={() => setEditingPayment(payment)} />} />
+              <div className="overflow-x-auto max-md:hidden">
               <div className="min-w-[900px]">
               <div className="grid grid-cols-7 border-b border-border/70">
                 {dailyData.map((day, i) => (

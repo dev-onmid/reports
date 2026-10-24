@@ -1140,7 +1140,8 @@ function KanbanCard({
     >
       {/* Ações (aparecem no hover, sobrepostas — não gastam altura) */}
       {/* max-md: no celular não existe hover — as ações ficam sempre visíveis. */}
-      <div className="absolute right-1 top-1 z-10 flex items-center gap-0.5 rounded-md bg-card/95 opacity-0 group-hover:opacity-100 max-md:opacity-100 transition-opacity">
+      {/* Celular: alvo de 32px por ação (eram 20px — pequeno demais para o dedo). */}
+      <div className="absolute right-1 top-1 z-10 flex items-center gap-0.5 rounded-md bg-card/95 opacity-0 group-hover:opacity-100 max-md:gap-1 max-md:opacity-100 max-md:[&>button]:h-8 max-md:[&>button]:w-8 max-md:[&>div>button:first-child]:h-8 max-md:[&>div>button:first-child]:w-8 max-md:[&_svg]:h-4 max-md:[&_svg]:w-4 transition-opacity">
         <button
           type="button"
           title={lead.qualificado ? 'Desmarcar como qualificado' : modoCliente ? 'Marcar como qualificado' : 'Marcar como QUALIFICADO (vai para o Meta otimizar)'}
